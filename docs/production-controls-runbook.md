@@ -51,6 +51,11 @@ Codex home, fake credentials, and a local Responses fixture. This catches config
 regressions (including reserved built-in provider IDs) before any live provider call.
 The custom provider retains the OpenAI routing header; an endpoint-only override would
 send API-key Responses requests to the proxy's default DeepSeek upstream.
+`OPENAI_BASE_URL` alone does not redirect ChatGPT-subscription Codex at all: it opens
+`wss://chatgpt.com/backend-api/codex/responses` directly and bypasses Headroom. To confirm
+routing, point the provider `base_url` at a closed port; Codex must report `waiting for
+network` rather than answer. `node --test tests/headroom.test.mjs` also loads the generated
+config through the installed Codex CLI when one is on `PATH`.
 
 ## Agent process isolation
 
