@@ -1,0 +1,14 @@
+  One substantive note regardless: this incident is itself evidence for the
+  branch. A stuck [3mdelivery[0m[39m[49m observation making a demonstrably idle session
+  permanently unsendable is the same predict-before-acting failure as the
+  pane-scrape gate — and [97m50e66ee[39m does not fix it, because [97mcanAttemptSend[39m still
+  returns false on a blocking/busy read without any bound. Worth adding to the
+  scope: the delivery-pending gate needs the same bounded fail-open treatment.
+
+[37m✻[39m [37mBrewed[39m [37mfor[39m [37m2m[39m [37m19s[39m
+
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m❯ [2mrestart the pi session[0m[39m[49m
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m  [95m⏵⏵[39m [95mbypass[39m [95mpermissions[39m [95mon[37m (shift+tab[39m [37mto[39m [37mcycle)[39m [37m·[39m [37m←[39m [37mfor[39m [37magents[39m
+                                        [32m✔[39m [32mUpdate[39m [32minstalled[39m [32m·[39m [32mRestart[39m [32mto[39m [32mupdate[39m

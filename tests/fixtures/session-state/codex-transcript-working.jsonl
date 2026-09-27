@@ -1,0 +1,2 @@
+{"type":"event_msg","payload":{"type":"task_started"}}
+{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{}"}}

@@ -1,0 +1,1 @@
+{"provider":"claude","eventName":"PreToolUse","at":100,"payload":{"tool_name":"Bash"}}

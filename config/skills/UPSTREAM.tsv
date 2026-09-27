@@ -1,0 +1,47 @@
+# Ported-skill upstream pins. Columns: local_skill  repo  upstream_path  pinned_sha  note
+# Sync: node scripts/skills-upstream-check.mjs  (see docs/skills-upstream-integration.md)
+# Fleet-native (no upstream, untracked): experiment, custody, client-update, bootstrap, visual-design-it-twice
+#
+# local_skill	repo	upstream_path	pinned_sha	note
+adr-format	mattpocock/skills	skills/engineering/domain-modeling/ADR-FORMAT.md	885e2ca
+agent-brief	mattpocock/skills	skills/engineering/triage/AGENT-BRIEF.md	885e2ca
+codebase-deepening	mattpocock/skills	skills/engineering/codebase-design/DEEPENING.md	885e2ca
+codebase-design	mattpocock/skills	skills/engineering/codebase-design/SKILL.md	885e2ca
+context-format	mattpocock/skills	skills/engineering/domain-modeling/CONTEXT-FORMAT.md	885e2ca
+debug-hard	mattpocock/skills	skills/engineering/diagnosing-bugs/SKILL.md	885e2ca
+design-it-twice	mattpocock/skills	skills/engineering/codebase-design/DESIGN-IT-TWICE.md	885e2ca
+domain-modeling	mattpocock/skills	skills/engineering/domain-modeling/SKILL.md	885e2ca
+grilling	mattpocock/skills	skills/productivity/grilling/SKILL.md	885e2ca
+hitl-loop	mattpocock/skills	skills/engineering/diagnosing-bugs/scripts/hitl-loop.template.sh	885e2ca
+out-of-scope	mattpocock/skills	skills/engineering/triage/OUT-OF-SCOPE.md	885e2ca
+skill-mechanics	mattpocock/skills	skills/productivity/writing-for-agents/SKILL-MECHANICS.md	885e2ca	heavily adapted
+tdd	mattpocock/skills	skills/engineering/tdd/SKILL.md	885e2ca
+tdd-mocking	mattpocock/skills	skills/engineering/tdd/mocking.md	885e2ca
+tdd-tests	mattpocock/skills	skills/engineering/tdd/tests.md	885e2ca
+to-questionnaire	mattpocock/skills	skills/productivity/to-questionnaire/SKILL.md	885e2ca
+to-tickets	mattpocock/skills	skills/engineering/to-tickets/SKILL.md	885e2ca
+triage	mattpocock/skills	skills/engineering/triage/SKILL.md	885e2ca
+wizard	mattpocock/skills	skills/engineering/wizard/SKILL.md	885e2ca
+wizard-template	mattpocock/skills	skills/engineering/wizard/template.sh	885e2ca
+writing-for-agents	mattpocock/skills	skills/productivity/writing-for-agents/SKILL.md	885e2ca
+debug	obra/superpowers	skills/systematic-debugging/SKILL.md	b36e082
+root-cause-tracing	obra/superpowers	skills/systematic-debugging/root-cause-tracing.md	b36e082
+defense-in-depth	obra/superpowers	skills/systematic-debugging/defense-in-depth.md	b36e082
+condition-based-waiting	obra/superpowers	skills/systematic-debugging/condition-based-waiting.md	b36e082
+verify	obra/superpowers	skills/verification-before-completion/SKILL.md	b36e082
+plan	obra/superpowers	skills/writing-plans/SKILL.md	b36e082	fleet scope-first header added
+ship	obra/superpowers	skills/finishing-a-development-branch/SKILL.md	b36e082	fleet merge/deploy invariants
+frontend-design	anthropics/skills	skills/frontend-design/SKILL.md	0a64e39
+web-design-review	vercel-labs/web-interface-guidelines	command.md	e3d624b	adapted; fixed local rules, no runtime fetch
+e2e	anthropics/skills	skills/webapp-testing/SKILL.md	0a64e39
+with-server	anthropics/skills	skills/webapp-testing/scripts/with_server.py	0a64e39
+scientific-slides	K-Dense-AI/claude-scientific-writer	skills/scientific-slides/SKILL.md	0c72606	heavily adapted
+slides-structure	K-Dense-AI/claude-scientific-writer	skills/scientific-slides/references/presentation_structure.md	0c72606
+slides-dataviz	K-Dense-AI/claude-scientific-writer	skills/scientific-slides/references/data_visualization_slides.md	0c72606
+slides-design	K-Dense-AI/claude-scientific-writer	skills/scientific-slides/references/slide_design_principles.md	0c72606
+paper	K-Dense-AI/claude-scientific-writer	skills/scientific-writing/SKILL.md	0c72606	adapted; spine kept
+technote	hameefy/claude-latex-skill	SKILL.md	c594f5a	adapted; EIT defaults dropped
+latex-preamble	hameefy/claude-latex-skill	SKILL.md	c594f5a	Step 2 slice
+latex-math	hameefy/claude-latex-skill	SKILL.md	c594f5a	Steps 3,6,7 slice
+slides-beamer	hameefy/claude-latex-skill	SKILL.md	c594f5a	Steps 2B,3B slice
+unslop	kentnielsen-droid/cursor-skills	pstack/skills/unslop/SKILL.md	60c641e

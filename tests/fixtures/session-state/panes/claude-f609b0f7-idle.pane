@@ -1,0 +1,16 @@
+  delegation policy that bulk PR work goes through codex — tell me if you'd
+  rather those be grok as well. Two more caveats: if the live fleet has
+  [97mDM_GITHUB_AGENT_PROVIDER[39m/[97m_MODEL[39m set in its env, the code default won't take
+  effect until those are cleared; and this ships only when the branch merges and
+  the live worktree redeploys.
+
+  Everything is on the branch/PR, nothing is armed against the live fleet. To
+  turn on the auto-maintenance after merge: deploy, ensure
+  [97mDM_SCHEDULED_AGENT_PUMP_ENABLED=1[39m, then [97mPOST /api/fleet/skills-upstream/setup[39m.
+
+[37m✻[39m [37mWorked for 4m 23s[39m
+
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m❯ 
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m  [95m⏵⏵[39m [95mbypass[39m [95mpermissions[39m [95mon[37m (shift+tab[39m [37mto[39m [37mcycle)[39m [37m·[39m [37mPR[39m [4m[93m#158[0m[37m[49m ·[39m [37m← for agents[39m

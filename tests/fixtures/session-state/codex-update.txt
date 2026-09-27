@@ -1,0 +1,4 @@
+Update available! 0.85.0 -> 0.86.0
+
+Update now?
+Press Enter to update Codex.

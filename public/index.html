@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes, interactive-widget=resizes-content">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="description" content="Self-hosted control plane for coding-agent sessions">
+
+    <title>Cadre</title>
+
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icons/icon.svg">
+    <link rel="stylesheet" href="/styles/main.css">
+    <link rel="stylesheet" href="/vendor/npm/katex/dist/katex.min.css">
+    <script type="importmap">
+      {
+        "imports": {
+          "preact": "/vendor/npm/preact/dist/preact.module.js",
+          "preact/hooks": "/vendor/npm/preact/hooks/dist/hooks.module.js",
+          "htm": "/vendor/npm/htm/dist/htm.module.js",
+          "htm/preact": "/vendor/npm/htm/preact/index.module.js",
+          "preact-router": "/vendor/npm/preact-router/dist/preact-router.module.js",
+          "@preact/signals": "/vendor/npm/@preact/signals/dist/signals.module.js",
+          "@preact/signals-core": "/vendor/npm/@preact/signals-core/dist/signals-core.module.js",
+          "marked": "/vendor/npm/marked/lib/marked.esm.js",
+          "katex": "/vendor/npm/katex/dist/katex.mjs"
+        }
+      }
+    </script>
+</head>
+<body>
+    <div id="app"></div>
+    <script type="module" src="/app/app.mjs"></script>
+</body>
+</html>

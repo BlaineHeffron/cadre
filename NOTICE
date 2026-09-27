@@ -1,0 +1,40 @@
+Cadre
+Copyright 2026 Blaine Heffron
+
+Cadre includes adapted third-party launch skills in config/skills/. Those files retain their upstream licenses; the project LICENSE covers Cadre-owned code.
+
+mattpocock/skills (MIT)
+Copyright (c) 2026 Matt Pocock
+Skills: adr-format, agent-brief, codebase-deepening, codebase-design, context-format, debug-hard, design-it-twice, domain-modeling, grilling, hitl-loop, out-of-scope, skill-mechanics, tdd, tdd-mocking, tdd-tests, to-questionnaire, to-tickets, triage, wizard, wizard-template, writing-for-agents.
+
+obra/superpowers (MIT)
+Copyright (c) 2025 Jesse Vincent
+Skills: debug, root-cause-tracing, defense-in-depth, condition-based-waiting, verify, plan, ship.
+
+anthropics/skills (Apache-2.0)
+Copyright 2026 Anthropic, PBC.
+Skills: frontend-design, e2e, with-server.
+
+vercel-labs/web-interface-guidelines (MIT)
+Copyright (c) 2025 Vercel Labs
+Skills: web-design-review.
+
+K-Dense-AI/claude-scientific-writer (MIT)
+Copyright (c) 2025-2026 K-Dense Inc.
+Skills: scientific-slides, slides-structure, slides-dataviz, slides-design, paper.
+
+hameefy/claude-latex-skill (MIT)
+Copyright (c) 2026 Hassan Mohammad
+Skills: technote, latex-preamble, latex-math, slides-beamer.
+
+kentnielsen-droid/cursor-skills (MIT)
+Copyright (c) 2026 Lauren Tan
+Skills: unslop.
+
+KaTeX (MIT), served from the npm package at /vendor/npm/katex/.
+Copyright (c) 2013-2020 Khan Academy and other contributors.
+The npm package includes its own LICENSE; preserve it when distributing the package.
+
+AmazingAng/old-coder (MIT)
+Copyright (c) 2026 amazingang
+Test honesty rules in modules/integrations/repo-quality.mjs.

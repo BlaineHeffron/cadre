@@ -1,0 +1,330 @@
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { afterEach, describe, it } from 'node:test';
+import Fastify from 'fastify';
+import { AsyncEventQueue, createBaseCapabilities, createTransportEvent } from '../modules/agent/agent-transport.mjs';
+import { AgentBusCredentialStore } from '../modules/agent-bus/mcp-auth.mjs';
+import { buildMcpCapabilityCatalog } from '../modules/integrations/mcp-server-catalog.mjs';
+import { claudeSessionsPlugin, isClaudeStreamJsonEnabled } from '../modules/sessions/claude-sessions.mjs';
+import { CLAUDE_STREAM_JSON_E2E_VERSION, claudeStreamJsonBusE2eEvidence } from '../modules/sessions/claude-stream-json-mcp.mjs';
+
+const roots = [];
+const apps = [];
+afterEach(async () => {
+  await Promise.allSettled(apps.splice(0).map((app) => app.close()));
+  while (roots.length) await rm(roots.pop(), { recursive: true, force: true });
+});
+
+class FakeTransport {
+  constructor() { this.queue = new AsyncEventQueue(); this.prompts = []; this.cancelCalls = 0; this.answers = []; }
+  emit(type, payload = {}) {
+    this.queue.push(createTransportEvent(type, payload, { attemptId: this.attemptId, provider: 'claude', transport: 'claude-stream-json' }));
+  }
+  async start(spec) {
+    this.startSpec = structuredClone(spec);
+    this.attemptId = spec.attemptId;
+    this.emit('attempt.started', { protocolSessionId: spec.sessionId });
+    return { attemptId: spec.attemptId, protocolSessionId: spec.sessionId, negotiated: this.capabilities() };
+  }
+  async prompt({ turnId, blocks }) {
+    this.prompts.push(blocks);
+    this.activeTurnId = turnId;
+    this.emit('turn.started', { turnId, evidence: { accepted: true, settled: false, quiescent: false } });
+    if (blocks.some((block) => block.type === 'text' && block.text === 'wait')) return new Promise(() => {});
+    this.emit('message.committed', { turnId, blocks: [{ type: 'text', text: 'Structured reply' }] });
+    this.emit('turn.settled', { turnId, stopReason: 'end_turn', evidence: { accepted: true, settled: true, quiescent: true } });
+    this.activeTurnId = null;
+    return { stopReason: 'end_turn' };
+  }
+  async attach() { throw new Error('unsupported'); }
+  async cancel() {
+    this.cancelCalls += 1;
+    this.emit('turn.settled', {
+      turnId: this.activeTurnId, stopReason: 'interrupted',
+      evidence: { accepted: true, settled: true, quiescent: true },
+    });
+    this.activeTurnId = null;
+    return { mode: 'best_effort' };
+  }
+  emitPermission() {
+    this.emit('interaction.requested', {
+      interactionId: `${this.attemptId}:permission-1`, turnId: this.activeTurnId, kind: 'permission',
+      toolCall: { name: 'Bash', title: 'Run command' },
+      options: [{ optionId: 'allow_once', name: 'Allow once' }, { optionId: 'deny', name: 'Deny' }],
+    });
+  }
+  async answerInteraction({ interactionId, optionId }) {
+    this.answers.push({ interactionId, optionId });
+    this.emit('interaction.answered', { interactionId, optionId });
+    return { ok: true };
+  }
+  events() { return this.queue; }
+  snapshot() { return { attemptId: this.attemptId, lifecycle: 'ready' }; }
+  capabilities() {
+    return createBaseCapabilities({
+      protocol: { name: 'claude-stream-json', version: '1' },
+      interaction: { permissions: 'structured_options', elicitation: false, answerOnce: true },
+      ...(this.startSpec?.capabilityEvidence || {}),
+    });
+  }
+  async terminate() { this.emit('attempt.exited', { code: 0 }); this.queue.close(); return { ok: true, status: 'terminated', residual: [] }; }
+}
+
+async function waitFor(check, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('condition timeout');
+}
+
+describe('Claude stream-json E2E version gate', () => {
+  it('documents the tested reference version', () => {
+    assert.equal(CLAUDE_STREAM_JSON_E2E_VERSION, '2.1.251');
+  });
+
+  it('accepts the tested version and every newer version', () => {
+    for (const cliVersion of [
+      '2.1.251 (Claude Code)', '2.1.252 (Claude Code)', '2.2.0 (Claude Code)',
+      '2.10.0 (Claude Code)', '3.0.0 (Claude Code)',
+    ]) {
+      const evidence = claudeStreamJsonBusE2eEvidence({ cliVersion });
+      assert.equal(evidence.proven, true, cliVersion);
+      assert.equal(evidence.expectedVersion, CLAUDE_STREAM_JSON_E2E_VERSION);
+    }
+  });
+
+  it('rejects older, missing, and unparseable versions', () => {
+    for (const cliVersion of [
+      '2.1.250 (Claude Code)', '2.0.999 (Claude Code)', '1.9.9 (Claude Code)', '', 'not a version',
+    ]) {
+      assert.equal(claudeStreamJsonBusE2eEvidence({ cliVersion }).proven, false, cliVersion || '(empty)');
+    }
+  });
+
+  it('compares version segments numerically, not lexically', () => {
+    assert.equal(claudeStreamJsonBusE2eEvidence({ cliVersion: '2.1.1000' }).proven, true);
+    assert.equal(claudeStreamJsonBusE2eEvidence({ cliVersion: '2.1.99' }).proven, false);
+  });
+});
+
+describe('Claude stream-json sessions', () => {
+  it('keeps the provider opt-in disabled by default', () => {
+    assert.equal(isClaudeStreamJsonEnabled(''), false);
+    assert.equal(isClaudeStreamJsonEnabled('0'), false);
+    assert.equal(isClaudeStreamJsonEnabled('true'), true);
+  });
+
+  it('serves Claude sessions through SessionService when opted in', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dueno-claude-stream-route-'));
+    roots.push(root);
+    const workDir = join(root, 'work');
+    await mkdir(workDir);
+    const clients = [];
+    const issuedTokens = [];
+    let credentialState = null;
+    const credentialStore = new AgentBusCredentialStore({
+      mode: 'issue_only',
+      store: {
+        mode: 'memory', async load() { return credentialState; },
+        async save(next) { credentialState = structuredClone(next); }, async close() {},
+      },
+    });
+    let issueCalls = 0;
+    const issueCredential = credentialStore.issue.bind(credentialStore);
+    credentialStore.issue = (options) => { issueCalls += 1; return issueCredential(options); };
+    const app = Fastify({ logger: false });
+    apps.push(app);
+    app.addHook('onRequest', async (request) => {
+      request.duenoAuth = {
+        authenticated: true,
+        principal: { type: 'ui', kind: 'dashboard', sessionId: 'test-operator' },
+        automationPolicy: '',
+      };
+    });
+    await app.register(claudeSessionsPlugin, {
+      streamJsonEnabled: true,
+      sessionRoot: join(root, 'sessions'),
+      observationSink: () => {},
+      credentialStore,
+      sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
+      mcpDiscovery: async ({ token }) => {
+        issuedTokens.push(token);
+        return { authenticated: true, discoveredToolCount: 8 };
+      },
+      e2eEvidence: { proven: true, expectedVersion: 'test' },
+      transportFactory() { const client = new FakeTransport(); clients.push(client); return client; },
+    });
+    const created = await app.inject({
+      method: 'POST', url: '/api/claude/sessions',
+      payload: { workDir, initialPrompt: 'hello' },
+    });
+    assert.equal(created.statusCode, 200);
+    const session = created.json();
+    assert.equal(session.transport, 'stream-json');
+    assert.equal(session.negotiated.mcpAttachment, 'launch_time_mcp_client');
+    assert.equal(session.negotiated.busParticipation, 'authenticated_scoped');
+    assert.equal(session.negotiated.interaction.permissions, 'structured_options');
+    assert.match(clients[0].startSpec.mcpConfigPath, /attempt-1\/dueno-mcp\.json$/);
+    assert.ok(clients[0].startSpec.settingsPath);
+    assert.equal((await stat(clients[0].startSpec.mcpConfigPath)).mode & 0o777, 0o600);
+    const mcpConfig = await readFile(clients[0].startSpec.mcpConfigPath, 'utf8');
+    assert.match(mcpConfig, /Bearer \$\{DUENO_AGENT_BUS_TOKEN\}/);
+    assert.equal(mcpConfig.includes(issuedTokens[0]), false);
+    assert.equal(clients[0].startSpec.env.DUENO_SESSION_ID, session.id);
+    assert.equal(clients[0].startSpec.env.DUENO_PROVIDER, 'claude');
+    assert.equal(clients[0].startSpec.env.DUENO_AGENT_BUS_TOKEN, issuedTokens[0]);
+    assert.equal(issueCalls, 1);
+    assert.deepEqual(session.mcpCapabilities.serverIds, ['dueno']);
+    assert.equal(JSON.stringify(session).includes(issuedTokens[0]), false);
+    assert.equal(session.initialPromptInjected, true);
+    await waitFor(() => clients[0].prompts.length === 1);
+    await waitFor(async () => (await app.inject({
+      method: 'GET', url: `/api/claude/sessions/${session.id}`,
+    })).json().state.status === 'ready');
+    const listed = await app.inject({ method: 'GET', url: '/api/claude/sessions' });
+    assert.equal(listed.json().sessions[0].id, session.id);
+    const waiting = await app.inject({ method: 'POST', url: `/api/claude/sessions/${session.id}/input`, payload: { text: 'wait' } });
+    assert.equal(waiting.statusCode, 200);
+    await waitFor(() => clients[0].activeTurnId);
+    clients[0].emitPermission();
+    await waitFor(async () => (await app.inject({
+      method: 'GET', url: `/api/claude/sessions/${session.id}`,
+    })).json().state.status === 'blocked');
+    const allowed = await app.inject({
+      method: 'POST', url: `/api/claude/sessions/${session.id}/interaction`, payload: { optionId: 'allow_once' },
+    });
+    assert.equal(allowed.statusCode, 200, allowed.body);
+    assert.equal(clients[0].answers[0].optionId, 'allow_once');
+    const unsupported = await app.inject({
+      method: 'POST', url: `/api/claude/sessions/${session.id}/keys`, payload: { keys: 'Up Enter' },
+    });
+    assert.equal(unsupported.statusCode, 400);
+    assert.equal(unsupported.json().code, 'unsupported_capability');
+    const interrupted = await app.inject({
+      method: 'POST', url: `/api/claude/sessions/${session.id}/keys`, payload: { keys: 'Escape' },
+    });
+    assert.equal(interrupted.json().mode, 'best_effort');
+    assert.equal(clients[0].cancelCalls, 1);
+    const removed = await app.inject({ method: 'DELETE', url: `/api/claude/sessions/${session.id}` });
+    assert.equal(removed.json().ok, true);
+    assert.equal((await credentialStore.authenticate(issuedTokens[0])).reason, 'revoked');
+    await assert.rejects(stat(clients[0].startSpec.mcpConfigPath), /ENOENT/);
+    const selected = await app.inject({
+      method: 'POST', url: '/api/claude/sessions', payload: { workDir, mcpServers: { add: ['fetch'] } },
+    });
+    assert.equal(selected.statusCode, 200, selected.body);
+    assert.deepEqual(selected.json().mcpCapabilities.serverIds, ['dueno', 'fetch']);
+    const selectedConfigPath = clients[1].startSpec.mcpConfigPath;
+    const selectedConfig = JSON.parse(await readFile(selectedConfigPath, 'utf8'));
+    assert.deepEqual(Object.keys(selectedConfig.mcpServers).sort(), ['dueno', 'fetch']);
+    assert.match(selectedConfig.mcpServers.dueno.headers.Authorization, /\$\{DUENO_AGENT_BUS_TOKEN\}/);
+    assert.equal(JSON.stringify(selectedConfig).includes(issuedTokens[1]), false);
+    assert.deepEqual((await credentialStore.authenticate(issuedTokens[1])).serverAllowlist, ['dueno', 'fetch']);
+
+    const forced = await app.inject({
+      method: 'POST', url: '/api/claude/sessions', payload: { workDir, mcpServers: { remove: ['dueno'] } },
+    });
+    assert.equal(forced.statusCode, 200, forced.body);
+    assert.deepEqual(forced.json().mcpCapabilities.serverIds, ['dueno']);
+    assert.equal(forced.json().mcpWarnings.some((warning) => warning.code === 'mcp_required_server_forced'), true);
+    const forcedConfigPath = clients[2].startSpec.mcpConfigPath;
+    const forcedConfig = JSON.parse(await readFile(forcedConfigPath, 'utf8'));
+    assert.deepEqual(Object.keys(forcedConfig.mcpServers), ['dueno']);
+    assert.equal(issueCalls, 3);
+    await app.close();
+    apps.splice(apps.indexOf(app), 1);
+    assert.equal((await credentialStore.authenticate(issuedTokens[1])).reason, 'revoked');
+    assert.equal((await credentialStore.authenticate(issuedTokens[2])).reason, 'revoked');
+    await assert.rejects(stat(selectedConfigPath), /ENOENT/);
+    await assert.rejects(stat(forcedConfigPath), /ENOENT/);
+  });
+
+  it('rejects unknown, unconfigured, and incompatible selections before minting a credential', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dueno-claude-stream-selection-'));
+    roots.push(root);
+    const workDir = join(root, 'work');
+    await mkdir(workDir);
+    let credentialState = null;
+    const credentialStore = new AgentBusCredentialStore({
+      mode: 'issue_only', store: {
+        mode: 'memory', async load() { return credentialState; },
+        async save(next) { credentialState = structuredClone(next); }, async close() {},
+      },
+    });
+    let issueCalls = 0;
+    const issueCredential = credentialStore.issue.bind(credentialStore);
+    credentialStore.issue = (options) => { issueCalls += 1; return issueCredential(options); };
+    const mcpCatalog = structuredClone(buildMcpCapabilityCatalog({
+      sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
+    }));
+    mcpCatalog.servers.find((server) => server.id === 'fetch').providers = ['codex'];
+    mcpCatalog.servers.find((server) => server.id === 'time').runtimes = ['pi'];
+    const app = Fastify({ logger: false });
+    apps.push(app);
+    await app.register(claudeSessionsPlugin, {
+      streamJsonEnabled: true, sessionRoot: join(root, 'sessions'), observationSink: () => {},
+      credentialStore, sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
+      mcpCatalog,
+    });
+    const unknownProfile = await app.inject({
+      method: 'POST', url: '/api/claude/sessions', payload: { workDir, mcpProfile: 'unknown' },
+    });
+    assert.equal(unknownProfile.json().code, 'mcp_profile_unknown');
+    const unknown = await app.inject({
+      method: 'POST', url: '/api/claude/sessions', payload: { workDir, mcpServers: { add: ['unknown'] } },
+    });
+    assert.equal(unknown.statusCode, 400);
+    assert.equal(unknown.json().code, 'mcp_server_unknown');
+    const providerUnsupported = await app.inject({
+      method: 'POST', url: '/api/claude/sessions', payload: { workDir, mcpServers: { add: ['fetch'] } },
+    });
+    assert.equal(providerUnsupported.json().code, 'mcp_provider_unsupported');
+    const runtimeUnsupported = await app.inject({
+      method: 'POST', url: '/api/claude/sessions', payload: { workDir, mcpServers: { add: ['time'] } },
+    });
+    assert.equal(runtimeUnsupported.json().code, 'mcp_runtime_unsupported');
+    const unconfigured = await app.inject({
+      method: 'POST', url: '/api/claude/sessions', payload: { workDir, mcpServers: { add: ['businessos'] } },
+    });
+    assert.equal(unconfigured.statusCode, 400);
+    assert.equal(unconfigured.json().code, 'mcp_server_unconfigured');
+    assert.equal(issueCalls, 0);
+    assert.equal(credentialState, null);
+  });
+
+  it('revokes the scoped bearer when launch preparation fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dueno-claude-stream-failure-'));
+    roots.push(root);
+    const sessionRoot = join(root, 'sessions');
+    const workDir = join(root, 'work');
+    await mkdir(workDir);
+    let state = null;
+    let issuedToken = '';
+    const credentialStore = new AgentBusCredentialStore({
+      mode: 'issue_only', store: {
+        mode: 'memory', async load() { return state; },
+        async save(next) { state = structuredClone(next); }, async close() {},
+      },
+    });
+    const app = Fastify({ logger: false });
+    apps.push(app);
+    await app.register(claudeSessionsPlugin, {
+      streamJsonEnabled: true, sessionRoot, observationSink: () => {},
+      credentialStore, sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
+      mcpDiscovery: async ({ token }) => { issuedToken = token; throw new Error('discovery failed'); },
+    });
+    const response = await app.inject({
+      method: 'POST', url: '/api/claude/sessions', payload: { workDir, mcpServers: { add: ['fetch'] } },
+    });
+    assert.equal(response.statusCode, 500);
+    assert.ok(issuedToken);
+    assert.equal((await credentialStore.authenticate(issuedToken)).reason, 'revoked');
+    assert.equal((await readdir(sessionRoot, { recursive: true }))
+      .some((entry) => entry.endsWith('dueno-mcp.json')), false);
+    assert.deepEqual((await app.inject({ method: 'GET', url: '/api/claude/sessions' })).json().sessions, []);
+  });
+});

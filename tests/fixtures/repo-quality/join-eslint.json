@@ -1,0 +1,25 @@
+[
+  {
+    "filePath": "/repo/src/nested.mjs",
+    "messages": [
+      {
+        "ruleId": "complexity",
+        "line": 10,
+        "column": 1,
+        "message": "Function 'parent' has a complexity of 12. Maximum allowed is 0."
+      },
+      {
+        "ruleId": "complexity",
+        "line": 10,
+        "column": 40,
+        "message": "Arrow function has a complexity of 4. Maximum allowed is 0."
+      },
+      {
+        "ruleId": "complexity",
+        "line": 50,
+        "column": 1,
+        "message": "Function 'eslintOnly' has a complexity of 9. Maximum allowed is 0."
+      }
+    ]
+  }
+]

@@ -1,0 +1,11 @@
+{
+  "name": "@blaineheffron/cadre-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.19.0" },
+  "dependencies": {
+    "@fastify/rate-limit": "11.1.0",
+    "fastify": "5.10.0"
+  }
+}

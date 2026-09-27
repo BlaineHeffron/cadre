@@ -1,0 +1,30 @@
+[
+  {
+    "filePath": "/repo/src/cart.mjs",
+    "messages": [
+      {
+        "ruleId": "complexity",
+        "line": 10,
+        "column": 3,
+        "message": "Async function 'checkout' has a complexity of 4. Maximum allowed is 0."
+      },
+      {
+        "ruleId": "no-unused-vars",
+        "line": 2,
+        "column": 1,
+        "message": "Ignored by this adapter."
+      }
+    ]
+  },
+  {
+    "filePath": "/outside/shared.mjs",
+    "messages": [
+      {
+        "ruleId": "complexity",
+        "line": 5,
+        "column": 1,
+        "message": "Arrow function has a complexity of 2. Maximum allowed is 0."
+      }
+    ]
+  }
+]

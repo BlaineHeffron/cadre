@@ -1,0 +1,39 @@
+function formatAgentRef(ref) {
+  return `${ref?.kind || 'unknown'}:${ref?.sessionId || 'unknown'}`;
+}
+
+function parentSnippet(parent) {
+  if (!parent) return null;
+  const body = String(parent.body || '').trim().replace(/\s+/g, ' ');
+  const snippet = body.length > 240 ? `${body.slice(0, 240)}…` : body;
+  return `In reply to ${parent.id} (${formatAgentRef(parent.from)}): ${snippet}`;
+}
+
+export function busMessageMarker(message) {
+  return `id=${message?.id || 'unknown'}`;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function sessionHasBusMessage(content, message) {
+  const id = String(message?.id || '').trim();
+  if (!id || !content) return false;
+  return new RegExp(`(?:^|[\\s\\[])id=${escapeRegExp(id)}(?:[\\s\\]])`).test(String(content));
+}
+
+export function renderBusEnvelope(message, parent = null) {
+  const dm = message.metadata?.dm === true;
+  const marker = busMessageMarker(message);
+  const opening = dm
+    ? `[DM ${marker} from=${formatAgentRef(message.from)}]`
+    : `[ROOM_MESSAGE ${marker} room=${message.threadId} from=${formatAgentRef(message.from)}]`;
+  const closing = dm ? '[/DM]' : '[/ROOM_MESSAGE]';
+  const reply = [
+    `Tool: room_send(thread_id="${message.threadId}", body="...", reply_to="<id if answering a claim>") · Context: room_context(thread_id="${message.threadId}")`,
+    'Reply only if this is new work. Do not reply to delayed copies or courtesy acks.'
+  ].join('\n');
+  const type = message.type && message.type !== 'message' ? `Type: ${message.type}` : null;
+  return [opening, parentSnippet(parent), type, String(message.body || '').trim(), closing, reply].filter((line) => line != null && line !== '').join('\n');
+}

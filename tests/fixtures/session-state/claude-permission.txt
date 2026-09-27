@@ -1,0 +1,3 @@
+Claude wants to run Bash
+Do you want to allow this command?
+Allow once

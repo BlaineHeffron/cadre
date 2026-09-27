@@ -1,0 +1,28 @@
+{
+  "/repo/src/nested.mjs": {
+    "statementMap": {
+      "0": { "start": { "line": 15, "column": 2 }, "end": { "line": 15, "column": 8 } },
+      "1": { "start": { "line": 11, "column": 2 }, "end": { "line": 11, "column": 12 } },
+      "2": { "start": { "line": 31, "column": 2 }, "end": { "line": 31, "column": 9 } }
+    },
+    "s": { "0": 1, "1": 0, "2": 1 },
+    "fnMap": {
+      "0": {
+        "name": "cov-inner",
+        "decl": { "start": { "line": 10, "column": 39 }, "end": { "line": 10, "column": 39 } },
+        "loc": { "start": { "line": 10, "column": 39 }, "end": { "line": 12, "column": 20 } }
+      },
+      "1": {
+        "name": "cov-parent",
+        "decl": { "start": { "line": 10, "column": 0 }, "end": { "line": 10, "column": 6 } },
+        "loc": { "start": { "line": 10, "column": 0 }, "end": { "line": 20, "column": 1 } }
+      },
+      "2": {
+        "name": "unmatched",
+        "decl": { "start": { "line": 30, "column": 0 }, "end": { "line": 30, "column": 9 } },
+        "loc": { "start": { "line": 30, "column": 0 }, "end": { "line": 32, "column": 1 } }
+      }
+    },
+    "f": { "0": 0, "1": 1, "2": 1 }
+  }
+}

@@ -1,0 +1,38 @@
+# Example config for a StartupScraper-compatible job search tool, referenced
+# by the job-opportunities scheduled agent via DM_JOB_OPPORTUNITIES_SCRAPER_PATH
+# and DM_JOB_OPPORTUNITIES_SCRAPER_CONFIG_PATH. Replace with your own search
+# terms, or point DM_JOB_OPPORTUNITIES_SCRAPER_CONFIG_PATH at a private copy.
+search:
+  engine: "searxng"
+  searxng_url: "http://localhost:8080"
+  time_range: "all"
+
+  keywords:
+    - "Example Keyword One"
+    - "Example Keyword Two"
+
+  seniority:
+    - "Senior"
+    - "Staff"
+    - "Principal"
+
+  locations:
+    - "Remote"
+    - "United States"
+
+  excluded:
+    - "unpaid"
+    - "internship"
+
+  domains:
+    - boards.greenhouse.io
+    - jobs.lever.co
+    - jobs.ashbyhq.com
+
+output:
+  mode: "markdown"
+  markdown_dir: ".dueno/job-opportunities/startup-scraper-output"
+  email_to: ""
+
+tiers:
+  max_results_per_tier: 80

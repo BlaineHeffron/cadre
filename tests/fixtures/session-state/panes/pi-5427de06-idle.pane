@@ -1,0 +1,16 @@
+ [1m[38;5;222mVerdict[0m[39m[49m
+
+ Not ship as-is. Fix 1–3 at least: status/summary/exports honor ARCHIVE;
+ resolve leftover flags when retention leave archived. Then 4 or document list
+ percent as always [38;5;109m—[39m and stop server [38;5;109marchiveFlag[39m lie.
+
+ [1mFiles:[0m[39m[49m 16. +1181 / −104.
+ [1mOwner:[0m[39m[49m rows retention + cutoffday ref now in [38;5;109mshared/types/rowsRetention.ts[39m +
+ [38;5;109mcutoffDayReference.ts[39m. Summaries/status/exports not moved under that owner.
+ That the hole.
+
+[38;5;109m────────────────────────────────────────────────────────────────────────────────
+[7m[39m [0m[39m[49m
+[38;5;109m────────────────────────────────────────────────────────────────────────────────
+[38;5;241m~/.dueno-fleet/github-agents/worktrees/octocat-example-app/pr-254-17871...
+↑128k ↓13k R1.2M CH94.8% $0.936 (sub) 13.0%/500k (auto)  (xai) grok-4.6 • medium

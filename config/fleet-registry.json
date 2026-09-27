@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "comment": "Refs-only deployment registry. No secrets here — *_REF fields are env var NAMES resolved at runtime when DM_COMMAND_CENTER_REMOTE_BASE_URL_REFS_ENABLED=1. Tokens live in this deployment's .env, never in this file. Replace this example deployment or point DM_COMMAND_CENTER_DEPLOYMENT_REGISTRY_PATH at a private copy.",
+  "deployments": [
+    {
+      "deployment_id": "example",
+      "profile": "businessos-client",
+      "environment": "production",
+      "public_base_url_ref": "EXAMPLE_DEPLOYMENT_PUBLIC_BASE_URL_REF",
+      "auth_mode": "none_local_fixture",
+      "health_contract": "businessos_diagnostics",
+      "enabled_modules": ["instance_diagnostics"],
+      "polling_interval_seconds": 120
+    }
+  ]
+}

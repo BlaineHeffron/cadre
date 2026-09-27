@@ -1,0 +1,7 @@
+Claude wants to run Bash
+rg -n "TODO" modules/session-state
+
+Do you want to allow this command?
+Allow once
+Allow always
+Deny

@@ -1,0 +1,22 @@
+  chronic set rather than anything this PR introduced. [1m22 failed on both master
+[0m[39m[49m  [1mand the PR branch[0m[39m[49m, with passes up from 56 to 59 — the PR adds green tests and
+  breaks nothing. That's the same E2E failure population #312 is working
+  through.
+
+  Two loose threads now:
+
+  - [1m#312[0m[39m[49m [1mis[0m[39m[49m [1mstill[0m[39m[49m [1mopen[0m[39m[49m and now behind master by this merge. No conflict — it
+  doesn't touch [97menrollment-org.spec.ts[39m — but it will want a rebase before
+  merging.
+  - With #314's normalization landed, the last two enrollment tests may now
+  reach green by adding an [97m/api/v1/enrollment/status[39m route to the mock harness,
+  which the crash previously made pointless. That's the cheapest remaining win
+  on the E2E backlog if you want me to pick it up.
+
+[37m✻[39m [37mCogitated for 1m 58s[39m
+
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m❯ [2mrebase 312 on master and add the enrollment status route[0m[39m[49m
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m  [95m⏵⏵ bypass permissions on[37m (shift+tab to cycle) · ← for agents[39m
+                                        [37mnew task? [97m/clear[37m to save [97m380.8k tokens[39m

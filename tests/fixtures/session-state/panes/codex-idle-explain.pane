@@ -1,0 +1,22 @@
+
+[38;5;2m  > [1mGeneric Estimator Kernels and Boundary-State Reconstruction[0m[39m[49m
+
+  First deliverable:
+
+  [38;5;12m1. [39mGeneric typed definitions.
+  [38;5;12m2. [39mKernel/factorization theorem.
+  [38;5;12m3. [39mContext-depth filtration.
+  [38;5;12m4. [39mFinite counterexample search.
+  [38;5;12m5. [39mFormal proof of stable core.
+  [38;5;12m6. [39mBaseline case only, demonstrating the reference threshold.
+
+  Best chance of a genuinely new result. Downstream claims remain speculative.
+  Engineering status: Milestone Four currently remains a reviewed charter; its build
+  sweep and proof contracts are not implemented or committed.
+
+[2m─ Worked for 3m 59s ────────────────────────────────────────────────────────────
+
+
+[0;1m[38;5;3m[49m›[0m[39m[49m [2mExplain this codebase[0m[39m[49m
+
+  [38;2;246;226;183mgpt-5.6-sol max[2m[39m · [0m[38;2;171;223;167m[49m~/projects/example-research[39m

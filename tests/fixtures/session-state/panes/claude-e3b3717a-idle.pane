@@ -1,0 +1,16 @@
+     # fail 0
+     [2m… +11 lines (ctrl+o to expand)[0m[39m[49m
+[37m  ⎿  Shell cwd was reset to /home/dev/projects/dueno-fleet-deterministic[39m
+[37m  ⎿  [95mYou've hit your session limit · resets 4:10pm (UTC)[39m
+     [37mContinuing automatically at 4:10pm · esc to cancel[39m
+
+[37m●[39m [37mUsage limit reached · continuing automatically at 4:10pm · esc or type[39m
+  [37mto cancel[39m
+
+[37m✻[39m [37mBaked for 10m 28s[39m
+
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m❯ 
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m  [97m⚠[39m [97mUsage[39m [97mlimit[39m [97mreached[39m [97m·[39m [97mcontinuing[39m [97mautomatically[39m [97mat[39m [97m4:10pm[39m [97m·[39m [97mesc[39m [97mto[39m [97mcancel[39m
+  [95m⏵⏵[39m [95mbypass[39m [95mpermissions[39m [95mon[37m (shift+tab[39m [37mto[39m [37mcycle)[39m [37m·[39m [37m←[39m [37mfor[39m [37magents[39m

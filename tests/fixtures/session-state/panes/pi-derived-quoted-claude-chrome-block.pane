@@ -1,0 +1,27 @@
+[48;5;22m
+ [1m[38;5;188m$ rg -n "waiting_for_input" modules/integrations/scheduled-agents.mjs && npm
+✻ Pondering… (6m 52s · ↑ 29.9k tokens)
+────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+[0m[39m[48;5;22m [1m[38;5;188mrun check[0m[38;5;244m[48;5;22m (timeout 30000s)[39m
+
+ [38;5;244m563:  if (value.status === 'ready' || value.state === 'waiting_for_input')
+[39m [38;5;244mreturn true;[39m
+
+ [38;5;244m> dueno-fleet@0.1.0 check[39m
+ [38;5;244m> node scripts/check-syntax.mjs[39m
+
+ [38;5;244mTook 4.0s[39m
+
+
+[49m [3m[38;5;244mYes, that's from the #156 scheduled-agents patch. Pre-existing, not my change.[0m[39m[49m
+
+ [38;5;109m⠴[39m [38;5;244mWorking...[39m
+
+[38;5;139m────────────────────────────────────────────────────────────────────────────────
+[7m[39m [0m[39m[49m
+[38;5;139m────────────────────────────────────────────────────────────────────────────────
+[38;5;241m~/projects/dueno-fleet-deterministic (feature/deterministic-session-control)[39m
+[38;5;241m↑159k ↓12k R450k CH97.4% $0.615 (sub) 11.9%/500k (auto)    (xai) grok-4.6 • high

@@ -1,0 +1,6 @@
+Verification guardrail
+
+Another agent is still reviewing this change. Choose how to continue:
+› 1. Continue without verification
+2. Wait for verification
+3. Cancel this action

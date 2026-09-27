@@ -1,0 +1,4 @@
+Codex wants to run a command
+rg -n "TODO" .
+Do you want to proceed?
+Press Enter to allow

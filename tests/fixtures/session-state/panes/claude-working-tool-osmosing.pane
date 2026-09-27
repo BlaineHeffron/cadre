@@ -1,0 +1,28 @@
+  main.
+
+[32m●[39m [1mBash[0m[39m[49m(git fetch origin --quiet && echo "=== commits ahead of main ===" && git
+      log --oneline origin/main..HEAD && echo "=== diffstat ===" && git diff
+      --stat origin/mai…)
+[37m  ⎿  [39m=== commits ahead of main ===
+     1f3c9a2 feat(skills): fan out one integration agent per changed skill
+     8b0e4d7 feat(skills): auto-maintain ported skills against upstream
+     [2m… +14 lines (ctrl+o to expand)[0m[39m[49m
+
+[97m●[39m The diffstat shows deletions in agent-bus and mcp test files I never touched —
+  my branch is behind [97morigin/main[39m, and a PR now would revert others' work.
+  Checking how far behind, then rebasing.
+
+[32m●[39m [1mBash[0m[39m[49m(echo "=== main commits not in my branch ==="; git log --oneline
+      HEAD..origin/main | head -30; echo "=== count ==="; git rev-list --count
+      HEAD..origin/main; echo…)
+[37m  ⎿  [39m=== main commits not in my branch ===
+     c2d5e91 Merge pull request #157 from octocat/dueno-fleet/issue/i
+     ssue-156-1787135092782
+     [2m… +12 lines (ctrl+o to expand)[0m[39m[49m
+
+[31m·[39m [33mOsmosing…[31m [37m(22s · ↓[39m [37m1.1k tokens)[39m
+
+[37m────────────────────────────────────────────────────────────────────────────────
+❯ [39m
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m  [95m⏵⏵[39m [95mbypass[39m [95mpermissions[39m [95mon[37m (shift+tab[39m [37mto[39m [37mcycle)[39m [37m·[39m [37mesc[39m [37mto[39m [37minterrupt[39m [37m·[39m [37m←[39m [37mfor[39m [37mag…[39m

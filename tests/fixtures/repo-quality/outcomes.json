@@ -1,0 +1,100 @@
+{
+  "outcomes": [
+    {
+      "scenario": "Baseline",
+      "summary": "Success",
+      "log_path": "logs/baseline.log",
+      "diff_path": null,
+      "phase_results": []
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/core/src/cart.rs:12:9: replace + with -",
+          "package": "core",
+          "file": "crates/core/src/cart.rs",
+          "function": null,
+          "span": {
+            "start": { "line": 12, "column": 9 },
+            "end": { "line": 12, "column": 10 }
+          },
+          "replacement": "-",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "logs/cart.log",
+      "diff_path": "diff/cart.diff",
+      "phase_results": []
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/core/src/cart.rs:20:5: replace body with Default::default()",
+          "package": "core",
+          "file": "crates/core/src/cart.rs",
+          "function": null,
+          "span": {
+            "start": { "line": 20, "column": 5 },
+            "end": { "line": 23, "column": 6 }
+          },
+          "replacement": "Default::default()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "logs/cart-body.log",
+      "diff_path": "diff/cart-body.diff",
+      "phase_results": []
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/api/src/lib.rs:7:4: delete match arm",
+          "package": "api",
+          "file": "crates/api/src/lib.rs",
+          "function": null,
+          "span": {
+            "start": { "line": 7, "column": 4 },
+            "end": { "line": 7, "column": 15 }
+          },
+          "replacement": "",
+          "genre": "MatchArm"
+        }
+      },
+      "summary": "Timeout",
+      "log_path": "logs/api.log",
+      "diff_path": "diff/api.diff",
+      "phase_results": []
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/api/src/lib.rs:30:4: replace == with !=",
+          "package": "api",
+          "file": "crates/api/src/lib.rs",
+          "function": null,
+          "span": {
+            "start": { "line": 30, "column": 4 },
+            "end": { "line": 30, "column": 6 }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "logs/api-unviable.log",
+      "diff_path": "diff/api-unviable.diff",
+      "phase_results": []
+    }
+  ],
+  "total_mutants": 4,
+  "missed": 1,
+  "caught": 1,
+  "timeout": 1,
+  "unviable": 1,
+  "success": 0,
+  "start_time": "2026-08-20T12:00:00Z",
+  "end_time": "2026-08-20T12:01:00Z",
+  "cargo_mutants_version": "27.1.0"
+}

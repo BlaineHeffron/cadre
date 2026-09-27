@@ -1,0 +1,100 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createAgentBusDelivery } from '../modules/agent-bus/delivery.mjs';
+import { renderBusEnvelope } from '../modules/agent-bus/envelope.mjs';
+import { createAgentAdapters } from '../modules/agent-bus/adapters.mjs';
+import { registerProtocolSessionProvider } from '../modules/sessions/protocol-session-registry.mjs';
+
+function idleSession() {
+  return { state: { capabilities: { canSendNow: true }, status: 'waiting_for_input', execution: 'idle' } };
+}
+
+test('skips inject when the session transcript already contains the message id', async () => {
+  const message = { id: 'msg_1', threadId: 'thr_1', from: { kind: 'codex', sessionId: 'c1' }, body: 'hello' };
+  const delivery = { id: 'del_1', messageId: 'msg_1', target: { kind: 'claude', sessionId: 'a1' }, status: 'queued', attempts: 0 };
+  const store = {
+    getThread: () => ({ thread: { status: 'open' } }),
+    getDelivery: () => delivery,
+    getMessage: () => null,
+    async updateDelivery(_id, patch) { return { ...delivery, ...patch }; },
+  };
+  let injected = 0;
+  const { deliverMessage } = createAgentBusDelivery({
+    app: {},
+    store,
+    wsManager: null,
+    observedSessions: new Set(),
+    deliveryInFlight: new Set(),
+    sessionDeliveryInFlight: new Set(),
+    broadcast() {},
+    broadcastAlert() {},
+    async resolveAgentSession() {
+      return {
+        async getSession() { return idleSession(); },
+        async captureSession() { return renderBusEnvelope(message); },
+        async injectEnvelope() { injected += 1; return { ok: true }; },
+      };
+    },
+  });
+  const updated = await deliverMessage(message, delivery);
+  assert.equal(injected, 0);
+  assert.equal(updated.status, 'injected');
+  assert.equal(updated.resolution, 'already_present');
+});
+
+test('injects once when the session has not received the message', async () => {
+  const message = { id: 'msg_2', threadId: 'thr_1', from: { kind: 'codex', sessionId: 'c1' }, body: 'hello' };
+  const delivery = { id: 'del_2', messageId: 'msg_2', target: { kind: 'claude', sessionId: 'a1' }, status: 'queued', attempts: 0 };
+  const store = {
+    getThread: () => ({ thread: { status: 'open' } }),
+    getDelivery: () => delivery,
+    getMessage: () => null,
+    async updateDelivery(_id, patch) { return { ...delivery, ...patch }; },
+  };
+  const envelopes = [];
+  const { deliverMessage } = createAgentBusDelivery({
+    app: {},
+    store,
+    wsManager: null,
+    observedSessions: new Set(),
+    deliveryInFlight: new Set(),
+    sessionDeliveryInFlight: new Set(),
+    broadcast() {},
+    broadcastAlert() {},
+    async resolveAgentSession() {
+      return {
+        async getSession() { return idleSession(); },
+        async captureSession() { return ''; },
+        async injectEnvelope(_app, _id, text, opts) {
+          envelopes.push({ text, opts });
+          return { ok: true, resolution: 'sent' };
+        },
+      };
+    },
+  });
+  const updated = await deliverMessage(message, delivery);
+  assert.equal(envelopes.length, 1);
+  assert.match(envelopes[0].text, /id=msg_2/);
+  assert.deepEqual(envelopes[0].opts, { deliveryId: 'del_2' });
+  assert.equal(updated.status, 'injected');
+});
+
+test('protocol inject uses a stable delivery idempotency key', async () => {
+  const prompts = [];
+  const unregister = registerProtocolSessionProvider('deepseek', {
+    service: {
+      get() { return { lifecycle: 'running', content: '' }; },
+      async prompt(_id, opts) { prompts.push(opts); return { turnId: `t${prompts.length}` }; },
+    },
+  });
+  try {
+    const adapter = createAgentAdapters().deepseek;
+    await adapter.injectEnvelope({}, 'd1', 'hello', { deliveryId: 'del_9' });
+    await adapter.injectEnvelope({}, 'd1', 'hello', { deliveryId: 'del_9' });
+    assert.equal(prompts.length, 2);
+    assert.equal(prompts[0].idempotencyKey, 'agent-bus:del_9');
+    assert.equal(prompts[1].idempotencyKey, 'agent-bus:del_9');
+  } finally {
+    unregister();
+  }
+});

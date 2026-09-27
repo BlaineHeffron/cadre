@@ -1,0 +1,36 @@
+{
+  "repo": "dueno-fleet",
+  "outputDir": ".quality/repo-quality",
+  "coverage": {
+    "command": "npx --no-install c8 --reporter=json --report-dir {outputDir}/cov --include 'modules/**' --include 'lib/**' --include server.mjs --include config.mjs node scripts/run-tests.mjs --test-reporter=dot",
+    "format": "istanbul-json",
+    "output": "{outputDir}/cov/coverage-final.json"
+  },
+  "complexity": {
+    "command": "npx --no-install eslint --config config/quality/eslint.complexity.mjs --format json --output-file {outputDir}/eslint.json modules lib server.mjs config.mjs",
+    "format": "eslint-json",
+    "output": "{outputDir}/eslint.json"
+  },
+  "dry": {
+    "command": "npx --no-install jscpd --reporters json --output {outputDir}/jscpd modules lib server.mjs config.mjs",
+    "format": "jscpd-json",
+    "output": "{outputDir}/jscpd/jscpd-report.json"
+  },
+  "mutation": {
+    "command": "npx --no-install stryker run --mutate {mutatePatterns}",
+    "format": "stryker-json",
+    "output": "{outputDir}/mutation.json",
+    "sourceGlobs": [
+      "modules/**/*.mjs",
+      "lib/**/*.mjs",
+      "server.mjs",
+      "config.mjs"
+    ]
+  },
+  "thresholds": {
+    "crapFail": 30,
+    "mutationScoreMinChanged": 0.8,
+    "survivorsMaxChanged": null
+  },
+  "baseline": "config/quality/crap-baseline.json"
+}

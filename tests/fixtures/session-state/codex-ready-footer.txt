@@ -1,0 +1,4 @@
+Implemented requested changes.
+Verification passed.
+› Run /review on my current changes
+gpt-5.4 medium · 72% left · ~/projects/example

@@ -1,0 +1,18 @@
+[0m[39m[49m [3m[38;5;244mARCHIVED ROWS. This means summary and export views of the records under limits
+[0m[39m[49m [3m[38;5;244mwill incorrectly include archived rows.[0m[39m[49m
+
+[48;5;22m
+ [1m[38;5;188mread[0m[39m[48;5;22m [38;5;109m~/projects/example-app/src/schemas/archival.schema.ts[38;5;226m:220-259[39m
+
+
+
+ [1m[38;5;188mread[0m[39m[48;5;22m [38;5;109m~/projects/example-app/src/services/outboundExportRecords.service.ts[38;5;226m:1-80[39m
+
+
+[49m [38;5;109m⠋[39m [38;5;244mWorking...[39m
+
+[38;5;109m────────────────────────────────────────────────────────────────────────────────
+[7m[39m [0m[39m[49m
+[38;5;109m────────────────────────────────────────────────────────────────────────────────
+[38;5;241m~/.dueno-fleet/github-agents/worktrees/octocat-example-app/pr-254-17871...
+↑81k ↓7.5k R268k CH94.8% $0.341 (sub) 9.1%/500k (auto)   (xai) grok-4.6 • medium

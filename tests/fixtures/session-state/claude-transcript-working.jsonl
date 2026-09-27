@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"Run the focused tests."}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}],"stop_reason":"tool_use"}}

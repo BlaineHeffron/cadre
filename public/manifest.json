@@ -1,0 +1,17 @@
+{
+  "name": "Cadre",
+  "short_name": "Cadre",
+  "description": "Self-hosted control plane for coding-agent sessions",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#1a1a2e",
+  "background_color": "#0f0f1a",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

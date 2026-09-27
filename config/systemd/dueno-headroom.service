@@ -1,0 +1,20 @@
+[Unit]
+Description=Cadre Headroom context compression
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/dueno-headroom
+ExecStart=%h/.local/bin/headroom proxy --host 127.0.0.1 --port 8787 --openai-api-url https://api.deepseek.com --mode cache --lossless --disable-kompress --no-code-aware --no-rate-limit --no-cache --no-subscription-tracking --stateless
+Environment=HEADROOM_OFFLINE=1 HEADROOM_BEACON=off DO_NOT_TRACK=1 HEADROOM_TELEMETRY=off
+Environment=HEADROOM_CONFIG_DIR=%h/.local/share/dueno-headroom/config
+Environment=HEADROOM_SKIP_UPSTREAM_CHECK=1
+Environment=HEADROOM_DEPLOYMENT_PROFILE=dueno-fleet
+Environment=HEADROOM_SAVINGS_PROFILE=coding HEADROOM_NO_MEMORY_TOOLS=1 HEADROOM_NO_MEMORY_CONTEXT=1
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

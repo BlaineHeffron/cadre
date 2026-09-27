@@ -1,0 +1,54 @@
+{
+  "statistics": {
+    "detectionDate": "2026-08-21T00:00:00.000Z",
+    "formats": {
+      "javascript": {
+        "sources": 2,
+        "lines": 80,
+        "tokens": 400,
+        "clones": 1,
+        "duplicatedLines": 10,
+        "duplicatedTokens": 50,
+        "percentage": 12.5,
+        "percentageTokens": 12.5,
+        "newDuplicatedLines": 0,
+        "newClones": 0
+      }
+    },
+    "total": {
+      "lines": 80,
+      "tokens": 400,
+      "sources": 2,
+      "clones": 1,
+      "duplicatedLines": 10,
+      "duplicatedTokens": 50,
+      "percentage": 12.5,
+      "percentageTokens": 12.5,
+      "newDuplicatedLines": 0,
+      "newClones": 0
+    }
+  },
+  "duplicates": [
+    {
+      "format": "javascript",
+      "lines": 11,
+      "fragment": "function checkout(cart) {\n  return cart.total;\n}",
+      "tokens": 50,
+      "firstFile": {
+        "name": "/repo/src/cart.mjs",
+        "start": 10,
+        "end": 20,
+        "startLoc": { "line": 10, "column": 0, "position": 120 },
+        "endLoc": { "line": 20, "column": 1, "position": 240 }
+      },
+      "secondFile": {
+        "name": "/repo/src/checkout.mjs",
+        "start": 40,
+        "end": 50,
+        "startLoc": { "line": 40, "column": 0, "position": 800 },
+        "endLoc": { "line": 50, "column": 1, "position": 920 }
+      },
+      "isNew": false
+    }
+  ]
+}

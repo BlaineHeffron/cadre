@@ -1,0 +1,22 @@
+      - Merge commit: [38;5;6m76ca9e71[39m
+      - Focused: 78/78 passed
+      - Build passed
+
+  - Portal PR #13 ([4m[38;5;6mhttps://github.com/octocat/example-portal/pull/13[0m[39m[49m)
+      - Review fix: [38;5;6m7c83450[39m
+      - Merge commit: [38;5;6me97fe00c[39m
+      - Focused: 5/5 passed
+      - Build passed
+
+  Reviewers fixed authorization bypasses, strict boolean validation, secondary
+  membership reporting, audited membership revocation, onboarding selection/
+  confirmation, stale-selection bugs, and scalable reconciliation UX.
+
+  No deployment or database mutation performed.
+
+[2m─ Worked for 13m 14s ───────────────────────────────────────────────────────────
+
+
+[0;1m[39m[49m›[0m[39m[49m [2mRun /review on my current changes[0m[39m[49m
+
+  [38;2;246;226;183mgpt-5.6-sol high[2m[39m · [0m[38;2;171;223;167m[49m~/projects/example-school-link[2m[39m · Main [default][0m[39m[49m

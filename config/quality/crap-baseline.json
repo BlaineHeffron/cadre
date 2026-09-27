@@ -1,0 +1,9 @@
+{
+  "repo": "dueno-fleet",
+  "sha": "fbc1348b8672560d0fc9ad6a9c6fd3a3c05cdd11",
+  "generatedAt": "2026-08-21T05:40:40.504Z",
+  "crapFail": 30,
+  "crapAboveFail": 110,
+  "crapSumAboveFail": 9313.12,
+  "duplicatedLinesPct": 2.81
+}

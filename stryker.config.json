@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "tap",
+  "coverageAnalysis": "perTest",
+  "tap": {
+    "testFiles": [
+      "tests/**/*.test.mjs"
+    ],
+    "nodeArgs": [
+      "--max-old-space-size=8192",
+      "--test-reporter=tap",
+      "-r",
+      "{{hookFile}}",
+      "{{testFile}}"
+    ]
+  },
+  "mutate": [],
+  "incremental": true,
+  "incrementalFile": ".quality/repo-quality/stryker-incremental.json",
+  "tempDirName": ".quality/repo-quality/stryker-tmp",
+  "reporters": [
+    "json",
+    "progress"
+  ],
+  "jsonReporter": {
+    "fileName": ".quality/repo-quality/mutation.json"
+  },
+  "timeoutMS": 15000,
+  "timeoutFactor": 3,
+  "concurrency": 4,
+  "ignoreStatic": true
+}

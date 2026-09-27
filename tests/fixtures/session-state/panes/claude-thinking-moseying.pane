@@ -1,0 +1,24 @@
+  [37mCalled dueno [1m2[0m[37m[49m times (ctrl+o to expand)[39m
+
+[97m●[39m While the implementer works, let me establish a clean baseline so I can
+  independently verify test claims later.
+
+[32m●[39m [1mBash[0m[39m[49m(timeout 300 node --test tests/session-state-core.test.mjs 2>&1 | tail
+      -20)
+[37m  ⎿  [39m    ok 9 - still drops a stale working transcript whose mtime is older
+      than freshness
+           ---
+     [2m… +18 lines (ctrl+o to expand)[0m[39m[49m
+
+[32m●[39m [1mBash[0m[39m[49m(sed -n '60,130p' modules/session-state/command-gate.mjs)
+[37m  ⎿  [39m  const value = String(line || '').trim();
+       return !value
+         || /^[-─_=]{6,}$/.test(value)
+     [2m… +68 lines (ctrl+o to expand)[0m[39m[49m
+
+[31m✶[39m [31mMo[93msey[31ming… [37m(3m 46s · ↓[39m [37m14.7k tokens)[39m
+
+[37m────────────────────────────────────────────────────────────────────────────────
+❯ [39m
+[37m────────────────────────────────────────────────────────────────────────────────
+[39m  [95m⏵⏵[39m [95mbypass[39m [95mpermissions[39m [95mon[37m (shift+tab[39m [37mto[39m [37mcycle)[39m [37m·[39m [37mesc[39m [37mto[39m [37minterrupt[39m [37m·[39m [37m←[39m [37mfor[39m [37mag…[39m
