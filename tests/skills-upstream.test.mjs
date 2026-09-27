@@ -44,6 +44,7 @@ describe('skills upstream helpers', () => {
 
   it('refuses the live deploy checkout and writes a per-group brief', () => {
     assert.equal(isLiveFleetCheckout('/home/dev/projects/dueno-fleet-live'), true);
+    assert.equal(isLiveFleetCheckout('/home/dev/projects/cadre-live'), true);
     assert.equal(isLiveFleetCheckout('/repo/fleet'), false);
     const prompt = buildSkillsUpstreamIntegrationPrompt({
       repo: 'hameefy/claude-latex-skill',
