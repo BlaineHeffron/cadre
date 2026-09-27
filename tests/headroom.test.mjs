@@ -84,6 +84,24 @@ test('fresh and resumed launches deliver endpoint overrides to the actual child 
   }
 });
 
+test('installed Codex loads the Headroom launch config and rejects the reserved provider ID', async (t) => {
+  // Codex 0.154+ refuses `model_providers.openai.*` at config load, which killed every Fleet
+  // Codex spawn. `features list` exits non-zero on that error without any model call.
+  const run = promisify(execFile);
+  const dir = await mkdtemp(join(tmpdir(), 'dueno-headroom-codex-home-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const env = { ...process.env, CODEX_HOME: dir };
+  try {
+    await run('codex', ['--version'], { env });
+  } catch {
+    t.skip('codex CLI not installed');
+    return;
+  }
+  await run('codex', [...headroomLaunchOverrides('codex').args, 'features', 'list'], { env });
+  await assert.rejects(run('codex', ['-c', 'model_providers.openai.base_url="http://127.0.0.1:8787/v1"', 'features', 'list'], { env }),
+    /reserved built-in provider/);
+});
+
 test('Pi routing preserves mixed wire formats, metadata, and upstream path prefixes', () => {
   const models = [
     { id: 'a', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', reasoning: true },
