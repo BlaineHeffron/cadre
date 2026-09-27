@@ -6,7 +6,7 @@ export const SKILLS_UPSTREAM_MANIFEST_REL = 'config/skills/UPSTREAM.tsv';
 export const DEFAULT_SKILLS_UPSTREAM_INTERVAL_SECONDS = 604800;
 export const DEFAULT_SKILLS_UPSTREAM_MAX_FANOUT = 3;
 export const DEFAULT_SKILLS_UPSTREAM_WORKTREE_BASE = '~/.dueno-fleet/agent-worktrees';
-export const LIVE_FLEET_CHECKOUT = join(homedir(), 'projects/dueno-fleet-live');
+export const LIVE_FLEET_CHECKOUT = join(homedir(), 'projects/cadre-live');
 
 function text(value) {
   return String(value || '').trim();
@@ -22,7 +22,7 @@ export function expandUserPath(value = '') {
 
 export function isLiveFleetCheckout(repoPath = '') {
   const resolved = resolve(expandUserPath(repoPath) || '.');
-  return resolved === LIVE_FLEET_CHECKOUT || resolved.endsWith('/dueno-fleet-live');
+  return resolved === LIVE_FLEET_CHECKOUT || /\/(cadre|dueno-fleet)-live$/.test(resolved);
 }
 
 export function parseUpstreamManifest(textValue = '') {

@@ -112,7 +112,7 @@ async function harness() {
   const root = await mkdtemp(join(tmpdir(), 'dueno-child-authority-root-'));
   const childDir = join(root, 'child');
   const outside = await mkdtemp(join(tmpdir(), 'dueno-child-authority-outside-'));
-  const live = join(root, 'dueno-fleet-live');
+  const live = join(root, 'cadre-live');
   const link = join(root, 'linked-outside');
   await Promise.all([mkdir(childDir), mkdir(live)]);
   await symlink(outside, link);

@@ -516,7 +516,7 @@ export async function assertCoordinatorPath(policy, value, label = 'path') {
   }
   const canonical = await realpath(raw).catch(() => '');
   if (!canonical) throw policyError(`${label} does not resolve to an existing path`, 'coordinator_target_path_missing');
-  if (canonical.split(sep).includes('dueno-fleet-live')) {
+  if (canonical.split(sep).some((part) => part === 'cadre-live' || part === 'dueno-fleet-live')) {
     throw policyError(`${label} may not target the live deployment checkout`, 'coordinator_live_checkout_denied');
   }
   if (!normalizedPolicy.projectRoots.some((root) => pathWithinRoot(canonical, root))) {

@@ -4,7 +4,7 @@ Scheduled job `sched_repo_quality_watch`. It measures CRAP (and any JSON mutatio
 
 ## Safety
 
-- Refuses `/path/to/dueno-fleet-live` (`isLiveFleetCheckout`). Omit that path from `DM_REPO_QUALITY_REPO_PATHS_JSON`.
+- Refuses `/path/to/cadre-live` (`isLiveFleetCheckout`). Omit that path from `DM_REPO_QUALITY_REPO_PATHS_JSON`.
 - Measurement and mutation run only in a fresh worktree (`createAgentSessionWorktree`, `branchPrefix` `dueno-fleet/quality`). The original checkout is never used as `--repo`.
 - Agent-started smoke servers must not run this job's side-effect loop. Use `DUENO_DISABLE_SIDE_EFFECTS=1 DM_GITHUB_AGENT_POLLER_ENABLED=0 DM_GITHUB_AGENTS_ENABLED=0 DM_SCHEDULED_AGENT_PUMP_ENABLED=0 TELEGRAM_BRIDGE=0`. Production-shaped runs require `PORT=4310` or `DUENO_ALLOW_SIDE_EFFECTS=1`.
 

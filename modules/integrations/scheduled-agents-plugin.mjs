@@ -268,7 +268,7 @@ function repoQualityRepoProblem(repoPaths = []) {
   if (paths.some((path) => isLiveFleetCheckout(path))) {
     return {
       code: 'repo_quality_live_checkout',
-      message: 'Refusing the live deploy checkout; omit dueno-fleet-live from DM_REPO_QUALITY_REPO_PATHS_JSON',
+      message: 'Refusing the live deploy checkout; omit cadre-live from DM_REPO_QUALITY_REPO_PATHS_JSON',
     };
   }
   return null;

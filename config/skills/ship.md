@@ -110,7 +110,7 @@ Do not report the work as shipped until this says "landed".
 
 ## Deployment (fleet-specific)
 
-Merging to `main` does not deploy. The live service runs from the `dueno-fleet-live` worktree pinned to `origin/main`; the canonical restart is `bash scripts/server.sh restart`, and it requires explicit authorization. Never treat a feature checkout as production. When reporting shipped state, say what is merged and what is not yet deployed.
+Merging to `main` does not deploy. The live service runs from the `cadre-live` worktree pinned to `origin/main`; the canonical restart is `bash scripts/server.sh restart`, and it requires explicit authorization. Never treat a feature checkout as production. When reporting shipped state, say what is merged and what is not yet deployed.
 
 ## Worktree Cleanup
 
