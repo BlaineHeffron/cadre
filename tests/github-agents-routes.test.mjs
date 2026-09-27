@@ -355,6 +355,7 @@ function githubItem(number, title) {
     created_at: '2026-06-22T12:00:00Z',
     updated_at: '2026-06-22T12:00:00Z',
     user: { login: 'alice' },
+    author_association: 'OWNER',
   };
 }
 
