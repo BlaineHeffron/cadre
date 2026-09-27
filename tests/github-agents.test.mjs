@@ -107,6 +107,25 @@ describe('GitHub agents poller', () => {
     assert.equal(result.updatedRepo.lastSeenIssueNumber, 5);
   });
 
+  it('ignores PRs and issues from authors without write access', async () => {
+    const outsider = (item) => ({ ...item, author_association: 'NONE' });
+    const result = await pollGithubRepo({
+      ...BASE_REPO,
+      lastSeenPrNumber: 1,
+      lastSeenIssueNumber: 1,
+    }, {
+      env: { GITHUB_TOKEN_REF: 'secret-token' },
+      now: () => 4000,
+      fetchImpl: mockGithubFetch([], {
+        pulls: [outsider(githubItem(6, 'Drive-by PR')), { ...githubItem(5, 'Collaborator PR'), author_association: 'COLLABORATOR' }],
+        issues: [outsider(githubItem(8, 'Drive-by issue')), { ...githubItem(7, 'Member issue'), author_association: 'MEMBER' }],
+      }),
+    });
+
+    assert.deepEqual(result.newPullRequests.map((item) => item.number), [5]);
+    assert.deepEqual(result.newIssues.map((item) => item.number), [7]);
+  });
+
   it('baselines newly enabled issue polling independently from PR cursors', async () => {
     const result = await pollGithubRepo({
       ...BASE_REPO,
@@ -1288,6 +1307,7 @@ function githubItem(number, title) {
     created_at: '2026-06-22T12:00:00Z',
     updated_at: '2026-06-22T12:00:00Z',
     user: { login: 'alice' },
+    author_association: 'OWNER',
   };
 }
 

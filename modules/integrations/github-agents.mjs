@@ -13,6 +13,8 @@ const MAX_SPAWNED_ITEM_KEYS = 500;
 const SPAWN_BACKOFF_BASE_MS = 60_000;
 const SPAWN_BACKOFF_MAX_MS = 30 * 60_000;
 const USER_AGENT = 'dueno-fleet';
+// Public repos accept issues and PRs from anyone; only these authors spawn agents.
+const TRUSTED_AUTHOR_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 const GITHUB_API_VERSION = '2022-11-28';
 const GITHUB_ACCEPT = 'application/vnd.github+json';
 
@@ -447,9 +449,10 @@ export async function pollGithubRepo(repoInput = {}, {
       repo.prEnabled ? fetchGithubList(fetchImpl, githubPullsUrl(repo), { token, timeoutMs }) : [],
       repo.issueEnabled ? fetchGithubList(fetchImpl, githubIssuesUrl(repo), { token, timeoutMs }) : [],
     ]);
-    const openPulls = pulls.map(normalizeGithubItem).filter((item) => item.number > 0);
+    const trusted = (item) => TRUSTED_AUTHOR_ASSOCIATIONS.has(item?.author_association);
+    const openPulls = pulls.filter(trusted).map(normalizeGithubItem).filter((item) => item.number > 0);
     const openIssues = issues
-      .filter((item) => !item?.pull_request)
+      .filter((item) => !item?.pull_request && trusted(item))
       .map(normalizeGithubItem)
       .filter((item) => item.number > 0);
     const baselinePr = repo.lastSeenPrNumber == null;
