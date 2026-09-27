@@ -5,7 +5,8 @@ import { resolveCompatibleProviderModelPair } from './modules/agent/provider-int
 import { runtimeStatePath } from './modules/ops/runtime-state.mjs';
 import { readEnv } from './modules/platform/cadre-env.mjs';
 
-loadEnv();
+// Tests must not pick up the checkout's deployment .env; node --test sets NODE_TEST_CONTEXT.
+if (!process.env.NODE_TEST_CONTEXT) loadEnv();
 
 const env = (key, fallback) => readEnv(key) ?? fallback;
 function envFlagValue(raw, fallback = true) {

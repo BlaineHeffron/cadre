@@ -27,7 +27,7 @@ async function tempRoot() {
 // Ambient DM_/DUENO_/CADRE_ vars (e.g. from a Fleet-launched shell) are dropped so
 // each case controls exactly which names are set. `dotenv` is written to the child's cwd.
 async function loadConfig(vars, dotenv = '') {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(DM|DUENO|CADRE)_/.test(key)));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(DM|DUENO|CADRE)_/.test(key) && key !== 'NODE_TEST_CONTEXT'));
   const script = `process.stdout.write(JSON.stringify((await import(${JSON.stringify(configModulePath)})).config));`;
   const cwd = await tempRoot();
   await writeFile(join(cwd, '.env'), dotenv);
@@ -75,8 +75,8 @@ describe('CADRE_ env resolver', () => {
     })).githubAgents.enabled, false);
   });
 
-  it('lets a test-set CADRE_ override beat a checkout .env, where a legacy override would not', async () => {
-    // Test isolation must set CADRE_ names: dotenv fills in the .env CADRE_ value
+  it('lets a process-set CADRE_ override beat .env, where a legacy override would not', async () => {
+    // dotenv never overrides process vars, so it fills in the .env CADRE_ value
     // around a legacy-only override, and the resolver prefers it.
     const dotenv = 'CADRE_STATE_DIR=/real/state\nDM_STATE_DIR=/legacy/state\n';
     const stateFile = async (vars) => (await loadConfig(vars, dotenv)).mcpCredentials.stateFile;
