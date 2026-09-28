@@ -570,14 +570,19 @@ printf '# Transcript: clip.webm\n\nLanguage: en (0.99)\n\n[0.00 - 1.20] heard: %
     await app.close();
   });
 
-  it('reports a missing engine binary, python, or faster-whisper package as 503', async () => {
+  it('reports a missing engine binary, interpreter, python, or faster-whisper package as 503', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dueno-ptt-missing-'));
     tempDirs.push(dir);
     // Real python running the repo faster-whisper-cli.py, with site-packages disabled.
     const barepython = await executable(dir, 'bare-python', 'exec python3 -I -S "$@"');
+    const noInterpreter = join(dir, 'no-interpreter');
+    await writeFile(noInterpreter, '#!/no/such/interpreter\n');
+    await chmod(noInterpreter, 0o755);
     const app = await buildApp();
     for (const env of [
       { FLEET_TRANSCRIBE_ENGINE: 'whisper-cpp', FLEET_WHISPER_BIN: join(dir, 'no-such-whisper-cli') },
+      { FLEET_TRANSCRIBE_ENGINE: 'whisper-cpp', FLEET_WHISPER_BIN: noInterpreter },
+      { FLEET_TRANSCRIBE_ENGINE: 'faster-whisper', FLEET_WHISPER_BIN: noInterpreter },
       { FLEET_TRANSCRIBE_ENGINE: 'faster-whisper', FLEET_WHISPER_BIN: undefined, FLEET_TRANSCRIBE_PYTHON: join(dir, 'no-such-python') },
       { FLEET_TRANSCRIBE_ENGINE: 'faster-whisper', FLEET_WHISPER_BIN: undefined, FLEET_TRANSCRIBE_PYTHON: barepython },
     ]) {
@@ -596,10 +601,11 @@ printf '# Transcript: clip.webm\n\nLanguage: en (0.99)\n\n[0.00 - 1.20] heard: %
     const { port } = app.server.address();
     const body = JSON.stringify({ audio: clip });
 
-    // The second engine ignores SIGTERM (as does its sleep child), so only the KILL escalation stops it.
-    for (const trap of ['', "trap '' TERM"]) {
-      const started = join(dir, `started-${trap ? 'ignore' : 'plain'}`);
-      const engine = await executable(dir, `slow-engine-${trap ? 'ignore' : 'plain'}`, `${trap}
+    // Later engines ignore SIGTERM (as do their sleep children), so only the KILL escalation stops
+    // them; the last also drops stderr, so the wrapper's `close` fires while it is still running.
+    for (const [i, trap] of ['', "trap '' TERM", "exec 2>/dev/null; trap '' TERM"].entries()) {
+      const started = join(dir, `started-${i}`);
+      const engine = await executable(dir, `slow-engine-${i}`, `${trap}
 sleep 60 &
 echo "$! $1" > ${JSON.stringify(started)}
 wait`);
@@ -611,8 +617,14 @@ wait`);
         const [pid, audioPath] = (await readFile(started, 'utf8')).trim().split(' ');
         assert.equal(alive(Number(pid)), true);
         req.destroy();
-
-        await waitFor(() => !alive(Number(pid)) && !existsSync(audioPath));
+        if (trap) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          assert.equal(alive(Number(pid)), true);
+          assert.equal((await post(app, { audio: clip })).statusCode, 429); // slot held while the engine lives
+          assert.equal(existsSync(audioPath), true);
+        }
+        await waitFor(() => !existsSync(audioPath));
+        assert.equal(alive(Number(pid)), false);
       });
       // The slot is free again: the next clip reaches the (missing) engine instead of a 429.
       const missingEngine = { FLEET_TRANSCRIBE_ENGINE: 'whisper-cpp', FLEET_WHISPER_BIN: join(dir, 'no-such-whisper-cli') };

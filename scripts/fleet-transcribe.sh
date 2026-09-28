@@ -39,7 +39,7 @@ has_transcript() {
 transcribe_whisper_cpp() {
   local audio="$1"
   local tmpbase="$2"
-  "$bin" -m "$model" -l "$lang" -f "$audio" -otxt -of "$tmpbase" >/dev/null
+  "$bin" -m "$model" -l "$lang" -f "$audio" -otxt -of "$tmpbase" >/dev/null || return
   [[ -s "${tmpbase}.txt" ]]
 }
 

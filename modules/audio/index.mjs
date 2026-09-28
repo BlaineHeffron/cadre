@@ -3,6 +3,7 @@ import { watch } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { config } from '../../config.mjs';
 import { buildAudioRecordingStore, safeAudioRecording } from './recordings.mjs';
@@ -165,16 +166,21 @@ function transcriptText(raw) {
 
 // Push-to-talk dictation: run one clip through the same engine config (FLEET_TRANSCRIBE_ENGINE,
 // FLEET_WHISPER_*) the inbox transcriber uses. The engine runs in its own process group; at the
-// deadline or when `signal` aborts, the whole group gets TERM, then KILL five seconds later.
-// `close` waits for every descendant holding stderr, so cleanup never races a live engine.
+// deadline, on abort, or if anything in the group outlives the wrapper, the group gets TERM, then
+// KILL after five seconds, and cleanup waits until the group is gone.
 async function transcribeClip(audio, ext, signal) {
   const dir = await mkdtemp(resolve(tmpdir(), 'cadre-ptt-'));
-  const timers = [];
   let child;
+  let stopping;
+  let deadline;
+  const group = (sig) => { try { process.kill(-child.pid, sig); return true; } catch { return false; } };
   const stop = () => {
-    const kill = (sig) => { try { process.kill(-child.pid, sig); } catch {} };
-    kill('SIGTERM');
-    timers.push(setTimeout(kill, 5000, 'SIGKILL'));
+    stopping ??= (async () => {
+      group('SIGTERM');
+      for (let i = 0; i < 50 && group(0); i++) await sleep(100);
+      group('SIGKILL');
+      for (let i = 0; i < 50 && group(0); i++) await sleep(100);
+    })();
   };
   try {
     await writeFile(resolve(dir, `clip.${ext}`), audio);
@@ -183,7 +189,7 @@ async function transcribeClip(audio, ext, signal) {
       stdio: ['ignore', 'ignore', 'pipe'],
       detached: true,
     });
-    timers.push(setTimeout(stop, 120000));
+    deadline = setTimeout(stop, 120000);
     if (signal?.aborted) stop();
     signal?.addEventListener('abort', stop);
     let stderr = '';
@@ -193,8 +199,11 @@ async function transcribeClip(audio, ext, signal) {
     if (code !== 0) throw Object.assign(new Error(`fleet-transcribe exited ${code}: ${stderr}`), { statusCode: code === 3 ? 503 : 502 });
     return transcriptText(await readFile(resolve(dir, 'clip.txt'), 'utf8'));
   } finally {
-    timers.forEach(clearTimeout);
+    clearTimeout(deadline);
     signal?.removeEventListener('abort', stop);
+    // `close` only means the wrapper exited; an engine that dropped stderr can still be running.
+    if (group(0)) stop();
+    await stopping;
     await rm(dir, { recursive: true, force: true });
   }
 }
