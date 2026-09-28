@@ -301,6 +301,7 @@ export class SessionService {
     contentLimit = 2 * 1024 * 1024,
     diagnosticLimit = 256 * 1024,
     logger = null,
+    answerTimeoutMs = 15_000,
   } = {}) {
     if (!journal) throw new TypeError('journal is required');
     if (typeof transportFactory !== 'function') throw new TypeError('transportFactory is required');
@@ -315,6 +316,7 @@ export class SessionService {
     this.contentLimit = contentLimit;
     this.diagnosticLimit = diagnosticLimit;
     this.logger = logger;
+    this.answerTimeoutMs = answerTimeoutMs;
     this.sessions = new Map();
     this.listeners = new Set();
     this.commandLocks = new Map();
@@ -658,7 +660,13 @@ export class SessionService {
       throw error;
     }
     this.assertExpectedState(sessionId, expected);
-    const result = await session.transport.answerInteraction({ interactionId, optionId, text: answerText });
+    // Answers hold the session lock, so a wedged provider write must not block
+    // delete/terminate forever: fail the answer and leave the interaction open.
+    let timer;
+    const result = await Promise.race([
+      session.transport.answerInteraction({ interactionId, optionId, text: answerText }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('Provider did not accept the answer in time'), { code: 'interaction_answer_timeout', statusCode: 504 })), this.answerTimeoutMs); }),
+    ]).finally(() => clearTimeout(timer));
     const answer = optionId ? { optionId: String(optionId) } : { text: String(answerText || '') };
     await this.#append(session, 'interaction.updated', {
       interactionId,

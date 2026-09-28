@@ -83,14 +83,14 @@ class FakeTransport {
   async terminate() { this.closed = true; this.queue.close(); return { ok: true, status: 'terminated', residual: [] }; }
 }
 
-async function fixture({ factory, auditStore = null, attachmentStore = null } = {}) {
+async function fixture({ factory, auditStore = null, attachmentStore = null, answerTimeoutMs } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dueno-session-service-'));
   roots.push(root);
   const workDir = join(root, 'work');
   await mkdir(workDir);
   const journal = new FileJournalStore({ rootDir: join(root, 'journal') });
   const service = new SessionService({
-    journal, transportFactory: factory, deliveryAuditStore: auditStore, attachmentStore,
+    journal, transportFactory: factory, deliveryAuditStore: auditStore, attachmentStore, answerTimeoutMs,
   });
   await service.init();
   return { root, workDir, journal, service };
@@ -315,6 +315,26 @@ describe('SessionService', () => {
     const interaction = harness.service.get(created.id).interactions[0];
     assert.deepEqual([interaction.status, interaction.answer, interaction.authorityAudit.length], ['answered', { optionId: 'allow_once' }, 1]);
     transport.queue.close();
+    await harness.service.close({ interrupt: false });
+  });
+
+  it('fails a hung provider answer so delete still terminates the session', { timeout: 15000 }, async () => {
+    let transport;
+    const harness = await fixture({ answerTimeoutMs: 50, factory: () => { transport = new FakeTransport(); return transport; } });
+    const created = await harness.service.start({ workDir: harness.workDir, permissionMode: 'workspace-write' });
+    await harness.service.prompt(created.id, { blocks: [{ type: 'text', text: 'needs permission' }], idempotencyKey: 'hung-key' });
+    await waitFor(() => harness.service.get(created.id).turns[0]?.status === 'inflight');
+    const interactionId = transport.permission();
+    await waitFor(() => harness.service.get(created.id).lifecycle === 'blocked');
+    transport.answerInteraction = () => new Promise(() => {}); // provider stopped reading its stdin
+    const answering = harness.service.answerInteraction(created.id, {
+      interactionId, optionId: 'allow_once', authority: { actor: 'dashboard:user:1', principalType: 'ui', decision: 'allowed' },
+    });
+    const deleting = harness.service.delete(created.id);
+    await assert.rejects(answering, (error) => error.code === 'interaction_answer_timeout' && error.statusCode === 504);
+    assert.equal((await deleting).status, 'deleted');
+    assert.equal(transport.closed, true);
+    assert.equal(harness.service.get(created.id), null);
     await harness.service.close({ interrupt: false });
   });
 
