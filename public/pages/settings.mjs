@@ -13,6 +13,7 @@ import {
   setSoundEnabled,
 } from '../app/notifications.mjs';
 import { isApprovalOnlyEnabled, setApprovalOnlyEnabled } from '../app/attention.mjs';
+import { encodeQr, qrSvgPath } from '../lib/qrcodegen.mjs';
 
 function makeSaveToken(inputToken) {
   return async function saveToken() {
@@ -39,6 +40,7 @@ async function logout() {
 
 export function SettingsPage({ section }) {
   const inputToken = useMemo(() => signal(''), []);
+  const pairing = useMemo(() => signal(null), []);
   const saveToken = useMemo(() => makeSaveToken(inputToken), []);
   const notifPermitted = useMemo(() => signal(isNotificationPermitted()), []);
   const soundOn = useMemo(() => signal(isSoundEnabled()), []);
@@ -83,6 +85,26 @@ export function SettingsPage({ section }) {
       addToast('Agent provider settings updated', 'success');
     } catch (error) {
       addToast(`Agent provider settings error: ${error.message}`, 'error');
+    }
+  }
+
+  async function pairPhone() {
+    try {
+      const { code, expiresAt } = await api.post('/auth/pair');
+      const url = `${window.location.origin}/#pair=${code}`;
+      const modules = encodeQr(url);
+      pairing.value = { url, expiresAt, size: modules.length, path: qrSvgPath(modules) };
+    } catch (error) {
+      addToast(`Pairing error: ${error.message}`, 'error');
+    }
+  }
+
+  async function copyPairLink() {
+    try {
+      await navigator.clipboard.writeText(pairing.value.url);
+      addToast('Pairing link copied', 'success');
+    } catch {
+      addToast('Copy failed; select the link and copy it manually', 'warning');
     }
   }
 
@@ -149,7 +171,26 @@ export function SettingsPage({ section }) {
         </div>
 
         ${isAuthenticated.value ? html`
-          <button class="btn btn-danger" onclick=${logout}>Logout</button>
+          <div style="display:flex; gap:8px; flex-wrap:wrap">
+            <button class="btn btn-primary" onclick=${pairPhone}>Pair phone</button>
+            <button class="btn btn-danger" onclick=${logout}>Logout</button>
+          </div>
+          ${pairing.value ? html`
+            <div style="display:grid; gap:8px; justify-items:start; margin-top:12px">
+              <svg viewBox="-4 -4 ${pairing.value.size + 8} ${pairing.value.size + 8}" width="220" height="220" role="img" aria-label="Pairing QR code" style="background:#fff; border-radius:8px">
+                <path d=${pairing.value.path} fill="#000" shape-rendering="crispEdges" />
+              </svg>
+              <div style="display:flex; gap:8px; width:100%">
+                <input readonly value=${pairing.value.url} onFocus=${e => e.target.select()} aria-label="Pairing link"
+                  style="flex:1; min-width:0; padding:8px; background:var(--bg-input); border:1px solid var(--border); border-radius:var(--radius); color:var(--text-primary)" />
+                <button class="btn" onclick=${copyPairLink}>Copy</button>
+              </div>
+              <div class="goals-inline-note">
+                Scan with your phone camera to sign it in. Single use; expires at ${new Date(pairing.value.expiresAt).toLocaleTimeString()}.
+                ${/^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname) ? ' This page is on a loopback address your phone cannot reach; open Cadre at its Tailscale Serve URL and pair from there.' : ''}
+              </div>
+            </div>
+          ` : null}
         ` : html`
           <div style="display:flex; gap:8px">
             <input

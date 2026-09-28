@@ -40,6 +40,9 @@ html, body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  /* viewport-fit=cover: keep content clear of landscape notches */
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* Navigation */
@@ -360,6 +363,8 @@ html, body {
 
 .card-header {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
@@ -2191,7 +2196,7 @@ body:has(.tmux-pane-page) {
 
 .fab {
   position: fixed;
-  bottom: 24px;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   right: 24px;
   width: 56px;
   height: 56px;
@@ -3087,7 +3092,7 @@ body:has(.tmux-pane-page) {
     left: 8px;
     right: 8px;
     width: auto;
-    max-height: min(70vh, calc(100dvh - 72px));
+    max-height: min(70vh, calc(100dvh - 72px - env(safe-area-inset-bottom, 0px)));
     overflow: auto;
   }
 
@@ -3315,7 +3320,7 @@ body:has(.tmux-pane-page) {
   }
 
   .claude-control-bar {
-    padding: 6px;
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
     gap: 5px;
     bottom: var(--keyboard-inset, 0px);
   }

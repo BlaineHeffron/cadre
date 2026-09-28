@@ -26,6 +26,7 @@ __pycache__/
 .cleanup-backups/
 *.pdf
 *.png
+!public/icons/*.png
 ~/
 ..*.tmp
 /.calendar_scheduler.json

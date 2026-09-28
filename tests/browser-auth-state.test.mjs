@@ -30,7 +30,7 @@ describe('browser auth state', () => {
     delete globalThis.fetch;
   });
 
-  it('exchanges URL token for HttpOnly session before scrubbing URL without storing token', async () => {
+  it('redeems a #pair= fragment code for an HttpOnly session and scrubs it from the URL', async () => {
     const localStorageCalls = [];
     const fetchCalls = [];
     const replacedUrls = [];
@@ -38,8 +38,8 @@ describe('browser auth state', () => {
     globalThis.window = {
       location: {
         pathname: '/fleet',
-        search: '?token=url-secret&view=active',
-        hash: '#section',
+        search: '?view=active',
+        hash: '#pair=code_-123',
       },
       history: {
         replaceState(_state, _title, url) {
@@ -62,10 +62,35 @@ describe('browser auth state', () => {
     assert.equal(fetchCalls[0][0], '/api/auth/login');
     assert.equal(fetchCalls[0][1].method, 'POST');
     assert.equal(fetchCalls[0][1].credentials, 'same-origin');
-    assert.deepEqual(JSON.parse(fetchCalls[0][1].body), { token: 'url-secret' });
-    assert.deepEqual(replacedUrls, ['/fleet?view=active#section']);
+    assert.deepEqual(JSON.parse(fetchCalls[0][1].body), { pairCode: 'code_-123' });
+    assert.deepEqual(replacedUrls, ['/fleet?view=active']);
     assert.equal(state.isAuthenticated.value, true);
     assert.equal(state.authChecked.value, true);
     assert.equal(localStorageCalls.some(([op, key]) => op === 'setItem' && key === 'dueno_token'), false);
+  });
+  it('keeps an existing session signed in when a spent pairing link is reopened', async () => {
+    const fetchCalls = [];
+    const replacedUrls = [];
+    globalThis.localStorage = makeLocalStorage([]);
+    globalThis.window = {
+      location: { pathname: '/', search: '', hash: '#pair=spent-code' },
+      history: { replaceState(_state, _title, url) { replacedUrls.push(url); } },
+    };
+    globalThis.fetch = async (url, options = {}) => {
+      fetchCalls.push(url);
+      if (url === '/api/auth/login') {
+        return { ok: false, status: 403, json: async () => ({ error: 'Invalid or expired pairing code' }) };
+      }
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    };
+
+    const state = await import(`../public/app/state.mjs?case=spent-${Date.now()}`);
+    await state.initAuth();
+
+    assert.deepEqual(fetchCalls, ['/api/auth/login', '/api/auth/status']);
+    assert.deepEqual(replacedUrls, ['/']);
+    assert.equal(state.isAuthenticated.value, true);
+    assert.equal(state.authChecked.value, true);
+    assert.deepEqual(state.toasts.value.map((toast) => toast.message), ['Pairing failed: Invalid or expired pairing code']);
   });
 });

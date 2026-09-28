@@ -117,6 +117,24 @@ bash scripts/server.sh restart           # sync live checkout to origin/main, in
 bash scripts/server.sh status            # also: start, stop, logs
 ```
 
+### Phone access
+
+Cadre is an installable PWA. To reach it from a phone on your tailnet:
+
+1. Serve it over HTTPS: `tailscale serve --https=443 http://127.0.0.1:4310`.
+2. On a signed-in desktop, open Cadre at the `https://<host>.<tailnet>.ts.net`
+   URL, go to Settings, and press **Pair phone**.
+3. Scan the QR code (or send yourself the link). The link carries a single-use
+   code that expires after 5 minutes, in the URL fragment (`#pair=`), so it
+   never reaches the server or its logs. Opening it signs the phone in with the
+   normal session cookie.
+4. Install: **Share → Add to Home Screen** on iOS Safari, or **Install app** in
+   Chrome's menu on Android.
+
+Other reverse proxies must pass the original `Host` header through (nginx:
+`proxy_set_header Host $host;`); pairing rejects requests whose `Origin` does
+not match `Host`.
+
 ## Safety
 
 Cadre's background loops (GitHub pollers, scheduled agents, Telegram bridge,
