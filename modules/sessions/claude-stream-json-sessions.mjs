@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { prepareHeadroomLaunch } from '../agent/headroom.mjs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { AttachmentStore } from '../agent/attachment-store.mjs';
 import { ClaudeStreamJsonTransport } from '../agent/claude-stream-json-transport.mjs';
+import { CodexAppServerTransport } from '../agent/codex-app-server-transport.mjs';
 import { cleanupClaudeHookSettings, prepareClaudeHookSettings } from '../agent/claude-hook-settings.mjs';
 import { ProcessSupervisor } from '../agent/process-supervisor.mjs';
 import { resolveMcpCapabilities } from '../integrations/mcp-capability-resolver.mjs';
@@ -20,9 +21,10 @@ import { buildAgentBusMcpUrl, seedClaudeWorkspaceTrust } from '../platform/mcp-s
 import { projectCompatibility } from '../session-state/contract.mjs';
 import { createJournalStore } from './journal-store.mjs';
 import { assertValidClaudeModel } from './claude-models.mjs';
+import { assertValidCodexModel } from './codex-models.mjs';
 import { registerProtocolSessionProvider } from './protocol-session-registry.mjs';
 import { notifyAgentSessionDeleted } from '../agent/session-delete-events.mjs';
-import { SessionService } from './session-service.mjs';
+import { resumableProtocolSessionId, SessionService } from './session-service.mjs';
 import { normalizeSessionWorkDir } from './workdir.mjs';
 import { discoverDeepSeekDuenoTools } from './deepseek-mcp.mjs';
 import {
@@ -34,8 +36,14 @@ import {
 } from './claude-stream-json-mcp.mjs';
 import { config } from '../../config.mjs';
 import { withCadreEnv } from '../platform/cadre-env.mjs';
+import { hasResearchWorkbenchLaunchProfile } from '../integrations/research-profile.mjs';
 
 const text = (value) => String(value || '').trim();
+const TRANSCRIPT = {
+  claude: { source: 'stream_json_committed_text', transport: 'stream-json' },
+  codex: { source: 'app_server_committed_text', transport: 'app-server' },
+};
+const CODEX_SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
 
 function openInteraction(session) {
   return session.interactions.find((interaction) => interaction.status === 'open') || null;
@@ -56,55 +64,62 @@ function content(session) {
   return value;
 }
 
-export function projectClaudeStreamJsonSession(session) {
+// Shared by structured Claude (stream-json) and Codex (app-server) interactive sessions.
+export function projectClaudeStreamJsonSession(session, kind = 'claude') {
   const state = projectCompatibility(session.canonicalState);
+  const canResume = session.lifecycle === 'interrupted' && !session.taskId && Boolean(resumableProtocolSessionId(session));
   return {
-    id: session.id, name: `claude-${session.id}`, sessionName: `claude-${session.id}`,
-    displayName: session.displayName, provider: 'claude', runtime: 'claude',
-    source: 'stream_json_committed_text', transport: 'stream-json', transcriptGrade: 'committed_text',
+    id: session.id, name: `${kind}-${session.id}`, sessionName: `${kind}-${session.id}`,
+    displayName: session.displayName, provider: kind, runtime: kind, model: session.model,
+    ...TRANSCRIPT[kind], transcriptGrade: 'committed_text',
     workDir: session.workDir, created: session.createdAt, content: content(session),
     diagnostics: session.diagnostics.map((entry) => entry.message || '').join('\n'),
     state, canonicalState: session.canonicalState,
     pendingResponse: state.execution === 'working' ? { sentAt: session.updatedAt } : null,
-    canResume: false, nonResumable: session.nonResumable || session.lifecycle === 'interrupted',
-    endedWithHistory: session.endedWithHistory || session.lifecycle === 'interrupted', attachCommand: '',
+    sessionEnded: ['ended', 'interrupted'].includes(session.lifecycle),
+    canResume, nonResumable: !canResume && session.nonResumable, endedWithHistory: session.endedWithHistory, attachCommand: '',
     attempts: session.attempts, turns: session.turns, negotiated: session.negotiated,
     mcpCapabilities: session.mcpCapabilities,
   };
 }
 
-function errorReply(reply, error) {
-  return reply.code(error?.statusCode || 500).send({ error: error?.message || 'Claude stream-json request failed', code: error?.code || null });
+function errorReply(reply, error, extra = {}) {
+  return reply.code(error?.statusCode || 500).send({ error: error?.message || 'Structured session request failed', code: error?.code || null, ...extra });
 }
 
 export async function claudeStreamJsonSessionsPlugin(app, {
+  provider: kind = 'claude',
   wsManager, transportFactory = null, supervisor = null, journal = null,
-  binary = 'claude', credentialStore, sourceConfig = config,
+  binary = kind, credentialStore, sourceConfig = config,
   mcpDiscovery = discoverDeepSeekDuenoTools,
   mcpCatalog = null,
   versionReader = readClaudeStreamJsonVersion, e2eEvidence = null,
-  sessionRoot = runtimeStatePath('claude_stream_json_sessions'),
+  sessionRoot = runtimeStatePath(kind === 'claude' ? 'claude_stream_json_sessions' : `${kind}_app_server_interactive_sessions`),
   sessionDeliveryAuditStore = null, attachmentStore = null,
 } = {}) {
+  const claude = kind === 'claude';
+  const label = claude ? 'Claude' : 'Codex';
+  const project = (session) => projectClaudeStreamJsonSession(session, kind);
   await mkdir(sessionRoot, { recursive: true });
   const processSupervisor = supervisor || new ProcessSupervisor({ ledgerPath: resolve(sessionRoot, 'ledger.json') });
   await processSupervisor.init();
   const service = new SessionService({
-    provider: 'claude', journal: journal || createJournalStore({ rootDir: resolve(sessionRoot, 'journal') }),
+    provider: kind, journal: journal || createJournalStore({ rootDir: resolve(sessionRoot, 'journal') }),
     attachmentStore: attachmentStore || new AttachmentStore({ rootDir: resolve(sessionRoot, 'attachments') }),
     deliveryAuditStore: sessionDeliveryAuditStore, logger: app.log,
-    transportFactory: (spec) => transportFactory?.(spec) || new ClaudeStreamJsonTransport({
+    transportFactory: (spec) => transportFactory?.(spec) || (claude ? new ClaudeStreamJsonTransport({
       binary, env: spec.env, supervisor: processSupervisor, capabilityEvidence: spec.capabilityEvidence,
-    }),
+    }) : new CodexAppServerTransport({ binary, env: spec.env, supervisor: processSupervisor })),
   });
   await service.init();
-  const unregister = registerProtocolSessionProvider('claude', { service, project: projectClaudeStreamJsonSession });
+  // Interactive Codex stays off the task registry; task launches keep their own bounded provider.
+  const unregister = claude ? registerProtocolSessionProvider('claude', { service, project }) : () => {};
 
   async function cleanupAttempt(sessionId, generation = 1, reason = 'attempt_ended', serverIds = null) {
     const selected = serverIds || service.get(sessionId)?.mcpCapabilities?.serverIds || [];
     await cleanupMcpCapabilityLaunch({
-      backendType: 'claude', sessionId, sourceConfig, reason,
-      claudeConfigPath: claudeStreamJsonMcpConfigPath(sessionRoot, sessionId, generation),
+      backendType: kind, sessionId, sourceConfig, reason,
+      ...(claude ? { claudeConfigPath: claudeStreamJsonMcpConfigPath(sessionRoot, sessionId, generation) } : {}),
       serverIds: selected,
       ...(credentialStore ? { credentialStore } : {}),
     });
@@ -113,30 +128,86 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   async function cleanupSessionLaunch(sessionId, generation = 1, reason = 'attempt_ended', serverIds = null) {
     await Promise.all([
       cleanupAttempt(sessionId, generation, reason, serverIds),
-      cleanupPromptProfileLaunch({ backendType: 'claude', sessionId }),
-      cleanupClaudeHookSettings({ sessionId }),
+      cleanupPromptProfileLaunch({ backendType: kind, sessionId }),
+      claude && cleanupClaudeHookSettings({ sessionId }),
     ]);
   }
+
+  // Scoped credential, MCP config, and launch args for one attempt. A resumed attempt reuses the
+  // persisted MCP selection; the provider replays the system prompt it recorded at first launch.
+  async function prepareAttempt({ id, workDir, body = {}, generation = 1, resolvedMcp, permissionMode }) {
+    const mcpPreparation = await prepareMcpCapabilityLaunch({
+      resolved: resolvedMcp, backendType: kind, sessionId: id, workDir,
+      sourceConfig, attemptGeneration: generation, rotation: generation > 1,
+      serverAllowlist: resolvedMcp.serverIds,
+      ...(claude ? { claudeConfigPath: claudeStreamJsonMcpConfigPath(sessionRoot, id, generation) } : {}),
+      duenoCredentialEnvVar: CLAUDE_STREAM_JSON_MCP_TOKEN_ENV_VAR,
+      ...(credentialStore ? { credentialStore } : {}),
+    });
+    if (!mcpPreparation.credentialToken) {
+      const error = new Error(`${label} ${claude ? 'stream-json' : 'app-server'} requires an authenticated Cadre MCP credential`);
+      error.statusCode = 503; error.code = `${kind}_mcp_credential_required`; throw error;
+    }
+    const promptLaunch = generation > 1 ? null : (await preparePromptProfileLaunch({
+      promptProfile: body.promptProfile, backendType: kind, sessionId: id,
+    })).prepared;
+    const promptArgs = buildPromptLaunchArgs({ runtime: kind, promptLaunch });
+    const headroom = await prepareHeadroomLaunch(kind);
+    const env = {
+      ...process.env,
+      ...headroom.env,
+      ...withCadreEnv({
+        [CLAUDE_STREAM_JSON_MCP_TOKEN_ENV_VAR]: mcpPreparation.credentialToken,
+        DUENO_SESSION_ID: id,
+        DUENO_PROVIDER: kind,
+      }),
+    };
+    if (!claude) {
+      // Read-only Codex asks before untrusted commands, matching the tmux safe runtime.
+      return { env, preflight: mcpPreparation.preflight, approvalPolicy: permissionMode === 'read-only' ? 'untrusted' : 'on-request',
+        args: [...headroom.args, ...mcpPreparation.prepared.codexArgs, ...promptArgs,
+        ...(headroom.modelProvider ? ['-c', `model_provider=${JSON.stringify(headroom.modelProvider)}`] : [])] };
+    }
+    const discovery = await mcpDiscovery({ url: buildAgentBusMcpUrl(sourceConfig), token: mcpPreparation.credentialToken });
+    const evidence = e2eEvidence || claudeStreamJsonBusE2eEvidence({
+      cliVersion: await versionReader(binary),
+    });
+    const capabilityEvidence = claudeStreamJsonMcpCapabilities({
+      discoveryProven: discovery?.authenticated === true, e2eEvidence: evidence,
+    });
+    if (capabilityEvidence.busParticipation !== 'authenticated_scoped') {
+      const error = new Error(`Claude stream-json Agent Bus E2E proof requires Claude Code ${evidence.expectedVersion}`);
+      error.statusCode = 503; error.code = 'claude_mcp_capability_unproven'; throw error;
+    }
+    const hookSettings = await prepareClaudeHookSettings({ sessionId: id });
+    await seedClaudeWorkspaceTrust(workDir, { logger: app.log });
+    return {
+      env, preflight: mcpPreparation.preflight, promptArgs, capabilityEvidence,
+      mcpConfigPath: mcpPreparation.prepared.claudeConfigPath, settingsPath: hookSettings.settingsPath,
+    };
+  }
+
   let listTimer = null;
   function broadcastList() {
     if (!wsManager || listTimer) return;
     listTimer = setTimeout(() => {
       listTimer = null;
-      wsManager.broadcast('claude:sessions', 'sessions', { sessions: service.list().map(projectClaudeStreamJsonSession) });
+      wsManager.broadcast(`${kind}:sessions`, 'sessions', { sessions: service.list().map(project) });
     }, 250);
     listTimer.unref?.();
   }
   const unsubscribe = service.subscribe((session, event) => {
-    const projected = projectClaudeStreamJsonSession(session);
+    const projected = project(session);
     const appended = event.type === 'transport.event' && event.data?.event?.type === 'message.delta'
       ? String(event.data.event.delta?.text || '') : '';
-    wsManager?.broadcast(`claude:session:${session.id}`, 'content', {
+    wsManager?.broadcast(`${kind}:session:${session.id}`, 'content', {
       revision: projected.state.revision, cursor: event.seq, appended,
       content: appended ? undefined : projected.content, state: projected.state,
       canonicalState: projected.canonicalState, pendingResponse: projected.pendingResponse,
     });
     broadcastList();
-    if (event.type === 'transport.event' && event.data?.event?.type === 'attempt.exited') {
+    // While (re)starting, the launching route owns credential cleanup; a stale exit must not revoke the new attempt.
+    if (event.type === 'transport.event' && event.data?.event?.type === 'attempt.exited' && session.lifecycle !== 'starting') {
       const generation = session.attempts.find((attempt) => attempt.attemptId === event.data.event.provenance?.attemptId)?.generation || 1;
       void cleanupAttempt(session.id, generation, 'attempt_process_ended', session.mcpCapabilities?.serverIds);
     }
@@ -145,14 +216,14 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   function requireSession(id) {
     const session = service.get(String(id || ''));
     if (session) return session;
-    const error = new Error(`Claude session not found: ${id}`);
+    const error = new Error(`${label} session not found: ${id}`);
     error.statusCode = 404; error.code = 'session_not_found'; throw error;
   }
 
   async function interactionAuthority(req, session, interaction) {
     try {
       return permissionAuthorityForRequest(req, {
-        tool: interaction?.toolCall?.name || 'claude.permission',
+        tool: interaction?.toolCall?.name || `${kind}.permission`,
         scope: 'permission.approve', risk: 'provider_tool_execution',
       });
     } catch (error) {
@@ -165,70 +236,34 @@ export async function claudeStreamJsonSessionsPlugin(app, {
     }
   }
 
-  app.get('/api/claude/sessions', async () => ({ sessions: service.list().map(projectClaudeStreamJsonSession) }));
-  app.post('/api/claude/sessions', async (req, reply) => {
+  app.get(`/api/${kind}/sessions`, async () => ({ sessions: service.list().map(project) }));
+  app.post(`/api/${kind}/sessions`, async (req, reply) => {
     let id = '';
     let selectedMcpServerIds = [];
     try {
       const workDir = await normalizeSessionWorkDir(req.body?.workDir);
-      if (!workDir) return reply.code(400).send({ error: 'workDir is required for Claude sessions' });
+      if (!workDir) return reply.code(400).send({ error: `workDir is required for ${label} sessions` });
       id = randomBytes(8).toString('hex');
-      const model = await assertValidClaudeModel(text(req.body?.model));
+      const model = await (claude ? assertValidClaudeModel : assertValidCodexModel)(text(req.body?.model));
       const resolvedMcp = resolveMcpCapabilities({
         request: {
           ...(req.body?.mcpProfile !== undefined ? { mcpProfile: req.body.mcpProfile } : {}),
           ...(req.body?.mcpServers !== undefined ? { mcpServers: req.body.mcpServers } : {}),
         },
-        provider: 'claude', runtime: 'claude', require: ['dueno'],
+        provider: kind, runtime: kind, require: ['dueno'],
         catalog: mcpCatalog || buildMcpCapabilityCatalog({ sourceConfig }),
       });
-      const mcpPreparation = await prepareMcpCapabilityLaunch({
-        resolved: resolvedMcp, backendType: 'claude', sessionId: id, workDir,
-        sourceConfig, attemptGeneration: 1,
-        serverAllowlist: resolvedMcp.serverIds,
-        claudeConfigPath: claudeStreamJsonMcpConfigPath(sessionRoot, id, 1),
-        duenoCredentialEnvVar: CLAUDE_STREAM_JSON_MCP_TOKEN_ENV_VAR,
-        ...(credentialStore ? { credentialStore } : {}),
-      });
+      // Research Workbench sessions handle untrusted input, so Codex gets the tmux path's read-only sandbox.
+      const permissionMode = !claude && hasResearchWorkbenchLaunchProfile(req.body?.metadata)
+        ? 'read-only' : text(req.body?.permissionMode) || 'workspace-write';
+      if (!claude && !CODEX_SANDBOX_MODES.has(permissionMode)) {
+        return reply.code(400).send({ error: `Unsupported Codex permission mode: ${permissionMode}`, code: 'unsupported_permission_mode' });
+      }
       selectedMcpServerIds = resolvedMcp.serverIds;
-      if (!mcpPreparation.credentialToken) {
-        const error = new Error('Claude stream-json requires an authenticated Cadre MCP credential');
-        error.statusCode = 503; error.code = 'claude_mcp_credential_required'; throw error;
-      }
-      const mcpConfigPath = mcpPreparation.prepared.claudeConfigPath;
-      const mcpUrl = buildAgentBusMcpUrl(sourceConfig);
-      const discovery = await mcpDiscovery({ url: mcpUrl, token: mcpPreparation.credentialToken });
-      const evidence = e2eEvidence || claudeStreamJsonBusE2eEvidence({
-        cliVersion: await versionReader(binary),
-      });
-      const capabilityEvidence = claudeStreamJsonMcpCapabilities({
-        discoveryProven: discovery?.authenticated === true, e2eEvidence: evidence,
-      });
-      if (capabilityEvidence.busParticipation !== 'authenticated_scoped') {
-        const error = new Error(`Claude stream-json Agent Bus E2E proof requires Claude Code ${evidence.expectedVersion}`);
-        error.statusCode = 503; error.code = 'claude_mcp_capability_unproven'; throw error;
-      }
-      const promptPreparation = await preparePromptProfileLaunch({
-        promptProfile: req.body?.promptProfile, backendType: 'claude', sessionId: id,
-      });
-      const hookSettings = await prepareClaudeHookSettings({ sessionId: id });
-      await seedClaudeWorkspaceTrust(workDir, { logger: app.log });
+      const { preflight, ...launch } = await prepareAttempt({ id, workDir, body: req.body || {}, resolvedMcp, permissionMode });
       let session = await service.start({
-        sessionId: id, displayName: text(req.body?.displayName), workDir,
-        model, permissionMode: text(req.body?.permissionMode) || 'workspace-write',
-        mcpConfigPath, settingsPath: hookSettings.settingsPath,
-        promptArgs: buildPromptLaunchArgs({ runtime: 'claude', promptLaunch: promptPreparation.prepared }),
-        capabilityEvidence,
-        mcpCapabilities: sanitizedMcpSnapshot(resolvedMcp, mcpPreparation.preflight),
-        env: {
-          ...process.env,
-          ...(await prepareHeadroomLaunch('claude')).env,
-          ...withCadreEnv({
-            [CLAUDE_STREAM_JSON_MCP_TOKEN_ENV_VAR]: mcpPreparation.credentialToken,
-            DUENO_SESSION_ID: id,
-            DUENO_PROVIDER: 'claude',
-          }),
-        },
+        ...launch, sessionId: id, displayName: text(req.body?.displayName), workDir, model, permissionMode,
+        mcpCapabilities: sanitizedMcpSnapshot(resolvedMcp, preflight),
       });
       const initialPrompt = text(req.body?.initialPrompt);
       if (initialPrompt) {
@@ -236,7 +271,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         session = service.get(id);
       }
       return {
-        ...projectClaudeStreamJsonSession(session),
+        ...project(session),
         mcpWarnings: resolvedMcp.warnings.map((warning) => ({ ...warning })),
         initialPromptInjected: Boolean(initialPrompt),
       };
@@ -248,8 +283,35 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       return errorReply(reply, error);
     }
   });
-  app.get('/api/claude/sessions/:id', async (req, reply) => {
-    try { return projectClaudeStreamJsonSession(requireSession(req.params.id)); } catch (error) { return errorReply(reply, error); }
+  app.get(`/api/${kind}/sessions/:id`, async (req, reply) => {
+    try { return project(requireSession(req.params.id)); } catch (error) { return errorReply(reply, error); }
+  });
+  // Reattach an interrupted session (e.g. after a Fleet restart) to its provider conversation.
+  app.post(`/api/${kind}/sessions/:id/resume`, async (req, reply) => {
+    try {
+      const session = requireSession(req.params.id);
+      let generation = 0;
+      const serverIds = session.mcpCapabilities?.serverIds || [];
+      return project(await service.resume(session.id, {
+        prepare: async (current) => {
+          generation = current.generation + 1;
+          const { preflight: _preflight, ...launch } = await prepareAttempt({
+            id: current.id, workDir: current.workDir, generation, resolvedMcp: { serverIds }, permissionMode: current.permissionMode,
+          });
+          return launch;
+        },
+        // Runs under the session lock, so the principal's credential is still the one this request issued.
+        cleanup: async () => {
+          await cleanupAttempt(session.id, generation, 'resume_failed', serverIds);
+          if (claude) await cleanupClaudeHookSettings({ sessionId: session.id });
+        },
+      }));
+    } catch (error) {
+      const session = service.get(req.params.id);
+      // Offer Start Fresh only while the session is still down (not after a concurrent resume won).
+      return errorReply(reply, error, ['ended', 'interrupted'].includes(session?.lifecycle) && !session.taskId
+        ? { freshSession: { workDir: session.workDir, model: session.model, displayName: session.displayName } } : {});
+    }
   });
   const input = async (req, reply) => {
     try {
@@ -278,16 +340,16 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       return { ok: true, state: 'sent' };
     } catch (error) { return errorReply(reply, error); }
   };
-  app.post('/api/claude/sessions/:id/input', input);
-  app.post('/api/claude/sessions/:id/startup-input', input);
-  app.post('/api/claude/sessions/:id/interaction', async (req, reply) => {
+  app.post(`/api/${kind}/sessions/:id/input`, input);
+  app.post(`/api/${kind}/sessions/:id/startup-input`, input);
+  app.post(`/api/${kind}/sessions/:id/interaction`, async (req, reply) => {
     try {
       const session = requireSession(req.params.id);
       const interaction = text(req.body?.interactionId)
         ? session.interactions.find((item) => item.interactionId === text(req.body.interactionId))
         : openInteraction(session);
       if (!interaction) {
-        const error = new Error('No open Claude interaction');
+        const error = new Error(`No open ${label} interaction`);
         error.statusCode = 409; error.code = 'interaction_not_open'; throw error;
       }
       await service.answerInteraction(session.id, {
@@ -300,42 +362,44 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       return { ok: true, state: 'sent' };
     } catch (error) { return errorReply(reply, error); }
   });
-  app.post('/api/claude/sessions/:id/keys', async (req, reply) => {
+  app.post(`/api/${kind}/sessions/:id/keys`, async (req, reply) => {
     try {
       requireSession(req.params.id);
       const keys = text(req.body?.keys);
       if (keys === 'Escape' || keys === 'C-c') return { ok: true, ...(await service.cancel(req.params.id)) };
-      const error = new Error(`Claude stream-json does not support terminal keys: ${keys || '(empty)'}`);
+      const error = new Error(`${label} ${claude ? 'stream-json' : 'app-server'} does not support terminal keys: ${keys || '(empty)'}`);
       error.statusCode = 400; error.code = 'unsupported_capability'; throw error;
     } catch (error) { return errorReply(reply, error); }
   });
-  app.post('/api/claude/sessions/:id/enter', async (req, reply) => {
+  app.post(`/api/${kind}/sessions/:id/enter`, async (req, reply) => {
     try { requireSession(req.params.id); return { ok: true, noop: true }; } catch (error) { return errorReply(reply, error); }
   });
-  app.post('/api/claude/sessions/:id/escape', async (req, reply) => {
+  app.post(`/api/${kind}/sessions/:id/escape`, async (req, reply) => {
     try { return { ok: true, ...(await service.cancel(req.params.id)) }; } catch (error) { return errorReply(reply, error); }
   });
-  app.get('/api/claude/sessions/:id/transcript', async (req, reply) => {
+  app.get(`/api/${kind}/sessions/:id/transcript`, async (req, reply) => {
     try {
       const session = requireSession(req.params.id);
-      return { text: content(session), entries: session.transcript, source: 'stream_json_committed_text', transcriptGrade: 'committed_text' };
+      return { text: content(session), entries: session.transcript, source: TRANSCRIPT[kind].source, transcriptGrade: 'committed_text' };
     } catch (error) { return errorReply(reply, error); }
   });
-  app.get('/api/claude/sessions/:id/events', async (req, reply) => {
+  app.get(`/api/${kind}/sessions/:id/events`, async (req, reply) => {
     try { requireSession(req.params.id); return await service.cursor(req.params.id, req.query); } catch (error) { return errorReply(reply, error); }
   });
-  app.delete('/api/claude/sessions/:id', async (req, reply) => {
+  app.delete(`/api/${kind}/sessions/:id`, async (req, reply) => {
     try {
       const existing = service.get(req.params.id);
       if (!existing) {
-        await notifyAgentSessionDeleted({ kind: 'claude', sessionId: req.params.id });
+        await notifyAgentSessionDeleted({ kind, sessionId: req.params.id });
         return { ok: true, status: 'already_gone', residual: [] };
       }
       const generation = existing.attempts.at(-1)?.generation || 1;
       const serverIds = existing.mcpCapabilities?.serverIds || [];
       const verdict = await service.delete(req.params.id, { reason: 'Deleted' });
-      if (verdict.ok) await notifyAgentSessionDeleted({ kind: 'claude', sessionId: req.params.id });
+      if (verdict.ok) await notifyAgentSessionDeleted({ kind, sessionId: req.params.id });
       await cleanupSessionLaunch(req.params.id, generation, 'session_terminated', serverIds);
+      // Drop every attempt directory, including one a concurrent resume created after generation was read.
+      if (verdict.ok) await rm(resolve(sessionRoot, existing.id), { recursive: true, force: true });
       return verdict.ok ? verdict : reply.code(500).send(verdict);
     } catch (error) { return errorReply(reply, error); }
   });

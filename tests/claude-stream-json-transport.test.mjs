@@ -202,6 +202,26 @@ setInterval(() => {}, 1000);
     assert.equal(transport.eventHistory.some((event) => event.type === 'attempt.exited'), false);
   });
 
+  it('attaches to an existing Claude conversation with --resume instead of --session-id', async () => {
+    const { root, workDir, supervisor } = await harness();
+    const binary = join(root, 'fake-claude-resume');
+    await writeFile(binary, `#!/usr/bin/env node
+const at = process.argv.indexOf('--resume');
+if (at < 0 || process.argv.includes('--session-id')) { process.stderr.write('bad resume args\\n'); process.exit(1); }
+process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: process.argv[at + 1] }) + '\\n');
+setInterval(() => {}, 1000);
+`, { mode: 0o755 });
+    const transport = new ClaudeStreamJsonTransport({ binary, env: { PATH: process.env.PATH, HOME: root }, supervisor });
+    transports.push(transport);
+    await assert.rejects(transport.attach({ cwd: workDir }), TypeError);
+    const protocolSessionId = '11111111-2222-4333-8444-555555555555';
+    const attached = await transport.attach({ cwd: workDir, protocolSessionId });
+    assert.equal(attached.protocolSessionId, protocolSessionId);
+    assert.equal(attached.negotiated.sessionOps.resume, 'supported');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(transport.lifecycle, 'ready');
+  });
+
   it('maps stream-json messages to normalized transport events', async () => {
     const { transport, workDir, args } = await harness();
     await transport.start({

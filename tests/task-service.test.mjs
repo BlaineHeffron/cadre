@@ -400,6 +400,32 @@ test('recovery journals a newer resolved outcome on the old attempt without repl
   assert.equal((await f.tasks.wait([task.taskId])).results.filter((event) => event.data.state === 'completed').length, 1);
 });
 
+test('resume attaches only to a provider conversation proven by a settled turn', async () => {
+  const f = await fixture(); const task = await f.spawn();
+  // The bootstrap turn never settled, so the provider may hold no conversation: start fresh.
+  await f.service.terminate(task.sessionId);
+  const fresh = await f.tasks.resume(task.taskId, 'fresh');
+  assert.equal(f.providers.at(-1).attached, undefined);
+  await f.handshake(fresh);
+  const proven = f.providers.at(-1).threadId;
+  await f.service.terminate(fresh.sessionId);
+  const attached = await f.tasks.resume(task.taskId, 'attach');
+  assert.equal(f.providers.at(-1).attached, proven);
+  // A runtime that did not exit is reaped before attaching; until then resume is refused.
+  const stuck = f.providers.at(-1);
+  const exit = stuck.terminate.bind(stuck);
+  stuck.terminate = async () => ({ ok: false, status: 'still_running', residual: [1] });
+  assert.equal((await f.service.terminate(attached.sessionId)).ok, false);
+  const launched = f.providers.length;
+  await assert.rejects(f.tasks.resume(task.taskId, 'stuck'), { code: 'terminate_failed' });
+  assert.equal(f.providers.length, launched);
+  stuck.terminate = exit;
+  // A failed attempt with no settled turn falls back to the latest earlier proven conversation.
+  await f.tasks.resume(task.taskId, 'again');
+  assert.equal(stuck.closed, true);
+  assert.equal(f.providers.at(-1).attached, proven);
+});
+
 test('replacement parent retains child spawn identity and can consume existing child results', async () => {
   const f = await fixture();
   const parent = await f.spawn('parent', { scope: { providers: ['fixture'], workDirs: [f.workDir], maxDepth: 1, maxChildren: 2 } });

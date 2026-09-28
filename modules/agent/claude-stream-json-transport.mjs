@@ -3,7 +3,6 @@ import {
   AsyncEventQueue,
   createBaseCapabilities,
   createTransportEvent,
-  unsupportedCapability,
 } from './agent-transport.mjs';
 import { mapPromptBlocksForClaude } from './prompt-blocks.mjs';
 import { ProcessSupervisor } from './process-supervisor.mjs';
@@ -15,11 +14,12 @@ export const CLAUDE_STREAM_JSON_ENV_ALLOWLIST = Object.freeze([
 ]);
 
 export function buildClaudeStreamJsonArgs({
-  sessionId, model = '', permissionMode = '', mcpConfigPath = '', settingsPath = '', promptArgs = [],
+  sessionId, resume = false, model = '', permissionMode = '', mcpConfigPath = '', settingsPath = '', promptArgs = [],
 } = {}) {
   const args = [
     '-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
-    '--include-partial-messages', '--verbose', '--session-id', String(sessionId),
+    // Claude rejects --session-id with --resume; a resumed conversation keeps its id.
+    '--include-partial-messages', '--verbose', resume ? '--resume' : '--session-id', String(sessionId),
     '--permission-prompt-tool', 'stdio',
   ];
   if (model) args.push('--model', String(model));
@@ -79,7 +79,10 @@ export class ClaudeStreamJsonTransport {
       streaming: 'deltas_and_committed_messages',
       streamFeatures: { tool_events: true, thought_events: true, plan: false, usage: true },
       transcript: 'committed_text',
-      recovery: { processSurvivesFleetRestart: false, fleetRecoverable: 'none' },
+      sessionOps: {
+        list: 'unsupported', load: 'unsupported', resume: 'supported', fork: 'unsupported', close: 'unsupported', delete: 'supported',
+      },
+      recovery: { processSurvivesFleetRestart: false, fleetRecoverable: 'provider_session' },
       identity: 'connection_bound',
       promptCapabilities: {
         types: ['text', 'image'], deliveryMode: 'inline',
@@ -110,7 +113,7 @@ export class ClaudeStreamJsonTransport {
         driverVersion: this.driverVersion,
         command: this.binary,
         args: spec.args || buildClaudeStreamJsonArgs({
-          sessionId: this.protocolSessionId, model: spec.model, permissionMode: spec.permissionMode,
+          sessionId: this.protocolSessionId, resume: spec.resume, model: spec.model, permissionMode: spec.permissionMode,
           mcpConfigPath: spec.mcpConfigPath, settingsPath: spec.settingsPath, promptArgs: spec.promptArgs,
         }),
         cwd,
@@ -136,8 +139,10 @@ export class ClaudeStreamJsonTransport {
     return { attemptId: this.attemptId, protocolSessionId: this.protocolSessionId, negotiated: this.negotiated };
   }
 
-  async attach() {
-    throw unsupportedCapability('sessionOps.attach', 'Claude stream-json live-process attachment is not supported');
+  // Resumes a stored conversation in a new process; live-process attachment is not supported.
+  async attach(spec = {}) {
+    if (!spec.protocolSessionId) throw new TypeError('Claude session id required for resume');
+    return this.start({ ...spec, resume: true });
   }
 
   async prompt({ turnId = randomUUID(), blocks, idempotencyKey = '' } = {}) {
