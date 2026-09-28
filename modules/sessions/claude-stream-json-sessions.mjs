@@ -364,9 +364,11 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   });
   app.post(`/api/${kind}/sessions/:id/keys`, async (req, reply) => {
     try {
-      requireSession(req.params.id);
+      const session = requireSession(req.params.id);
       const keys = text(req.body?.keys);
       if (keys === 'Escape' || keys === 'C-c') return { ok: true, ...(await service.cancel(req.params.id)) };
+      // The dashboard posts single-character option keys here; answer an open question with them.
+      if (openInteraction(session)) return input(req, reply);
       const error = new Error(`${label} ${claude ? 'stream-json' : 'app-server'} does not support terminal keys: ${keys || '(empty)'}`);
       error.statusCode = 400; error.code = 'unsupported_capability'; throw error;
     } catch (error) { return errorReply(reply, error); }

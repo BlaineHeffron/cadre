@@ -2,7 +2,7 @@ import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
 const scenario = process.argv[2] || 'normal';
 const log = process.argv[3];
-let initialized = false, notified = false, next = 0, active = null, config = {};
+let initialized = false, notified = false, next = 0, active = null, config = {}, awaiting = null;
 const send = (value) => process.stdout.write(JSON.stringify(value) + '\n');
 const thread = (turns = []) => ({ id: 'thread-1', turns });
 const notify = (method, params) => send({ method, params: { threadId: 'thread-1', ...params } });
@@ -69,6 +69,17 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     notify('item/started', { turnId: active, item: { type: 'mcpToolCall', id: 'tool-1', tool: 'room_context', arguments: {} } });
     if (scenario === 'death') return setTimeout(() => process.exit(9), 15);
     if (scenario === 'hold') return;
+    if (scenario === 'requests') {
+      const base = { threadId: 'thread-1', turnId: active };
+      awaiting = new Set(['elicit-1', 'unknown-1', 'file-1', 'perm-1', 'input-1']);
+      send({ id: 'elicit-1', method: 'mcpServer/elicitation/request', params: { ...base, serverName: 'fixture', mode: 'form', message: 'Token?', requestedSchema: { type: 'object', properties: {} } } });
+      send({ id: 'unknown-1', method: 'item/tool/call', params: { ...base, callId: 'call-1', tool: 'fixture', arguments: {} } });
+      send({ id: 'file-1', method: 'item/fileChange/requestApproval', params: { ...base, itemId: 'patch-1', reason: 'Write fixture file' } });
+      send({ id: 'perm-1', method: 'item/permissions/requestApproval', params: { ...base, itemId: 'perm-1', cwd: '/tmp', reason: 'Needs network', permissions: { network: { enabled: true } } } });
+      return send({ id: 'input-1', method: 'item/tool/requestUserInput', params: { ...base, itemId: 'ask-1', isBlocking: true, questions: [
+        { id: 'color', header: 'Color', question: 'Pick a color', isOther: true, options: [{ label: 'Red', description: 'warm' }, { label: 'Blue', description: 'cool' }] },
+        { id: 'name', header: 'Name', question: 'Name the file', options: null }] } });
+    }
     if (scenario === 'approval') return send({ id: 'approval-1', method: 'item/commandExecution/requestApproval', params: { threadId: 'thread-1', turnId: active, itemId: 'tool-1', availableDecisions: ['accept', 'decline'] } });
     return setTimeout(() => finish(scenario === 'failed' ? 'failed' : 'completed'), 10);
   }
@@ -77,6 +88,6 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     if (params.turnId !== active) return reject('turnId mismatch');
     reply({}); return setTimeout(() => finish('interrupted'), 15);
   }
-  if (!method && id === 'approval-1') return finish();
+  if (!method && (id === 'approval-1' || (awaiting?.delete(id) && !awaiting.size))) return finish();
   return reject('unsupported method');
 });

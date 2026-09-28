@@ -20,7 +20,7 @@ function claudeStreamJsonTransportCapabilities(e2eEvidence) {
   return createBaseCapabilities({
     protocol: { name: 'claude-stream-json', version: '1' },
     delivery: 'structured', cancellation: 'best_effort',
-    interaction: { permissions: 'structured_options', elicitation: false, answerOnce: true },
+    interaction: { permissions: 'structured_options', elicitation: false, questions: true, answerOnce: true },
     streaming: 'delta_plus_committed',
     streamFeatures: { tool_events: true, thought_events: true, plan: false, usage: true },
     transcript: 'committed_text',

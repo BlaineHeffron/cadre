@@ -73,7 +73,7 @@ class FakeTransport {
   capabilities() {
     return createBaseCapabilities({
       protocol: { name: 'claude-stream-json', version: '1' },
-      interaction: { permissions: 'structured_options', elicitation: false, answerOnce: true },
+      interaction: { permissions: 'structured_options', elicitation: false, questions: true, answerOnce: true },
       sessionOps: { list: 'unsupported', load: 'unsupported', resume: 'supported', fork: 'unsupported', close: 'unsupported', delete: 'supported' },
       ...(this.startSpec?.capabilityEvidence || {}),
     });
@@ -216,6 +216,11 @@ describe('Claude stream-json sessions', () => {
     // A delayed duplicate click finds no open interaction; it must not become a prompt.
     const replay = await answer(guards);
     assert.deepEqual([replay.statusCode, replay.json().code, clients[0].prompts.length, clients[0].answers.length], [409, 'interaction_changed', 2, 1]);
+    clients[0].emit('interaction.requested', { interactionId: `${clients[0].attemptId}:ask-1`, turnId: clients[0].activeTurnId, kind: 'selection',
+      toolCall: { title: 'Pick one' }, options: [{ optionId: 'A', name: 'A' }, { optionId: 'B', name: 'B' }] });
+    await waitFor(async () => (await app.inject({ method: 'GET', url: `/api/claude/sessions/${session.id}` })).json().state.interaction.kind === 'selection');
+    const picked = await app.inject({ method: 'POST', url: `/api/claude/sessions/${session.id}/keys`, payload: { keys: 'B', expectedInteractionKind: 'selection' } });
+    assert.deepEqual([picked.statusCode, clients[0].answers[1]?.optionId], [200, 'B'], picked.body);
     const unsupported = await app.inject({
       method: 'POST', url: `/api/claude/sessions/${session.id}/keys`, payload: { keys: 'Up Enter' },
     });

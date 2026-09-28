@@ -114,11 +114,41 @@ test('approval decisions are single-use structured replies', async () => {
   const { transport, cwd, events, frames } = await setup('approval'); await transport.start({ cwd });
   const pending = prompt(transport); await until(() => events.some((e) => e.type === 'interaction.requested'));
   const interactionId = events.find((e) => e.type === 'interaction.requested').interactionId;
-  await assert.rejects(transport.answerInteraction({ interactionId, optionId: 'acceptForSession' }), { code: 'invalid_interaction_option' });
+  assert.deepEqual(events.find((e) => e.type === 'interaction.requested').options.map((o) => o.optionId), ['accept', 'acceptForSession', 'decline', 'cancel']);
+  await assert.rejects(transport.answerInteraction({ interactionId, optionId: 'approve' }), { code: 'invalid_interaction_option' });
   await transport.answerInteraction({ interactionId, optionId: 'decline' });
   await assert.rejects(transport.answerInteraction({ interactionId, optionId: 'decline' }), { code: 'interaction_not_open' });
   await pending;
   assert.deepEqual((await frames()).find((e) => e.id === 'approval-1').result, { decision: 'decline' });
+});
+
+test('server requests round-trip session grants, permission profiles, user-input answers, and declines', async () => {
+  const { transport, cwd, events, frames } = await setup('requests'); await transport.start({ cwd });
+  for (const decision of ['acceptForSession', 'decline']) {
+    const seen = events.length;
+    const pending = prompt(transport);
+    const requested = () => events.slice(seen).filter((e) => e.type === 'interaction.requested');
+    await until(() => requested().length === 4);
+    const by = (name, index = 0) => requested().filter((e) => e.toolCall.name === name)[index];
+    const [file, perm, color, name] = [by('item/fileChange/requestApproval'), by('item/permissions/requestApproval'),
+      by('item/tool/requestUserInput'), by('item/tool/requestUserInput', 1)];
+    assert.deepEqual(perm.options.map((o) => o.optionId), ['accept', 'acceptForSession', 'decline']);
+    assert.deepEqual([color.kind, color.toolCall.title, color.options.map((o) => o.optionId)], ['selection', 'Color: Pick a color', ['Red', 'Blue']]);
+    assert.equal(name.kind, 'unknown_blocking');
+    await transport.answerInteraction({ interactionId: file.interactionId, optionId: decision });
+    await transport.answerInteraction({ interactionId: perm.interactionId, optionId: decision });
+    await transport.answerInteraction({ interactionId: color.interactionId, optionId: 'Blue' });
+    assert.equal(transport.snapshot().lifecycle, 'blocked');
+    await assert.rejects(transport.answerInteraction({ interactionId: name.interactionId }), { code: 'invalid_interaction_option' });
+    await transport.answerInteraction({ interactionId: name.interactionId, text: 'notes.txt' });
+    await pending;
+  }
+  const replies = (id) => frames().then((all) => all.filter((f) => !f.method && f.id === id).map((f) => f.result || f.error.code));
+  assert.deepEqual(await replies('file-1'), [{ decision: 'acceptForSession' }, { decision: 'decline' }]);
+  assert.deepEqual(await replies('perm-1'), [{ permissions: { network: { enabled: true } }, scope: 'session' }, { permissions: {} }]);
+  assert.deepEqual(await replies('input-1'), Array(2).fill({ answers: { color: { answers: ['Blue'] }, name: { answers: ['notes.txt'] } } }));
+  assert.deepEqual(await replies('elicit-1'), [{ action: 'decline' }, { action: 'decline' }]);
+  assert.deepEqual(await replies('unknown-1'), [-32601, -32601]);
 });
 
 test('model rerouting records execution evidence separately from startup model', async () => {

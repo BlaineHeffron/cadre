@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
-import { AsyncEventQueue, createBaseCapabilities, createTransportEvent, unsupportedCapability } from './agent-transport.mjs';
+import { AsyncEventQueue, createBaseCapabilities, createTransportEvent, questionInteraction, unsupportedCapability } from './agent-transport.mjs';
 import { NdjsonJsonRpcCodec, DEFER_JSON_RPC_RESPONSE } from './ndjson-json-rpc.mjs';
 import { ProcessSupervisor, buildSupervisedEnv } from './process-supervisor.mjs';
 
@@ -45,7 +45,7 @@ export function codexAppServerCapabilities(evidence = null) {
     protocol: { name: 'codex-app-server', version: evidence?.cliVersion || '' },
     turn: { admission: 'single', steer: has('turn/steer') && evidence.steerExpectedTurnId === true, followup: false },
     cancellation: has('turn/interrupt') ? 'best_effort' : 'none',
-    interaction: { permissions: 'structured_options', elicitation: false, answerOnce: true },
+    interaction: { permissions: 'structured_options', elicitation: false, questions: true, answerOnce: true },
     streaming: 'deltas_and_committed_messages',
     streamFeatures: { tool_events: true, thought_events: true, plan: true, usage: true },
     sessionOps: { list: 'unsupported', load: has('thread/read') ? 'supported' : 'unsupported',
@@ -267,13 +267,21 @@ export class CodexAppServerTransport {
       turn: turn || null };
   }
 
-  async answerInteraction({ interactionId, optionId } = {}) {
+  async answerInteraction({ interactionId, optionId, text } = {}) {
     const entry = this.interactions.get(interactionId);
     if (!entry || entry.answered) throw failure('interaction_not_open', 'Interaction is not open', { statusCode: 409 });
-    if (!entry.options.includes(optionId)) throw failure('invalid_interaction_option', 'Unsupported approval decision', { statusCode: 400 });
+    const answer = String(text || optionId || '');
+    if (entry.question ? !answer : !entry.options.includes(optionId)) throw failure('invalid_interaction_option', 'Unsupported approval decision', { statusCode: 400 });
     entry.answered = true;
-    try { await this.codec.respond(entry.id, { decision: optionId }); }
-    catch (error) { this.#uncertain(error); throw error; }
+    // Response shapes per codex-cli 0.157.1 schema; permissions/requestUserInput mappings follow t3code (MIT).
+    if (entry.question) entry.pending.answers[entry.question.id] = { answers: [answer] };
+    const result = entry.question ? { answers: entry.pending.answers }
+      : entry.permissions ? { permissions: optionId === 'decline' ? {} : entry.permissions, ...(optionId === 'acceptForSession' ? { scope: 'session' } : {}) }
+        : { decision: optionId };
+    if (!entry.question || !--entry.pending.remaining) {
+      try { await this.codec.respond(entry.id, result); }
+      catch (error) { this.#uncertain(error); throw error; }
+    }
     this.interactions.delete(interactionId);
     this.#emit('interaction.answered', { interactionId, optionId });
     if (this.currentTurn && !this.interactions.size && this.lifecycle === 'blocked') this.lifecycle = 'working';
@@ -305,16 +313,33 @@ export class CodexAppServerTransport {
     this.currentTurn?.events.push(event); this.eventQueue.push(event); return event;
   }
   #request(method, params, message) {
-    if (!['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'].includes(method)) return undefined;
+    // Cadre hosts no MCP elicitation forms; decline instead of leaving the tool call hanging.
+    if (method === 'mcpServer/elicitation/request') return { action: 'decline' };
+    const permissions = method === 'item/permissions/requestApproval';
+    if (!permissions && !['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/tool/requestUserInput'].includes(method)) return undefined;
     if (params.threadId !== this.protocolSessionId || !this.currentTurn || (this.currentTurn.providerTurnId && params.turnId !== this.currentTurn.providerTurnId)) return undefined;
     const interactionId = `${this.attemptId}:${message.id}`;
     if (this.interactions.has(interactionId)) return DEFER_JSON_RPC_RESPONSE;
-    const options = (params.availableDecisions || ['accept', 'decline', 'cancel']).filter((value) => ['accept', 'decline', 'cancel'].includes(value));
-    this.interactions.set(interactionId, { id: message.id, options, answered: false });
+    const turnId = this.currentTurn.turnId;
+    if (method === 'item/tool/requestUserInput') {
+      if (!params.questions?.length) return { answers: {} };
+      const pending = { answers: {}, remaining: params.questions.length };
+      params.questions.forEach((question, index) => {
+        const id = index ? `${interactionId}:${index}` : interactionId;
+        this.interactions.set(id, { id: message.id, question, pending, answered: false });
+        const { kind, options, toolCall } = questionInteraction(question);
+        this.#emit('interaction.requested', { interactionId: id, turnId, kind, options, toolCall: { ...toolCall, toolCallId: params.itemId, name: method } });
+      });
+      this.lifecycle = 'blocked';
+      return DEFER_JSON_RPC_RESPONSE;
+    }
+    const options = ['accept', 'acceptForSession', 'decline', ...(permissions ? [] : ['cancel'])];
+    this.interactions.set(interactionId, { id: message.id, options, permissions: permissions && (params.permissions || {}), answered: false });
     this.lifecycle = 'blocked';
-    this.#emit('interaction.requested', { interactionId, turnId: this.currentTurn.turnId, kind: 'permission',
-      options: options.map((optionId) => ({ optionId, name: optionId, kind: optionId === 'accept' ? 'allow_once' : 'reject_once' })),
-      toolCall: { toolCallId: params.itemId, name: method, title: params.reason || 'Codex approval required', input: { command: params.command, cwd: params.cwd } } });
+    this.#emit('interaction.requested', { interactionId, turnId, kind: 'permission',
+      options: options.map((optionId) => ({ optionId, name: optionId, kind: { accept: 'allow_once', acceptForSession: 'allow_always' }[optionId] || 'reject_once' })),
+      toolCall: { toolCallId: params.itemId, name: method, title: params.reason || 'Codex approval required',
+        input: { command: params.command, cwd: params.cwd, permissions: params.permissions } } });
     return DEFER_JSON_RPC_RESPONSE;
   }
   #notification(method, params) {
