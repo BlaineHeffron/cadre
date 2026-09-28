@@ -17,7 +17,7 @@ import {
   prepareClaudeHookSettings,
 } from '../agent/claude-hook-settings.mjs';
 import { readHookDerivedState, readHookSessionMetadata } from '../session-state/providers/hook.mjs';
-import { projectCompatibility } from '../session-state/contract.mjs';
+import { canonicalSessionStateId, projectCompatibility } from '../session-state/contract.mjs';
 import { isFinishedWorkEdge, nextRememberedStatus } from '../session-state/attention-edge.mjs';
 import {
   PANE_FRESH_MS,
@@ -168,9 +168,7 @@ export function isTmuxMissingNamedSessionError(stderr = '') {
   return /can't find session|no such session|session not found/i.test(String(stderr || ''));
 }
 
-export function canonicalSessionStateId(kind, sessionId) {
-  return `${String(kind || '').trim().toLowerCase()}:${String(sessionId || '').trim()}`;
-}
+export { canonicalSessionStateId };
 
 export function reconcileSessionMaps(live, baseline, discovered) {
   const next = new Map(discovered);

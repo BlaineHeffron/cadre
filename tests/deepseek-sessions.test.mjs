@@ -225,7 +225,7 @@ describe('DeepSeek Harness ACP sessions', () => {
     });
     assert.equal(detail.statusCode, 200);
     assert.equal(detail.json().state.status, 'ready');
-    assert.equal(detail.json().state.transcriptGrade, 'committed_text');
+    assert.equal(detail.json().transcriptGrade, 'committed_text');
     assert.match(detail.json().content, /> Run the tests/);
     assert.match(detail.json().content, /Finished/);
     assert.deepEqual(harness.clients[0].prompts, ['Run the tests']);

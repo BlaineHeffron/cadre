@@ -15,7 +15,6 @@ import { skillsPlugin } from './modules/integrations/skills.mjs';
 import { claudeSessionsPlugin } from './modules/sessions/claude-sessions.mjs';
 import { codexSessionsPlugin } from './modules/sessions/codex-sessions.mjs';
 import { createCodexAppServerSessionProvider } from './modules/sessions/codex-app-server-sessions.mjs';
-import { observe as observeSessionState } from './modules/session-state/tracker.mjs';
 import { getPiProviderHealth, piSessionsPlugin } from './modules/sessions/pi-sessions.mjs';
 import { deepseekSessionsPlugin, getDeepSeekProviderHealth } from './modules/sessions/deepseek-sessions.mjs';
 import { agentInterfacePlugin } from './modules/agent/interface.mjs';
@@ -137,7 +136,7 @@ await app.register(codexSessionsPlugin, { wsManager, sessionDeliveryAuditStore }
 
 // Explicit task provider; ordinary Codex sessions continue using tmux.
 const codexAppServer = await createCodexAppServerSessionProvider({
-  logger: app.log, observationSink: observeSessionState, deliveryAuditStore: sessionDeliveryAuditStore,
+  logger: app.log, deliveryAuditStore: sessionDeliveryAuditStore,
 });
 app.addHook('onClose', () => codexAppServer.close());
 

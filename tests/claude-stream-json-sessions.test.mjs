@@ -148,7 +148,6 @@ describe('Claude stream-json sessions', () => {
     await app.register(claudeSessionsPlugin, {
       streamJsonEnabled: true,
       sessionRoot: join(root, 'sessions'),
-      observationSink: () => {},
       credentialStore,
       sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
       mcpDiscovery: async ({ token }) => {
@@ -266,7 +265,7 @@ describe('Claude stream-json sessions', () => {
     const app = Fastify({ logger: false });
     apps.push(app);
     await app.register(claudeSessionsPlugin, {
-      streamJsonEnabled: true, sessionRoot: join(root, 'sessions'), observationSink: () => {},
+      streamJsonEnabled: true, sessionRoot: join(root, 'sessions'),
       credentialStore, sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
       mcpCatalog,
     });
@@ -313,7 +312,7 @@ describe('Claude stream-json sessions', () => {
     const app = Fastify({ logger: false });
     apps.push(app);
     await app.register(claudeSessionsPlugin, {
-      streamJsonEnabled: true, sessionRoot, observationSink: () => {},
+      streamJsonEnabled: true, sessionRoot,
       credentialStore, sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
       mcpDiscovery: async ({ token }) => { issuedToken = token; throw new Error('discovery failed'); },
     });

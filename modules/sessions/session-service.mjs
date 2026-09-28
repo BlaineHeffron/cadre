@@ -6,6 +6,8 @@ import {
   normalizePromptCapabilities,
 } from '../agent/prompt-blocks.mjs';
 import { incrementOpsCounter, recordOpsTiming } from '../ops/observability.mjs';
+import { canonicalSessionStateId } from '../session-state/contract.mjs';
+import { sessionStateTracker } from '../session-state/tracker.mjs';
 import { recordSessionDeliveryAudit } from './delivery-audit.mjs';
 import { assertSessionDeletable } from './journal-store.mjs';
 
@@ -295,7 +297,7 @@ export class SessionService {
     promptPolicy = null,
     provider = 'deepseek',
     now = () => Date.now(),
-    observationSink = () => {},
+    stateTracker = sessionStateTracker,
     contentLimit = 2 * 1024 * 1024,
     diagnosticLimit = 256 * 1024,
     logger = null,
@@ -309,7 +311,7 @@ export class SessionService {
     this.promptPolicy = promptPolicy;
     this.provider = provider;
     this.now = now;
-    this.observationSink = observationSink;
+    this.stateTracker = stateTracker;
     this.contentLimit = contentLimit;
     this.diagnosticLimit = diagnosticLimit;
     this.logger = logger;
@@ -328,6 +330,7 @@ export class SessionService {
       if (!restored) continue;
       restored.taskId ||= await this.journal.rebuild(sessionId, (value, event) => event.type === 'task.linked' ? event.data.taskId : value, null);
       this.sessions.set(sessionId, restored);
+      this.#observeProtocol(restored);
       if (!['ended', 'interrupted'].includes(restored.lifecycle)) {
         const activeAttemptId = restored.activeAttemptId;
         await this.#append(restored, 'session.interrupted', {
@@ -345,12 +348,12 @@ export class SessionService {
     return [...this.sessions.values()]
       .filter((session) => includeEnded || !['ended', 'interrupted'].includes(session.lifecycle))
       .sort((left, right) => right.createdAt - left.createdAt)
-      .map(publicSession);
+      .map((session) => this.#public(session));
   }
 
   get(sessionId) {
     const session = this.sessions.get(String(sessionId || ''));
-    return session ? publicSession(session) : null;
+    return session ? this.#public(session) : null;
   }
 
   async start(spec = {}) {
@@ -424,7 +427,7 @@ export class SessionService {
       incrementOpsCounter('attempt_start', 1, { transport: 'acp', provider: session.provider, outcome: 'success' });
       recordOpsTiming('start_latency', this.now() - startedAt, { transport: 'acp', provider: session.provider, outcome: 'success' });
       this.#log('info', 'Structured attempt started', { sessionId, attemptId });
-      return publicSession(session);
+      return this.#public(session);
     } catch (error) {
       incrementOpsCounter('attempt_start', 1, { transport: 'acp', provider: session.provider, outcome: 'failed' });
       recordOpsTiming('start_latency', this.now() - startedAt, { transport: 'acp', provider: session.provider, outcome: 'failed' });
@@ -714,6 +717,7 @@ export class SessionService {
       await this.journal.deleteSession(id);
       await this.attachmentStore?.releaseSession?.(id);
       this.sessions.delete(id);
+      this.stateTracker.remove(canonicalSessionStateId(existing.provider, id));
       return { ...verdict, status: 'deleted' };
     });
   }
@@ -815,7 +819,6 @@ export class SessionService {
     }
     while (session.transcript.length > 1 && Buffer.byteLength(JSON.stringify(session.transcript)) > this.contentLimit) session.transcript.shift();
     while (session.diagnostics.length > 1 && Buffer.byteLength(JSON.stringify(session.diagnostics)) > this.diagnosticLimit) session.diagnostics.shift();
-    this.#observeProtocol(session);
   }
 
   async #appendTranscript(session, entry) {
@@ -834,18 +837,18 @@ export class SessionService {
       throw error;
     }
     await this.#append(session, 'session.lifecycle', { lifecycle, detail });
-    this.#observeProtocol(session);
   }
 
   async #append(session, type, data, options = {}) {
     const event = await this.journal.append(session.id, { type, data: clone(data), ...options });
     reduceSessionEvent(session, event);
+    this.#observeProtocol(session);
     this.#notify(session, event);
     return event;
   }
 
   #notify(session, event) {
-    const projected = publicSession(session);
+    const projected = this.#public(session);
     for (const listener of [...this.listeners]) {
       try { listener(projected, clone(event)); } catch { /* listeners are isolated */ }
     }
@@ -867,13 +870,19 @@ export class SessionService {
     try { writer.call(this.logger, fields, message); } catch { /* logging cannot affect state */ }
   }
 
+  // Canonical state comes only from the tracker, keyed like every other
+  // provider session so all consumers read the same snapshot.
+  #public(session) {
+    return { ...publicSession(session), canonicalState: this.stateTracker.get(canonicalSessionStateId(session.provider, session.id)) };
+  }
+
   #observeProtocol(session) {
     const execution = ['working', 'blocked', 'cancelling'].includes(session.lifecycle) ? 'working' : session.lifecycle === 'ready' ? 'idle' : 'unknown';
     const openInteraction = session.interactions.find((item) => item.status === 'open');
     const lifecycle = ['ended', 'interrupted'].includes(session.lifecycle) ? 'ended' : session.lifecycle === 'created' || session.lifecycle === 'starting' ? 'starting' : 'running';
     const observedAt = this.now();
     try {
-      this.observationSink(session.id, [
+      this.stateTracker.observe(canonicalSessionStateId(session.provider, session.id), [
         ...(session.model ? [{ source: 'protocol', kind: 'requested_runtime', value: { requestedModel: session.model },
           observedAt, expiresAt: 0, fingerprint: `protocol:requested:${session.model}` }] : []),
         ...(session.negotiated?.effectiveModel ? [{ source: 'protocol', kind: 'effective_runtime',
@@ -886,13 +895,16 @@ export class SessionService {
           source: 'protocol', kind: 'interaction',
           value: openInteraction ? {
             kind: openInteraction.kind, detail: openInteraction.toolCall?.title || 'Permission required',
-            options: clone(openInteraction.options), fingerprint: openInteraction.interactionId, stable: true,
+            options: (openInteraction.options || []).map((option) => ({
+              key: option.optionId, value: option.optionId, label: option.name || option.optionId, kind: option.kind || '',
+            })),
+            fingerprint: openInteraction.interactionId, stable: true,
           } : session.lifecycle === 'ready' ? { kind: 'free_text', detail: '', options: [], fingerprint: `ready:${session.revision}`, stable: true } : { kind: 'none', detail: '', options: [], fingerprint: '', stable: true },
           observedAt, expiresAt: 0, fingerprint: openInteraction?.interactionId || `protocol:interaction:${session.revision}`,
         },
       ]);
     } catch {
-      /* observation sinks cannot take down the transport consumer */
+      /* observation failures cannot take down the transport consumer */
     }
   }
 }

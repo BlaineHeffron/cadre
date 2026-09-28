@@ -6,6 +6,7 @@ import { afterEach, describe, it } from 'node:test';
 import { AsyncEventQueue, createBaseCapabilities, createTransportEvent, unsupportedCapability } from '../modules/agent/agent-transport.mjs';
 import { FileJournalStore } from '../modules/sessions/journal-store.mjs';
 import { reduceSessionEvent, SessionService } from '../modules/sessions/session-service.mjs';
+import { createSessionStateTracker } from '../modules/session-state/tracker.mjs';
 
 const roots = [];
 afterEach(async () => {
@@ -442,7 +443,7 @@ describe('SessionService', () => {
     await harness.service.close({ interrupt: false });
   });
 
-  it('keeps consuming transport events when the observation sink throws', { timeout: 15000 }, async () => {
+  it('keeps consuming transport events when state observation throws', { timeout: 15000 }, async () => {
     let transport;
     const root = await mkdtemp(join(tmpdir(), 'dueno-session-service-'));
     roots.push(root);
@@ -451,7 +452,7 @@ describe('SessionService', () => {
     const journal = new FileJournalStore({ rootDir: join(root, 'journal') });
     const service = new SessionService({
       journal,
-      observationSink: () => { throw new Error('sink down'); },
+      stateTracker: { ...createSessionStateTracker(), observe() { throw new Error('tracker down'); } },
       transportFactory: () => { transport = new FakeTransport({ settle: true }); return transport; },
     });
     await service.init();
