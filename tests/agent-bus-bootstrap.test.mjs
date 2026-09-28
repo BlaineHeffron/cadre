@@ -72,3 +72,17 @@ test('bootstrap failure cleans sessions created by the request', async (t) => {
   assert.equal(response.statusCode, 400);
   assert.deepEqual(h.deletedSessions.codex, ['codex-new-1']);
 });
+
+test('bootstrap forwards the automated structured-runtime request to created sessions only', async (t) => {
+  const h = await createAgentBusHarness(); t.after(() => h.cleanup());
+  const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
+    title: 'Structured collab', structured: true, participants: [{ kind: 'codex', create: true }, { kind: 'claude', create: true }],
+  } });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual([h.createdSessions.codex[0].structured, h.createdSessions.claude[0].structured], [true, true]);
+  const plain = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
+    title: 'Plain collab', participants: [{ kind: 'codex', create: true }, { kind: 'claude', create: true }],
+  } });
+  assert.equal(plain.statusCode, 200, plain.body);
+  assert.equal(Object.hasOwn(h.createdSessions.codex[1], 'structured'), false);
+});

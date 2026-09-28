@@ -590,6 +590,8 @@ export function buildMonitorMcpServer({ requestImpl }) {
             ...(mcpServers !== undefined ? { mcpServers } : {}),
             ...(provider === 'codex' && codexPlugins !== undefined ? { codexPlugins } : {}),
             ...(promptProfile !== undefined ? { promptProfile } : {}),
+            // Automated spawn: the structured runtime serves it when CADRE_STRUCTURED_AUTOMATED_SPAWNS is on.
+            structured: true,
           },
         });
         const sessionId = sessionIdFromResult(result);
@@ -1172,6 +1174,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
             ...(codexPlugins !== undefined ? { codexPlugins } : {}),
             ...(promptProfile !== undefined ? { promptProfile } : {}),
             participants: normalizedParticipants,
+            structured: true,
           },
         });
         assertBootstrapOk(payload);
@@ -1237,6 +1240,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
             ...(codexPlugins !== undefined ? { codexPlugins } : {}),
             ...(promptProfile !== undefined ? { promptProfile } : {}),
             participants: normalizedParticipants,
+            structured: true,
           },
         });
         assertBootstrapOk(payload);

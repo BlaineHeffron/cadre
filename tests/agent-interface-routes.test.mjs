@@ -34,15 +34,17 @@ function makeMemoryIdempotencyStore(initial = {}) {
   };
 }
 
-async function buildApp({ idempotencyStore = makeMemoryIdempotencyStore(), sessionExistsImpl = async () => true } = {}) {
+async function buildApp({ idempotencyStore = makeMemoryIdempotencyStore(), sessionExistsImpl = async () => true, worktreeCreator } = {}) {
   process.env.AUTH_TOKEN = TEST_TOKEN;
   process.env.INTERNAL_BYPASS_TOKEN = TEST_TOKEN;
   const { agentInterfacePlugin } = await import(`../modules/agent/interface.mjs?agentInterfaceRoutes=${Date.now()}_${Math.random().toString(36).slice(2)}`);
   const app = Fastify({ logger: false });
   let spawnCount = 0;
+  const createBodies = [];
 
-  app.post('/api/codex/sessions', async () => {
+  app.post('/api/codex/sessions', async (req) => {
     spawnCount += 1;
+    createBodies.push(req.body);
     return { id: `codex_route_${spawnCount}`, sessionName: `codex-route-${spawnCount}` };
   });
   app.post('/api/pi/sessions', async (_req, reply) => reply.code(503).send({
@@ -75,6 +77,7 @@ async function buildApp({ idempotencyStore = makeMemoryIdempotencyStore(), sessi
     idempotencyTtlMs: 3_600_000,
     now: () => 10_000,
     sessionExistsImpl,
+    worktreeCreator,
     getPreferences: async () => ({
       claudeEnabled: true,
       codexEnabled: true,
@@ -85,6 +88,7 @@ async function buildApp({ idempotencyStore = makeMemoryIdempotencyStore(), sessi
 
   return {
     app,
+    createBodies,
     get spawnCount() {
       return spawnCount;
     },
@@ -180,6 +184,33 @@ describe('agent interface routes', () => {
     assert.equal(harness.spawnCount, 1);
     assert.equal(second.json().session.id, first.json().session.id);
     assert.equal(second.json().session.threadId, '');
+    await harness.app.close();
+  });
+
+  it('forwards only an explicit structured-runtime request to the backend create route', async () => {
+    const harness = await buildApp();
+    for (const structured of [true, 'yes', undefined]) {
+      const res = await harness.app.inject({
+        method: 'POST', url: '/api/agents/sessions', headers: authHeaders(),
+        payload: { provider: 'codex', workDir: '/tmp/bos', structured },
+      });
+      assert.equal(res.statusCode, 200, res.body);
+    }
+    assert.deepEqual(harness.createBodies.map((body) => body.structured), [true, undefined, undefined]);
+    await harness.app.close();
+  });
+
+  it('keeps isolated-worktree spawns on tmux, whose delete path removes the worktree', async () => {
+    const harness = await buildApp({
+      worktreeCreator: async ({ repoPath }) => ({ worktreePath: `${repoPath}-wt`, branch: 'wt', baseRef: 'main', repoPath }),
+    });
+    const res = await harness.app.inject({
+      method: 'POST', url: '/api/agents/sessions', headers: authHeaders(),
+      payload: { provider: 'codex', workDir: '/tmp/bos', structured: true, isolatedWorktree: true },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(harness.createBodies[0].workDir, '/tmp/bos-wt');
+    assert.equal(harness.createBodies[0].structured, undefined);
     await harness.app.close();
   });
 

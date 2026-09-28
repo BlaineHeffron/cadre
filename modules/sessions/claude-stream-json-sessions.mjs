@@ -14,6 +14,7 @@ import {
   sanitizedMcpSnapshot,
 } from '../integrations/mcp-launch-preflight.mjs';
 import { buildMcpCapabilityCatalog } from '../integrations/mcp-server-catalog.mjs';
+import { composeLaunchUserPrompt } from '../integrations/launch-skills.mjs';
 import { buildPromptLaunchArgs, cleanupPromptProfileLaunch, preparePromptProfileLaunch } from '../integrations/prompt-profile-launch.mjs';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { permissionAuthorityForRequest } from '../platform/auth.mjs';
@@ -163,8 +164,9 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       }),
     };
     if (!claude) {
-      // Read-only Codex asks before untrusted commands, matching the tmux safe runtime.
-      return { env, preflight: mcpPreparation.preflight, approvalPolicy: permissionMode === 'read-only' ? 'untrusted' : 'on-request',
+      // Read-only Codex asks before untrusted commands; full access never asks, matching the tmux runtime.
+      const approvalPolicy = { 'read-only': 'untrusted', 'danger-full-access': 'never' }[permissionMode] || 'on-request';
+      return { env, preflight: mcpPreparation.preflight, approvalPolicy,
         args: [...headroom.args, ...mcpPreparation.prepared.codexArgs, ...promptArgs,
         ...(headroom.modelProvider ? ['-c', `model_provider=${JSON.stringify(headroom.modelProvider)}`] : [])] };
     }
@@ -243,6 +245,8 @@ export async function claudeStreamJsonSessionsPlugin(app, {
     try {
       const workDir = await normalizeSessionWorkDir(req.body?.workDir);
       if (!workDir) return reply.code(400).send({ error: `workDir is required for ${label} sessions` });
+      // Resolve launch skills before starting so an unknown skill cannot orphan a process.
+      const initialPrompt = composeLaunchUserPrompt({ skillIds: req.body?.skills, initialPrompt: req.body?.initialPrompt });
       id = randomBytes(8).toString('hex');
       const model = await (claude ? assertValidClaudeModel : assertValidCodexModel)(text(req.body?.model));
       const resolvedMcp = resolveMcpCapabilities({
@@ -255,7 +259,8 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       });
       // Research Workbench sessions handle untrusted input, so Codex gets the tmux path's read-only sandbox.
       const permissionMode = !claude && hasResearchWorkbenchLaunchProfile(req.body?.metadata)
-        ? 'read-only' : text(req.body?.permissionMode) || 'workspace-write';
+        // Automated spawns have no human to approve tools, so they default to tmux's full access.
+        ? 'read-only' : text(req.body?.permissionMode) || (req.body?.structured === true ? 'danger-full-access' : 'workspace-write');
       if (!claude && !CODEX_SANDBOX_MODES.has(permissionMode)) {
         return reply.code(400).send({ error: `Unsupported Codex permission mode: ${permissionMode}`, code: 'unsupported_permission_mode' });
       }
@@ -265,7 +270,6 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         ...launch, sessionId: id, displayName: text(req.body?.displayName), workDir, model, permissionMode,
         mcpCapabilities: sanitizedMcpSnapshot(resolvedMcp, preflight),
       });
-      const initialPrompt = text(req.body?.initialPrompt);
       if (initialPrompt) {
         await service.prompt(id, { blocks: [{ type: 'text', text: initialPrompt }], idempotencyKey: `initial:${id}`, source: 'session_create' });
         session = service.get(id);
@@ -407,7 +411,8 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       await cleanupSessionLaunch(req.params.id, generation, 'session_terminated', serverIds);
       // Drop every attempt directory, including one a concurrent resume created after generation was read.
       if (verdict.ok) await rm(resolve(sessionRoot, existing.id), { recursive: true, force: true });
-      return verdict.ok ? verdict : reply.code(500).send(verdict);
+      // 'terminated' is the delete contract shared with the tmux route and its MCP/agent-bus consumers.
+      return verdict.ok ? { ...verdict, status: 'terminated' } : reply.code(500).send(verdict);
     } catch (error) { return errorReply(reply, error); }
   });
   app.addHook('onClose', async () => {
@@ -419,4 +424,61 @@ export async function claudeStreamJsonSessionsPlugin(app, {
     )));
     await processSupervisor.close();
   });
+  return { service };
+}
+
+export function isStructuredAutomatedSpawnsEnabled(kind, value = process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS) {
+  const raw = String(value || '').trim();
+  return /^(1|true|yes)$/i.test(raw) || raw.split(',').map((entry) => entry.trim()).includes(kind);
+}
+
+// Serves structured and tmux sessions on the same /api/{kind}/sessions routes. Automated spawns
+// (body.structured) start structured; human (UI principal) and coordinator-authority creates stay
+// tmux. Per-session routes dispatch on which runtime owns the id; lists and ws broadcasts merge.
+export async function hybridSessionsPlugin(app, { tmuxPlugin, ...options }) {
+  const kind = options.provider || 'claude';
+  const ws = options.wsManager;
+  const lists = { tmux: null, structured: [] };
+  const wsFor = (side) => ws && Object.assign(Object.create(ws), {
+    broadcast(channel, type, data) {
+      if (channel !== `${kind}:sessions`) return ws.broadcast(channel, type, data);
+      lists[side] = data.sessions;
+      if (!lists.tmux) return undefined; // Never publish a merged list that drops unseen tmux sessions.
+      return ws.broadcast(channel, type, { sessions: [...lists.tmux, ...lists.structured] });
+    },
+    onChannel: (prefix, handler) => ws.onChannel(prefix, (socket, channel, data) => (
+      owned(String(channel).split(':')[2]) ? undefined : handler(socket, channel, data))),
+  });
+  const routes = new Map();
+  const record = (method) => (url, handler) => { routes.set(`${method} ${url}`, handler); };
+  const { service } = await claudeStreamJsonSessionsPlugin({
+    log: app.log, addHook: app.addHook.bind(app), get: record('GET'), post: record('POST'), delete: record('DELETE'),
+  }, { ...options, wsManager: wsFor('structured') });
+  // Ids stay structured after delete so they 404 instead of reaching tmux.
+  const known = new Set();
+  const owned = (id) => Boolean(id) && (known.has(String(id)) || Boolean(service.get(String(id)) && known.add(String(id))));
+  app.addHook('onRoute', (route) => {
+    const key = `${route.method} ${route.url}`;
+    const own = routes.get(key);
+    const tmux = route.handler;
+    routes.delete(key);
+    if (key === `GET /api/${kind}/sessions`) {
+      route.handler = async (req, reply) => ({ sessions: [...(await tmux(req, reply)).sessions, ...(await own(req, reply)).sessions] });
+    } else if (own) {
+      route.handler = (req, reply) => {
+        const structured = req.params?.id ? owned(req.params.id)
+          : req.body?.structured === true && !req.duenoAuth?.coordinatorPolicy && req.duenoAuth?.principal?.type !== 'ui';
+        return (structured ? own : tmux)(req, reply);
+      };
+    } else if (route.url.startsWith(`/api/${kind}/sessions/:id`)) {
+      route.handler = (req, reply) => (owned(req.params?.id) ? reply.code(409).send({
+        error: `${route.method} ${route.url} is not supported for structured ${kind} sessions`, code: 'unsupported_for_structured_session',
+      }) : tmux(req, reply));
+    }
+  });
+  await tmuxPlugin(app, { ...options, wsManager: wsFor('tmux') });
+  for (const [key, handler] of routes) {
+    const [method, url] = key.split(' ');
+    app.route({ method, url, handler });
+  }
 }

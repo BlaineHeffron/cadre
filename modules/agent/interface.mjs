@@ -358,6 +358,8 @@ export function buildAgentInterface({
         promptProfile: input.promptProfile,
         skills: input.skills,
         initialPrompt: input.initialPrompt,
+        // Isolated worktrees stay tmux: only its delete path removes the worktree.
+        structured: (input.structured === true && !worktree) || undefined,
         metadata: {
           ...(input.metadata && typeof input.metadata === 'object' ? input.metadata : {}),
           ...(worktree ? {
