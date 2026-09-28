@@ -131,6 +131,10 @@ Cadre is an installable PWA. To reach it from a phone on your tailnet:
 4. Install: **Share → Add to Home Screen** on iOS Safari, or **Install app** in
    Chrome's menu on Android.
 
+Other reverse proxies must pass the original `Host` header through (nginx:
+`proxy_set_header Host $host;`); pairing rejects requests whose `Origin` does
+not match `Host`.
+
 ## Safety
 
 Cadre's background loops (GitHub pollers, scheduled agents, Telegram bridge,
