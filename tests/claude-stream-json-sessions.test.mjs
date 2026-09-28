@@ -509,6 +509,13 @@ describe('Claude stream-json sessions', () => {
     const invalid = await app.inject({ method: 'POST', url: '/api/codex/sessions', payload: { workDir, permissionMode: 'yolo' } });
     assert.deepEqual([invalid.statusCode, invalid.json().code], [400, 'unsupported_permission_mode']);
     assert.equal(clients.length, 2);
+    // Automated spawns default to tmux's unattended full access; Research Workbench still forces read-only.
+    for (const metadata of [undefined, { researchWorkbench: { profileId: RESEARCH_PROFILE_ID } }]) {
+      const res = await app.inject({ method: 'POST', url: '/api/codex/sessions', payload: { workDir, structured: true, metadata } });
+      assert.equal(res.statusCode, 200, res.body);
+    }
+    assert.deepEqual(clients.slice(2).map((client) => [client.startSpec.permissionMode, client.startSpec.approvalPolicy]),
+      [['danger-full-access', 'never'], ['read-only', 'untrusted']]);
   });
 
   it('keeps interactive Codex on the tmux provider unless opted in', () => {

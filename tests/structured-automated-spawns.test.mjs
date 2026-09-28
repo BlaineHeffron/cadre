@@ -40,11 +40,17 @@ const { AgentBusCredentialStore } = await import('../modules/agent-bus/mcp-auth.
 const { claudeSessionsPlugin } = await import('../modules/sessions/claude-sessions.mjs');
 const { isStructuredAutomatedSpawnsEnabled } = await import('../modules/sessions/claude-stream-json-sessions.mjs');
 const { getProtocolSessionProvider } = await import('../modules/sessions/protocol-session-registry.mjs');
+const { buildClaudeStreamJsonArgs } = await import('../modules/agent/claude-stream-json-transport.mjs');
+const { agentInterfacePlugin } = await import('../modules/agent/interface.mjs');
+const { buildMonitorMcpServer } = await import('../modules/platform/monitor-mcp.mjs');
+const { buildInProcessFastifyRequest } = await import('../modules/agent-bus/in-process-mcp.mjs');
+const { createAgentAdapters } = await import('../modules/agent-bus/adapters.mjs');
 
 class FakeTransport {
   constructor() { this.queue = new AsyncEventQueue(); this.prompts = []; }
   emit(type, payload = {}) { this.queue.push(createTransportEvent(type, payload, { attemptId: this.attemptId, provider: 'claude', transport: 'structured' })); }
   async start(spec) {
+    this.spec = spec;
     this.attemptId = spec.attemptId;
     this.emit('attempt.started', { protocolSessionId: spec.sessionId });
     return { attemptId: spec.attemptId, protocolSessionId: spec.sessionId, negotiated: this.capabilities() };
@@ -52,6 +58,15 @@ class FakeTransport {
   async prompt({ turnId, blocks }) {
     this.prompts.push(blocks);
     this.emit('turn.started', { turnId, evidence: { accepted: true, settled: false, quiescent: false } });
+    // Like Claude, a tool call asks the permission prompt tool unless permissions are skipped.
+    if (blocks[0]?.text === 'run tests' && !buildClaudeStreamJsonArgs(this.spec).includes('--dangerously-skip-permissions')) {
+      this.emit('interaction.requested', {
+        interactionId: 'i1', turnId, kind: 'permission',
+        options: [{ optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' }, { optionId: 'deny', name: 'Deny', kind: 'reject_once' }],
+        toolCall: { toolCallId: 't1', name: 'Bash', title: 'Bash requires permission', input: { command: 'npm test' } },
+      });
+      return new Promise(() => {});
+    }
     this.emit('message.committed', { turnId, blocks: [{ type: 'text', text: 'Structured reply' }] });
     this.emit('turn.settled', { turnId, stopReason: 'end_turn', evidence: { accepted: true, settled: true, quiescent: true } });
     return { stopReason: 'end_turn' };
@@ -104,11 +119,17 @@ async function buildApp() {
     e2eEvidence: { proven: true, expectedVersion: 'test' },
     transportFactory() { const transport = new FakeTransport(); transports.push(transport); return transport; },
   });
+  await app.register(agentInterfacePlugin, {
+    idempotencyStore: { async get() { return null; }, async set() {}, async close() {} },
+    getPreferences: async () => ({ claudeEnabled: true, codexEnabled: true, piEnabled: true, preferredSingleProvider: 'claude' }),
+  });
   await app.ready();
   const request = (method, url, { principal, payload } = {}) => app.inject({
     method, url, payload, headers: principal ? { 'x-test-principal': principal } : {},
   });
-  return { app, ws, transports, request };
+  // The real MCP tools, calling routes in process as an agent principal.
+  const mcp = buildMonitorMcpServer({ requestImpl: buildInProcessFastifyRequest({ app, buildHeaders: () => ({}) }) });
+  return { app, ws, transports, request, mcp };
 }
 
 describe('structured automated spawns', () => {
@@ -133,7 +154,7 @@ describe('structured automated spawns', () => {
 
   it('serves automated creates on the structured runtime beside tmux sessions when the flag is on', async () => {
     process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
-    const { app, ws, transports, request } = await buildApp();
+    const { app, ws, transports, request, mcp } = await buildApp();
     try {
       // Human and coordinator-authority creates stay on tmux; only an automated create reaches structured.
       for (const [principal, error] of [['ui', /^Session create requires/], ['coordinator', /^Session create requires/], ['agent', /^workDir is required for Claude sessions/]]) {
@@ -181,11 +202,68 @@ describe('structured automated spawns', () => {
       await waitFor(() => listIds()?.length === 2);
       assert.deepEqual(listIds(), [session.id, 'tmux1'].sort());
 
-      const removed = await request('DELETE', `/api/claude/sessions/${session.id}`);
-      assert.equal(removed.json().ok, true);
+      // monitor_terminate_session and the agent-bus adapter accept only terminated/already_gone.
+      const terminated = await mcp.handleToolCall('monitor_terminate_session', { session_id: session.id });
+      assert.deepEqual([terminated.ok, terminated.status, terminated.kind], [true, 'terminated', 'claude']);
       assert.equal(getProtocolSessionProvider('claude').service.get(session.id), null);
       await waitFor(() => listIds()?.length === 1);
       assert.deepEqual(listIds(), ['tmux1']);
+      // A deleted structured id stays structured: 404 rather than a tmux fallthrough.
+      const gone = await request('GET', `/api/claude/sessions/${session.id}`);
+      assert.deepEqual([gone.statusCode, gone.json().code], [404, 'session_not_found']);
+
+      const roomWorker = (await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir } })).json();
+      const adapterResult = await createAgentAdapters().claude.deleteSession(app, roomWorker.id);
+      assert.deepEqual([adapterResult.ok, adapterResult.status], [true, 'terminated']);
+      // No merged list ever dropped the tmux session, even before tmux first broadcast.
+      assert.equal(ws.broadcasts.filter((entry) => entry.channel === 'claude:sessions')
+        .every((entry) => entry.data.sessions.some((item) => item.id === 'tmux1')), true);
+    } finally {
+      await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('lets a spawn_session worker run tools unattended, as tmux does, unless a mode is given', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, transports, request, mcp } = await buildApp();
+    try {
+      const spawned = await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, displayName: 'worker' });
+      const id = spawned.session?.id || spawned.id;
+      assert.equal(transports[0].spec.permissionMode, 'danger-full-access');
+      const sent = await request('POST', `/api/claude/sessions/${id}/input`, { payload: { text: 'run tests', source: 'agent_bus' } });
+      assert.equal(sent.statusCode, 200, sent.body);
+      await waitFor(async () => (await request('GET', `/api/claude/sessions/${id}`)).json().state.capabilities.canSendNow === true);
+      assert.deepEqual(getProtocolSessionProvider('claude').service.get(id).interactions, []);
+
+      // An explicit mode wins, so that session asks for tool permission.
+      const explicit = await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, permissionMode: 'workspace-write' } });
+      assert.equal(transports[1].spec.permissionMode, 'workspace-write');
+      await request('POST', `/api/claude/sessions/${explicit.json().id}/input`, { payload: { text: 'run tests', source: 'agent_bus' } });
+      await waitFor(() => getProtocolSessionProvider('claude').service.get(explicit.json().id).interactions.length === 1);
+      assert.equal(getProtocolSessionProvider('claude').service.get(explicit.json().id).interactions[0].status, 'open');
+    } finally {
+      await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('refuses tmux-only routes for structured ids instead of falling through to tmux', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, transports, request } = await buildApp();
+    try {
+      const { id } = (await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir } })).json();
+      for (const [method, suffix, payload] of [
+        ['PUT', '', { displayName: 'x' }], ['POST', '/scheduled-send', { text: 'later', delayMs: 50 }], ['GET', '/scheduled-sends'],
+        ['POST', '/clear', {}], ['POST', '/shift-tab', {}], ['POST', '/image', {}],
+      ]) {
+        const res = await request(method, `/api/claude/sessions/${id}${suffix}`, { payload });
+        assert.deepEqual([res.statusCode, res.json().code], [409, 'unsupported_for_structured_session'], `${method} ${suffix}`);
+      }
+      assert.equal(transports[0].prompts.length, 0);
+      // The same routes still serve tmux sessions.
+      const renamed = await request('PUT', '/api/claude/sessions/tmux1', { payload: { displayName: 'Human pane' } });
+      assert.equal(renamed.statusCode, 200, renamed.body);
     } finally {
       await app.close();
       delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
