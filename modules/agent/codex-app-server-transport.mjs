@@ -45,7 +45,7 @@ export function codexAppServerCapabilities(evidence = null) {
     protocol: { name: 'codex-app-server', version: evidence?.cliVersion || '' },
     turn: { admission: 'single', steer: has('turn/steer') && evidence.steerExpectedTurnId === true, followup: false },
     cancellation: has('turn/interrupt') ? 'best_effort' : 'none',
-    interaction: { permissions: 'structured_options', elicitation: false, questions: true, answerOnce: true },
+    interaction: { permissions: 'structured_options', elicitation: false, answerOnce: true },
     streaming: 'deltas_and_committed_messages',
     streamFeatures: { tool_events: true, thought_events: true, plan: true, usage: true },
     sessionOps: { list: 'unsupported', load: has('thread/read') ? 'supported' : 'unsupported',
@@ -271,7 +271,8 @@ export class CodexAppServerTransport {
     const entry = this.interactions.get(interactionId);
     if (!entry || entry.answered) throw failure('interaction_not_open', 'Interaction is not open', { statusCode: 409 });
     const answer = String(text || optionId || '');
-    if (entry.question ? !answer : !entry.options.includes(optionId)) throw failure('invalid_interaction_option', 'Unsupported approval decision', { statusCode: 400 });
+    const closed = entry.question?.options?.length && !entry.question.isOther && !entry.question.options.some((item) => item.label === answer);
+    if (entry.question ? !answer || closed : !entry.options.includes(optionId)) throw failure('invalid_interaction_option', 'Unsupported approval decision', { statusCode: 400 });
     entry.answered = true;
     // Response shapes per codex-cli 0.157.1 schema; permissions/requestUserInput mappings follow t3code (MIT).
     if (entry.question) entry.pending.answers[entry.question.id] = { answers: [answer] };
@@ -333,7 +334,8 @@ export class CodexAppServerTransport {
       this.lifecycle = 'blocked';
       return DEFER_JSON_RPC_RESPONSE;
     }
-    const options = ['accept', 'acceptForSession', 'decline', ...(permissions ? [] : ['cancel'])];
+    const options = (params.availableDecisions || ['accept', 'acceptForSession', 'decline', ...(permissions ? [] : ['cancel'])])
+      .filter((decision) => ['accept', 'acceptForSession', 'decline', 'cancel'].includes(decision));
     this.interactions.set(interactionId, { id: message.id, options, permissions: permissions && (params.permissions || {}), answered: false });
     this.lifecycle = 'blocked';
     this.#emit('interaction.requested', { interactionId, turnId, kind: 'permission',

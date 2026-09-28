@@ -11,6 +11,7 @@ import { claudeSessionsPlugin, isClaudeStreamJsonEnabled } from '../modules/sess
 import { codexSessionsPlugin, isCodexAppServerEnabled } from '../modules/sessions/codex-sessions.mjs';
 import { getProtocolSessionProvider } from '../modules/sessions/protocol-session-registry.mjs';
 import { TASK_ADMISSION } from '../modules/sessions/session-service.mjs';
+import { defaultSendSessionInput } from '../modules/telegram/bridge-loop.mjs';
 import { RESEARCH_PROFILE_ID } from '../modules/integrations/research-profile.mjs';
 import { CLAUDE_STREAM_JSON_E2E_VERSION, claudeStreamJsonBusE2eEvidence } from '../modules/sessions/claude-stream-json-mcp.mjs';
 
@@ -73,7 +74,7 @@ class FakeTransport {
   capabilities() {
     return createBaseCapabilities({
       protocol: { name: 'claude-stream-json', version: '1' },
-      interaction: { permissions: 'structured_options', elicitation: false, questions: true, answerOnce: true },
+      interaction: { permissions: 'structured_options', elicitation: false, answerOnce: true },
       sessionOps: { list: 'unsupported', load: 'unsupported', resume: 'supported', fork: 'unsupported', close: 'unsupported', delete: 'supported' },
       ...(this.startSpec?.capabilityEvidence || {}),
     });
@@ -217,10 +218,17 @@ describe('Claude stream-json sessions', () => {
     const replay = await answer(guards);
     assert.deepEqual([replay.statusCode, replay.json().code, clients[0].prompts.length, clients[0].answers.length], [409, 'interaction_changed', 2, 1]);
     clients[0].emit('interaction.requested', { interactionId: `${clients[0].attemptId}:ask-1`, turnId: clients[0].activeTurnId, kind: 'selection',
-      toolCall: { title: 'Pick one' }, options: [{ optionId: 'A', name: 'A' }, { optionId: 'B', name: 'B' }] });
+      toolCall: { title: 'Pick one' }, options: [{ optionId: 'Red', name: 'Red' }, { optionId: 'Blue', name: 'Blue' }] });
     await waitFor(async () => (await app.inject({ method: 'GET', url: `/api/claude/sessions/${session.id}` })).json().state.interaction.kind === 'selection');
-    const picked = await app.inject({ method: 'POST', url: `/api/claude/sessions/${session.id}/keys`, payload: { keys: 'B', expectedInteractionKind: 'selection' } });
-    assert.deepEqual([picked.statusCode, clients[0].answers[1]?.optionId], [200, 'B'], picked.body);
+    // Toolbar keys and captured keystrokes must not become answers.
+    const strayKey = await app.inject({ method: 'POST', url: `/api/claude/sessions/${session.id}/keys`, payload: { keys: 'Up' } });
+    const keystroke = await app.inject({ method: 'POST', url: `/api/claude/sessions/${session.id}/input`, payload: { text: 'j', enter: false } });
+    assert.deepEqual([strayKey.statusCode, strayKey.json().code, keystroke.statusCode, clients[0].answers.length], [400, 'unsupported_capability', 400, 1]);
+    // Telegram's hook buttons send answer:N, posted to /keys; N selects the Nth option.
+    const { state: selection } = (await app.inject({ method: 'GET', url: `/api/claude/sessions/${session.id}` })).json();
+    await defaultSendSessionInput({ session: { id: session.id, runtime: 'claude', state: selection }, text: '2', interactionAnswer: true,
+      requestImpl: async (url, { method, body }) => { const res = await app.inject({ method, url, payload: body }); return { statusCode: res.statusCode, payload: res.json() }; } });
+    assert.equal(clients[0].answers[1]?.optionId, 'Blue');
     const unsupported = await app.inject({
       method: 'POST', url: `/api/claude/sessions/${session.id}/keys`, payload: { keys: 'Up Enter' },
     });

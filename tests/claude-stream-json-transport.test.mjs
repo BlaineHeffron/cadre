@@ -96,7 +96,7 @@ process.stdin.on('data', (chunk) => {
     if (message.type === 'user') send({
       type: 'control_request', request_id: 'permission-1', request: {
         subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'npm test' },
-        tool_use_id: 'toolu_1', permission_suggestions: [], title: 'Run tests?',
+        tool_use_id: 'toolu_1', permission_suggestions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }], title: 'Run tests?',
       },
     });
     if (message.type === 'control_response') {
@@ -135,7 +135,8 @@ process.stdin.on('data', (chunk) => {
       control('elicit-1', { subtype: 'elicitation', mcp_server_name: 'fixture', message: 'Token?', requested_schema: { type: 'object', properties: {} } });
       control('hook-1', { subtype: 'hook_callback', callback_id: 'hook', input: {} });
       control('bash-1', { subtype: 'can_use_tool', tool_name: 'Bash', display_name: 'Bash', input: { command: 'npm test' }, tool_use_id: 'toolu_1',
-        permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'localSettings' }] });
+        permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'localSettings' },
+          { type: 'setMode', mode: 'acceptEdits', destination: 'session' }, { type: 'addDirectories', directories: ['/etc'], destination: 'session' }] });
       control('ask-1', ask('toolu_2'));
       control('ask-2', ask('toolu_3'));
       send({ type: 'control_cancel_request', request_id: 'ask-2' });

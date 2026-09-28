@@ -77,7 +77,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       send({ id: 'file-1', method: 'item/fileChange/requestApproval', params: { ...base, itemId: 'patch-1', reason: 'Write fixture file' } });
       send({ id: 'perm-1', method: 'item/permissions/requestApproval', params: { ...base, itemId: 'perm-1', cwd: '/tmp', reason: 'Needs network', permissions: { network: { enabled: true } } } });
       return send({ id: 'input-1', method: 'item/tool/requestUserInput', params: { ...base, itemId: 'ask-1', isBlocking: true, questions: [
-        { id: 'color', header: 'Color', question: 'Pick a color', isOther: true, options: [{ label: 'Red', description: 'warm' }, { label: 'Blue', description: 'cool' }] },
+        { id: 'color', header: 'Color', question: 'Pick a color', isOther: false, options: [{ label: 'Red', description: 'warm' }, { label: 'Blue', description: 'cool' }] },
         { id: 'name', header: 'Name', question: 'Name the file', options: null }] } });
     }
     if (scenario === 'approval') return send({ id: 'approval-1', method: 'item/commandExecution/requestApproval', params: { threadId: 'thread-1', turnId: active, itemId: 'tool-1', availableDecisions: ['accept', 'decline'] } });

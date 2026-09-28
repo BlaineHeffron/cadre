@@ -114,8 +114,8 @@ test('approval decisions are single-use structured replies', async () => {
   const { transport, cwd, events, frames } = await setup('approval'); await transport.start({ cwd });
   const pending = prompt(transport); await until(() => events.some((e) => e.type === 'interaction.requested'));
   const interactionId = events.find((e) => e.type === 'interaction.requested').interactionId;
-  assert.deepEqual(events.find((e) => e.type === 'interaction.requested').options.map((o) => o.optionId), ['accept', 'acceptForSession', 'decline', 'cancel']);
-  await assert.rejects(transport.answerInteraction({ interactionId, optionId: 'approve' }), { code: 'invalid_interaction_option' });
+  assert.deepEqual(events.find((e) => e.type === 'interaction.requested').options.map((o) => o.optionId), ['accept', 'decline']);
+  await assert.rejects(transport.answerInteraction({ interactionId, optionId: 'acceptForSession' }), { code: 'invalid_interaction_option' });
   await transport.answerInteraction({ interactionId, optionId: 'decline' });
   await assert.rejects(transport.answerInteraction({ interactionId, optionId: 'decline' }), { code: 'interaction_not_open' });
   await pending;
@@ -135,8 +135,10 @@ test('server requests round-trip session grants, permission profiles, user-input
     assert.deepEqual(perm.options.map((o) => o.optionId), ['accept', 'acceptForSession', 'decline']);
     assert.deepEqual([color.kind, color.toolCall.title, color.options.map((o) => o.optionId)], ['selection', 'Color: Pick a color', ['Red', 'Blue']]);
     assert.equal(name.kind, 'unknown_blocking');
+    assert.deepEqual(file.options.map((o) => o.optionId), ['accept', 'acceptForSession', 'decline', 'cancel']);
     await transport.answerInteraction({ interactionId: file.interactionId, optionId: decision });
     await transport.answerInteraction({ interactionId: perm.interactionId, optionId: decision });
+    await assert.rejects(transport.answerInteraction({ interactionId: color.interactionId, text: 'Green' }), { code: 'invalid_interaction_option' });
     await transport.answerInteraction({ interactionId: color.interactionId, optionId: 'Blue' });
     assert.equal(transport.snapshot().lifecycle, 'blocked');
     await assert.rejects(transport.answerInteraction({ interactionId: name.interactionId }), { code: 'invalid_interaction_option' });

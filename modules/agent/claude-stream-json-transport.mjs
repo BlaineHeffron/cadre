@@ -76,7 +76,7 @@ export class ClaudeStreamJsonTransport {
       protocol: { name: 'claude-stream-json', version: '1' },
       delivery: 'structured',
       cancellation: 'best_effort',
-      interaction: { permissions: 'structured_options', elicitation: false, questions: true, answerOnce: true },
+      interaction: { permissions: 'structured_options', elicitation: false, answerOnce: true },
       streaming: 'deltas_and_committed_messages',
       streamFeatures: { tool_events: true, thought_events: true, plan: false, usage: true },
       transcript: 'committed_text',
@@ -199,7 +199,7 @@ export class ClaudeStreamJsonTransport {
 
   async answerInteraction({ interactionId, optionId, text } = {}) {
     const entry = this.interactions.get(String(interactionId || ''));
-    if (!entry || entry.answered) {
+    if (!entry) {
       const error = new Error('Interaction is missing or already answered');
       error.code = 'interaction_not_open'; error.statusCode = 409; throw error;
     }
@@ -224,7 +224,6 @@ export class ClaudeStreamJsonTransport {
       });
     }
     if (entry.question) entry.pending.remaining -= 1;
-    entry.answered = true;
     this.interactions.delete(entry.interactionId);
     if (this.currentTurn && !this.interactions.size) this.lifecycle = 'working';
     this.#emit('interaction.answered', { interactionId: entry.interactionId, optionId });
@@ -314,7 +313,7 @@ export class ClaudeStreamJsonTransport {
       if (!requestId || this.interactions.has(`${this.attemptId}:${requestId}`)) return;
       const interactionId = `${this.attemptId}:${requestId}`;
       const request = message.request;
-      const base = { requestId, toolUseId: String(request.tool_use_id || ''), input: structuredClone(request.input || {}), answered: false };
+      const base = { requestId, toolUseId: String(request.tool_use_id || ''), input: structuredClone(request.input || {}) };
       const questions = request.tool_name === 'AskUserQuestion' ? base.input.questions || [] : [];
       this.lifecycle = 'blocked';
       if (questions.length) {
@@ -329,7 +328,8 @@ export class ClaudeStreamJsonTransport {
         });
         return;
       }
-      const suggestions = request.permission_suggestions || [];
+      // Session grants forward only rule suggestions; setMode/addDirectories would silently widen the session.
+      const suggestions = (request.permission_suggestions || []).filter((item) => /Rules$/.test(item?.type));
       const options = [
         { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
         ...(suggestions.length ? [{ optionId: 'allow_session', name: 'Allow for session', kind: 'allow_always' }] : []),
