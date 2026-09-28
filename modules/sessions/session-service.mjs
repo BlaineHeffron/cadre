@@ -12,6 +12,7 @@ import { recordSessionDeliveryAudit } from './delivery-audit.mjs';
 import { assertSessionDeletable } from './journal-store.mjs';
 
 const ACTIVE_TURNS = new Set(['queued', 'admitted', 'inflight']);
+const UNSETTLED_INTERACTIONS = new Set(['open', 'answer_timeout']);
 // Not representable by an HTTP/MCP caller's source string or JSON body.
 export const TASK_ADMISSION = Symbol('task admission');
 const TRANSITIONS = Object.freeze({
@@ -245,7 +246,7 @@ function reduceSessionEvent(session, event) {
       session.detail = transportEvent.toolCall?.title || 'Permission required';
     } else if (transportEvent.type === 'interaction.answered') {
       const interaction = session.interactions.find((item) => item.interactionId === transportEvent.interactionId);
-      if (interaction?.status === 'open') {
+      if (UNSETTLED_INTERACTIONS.has(interaction?.status)) {
         interaction.status = 'answered';
         interaction.answer = transportEvent.optionId ? { optionId: transportEvent.optionId } : { text: transportEvent.text || '' };
         interaction.answeredAt = event.recordedAt;
@@ -253,7 +254,7 @@ function reduceSessionEvent(session, event) {
       if (session.lifecycle === 'blocked') session.lifecycle = session.activeTurnId ? 'working' : 'ready';
     } else if (transportEvent.type === 'interaction.cancelled') {
       const interaction = session.interactions.find((item) => item.interactionId === transportEvent.interactionId);
-      if (interaction?.status === 'open') {
+      if (UNSETTLED_INTERACTIONS.has(interaction?.status)) {
         interaction.status = 'cancelled';
         interaction.answeredAt = event.recordedAt;
       }
@@ -660,14 +661,23 @@ export class SessionService {
       throw error;
     }
     this.assertExpectedState(sessionId, expected);
+    const answer = optionId ? { optionId: String(optionId) } : { text: String(answerText || '') };
     // Answers hold the session lock, so a wedged provider write must not block
-    // delete/terminate forever: fail the answer and leave the interaction open.
+    // delete/terminate forever. The write may still land, so the interaction is
+    // fenced with an unknown outcome (no retries) until the provider reports it.
     let timer;
+    const timeout = Symbol('timeout');
     const result = await Promise.race([
       session.transport.answerInteraction({ interactionId, optionId, text: answerText }),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('Provider did not accept the answer in time'), { code: 'interaction_answer_timeout', statusCode: 504 })), this.answerTimeoutMs); }),
+      new Promise((resolve) => { timer = setTimeout(resolve, this.answerTimeoutMs, timeout); }),
     ]).finally(() => clearTimeout(timer));
-    const answer = optionId ? { optionId: String(optionId) } : { text: String(answerText || '') };
+    if (result === timeout) {
+      await this.#append(session, 'interaction.updated', {
+        interactionId,
+        patch: { status: 'answer_timeout', outcome: 'unknown', answer, actor: authorityAudit.actor, policy: authorityAudit.policy, authority: authorityAudit },
+      });
+      throw Object.assign(new Error('Provider did not accept the answer in time; outcome unknown'), { code: 'interaction_answer_timeout', statusCode: 504 });
+    }
     await this.#append(session, 'interaction.updated', {
       interactionId,
       patch: {
@@ -909,7 +919,9 @@ export class SessionService {
 
   #observeProtocol(session) {
     const execution = ['working', 'blocked', 'cancelling'].includes(session.lifecycle) ? 'working' : session.lifecycle === 'ready' ? 'idle' : 'unknown';
-    const openInteraction = session.interactions.find((item) => item.status === 'open');
+    const openInteraction = session.interactions.find((item) => UNSETTLED_INTERACTIONS.has(item.status));
+    // A timed-out answer keeps the session blocked but not answerable until the provider settles it.
+    const fenced = openInteraction?.status === 'answer_timeout';
     const lifecycle = ['ended', 'interrupted'].includes(session.lifecycle) ? 'ended' : session.lifecycle === 'created' || session.lifecycle === 'starting' ? 'starting' : 'running';
     const observedAt = this.now();
     try {
@@ -925,13 +937,15 @@ export class SessionService {
         {
           source: 'protocol', kind: 'interaction',
           value: openInteraction ? {
-            kind: openInteraction.kind, detail: openInteraction.toolCall?.title || 'Permission required',
-            options: (openInteraction.options || []).map((option) => ({
+            kind: fenced ? 'unknown_blocking' : openInteraction.kind,
+            detail: fenced ? 'Answer outcome unknown; waiting for the provider' : openInteraction.toolCall?.title || 'Permission required',
+            options: (fenced ? [] : openInteraction.options || []).map((option) => ({
               key: option.optionId, value: option.optionId, label: option.name || option.optionId, kind: option.kind || '',
             })),
             fingerprint: openInteraction.interactionId, stable: true,
           } : session.lifecycle === 'ready' ? { kind: 'free_text', detail: '', options: [], fingerprint: `ready:${session.revision}`, stable: true } : { kind: 'none', detail: '', options: [], fingerprint: '', stable: true },
-          observedAt, expiresAt: 0, fingerprint: openInteraction?.interactionId || `protocol:interaction:${session.revision}`,
+          // The snapshot fingerprint comes from here; empty while fenced so nothing can answer it.
+          observedAt, expiresAt: 0, fingerprint: fenced ? '' : openInteraction?.interactionId || `protocol:interaction:${session.revision}`,
         },
       ]);
     } catch {

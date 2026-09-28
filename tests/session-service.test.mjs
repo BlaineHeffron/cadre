@@ -338,6 +338,38 @@ describe('SessionService', () => {
     await harness.service.close({ interrupt: false });
   });
 
+  it('fences a timed-out answer as unknown until the provider reports the outcome', { timeout: 15000 }, async () => {
+    let transport;
+    const harness = await fixture({ answerTimeoutMs: 50, factory: () => { transport = new FakeTransport(); return transport; } });
+    const created = await harness.service.start({ workDir: harness.workDir, permissionMode: 'workspace-write' });
+    await harness.service.prompt(created.id, { blocks: [{ type: 'text', text: 'needs permission' }], idempotencyKey: 'fence-key' });
+    await waitFor(() => harness.service.get(created.id).turns[0]?.status === 'inflight');
+    const interactionId = transport.permission();
+    await waitFor(() => harness.service.get(created.id).lifecycle === 'blocked');
+    const calls = [];
+    transport.answerInteraction = (input) => { calls.push(input.optionId); return new Promise(() => {}); };
+    const authority = { actor: 'dashboard:user:1', principalType: 'ui', decision: 'allowed' };
+    await assert.rejects(harness.service.answerInteraction(created.id, { interactionId, optionId: 'allow_once', authority }),
+      (error) => error.code === 'interaction_answer_timeout' && error.statusCode === 504);
+    const fenced = harness.service.get(created.id);
+    assert.deepEqual([fenced.interactions[0].status, fenced.interactions[0].outcome, fenced.interactions[0].authority.actor],
+      ['answer_timeout', 'unknown', 'dashboard:user:1']);
+    const { canonicalState } = fenced;
+    assert.deepEqual([canonicalState.status, canonicalState.interaction.kind, canonicalState.capabilities.needsAttention,
+      canonicalState.capabilities.sendMessage, canonicalState.capabilities.canAnswerInteraction], ['blocked', 'unknown_blocking', true, false, false]);
+    await assert.rejects(harness.service.answerInteraction(created.id, { interactionId, optionId: 'deny', authority }),
+      (error) => error.code === 'interaction_not_open' && error.statusCode === 409);
+    assert.deepEqual(calls, ['allow_once']);
+    // The first write lands late; the provider's report settles the interaction with the real answer.
+    transport.emit('interaction.answered', { interactionId, optionId: 'allow_once' });
+    await waitFor(() => harness.service.get(created.id).lifecycle === 'working');
+    const settled = harness.service.get(created.id);
+    assert.deepEqual([settled.interactions[0].status, settled.interactions[0].answer, settled.canonicalState.status, settled.canonicalState.capabilities.needsAttention],
+      ['answered', { optionId: 'allow_once' }, 'working', false]);
+    transport.queue.close();
+    await harness.service.close({ interrupt: false });
+  });
+
   it('records and denies an agent attempt to self-approve a permission interaction', { timeout: 15000 }, async () => {
     let transport;
     const harness = await fixture({ factory: () => { transport = new FakeTransport(); return transport; } });
