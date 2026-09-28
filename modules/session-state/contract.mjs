@@ -72,6 +72,10 @@ export function deepFreeze(value) {
   return Object.freeze(value);
 }
 
+export function canonicalSessionStateId(kind, sessionId) {
+  return `${String(kind || '').trim().toLowerCase()}:${String(sessionId || '').trim()}`;
+}
+
 export function createInitialSnapshot(sessionId, now = 0) {
   if (!String(sessionId || '').trim()) throw new TypeError('sessionId is required');
   const timestamp = Number.isFinite(Number(now)) ? Number(now) : 0;

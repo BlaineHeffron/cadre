@@ -225,7 +225,7 @@ describe('DeepSeek Harness ACP sessions', () => {
     });
     assert.equal(detail.statusCode, 200);
     assert.equal(detail.json().state.status, 'ready');
-    assert.equal(detail.json().state.transcriptGrade, 'committed_text');
+    assert.equal(detail.json().transcriptGrade, 'committed_text');
     assert.match(detail.json().content, /> Run the tests/);
     assert.match(detail.json().content, /Finished/);
     assert.deepEqual(harness.clients[0].prompts, ['Run the tests']);
@@ -365,10 +365,17 @@ describe('DeepSeek Harness ACP sessions', () => {
     const blocked = await harness.app.inject({ method: 'GET', url: `/api/deepseek/sessions/${id}` });
     assert.equal(blocked.json().state.status, 'blocked');
 
+    const { state } = blocked.json();
+    const guards = { expectedRevision: state.revision, expectedFingerprint: state.interaction.fingerprint, expectedInteractionKind: 'permission' };
+    const stale = await harness.app.inject({
+      method: 'POST', url: `/api/deepseek/sessions/${id}/keys`, payload: { keys: 'allow_once', ...guards, expectedRevision: state.revision - 1 },
+    });
+    assert.deepEqual([stale.statusCode, stale.json().code, harness.clients[0].permissionAnswers], [409, 'interaction_changed', []]);
+
     const answered = await harness.app.inject({
       method: 'POST',
       url: `/api/deepseek/sessions/${id}/input`,
-      payload: { text: 'allow_once' },
+      payload: { text: 'allow_once', ...guards },
     });
     assert.equal(answered.statusCode, 200);
     assert.deepEqual(harness.clients[0].permissionAnswers, [{ requestId: 42, optionId: 'allow_once' }]);

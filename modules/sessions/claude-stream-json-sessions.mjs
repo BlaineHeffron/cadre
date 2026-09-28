@@ -17,7 +17,7 @@ import { buildPromptLaunchArgs, cleanupPromptProfileLaunch, preparePromptProfile
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { permissionAuthorityForRequest } from '../platform/auth.mjs';
 import { buildAgentBusMcpUrl, seedClaudeWorkspaceTrust } from '../platform/mcp-seed.mjs';
-import { observe as observeSessionState } from '../session-state/tracker.mjs';
+import { projectCompatibility } from '../session-state/contract.mjs';
 import { createJournalStore } from './journal-store.mjs';
 import { assertValidClaudeModel } from './claude-models.mjs';
 import { registerProtocolSessionProvider } from './protocol-session-registry.mjs';
@@ -57,41 +57,15 @@ function content(session) {
 }
 
 export function projectClaudeStreamJsonSession(session) {
-  const interaction = openInteraction(session);
-  const ended = ['ended', 'interrupted'].includes(session.lifecycle);
-  const ready = session.lifecycle === 'ready';
-  const busy = ['working', 'cancelling'].includes(session.lifecycle);
-  const blocked = session.lifecycle === 'blocked';
-  const state = {
-    state: blocked ? 'needs_approval' : ready ? 'waiting_for_input' : ended ? 'ended' : session.lifecycle,
-    status: ended ? 'ended' : session.lifecycle,
-    reason: session.detail || session.lifecycle,
-    detail: session.detail || '', revision: session.revision, updatedAt: session.updatedAt,
-    lifecycle: ended ? 'ended' : 'running', execution: busy || blocked ? 'busy' : 'idle',
-    interaction: interaction ? {
-      kind: interaction.kind,
-      detail: interaction.toolCall?.title || 'Permission required',
-      options: (interaction.options || []).map((option) => ({
-        key: option.optionId, value: option.optionId, label: option.name || option.optionId, kind: option.kind || '',
-      })),
-      fingerprint: interaction.interactionId,
-    } : { kind: ready ? 'free_text' : 'none', detail: '', options: [], fingerprint: '' },
-    capabilities: {
-      canQueueMessage: ready, canSendNow: ready, canAnswerInteraction: blocked,
-      canInterrupt: busy || blocked, sendMessage: ready, clear: false, interrupt: busy || blocked,
-      autoClose: ended, needsAttention: blocked,
-    },
-    runtime: { provider: 'claude', harness: 'claude', transport: 'stream-json' },
-    inputType: blocked ? 'permission' : ready ? 'free_text' : null, pendingResponse: busy || blocked,
-    transcriptGrade: 'committed_text',
-  };
+  const state = projectCompatibility(session.canonicalState);
   return {
     id: session.id, name: `claude-${session.id}`, sessionName: `claude-${session.id}`,
     displayName: session.displayName, provider: 'claude', runtime: 'claude',
     source: 'stream_json_committed_text', transport: 'stream-json', transcriptGrade: 'committed_text',
     workDir: session.workDir, created: session.createdAt, content: content(session),
     diagnostics: session.diagnostics.map((entry) => entry.message || '').join('\n'),
-    state, canonicalState: state, pendingResponse: busy || blocked ? { sentAt: session.updatedAt } : null,
+    state, canonicalState: session.canonicalState,
+    pendingResponse: state.execution === 'working' ? { sentAt: session.updatedAt } : null,
     canResume: false, nonResumable: session.nonResumable || session.lifecycle === 'interrupted',
     endedWithHistory: session.endedWithHistory || session.lifecycle === 'interrupted', attachCommand: '',
     attempts: session.attempts, turns: session.turns, negotiated: session.negotiated,
@@ -110,7 +84,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   mcpCatalog = null,
   versionReader = readClaudeStreamJsonVersion, e2eEvidence = null,
   sessionRoot = runtimeStatePath('claude_stream_json_sessions'),
-  sessionDeliveryAuditStore = null, observationSink = observeSessionState, attachmentStore = null,
+  sessionDeliveryAuditStore = null, attachmentStore = null,
 } = {}) {
   await mkdir(sessionRoot, { recursive: true });
   const processSupervisor = supervisor || new ProcessSupervisor({ ledgerPath: resolve(sessionRoot, 'ledger.json') });
@@ -118,7 +92,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   const service = new SessionService({
     provider: 'claude', journal: journal || createJournalStore({ rootDir: resolve(sessionRoot, 'journal') }),
     attachmentStore: attachmentStore || new AttachmentStore({ rootDir: resolve(sessionRoot, 'attachments') }),
-    deliveryAuditStore: sessionDeliveryAuditStore, observationSink, logger: app.log,
+    deliveryAuditStore: sessionDeliveryAuditStore, logger: app.log,
     transportFactory: (spec) => transportFactory?.(spec) || new ClaudeStreamJsonTransport({
       binary, env: spec.env, supervisor: processSupervisor, capabilityEvidence: spec.capabilityEvidence,
     }),
@@ -292,8 +266,10 @@ export async function claudeStreamJsonSessionsPlugin(app, {
           interactionId: interaction.interactionId,
           optionId: text(req.body?.optionId || req.body?.text || req.body?.keys),
           authority: await interactionAuthority(req, session, interaction),
+        expected: req.body || {},
         });
       } else {
+        service.assertExpectedState(session.id, req.body || {});
         await service.prompt(req.params.id, {
           blocks, idempotencyKey: text(req.body?.idempotencyKey) || randomBytes(16).toString('hex'),
           source: text(req.body?.source) || 'api',
@@ -319,6 +295,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         optionId: text(req.body?.optionId) || undefined,
         text: text(req.body?.text) || undefined,
         authority: await interactionAuthority(req, session, interaction),
+        expected: req.body || {},
       });
       return { ok: true, state: 'sent' };
     } catch (error) { return errorReply(reply, error); }

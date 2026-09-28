@@ -328,18 +328,24 @@ export class AcpTransport {
   async terminate({ grace = 500 } = {}) {
     if (!this.instanceId) return { ok: true, status: 'already_gone', residual: [] };
     this.terminating = true;
-    for (const entry of [...this.interactions.values()]) {
-      try {
-        await this.codec?.respond(entry.requestId, { outcome: { outcome: 'cancelled' } });
-        this.#emit('interaction.cancelled', { interactionId: entry.interactionId }, 'secret');
-      } catch {
-        // Termination still proceeds; transport failure is reflected by verdict.
+    // Graceful writes are bounded by the grace period: a child that stops reading
+    // stdin (or a hung earlier write) must never block the kill below.
+    let timer;
+    await Promise.race([(async () => {
+      for (const entry of [...this.interactions.values()]) {
+        try {
+          await this.codec?.respond(entry.requestId, { outcome: { outcome: 'cancelled' } });
+          this.#emit('interaction.cancelled', { interactionId: entry.interactionId }, 'secret');
+        } catch {
+          // Termination still proceeds; transport failure is reflected by verdict.
+        }
       }
-    }
+      if (this.currentTurn && this.codec && !this.codec.closed) {
+        await this.codec.notify('session/cancel', { sessionId: this.protocolSessionId }).catch(() => {});
+      }
+    })(), new Promise((resolve) => { timer = setTimeout(resolve, Number(grace) || 0); })]);
+    clearTimeout(timer);
     this.interactions.clear();
-    if (this.currentTurn && this.codec && !this.codec.closed) {
-      await this.codec.notify('session/cancel', { sessionId: this.protocolSessionId }).catch(() => {});
-    }
     try { this.child?.stdin?.end?.(); } catch { /* ignored */ }
     const verdict = await this.supervisor.terminate(this.instanceId, { graceMs: Number(grace) || 0 });
     this.codec?.close(new Error('ACP transport terminated'));

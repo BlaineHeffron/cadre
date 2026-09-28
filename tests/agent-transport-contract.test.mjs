@@ -199,6 +199,22 @@ describe('AgentTransport contract: AcpTransport', () => {
     assert.deepEqual(verdict.residual, []);
   });
 
+  it('kills the runtime within the grace period when cancellation writes are stuck', async () => {
+    const terminateCalls = [];
+    const transport = new AcpTransport({ configPath: '/tmp/fake-acp.yml', supervisor: {
+      runtime: () => null,
+      async terminate(instanceId) { terminateCalls.push(instanceId); return { ok: true, status: 'terminated', residual: [] }; },
+    } });
+    Object.assign(transport, { instanceId: 'runtime-stuck', protocolSessionId: 'p', attemptId: 'a', currentTurn: { turnId: 't', events: [] } });
+    transport.interactions.set('i', { interactionId: 'i', requestId: 1 });
+    // A child that stopped reading stdin: every write (behind the hung answer) never settles.
+    transport.codec = { closed: false, respond: () => new Promise(() => {}), notify: () => new Promise(() => {}), close() {} };
+    const startedAt = Date.now();
+    assert.equal((await transport.terminate({ grace: 50 })).status, 'terminated');
+    assert.ok(Date.now() - startedAt < 1000);
+    assert.deepEqual([terminateCalls, transport.lifecycle, transport.interactions.size], [['runtime-stuck'], 'ended', 0]);
+  });
+
   it('orders and answers a structured permission exactly once', { timeout: 15000 }, async () => {
     const { transport, workDir, args } = await harness('permission');
     await transport.start({ cwd: workDir, args });

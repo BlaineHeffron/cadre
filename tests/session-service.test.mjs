@@ -6,6 +6,7 @@ import { afterEach, describe, it } from 'node:test';
 import { AsyncEventQueue, createBaseCapabilities, createTransportEvent, unsupportedCapability } from '../modules/agent/agent-transport.mjs';
 import { FileJournalStore } from '../modules/sessions/journal-store.mjs';
 import { reduceSessionEvent, SessionService } from '../modules/sessions/session-service.mjs';
+import { createSessionStateTracker } from '../modules/session-state/tracker.mjs';
 
 const roots = [];
 afterEach(async () => {
@@ -82,14 +83,14 @@ class FakeTransport {
   async terminate() { this.closed = true; this.queue.close(); return { ok: true, status: 'terminated', residual: [] }; }
 }
 
-async function fixture({ factory, auditStore = null, attachmentStore = null } = {}) {
+async function fixture({ factory, auditStore = null, attachmentStore = null, answerTimeoutMs } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dueno-session-service-'));
   roots.push(root);
   const workDir = join(root, 'work');
   await mkdir(workDir);
   const journal = new FileJournalStore({ rootDir: join(root, 'journal') });
   const service = new SessionService({
-    journal, transportFactory: factory, deliveryAuditStore: auditStore, attachmentStore,
+    journal, transportFactory: factory, deliveryAuditStore: auditStore, attachmentStore, answerTimeoutMs,
   });
   await service.init();
   return { root, workDir, journal, service };
@@ -291,6 +292,103 @@ describe('SessionService', () => {
     await harness.service.close();
   });
 
+  it('lets exactly one of two concurrent conflicting answers reach the provider', { timeout: 15000 }, async () => {
+    let transport;
+    const harness = await fixture({ factory: () => { transport = new FakeTransport(); return transport; } });
+    const created = await harness.service.start({ workDir: harness.workDir, permissionMode: 'workspace-write' });
+    await harness.service.prompt(created.id, { blocks: [{ type: 'text', text: 'needs permission' }], idempotencyKey: 'race-key' });
+    await waitFor(() => harness.service.get(created.id).turns[0]?.status === 'inflight');
+    const interactionId = transport.permission();
+    await waitFor(() => harness.service.get(created.id).lifecycle === 'blocked');
+    // Like the real Claude transport: the write is slow and does not dedupe answers itself.
+    const calls = [];
+    transport.answerInteraction = async (input) => { calls.push(input.optionId); await new Promise((r) => setTimeout(r, 20)); return { ok: true }; };
+    const { canonicalState } = harness.service.get(created.id);
+    const expected = { expectedRevision: canonicalState.revision, expectedFingerprint: canonicalState.interaction.fingerprint, expectedInteractionKind: 'permission' };
+    const authority = { actor: 'dashboard:user:1', principalType: 'ui', decision: 'allowed' };
+    const results = await Promise.allSettled(['allow_once', 'deny'].map((optionId) => (
+      harness.service.answerInteraction(created.id, { interactionId, optionId, authority, expected })
+    )));
+    assert.deepEqual(results.map((result) => result.status), ['fulfilled', 'rejected']);
+    assert.equal(results[1].reason.statusCode, 409);
+    assert.deepEqual(calls, ['allow_once']);
+    const interaction = harness.service.get(created.id).interactions[0];
+    assert.deepEqual([interaction.status, interaction.answer, interaction.authorityAudit.length], ['answered', { optionId: 'allow_once' }, 1]);
+    transport.queue.close();
+    await harness.service.close({ interrupt: false });
+  });
+
+  it('fails a hung provider answer so delete still terminates the session', { timeout: 15000 }, async () => {
+    let transport;
+    const harness = await fixture({ answerTimeoutMs: 50, factory: () => { transport = new FakeTransport(); return transport; } });
+    const created = await harness.service.start({ workDir: harness.workDir, permissionMode: 'workspace-write' });
+    await harness.service.prompt(created.id, { blocks: [{ type: 'text', text: 'needs permission' }], idempotencyKey: 'hung-key' });
+    await waitFor(() => harness.service.get(created.id).turns[0]?.status === 'inflight');
+    const interactionId = transport.permission();
+    await waitFor(() => harness.service.get(created.id).lifecycle === 'blocked');
+    transport.answerInteraction = () => new Promise(() => {}); // provider stopped reading its stdin
+    const answering = harness.service.answerInteraction(created.id, {
+      interactionId, optionId: 'allow_once', authority: { actor: 'dashboard:user:1', principalType: 'ui', decision: 'allowed' },
+    });
+    const deleting = harness.service.delete(created.id);
+    await assert.rejects(answering, (error) => error.code === 'interaction_answer_timeout' && error.statusCode === 504);
+    assert.equal((await deleting).status, 'deleted');
+    assert.equal(transport.closed, true);
+    assert.equal(harness.service.get(created.id), null);
+    await harness.service.close({ interrupt: false });
+  });
+
+  it('fences a timed-out answer as unknown until the provider reports the outcome', { timeout: 15000 }, async () => {
+    let transport;
+    const harness = await fixture({ answerTimeoutMs: 50, factory: () => { transport = new FakeTransport(); return transport; } });
+    const created = await harness.service.start({ workDir: harness.workDir, permissionMode: 'workspace-write' });
+    await harness.service.prompt(created.id, { blocks: [{ type: 'text', text: 'needs permission' }], idempotencyKey: 'fence-key' });
+    await waitFor(() => harness.service.get(created.id).turns[0]?.status === 'inflight');
+    const interactionId = transport.permission();
+    await waitFor(() => harness.service.get(created.id).lifecycle === 'blocked');
+    const calls = [];
+    transport.answerInteraction = (input) => { calls.push(input.optionId); return new Promise(() => {}); };
+    const authority = { actor: 'dashboard:user:1', principalType: 'ui', decision: 'allowed' };
+    await assert.rejects(harness.service.answerInteraction(created.id, { interactionId, optionId: 'allow_once', authority }),
+      (error) => error.code === 'interaction_answer_timeout' && error.statusCode === 504);
+    const fenced = harness.service.get(created.id);
+    assert.deepEqual([fenced.interactions[0].status, fenced.interactions[0].outcome, fenced.interactions[0].authority.actor],
+      ['answer_timeout', 'unknown', 'dashboard:user:1']);
+    const { canonicalState } = fenced;
+    assert.deepEqual([canonicalState.status, canonicalState.interaction.kind, canonicalState.capabilities.needsAttention,
+      canonicalState.capabilities.sendMessage, canonicalState.capabilities.canAnswerInteraction], ['blocked', 'unknown_blocking', true, false, false]);
+    await assert.rejects(harness.service.answerInteraction(created.id, { interactionId, optionId: 'deny', authority }),
+      (error) => error.code === 'interaction_not_open' && error.statusCode === 409);
+    assert.deepEqual(calls, ['allow_once']);
+    // The first write lands late; the provider's report settles the interaction with the real answer.
+    transport.emit('interaction.answered', { interactionId, optionId: 'allow_once' });
+    await waitFor(() => harness.service.get(created.id).lifecycle === 'working');
+    const settled = harness.service.get(created.id);
+    assert.deepEqual([settled.interactions[0].status, settled.interactions[0].answer, settled.canonicalState.status, settled.canonicalState.capabilities.needsAttention],
+      ['answered', { optionId: 'allow_once' }, 'working', false]);
+    transport.queue.close();
+    await harness.service.close({ interrupt: false });
+  });
+
+  it('stops projecting a fenced answer as blocking once the session ends', { timeout: 15000 }, async () => {
+    let transport;
+    const harness = await fixture({ answerTimeoutMs: 50, factory: () => { transport = new FakeTransport(); return transport; } });
+    const created = await harness.service.start({ workDir: harness.workDir, permissionMode: 'workspace-write' });
+    await harness.service.prompt(created.id, { blocks: [{ type: 'text', text: 'needs permission' }], idempotencyKey: 'fence-end-key' });
+    await waitFor(() => harness.service.get(created.id).turns[0]?.status === 'inflight');
+    const interactionId = transport.permission();
+    await waitFor(() => harness.service.get(created.id).lifecycle === 'blocked');
+    transport.answerInteraction = () => new Promise(() => {});
+    await assert.rejects(harness.service.answerInteraction(created.id, {
+      interactionId, optionId: 'allow_once', authority: { actor: 'dashboard:user:1', principalType: 'ui', decision: 'allowed' },
+    }), (error) => error.code === 'interaction_answer_timeout');
+    assert.equal(harness.service.get(created.id).canonicalState.capabilities.needsAttention, true);
+    await harness.service.terminate(created.id);
+    const { canonicalState } = harness.service.get(created.id);
+    assert.deepEqual([canonicalState.interaction.kind, canonicalState.capabilities.needsAttention], ['none', false]);
+    await harness.service.close({ interrupt: false });
+  });
+
   it('records and denies an agent attempt to self-approve a permission interaction', { timeout: 15000 }, async () => {
     let transport;
     const harness = await fixture({ factory: () => { transport = new FakeTransport(); return transport; } });
@@ -442,7 +540,7 @@ describe('SessionService', () => {
     await harness.service.close({ interrupt: false });
   });
 
-  it('keeps consuming transport events when the observation sink throws', { timeout: 15000 }, async () => {
+  it('keeps consuming transport events when state observation throws', { timeout: 15000 }, async () => {
     let transport;
     const root = await mkdtemp(join(tmpdir(), 'dueno-session-service-'));
     roots.push(root);
@@ -451,7 +549,7 @@ describe('SessionService', () => {
     const journal = new FileJournalStore({ rootDir: join(root, 'journal') });
     const service = new SessionService({
       journal,
-      observationSink: () => { throw new Error('sink down'); },
+      stateTracker: { ...createSessionStateTracker(), observe() { throw new Error('tracker down'); } },
       transportFactory: () => { transport = new FakeTransport({ settle: true }); return transport; },
     });
     await service.init();

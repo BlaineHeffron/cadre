@@ -1,5 +1,5 @@
 import { computed, signal } from '@preact/signals';
-import { agentBusAlerts, agentThreads, claudeSessions, codexSessions, piSessions, sessionPromptNotifications } from './state.mjs';
+import { agentBusAlerts, agentThreads, claudeSessions, codexSessions, deepseekSessions, piSessions, sessionPromptNotifications } from './state.mjs';
 import { providerDescriptor } from './providers.mjs';
 import { sessionTitle } from './agent-bus-ui.mjs';
 
@@ -168,10 +168,11 @@ function attentionItemFromSession(kind, session) {
     revision: session?.state?.revision,
     interactionKind: session?.state?.interaction?.kind || 'none',
     interactionFingerprint: session?.state?.interaction?.fingerprint || '',
+    // A ready session only needs attention for a reason (runtime mismatch); show it.
     statusLabel: status === 'blocked'
       ? 'needs approval'
       : status === 'ready'
-        ? 'prompt ready'
+        ? session?.state?.reason || 'needs attention'
         : 'needs attention',
     providerLabel: descriptor.label,
     name,
@@ -211,14 +212,10 @@ function attentionItemFromDelivery(alert) {
 
 export const attentionItems = computed(() => {
   const rows = [];
-  for (const session of claudeSessions.value) {
-    if (session?.state?.capabilities?.needsAttention === true) rows.push(attentionItemFromSession('claude', session));
-  }
-  for (const session of codexSessions.value) {
-    if (session?.state?.capabilities?.needsAttention === true) rows.push(attentionItemFromSession('codex', session));
-  }
-  for (const session of piSessions.value) {
-    if (session?.state?.capabilities?.needsAttention === true) rows.push(attentionItemFromSession('pi', session));
+  for (const [kind, sessions] of [['claude', claudeSessions], ['codex', codexSessions], ['deepseek', deepseekSessions], ['pi', piSessions]]) {
+    for (const session of sessions.value) {
+      if (session?.state?.capabilities?.needsAttention === true) rows.push(attentionItemFromSession(kind, session));
+    }
   }
   for (const alert of agentBusAlerts.value) {
     if (alert?.type === 'delivery_failed') rows.push(attentionItemFromDelivery(alert));

@@ -7,6 +7,7 @@ import { ProcessSupervisor } from '../agent/process-supervisor.mjs';
 import { prepareAgentBusCredentialLaunch, cleanupAgentBusCredentialLaunch } from '../integrations/mcp-launch-preflight.mjs';
 import { buildAgentBusMcpUrl } from '../platform/mcp-seed.mjs';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
+import { projectCompatibility } from '../session-state/contract.mjs';
 import { SessionService } from './session-service.mjs';
 import { createJournalStore } from './journal-store.mjs';
 import { registerProtocolSessionProvider } from './protocol-session-registry.mjs';
@@ -16,26 +17,15 @@ import { config } from '../../config.mjs';
 import { withCadreEnv } from '../platform/cadre-env.mjs';
 
 export function projectCodexAppServerSession(session) {
-  const ready = session.lifecycle === 'ready';
-  const ended = ['ended', 'interrupted'].includes(session.lifecycle);
-  const busy = ['working', 'blocked', 'cancelling'].includes(session.lifecycle);
-  const interaction = session.interactions.find((entry) => entry.status === 'open');
-  const state = { state: ready ? 'waiting_for_input' : session.lifecycle, status: session.lifecycle,
-    lifecycle: ended ? 'ended' : 'running', execution: busy ? 'busy' : 'idle',
-    detail: session.detail, revision: session.revision, updatedAt: session.updatedAt,
-    runtime: { provider: 'codex-app-server', harness: 'codex', transport: 'app-server' },
-    interaction: interaction ? { kind: interaction.kind, fingerprint: interaction.interactionId,
-      detail: interaction.toolCall?.title, options: interaction.options } : { kind: ready ? 'free_text' : 'none', options: [] },
-    capabilities: { canSendNow: ready, canQueueMessage: ready, canInterrupt: busy, canAnswerInteraction: Boolean(interaction) },
-  };
+  const state = projectCompatibility(session.canonicalState);
   const deltaTurns = new Set(session.transcript.filter((entry) => entry.type === 'message.delta').map((entry) => entry.turnId));
   const content = session.transcript.map((entry) => entry.type === 'message.delta' ? entry.delta?.text || ''
     : entry.type === 'message.committed' && !deltaTurns.has(entry.turnId) ? entry.blocks?.map((block) => block.text || '').join('') || ''
       : entry.type === 'user.message' ? `\n> ${(entry.blocks || []).map((block) => block.text || '').join('\n')}\n` : '').join('');
   return { ...session, name: `codex-${session.id}`, sessionName: `codex-${session.id}`, provider: 'codex-app-server', runtime: 'codex',
     transport: 'app-server', source: 'app_server_committed_text', transcriptGrade: 'committed_text', content,
-    state, canonicalState: state, created: session.createdAt,
-    pendingResponse: busy ? { sentAt: session.updatedAt } : null,
+    state, created: session.createdAt,
+    pendingResponse: state.execution === 'working' ? { sentAt: session.updatedAt } : null,
     canResume: session.negotiated?.sessionOps?.resume === 'supported', attachCommand: '' };
 }
 
@@ -47,13 +37,13 @@ export async function createCodexAppServerSessionProvider({
   credentialStore, prepareLaunch = prepareAgentBusCredentialLaunch,
   cleanupLaunch = cleanupAgentBusCredentialLaunch, modelValidator = assertValidCodexModel,
   prepareHeadroom = prepareHeadroomLaunch,
-  observationSink, deliveryAuditStore, logger,
+  deliveryAuditStore, logger,
 } = {}) {
   await mkdir(sessionRoot, { recursive: true });
   const processSupervisor = supervisor || new ProcessSupervisor({ ledgerPath: resolve(sessionRoot, 'ledger.json') });
   await processSupervisor.init();
   const service = new SessionService({ provider: 'codex-app-server', journal: journal || createJournalStore({ rootDir: resolve(sessionRoot, 'journal') }),
-    observationSink, deliveryAuditStore, logger,
+    deliveryAuditStore, logger,
     transportFactory: (spec) => transportFactory?.(spec) || new CodexAppServerTransport({ binary, supervisor: processSupervisor, env: spec.env }),
   });
   await service.init();

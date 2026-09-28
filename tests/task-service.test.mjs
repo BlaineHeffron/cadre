@@ -7,6 +7,7 @@ import { AsyncEventQueue, createBaseCapabilities, createTransportEvent } from '.
 import { AgentBusStore } from '../modules/agent-bus/store.mjs';
 import { FileJournalStore } from '../modules/sessions/journal-store.mjs';
 import { SessionService } from '../modules/sessions/session-service.mjs';
+import { createSessionStateTracker } from '../modules/session-state/tracker.mjs';
 import { TaskService } from '../modules/sessions/task-service.mjs';
 
 // A disposable provider implementing the public transport contract. Stores and
@@ -66,11 +67,11 @@ afterEach(async () => {
 async function fixture(options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dueno-task-test-'));
   const workDir = join(root, 'work'); await mkdir(workDir);
-  const f = { root, workDir, providers: [], observations: [], time: Date.now(), options };
+  const f = { root, workDir, providers: [], time: Date.now(), options };
   f.open = async () => {
     f.store = new AgentBusStore({ stateDir: join(root, 'bus'), ...options.store }); await f.store.init();
     f.journal = new FileJournalStore({ rootDir: join(root, 'journal') });
-    f.service = new SessionService({ journal: f.journal, provider: 'fixture', observationSink: (_, observations) => f.observations.push(...observations), transportFactory: () => {
+    f.service = new SessionService({ journal: f.journal, provider: 'fixture', stateTracker: createSessionStateTracker(), transportFactory: () => {
       const p = new Provider(); if (options.model) p.model = options.model; f.providers.push(p); return p;
     } });
     await f.service.init();
@@ -336,9 +337,12 @@ test('provider reroute metadata remains current and survives journal rebuild', a
   f.providers[0].emit('diagnostic', { kind: 'model_rerouted', effectiveModel: 'rerouted-model', modelEvidence: { source: 'model/rerouted' } });
   await until(() => f.service.get(task.sessionId).negotiated.effectiveModel === 'rerouted-model');
   assert.equal((await f.tasks.status(task.taskId)).effectiveModel, 'rerouted-model');
-  assert.equal(f.observations.filter((item) => item.kind === 'effective_runtime').at(-1).value.effectiveModel, 'rerouted-model');
+  assert.equal(f.service.get(task.sessionId).canonicalState.runtime.effectiveModel, 'rerouted-model');
   await f.restart();
   assert.equal((await f.tasks.status(task.taskId)).modelEvidence.source, 'model/rerouted');
+  // A fresh tracker is rebuilt from the journal alone: interrupted, not sendable.
+  const rebuilt = f.service.get(task.sessionId).canonicalState;
+  assert.deepEqual([rebuilt.status, rebuilt.runtime.effectiveModel, rebuilt.capabilities.sendMessage], ['ended', 'rerouted-model', false]);
 });
 
 

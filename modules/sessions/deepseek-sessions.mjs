@@ -10,7 +10,7 @@ import { ProcessSupervisor } from '../agent/process-supervisor.mjs';
 import { incrementOpsCounter } from '../ops/observability.mjs';
 import { permissionAuthorityForRequest } from '../platform/auth.mjs';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
-import { observe as observeSessionState } from '../session-state/tracker.mjs';
+import { projectCompatibility } from '../session-state/contract.mjs';
 import { createJournalStore } from './journal-store.mjs';
 import { registerProtocolSessionProvider } from './protocol-session-registry.mjs';
 import { notifyAgentSessionDeleted } from '../agent/session-delete-events.mjs';
@@ -132,49 +132,8 @@ function contentFromTranscript(session) {
   return result;
 }
 
-function compatibilityState(session) {
-  const interaction = openInteraction(session);
-  const ended = ['ended', 'interrupted'].includes(session.lifecycle);
-  const ready = session.lifecycle === 'ready';
-  const busy = ['working', 'cancelling'].includes(session.lifecycle);
-  const blocked = session.lifecycle === 'blocked';
-  return {
-    state: blocked ? 'needs_approval' : ready ? 'waiting_for_input' : ended ? 'ended' : session.lifecycle,
-    status: ended ? 'ended' : session.lifecycle,
-    reason: session.detail || session.lifecycle,
-    detail: session.detail || '',
-    revision: session.revision,
-    updatedAt: session.updatedAt,
-    lifecycle: ended ? 'ended' : 'running',
-    execution: busy || blocked ? 'busy' : 'idle',
-    interaction: interaction ? {
-      kind: interaction.kind,
-      detail: interaction.toolCall?.title || 'Permission required',
-      options: (interaction.options || []).map((option) => ({
-        key: option.optionId, value: option.optionId, label: option.name || option.optionId, kind: option.kind || '',
-      })),
-      fingerprint: interaction.interactionId,
-    } : { kind: ready ? 'free_text' : 'none', detail: '', options: [], fingerprint: '' },
-    capabilities: {
-      canQueueMessage: ready,
-      canSendNow: ready,
-      canAnswerInteraction: blocked,
-      canInterrupt: busy || blocked,
-      sendMessage: ready,
-      clear: false,
-      interrupt: busy || blocked,
-      autoClose: ended,
-      needsAttention: blocked,
-    },
-    runtime: { provider: 'deepseek', harness: 'deepseek', transport: 'acp' },
-    inputType: blocked ? 'permission' : ready ? 'free_text' : null,
-    pendingResponse: busy || blocked,
-    transcriptGrade: 'committed_text',
-  };
-}
-
 export function projectDeepSeekSession(session) {
-  const state = compatibilityState(session);
+  const state = projectCompatibility(session.canonicalState);
   return {
     id: session.id,
     name: `deepseek-${session.id}`,
@@ -186,8 +145,8 @@ export function projectDeepSeekSession(session) {
     created: session.createdAt,
     content: contentFromTranscript(session),
     diagnostics: session.diagnostics.map((entry) => entry.message || '').join('\n'),
-    state, canonicalState: state,
-    pendingResponse: state.pendingResponse ? { sentAt: session.updatedAt } : null,
+    state, canonicalState: session.canonicalState,
+    pendingResponse: state.execution === 'working' ? { sentAt: session.updatedAt } : null,
     canResume: false,
     nonResumable: session.nonResumable || session.lifecycle === 'interrupted',
     endedWithHistory: session.endedWithHistory || session.lifecycle === 'interrupted',
@@ -220,7 +179,6 @@ export async function deepseekSessionsPlugin(app, {
   attemptConfigRemover = removeDeepSeekAttemptCordis,
   sessionDeliveryAuditStore = null,
   attachmentStore = null,
-  observationSink = observeSessionState,
 } = {}) {
   await mkdir(sessionRoot, { recursive: true });
   await mkdir(homeDir, { recursive: true });
@@ -242,7 +200,6 @@ export async function deepseekSessionsPlugin(app, {
     attachmentStore: fleetAttachmentStore,
     provider: 'deepseek',
     deliveryAuditStore: sessionDeliveryAuditStore,
-    observationSink,
     logger: app.log,
     transportFactory: (spec) => {
       if (transportFactory) return transportFactory(spec);
@@ -449,8 +406,10 @@ export async function deepseekSessionsPlugin(app, {
           interactionId: interaction.interactionId,
           optionId: value,
           authority,
+          expected: req.body || {},
         });
       } else {
+        service.assertExpectedState(session.id, req.body || {});
         await service.prompt(session.id, {
           blocks: blocks || [{ type: 'text', text: value }],
           idempotencyKey: text(req.body?.idempotencyKey) || randomBytes(16).toString('hex'),
@@ -481,6 +440,7 @@ export async function deepseekSessionsPlugin(app, {
         optionId: text(req.body?.optionId) || undefined,
         text: text(req.body?.text) || undefined,
         authority: await interactionAuthority(req, session, interaction),
+        expected: req.body || {},
       });
       return { ok: true, state: 'sent' };
     } catch (error) { return errorReply(reply, error); }

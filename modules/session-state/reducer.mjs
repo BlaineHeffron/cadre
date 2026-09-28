@@ -134,12 +134,15 @@ function runtimeFrom(observations, previousRuntime) {
   return runtime;
 }
 
+// Providers report display casing (GPT-6-Sol for gpt-6-sol); compare identities,
+// while the snapshot keeps the original strings for diagnostics.
+function differs(requested, effective) {
+  return Boolean(requested && effective && requested.trim().toLowerCase() !== effective.trim().toLowerCase());
+}
+
 function runtimeMismatch(runtime) {
-  const modelMismatch = runtime.requestedModel && runtime.effectiveModel
-    && runtime.requestedModel !== runtime.effectiveModel;
-  const thinkingMismatch = runtime.requestedThinkingLevel && runtime.effectiveThinkingLevel
-    && runtime.requestedThinkingLevel !== runtime.effectiveThinkingLevel;
-  return Boolean(modelMismatch || thinkingMismatch);
+  return differs(runtime.requestedModel, runtime.effectiveModel)
+    || differs(runtime.requestedThinkingLevel, runtime.effectiveThinkingLevel);
 }
 
 function reasonFor({ lifecycle, execution, interaction, deliveryState, mismatch }) {
@@ -288,7 +291,8 @@ export function reduce(previousSnapshot, observationSet, now = Date.now()) {
       canInterrupt,
       // Compatibility aliases. New consumers must use the action-specific names.
       sendMessage,
-      clear: sendMessage,
+      // Protocol sessions declare whether their provider has a clear operation.
+      clear: sendMessage && lifecycleObservation?.value?.clear !== false,
       interrupt: canInterrupt,
       // Process death only. Idle auto-close is decided by the consumer from a
       // transcript terminal record (executionSource === 'transcript'), never

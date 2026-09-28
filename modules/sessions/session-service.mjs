@@ -6,10 +6,13 @@ import {
   normalizePromptCapabilities,
 } from '../agent/prompt-blocks.mjs';
 import { incrementOpsCounter, recordOpsTiming } from '../ops/observability.mjs';
+import { canonicalSessionStateId } from '../session-state/contract.mjs';
+import { sessionStateTracker } from '../session-state/tracker.mjs';
 import { recordSessionDeliveryAudit } from './delivery-audit.mjs';
 import { assertSessionDeletable } from './journal-store.mjs';
 
 const ACTIVE_TURNS = new Set(['queued', 'admitted', 'inflight']);
+const UNSETTLED_INTERACTIONS = new Set(['open', 'answer_timeout']);
 // Not representable by an HTTP/MCP caller's source string or JSON body.
 export const TASK_ADMISSION = Symbol('task admission');
 const TRANSITIONS = Object.freeze({
@@ -243,7 +246,7 @@ function reduceSessionEvent(session, event) {
       session.detail = transportEvent.toolCall?.title || 'Permission required';
     } else if (transportEvent.type === 'interaction.answered') {
       const interaction = session.interactions.find((item) => item.interactionId === transportEvent.interactionId);
-      if (interaction?.status === 'open') {
+      if (UNSETTLED_INTERACTIONS.has(interaction?.status)) {
         interaction.status = 'answered';
         interaction.answer = transportEvent.optionId ? { optionId: transportEvent.optionId } : { text: transportEvent.text || '' };
         interaction.answeredAt = event.recordedAt;
@@ -251,7 +254,7 @@ function reduceSessionEvent(session, event) {
       if (session.lifecycle === 'blocked') session.lifecycle = session.activeTurnId ? 'working' : 'ready';
     } else if (transportEvent.type === 'interaction.cancelled') {
       const interaction = session.interactions.find((item) => item.interactionId === transportEvent.interactionId);
-      if (interaction?.status === 'open') {
+      if (UNSETTLED_INTERACTIONS.has(interaction?.status)) {
         interaction.status = 'cancelled';
         interaction.answeredAt = event.recordedAt;
       }
@@ -295,10 +298,11 @@ export class SessionService {
     promptPolicy = null,
     provider = 'deepseek',
     now = () => Date.now(),
-    observationSink = () => {},
+    stateTracker = sessionStateTracker,
     contentLimit = 2 * 1024 * 1024,
     diagnosticLimit = 256 * 1024,
     logger = null,
+    answerTimeoutMs = 15_000,
   } = {}) {
     if (!journal) throw new TypeError('journal is required');
     if (typeof transportFactory !== 'function') throw new TypeError('transportFactory is required');
@@ -309,10 +313,11 @@ export class SessionService {
     this.promptPolicy = promptPolicy;
     this.provider = provider;
     this.now = now;
-    this.observationSink = observationSink;
+    this.stateTracker = stateTracker;
     this.contentLimit = contentLimit;
     this.diagnosticLimit = diagnosticLimit;
     this.logger = logger;
+    this.answerTimeoutMs = answerTimeoutMs;
     this.sessions = new Map();
     this.listeners = new Set();
     this.commandLocks = new Map();
@@ -328,6 +333,7 @@ export class SessionService {
       if (!restored) continue;
       restored.taskId ||= await this.journal.rebuild(sessionId, (value, event) => event.type === 'task.linked' ? event.data.taskId : value, null);
       this.sessions.set(sessionId, restored);
+      this.#observeProtocol(restored);
       if (!['ended', 'interrupted'].includes(restored.lifecycle)) {
         const activeAttemptId = restored.activeAttemptId;
         await this.#append(restored, 'session.interrupted', {
@@ -345,12 +351,12 @@ export class SessionService {
     return [...this.sessions.values()]
       .filter((session) => includeEnded || !['ended', 'interrupted'].includes(session.lifecycle))
       .sort((left, right) => right.createdAt - left.createdAt)
-      .map(publicSession);
+      .map((session) => this.#public(session));
   }
 
   get(sessionId) {
     const session = this.sessions.get(String(sessionId || ''));
-    return session ? publicSession(session) : null;
+    return session ? this.#public(session) : null;
   }
 
   async start(spec = {}) {
@@ -424,7 +430,7 @@ export class SessionService {
       incrementOpsCounter('attempt_start', 1, { transport: 'acp', provider: session.provider, outcome: 'success' });
       recordOpsTiming('start_latency', this.now() - startedAt, { transport: 'acp', provider: session.provider, outcome: 'success' });
       this.#log('info', 'Structured attempt started', { sessionId, attemptId });
-      return publicSession(session);
+      return this.#public(session);
     } catch (error) {
       incrementOpsCounter('attempt_start', 1, { transport: 'acp', provider: session.provider, outcome: 'failed' });
       recordOpsTiming('start_latency', this.now() - startedAt, { transport: 'acp', provider: session.provider, outcome: 'failed' });
@@ -585,7 +591,13 @@ export class SessionService {
     });
   }
 
-  async recordInteractionAuthority(sessionId, { interactionId, authority } = {}) {
+  // Authority audits and answers share the per-session command lock so concurrent
+  // answers cannot both reach the provider or overwrite each other's audit patch.
+  recordInteractionAuthority(sessionId, input) {
+    return this.#withCommandLock(String(sessionId || ''), () => this.#recordInteractionAuthority(sessionId, input));
+  }
+
+  async #recordInteractionAuthority(sessionId, { interactionId, authority } = {}) {
     const session = this.#requireActive(sessionId);
     const interaction = session.interactions.find((item) => item.interactionId === String(interactionId));
     if (!interaction || interaction.status !== 'open') {
@@ -616,7 +628,23 @@ export class SessionService {
     return audit;
   }
 
-  async answerInteraction(sessionId, { interactionId, optionId, text: answerText, authority = null } = {}) {
+  // Stale-write guard (same contract as the tmux command gate): a UI answer built
+  // against an older canonical snapshot must not land on a newer interaction.
+  assertExpectedState(sessionId, { expectedRevision, expectedFingerprint, expectedInteractionKind } = {}) {
+    const session = this.#requireActive(sessionId);
+    const snapshot = this.stateTracker.get(canonicalSessionStateId(session.provider, session.id));
+    if ((Number.isInteger(expectedRevision) && expectedRevision !== snapshot.revision)
+      || (expectedFingerprint && expectedFingerprint !== snapshot.interaction.fingerprint)
+      || (expectedInteractionKind && expectedInteractionKind !== snapshot.interaction.kind)) {
+      throw Object.assign(new Error('Session state changed before the input could be sent'), { code: 'interaction_changed', statusCode: 409 });
+    }
+  }
+
+  answerInteraction(sessionId, input) {
+    return this.#withCommandLock(String(sessionId || ''), () => this.#answerInteractionUnlocked(sessionId, input));
+  }
+
+  async #answerInteractionUnlocked(sessionId, { interactionId, optionId, text: answerText, authority = null, expected = {} } = {}) {
     const session = this.#requireActive(sessionId);
     const interaction = session.interactions.find((item) => item.interactionId === String(interactionId));
     if (!interaction || interaction.status !== 'open') {
@@ -625,15 +653,31 @@ export class SessionService {
       error.statusCode = 409;
       throw error;
     }
-    const authorityAudit = await this.recordInteractionAuthority(sessionId, { interactionId, authority });
+    const authorityAudit = await this.#recordInteractionAuthority(sessionId, { interactionId, authority });
     if (authorityAudit.decision !== 'allowed' || authorityAudit.principalType === 'agent') {
       const error = new Error('Permission interactions require an authenticated operator or a pre-approved automation policy');
       error.code = 'permission_authority_required';
       error.statusCode = 403;
       throw error;
     }
-    const result = await session.transport.answerInteraction({ interactionId, optionId, text: answerText });
+    this.assertExpectedState(sessionId, expected);
     const answer = optionId ? { optionId: String(optionId) } : { text: String(answerText || '') };
+    // Answers hold the session lock, so a wedged provider write must not block
+    // delete/terminate forever. The write may still land, so the interaction is
+    // fenced with an unknown outcome (no retries) until the provider reports it.
+    let timer;
+    const timeout = Symbol('timeout');
+    const result = await Promise.race([
+      session.transport.answerInteraction({ interactionId, optionId, text: answerText }),
+      new Promise((resolve) => { timer = setTimeout(resolve, this.answerTimeoutMs, timeout); }),
+    ]).finally(() => clearTimeout(timer));
+    if (result === timeout) {
+      await this.#append(session, 'interaction.updated', {
+        interactionId,
+        patch: { status: 'answer_timeout', outcome: 'unknown', answer, actor: authorityAudit.actor, policy: authorityAudit.policy, authority: authorityAudit },
+      });
+      throw Object.assign(new Error('Provider did not accept the answer in time; outcome unknown'), { code: 'interaction_answer_timeout', statusCode: 504 });
+    }
     await this.#append(session, 'interaction.updated', {
       interactionId,
       patch: {
@@ -714,6 +758,7 @@ export class SessionService {
       await this.journal.deleteSession(id);
       await this.attachmentStore?.releaseSession?.(id);
       this.sessions.delete(id);
+      this.stateTracker.remove(canonicalSessionStateId(existing.provider, id));
       return { ...verdict, status: 'deleted' };
     });
   }
@@ -815,7 +860,6 @@ export class SessionService {
     }
     while (session.transcript.length > 1 && Buffer.byteLength(JSON.stringify(session.transcript)) > this.contentLimit) session.transcript.shift();
     while (session.diagnostics.length > 1 && Buffer.byteLength(JSON.stringify(session.diagnostics)) > this.diagnosticLimit) session.diagnostics.shift();
-    this.#observeProtocol(session);
   }
 
   async #appendTranscript(session, entry) {
@@ -834,18 +878,18 @@ export class SessionService {
       throw error;
     }
     await this.#append(session, 'session.lifecycle', { lifecycle, detail });
-    this.#observeProtocol(session);
   }
 
   async #append(session, type, data, options = {}) {
     const event = await this.journal.append(session.id, { type, data: clone(data), ...options });
     reduceSessionEvent(session, event);
+    this.#observeProtocol(session);
     this.#notify(session, event);
     return event;
   }
 
   #notify(session, event) {
-    const projected = publicSession(session);
+    const projected = this.#public(session);
     for (const listener of [...this.listeners]) {
       try { listener(projected, clone(event)); } catch { /* listeners are isolated */ }
     }
@@ -867,32 +911,46 @@ export class SessionService {
     try { writer.call(this.logger, fields, message); } catch { /* logging cannot affect state */ }
   }
 
+  // Canonical state comes only from the tracker, keyed like every other
+  // provider session so all consumers read the same snapshot.
+  #public(session) {
+    return { ...publicSession(session), canonicalState: this.stateTracker.get(canonicalSessionStateId(session.provider, session.id)) };
+  }
+
   #observeProtocol(session) {
     const execution = ['working', 'blocked', 'cancelling'].includes(session.lifecycle) ? 'working' : session.lifecycle === 'ready' ? 'idle' : 'unknown';
-    const openInteraction = session.interactions.find((item) => item.status === 'open');
     const lifecycle = ['ended', 'interrupted'].includes(session.lifecycle) ? 'ended' : session.lifecycle === 'created' || session.lifecycle === 'starting' ? 'starting' : 'running';
+    // An ended session has nothing left to answer, so no interaction can keep it blocked.
+    const openInteraction = lifecycle !== 'ended' && session.interactions.find((item) => UNSETTLED_INTERACTIONS.has(item.status));
+    // A timed-out answer keeps the session blocked but not answerable until the provider settles it.
+    const fenced = openInteraction?.status === 'answer_timeout';
     const observedAt = this.now();
     try {
-      this.observationSink(session.id, [
+      this.stateTracker.observe(canonicalSessionStateId(session.provider, session.id), [
         ...(session.model ? [{ source: 'protocol', kind: 'requested_runtime', value: { requestedModel: session.model },
           observedAt, expiresAt: 0, fingerprint: `protocol:requested:${session.model}` }] : []),
         ...(session.negotiated?.effectiveModel ? [{ source: 'protocol', kind: 'effective_runtime',
           value: { effectiveModel: session.negotiated.effectiveModel, effectiveThinkingLevel: session.negotiated.effectiveThinkingLevel || null,
             evidence: clone(session.negotiated.modelEvidence) }, observedAt, expiresAt: 0,
           fingerprint: `protocol:effective:${session.revision}` }] : []),
-        { source: 'protocol', kind: 'lifecycle', value: { lifecycle }, observedAt, expiresAt: 0, fingerprint: `protocol:lifecycle:${session.revision}` },
+        { source: 'protocol', kind: 'lifecycle', value: { lifecycle, clear: false }, observedAt, expiresAt: 0, fingerprint: `protocol:lifecycle:${session.revision}` },
         { source: 'protocol', kind: 'execution', value: { execution }, observedAt, expiresAt: 0, fingerprint: `protocol:execution:${session.revision}` },
         {
           source: 'protocol', kind: 'interaction',
           value: openInteraction ? {
-            kind: openInteraction.kind, detail: openInteraction.toolCall?.title || 'Permission required',
-            options: clone(openInteraction.options), fingerprint: openInteraction.interactionId, stable: true,
+            kind: fenced ? 'unknown_blocking' : openInteraction.kind,
+            detail: fenced ? 'Answer outcome unknown; waiting for the provider' : openInteraction.toolCall?.title || 'Permission required',
+            options: (fenced ? [] : openInteraction.options || []).map((option) => ({
+              key: option.optionId, value: option.optionId, label: option.name || option.optionId, kind: option.kind || '',
+            })),
+            fingerprint: openInteraction.interactionId, stable: true,
           } : session.lifecycle === 'ready' ? { kind: 'free_text', detail: '', options: [], fingerprint: `ready:${session.revision}`, stable: true } : { kind: 'none', detail: '', options: [], fingerprint: '', stable: true },
-          observedAt, expiresAt: 0, fingerprint: openInteraction?.interactionId || `protocol:interaction:${session.revision}`,
+          // The snapshot fingerprint comes from here; empty while fenced so nothing can answer it.
+          observedAt, expiresAt: 0, fingerprint: fenced ? '' : openInteraction?.interactionId || `protocol:interaction:${session.revision}`,
         },
       ]);
     } catch {
-      /* observation sinks cannot take down the transport consumer */
+      /* observation failures cannot take down the transport consumer */
     }
   }
 }
