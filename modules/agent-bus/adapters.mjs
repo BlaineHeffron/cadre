@@ -43,13 +43,13 @@ function buildAdapter({ kind, detailPath, inputPath }) {
       return Array.isArray(payload?.sessions) ? payload.sessions : [];
     },
 
-    async createSession(app, { workDir, args, model, provider, thinkingLevel, displayName, mcpProfile, mcpServers, codexPlugins, promptProfile, authContext } = {}) {
+    async createSession(app, { workDir, args, model, provider, thinkingLevel, displayName, mcpProfile, mcpServers, codexPlugins, promptProfile, structured, authContext } = {}) {
       if (authContext) {
         const request = buildInProcessFastifyRequest({ app, buildHeaders: authHeaders });
         try {
           return await request(`/api/${kind}/sessions`, {
             method: 'POST',
-            body: { workDir, args, model, provider, thinkingLevel, displayName, mcpProfile, mcpServers, codexPlugins, promptProfile },
+            body: { workDir, args, model, provider, thinkingLevel, displayName, mcpProfile, mcpServers, codexPlugins, promptProfile, structured },
             authContext,
           });
         } catch (error) {
@@ -60,7 +60,7 @@ function buildAdapter({ kind, detailPath, inputPath }) {
       const { res, payload } = await injectJson(app, {
         method: 'POST',
         url: `/api/${kind}/sessions`,
-        payload: { workDir, args, model, provider, thinkingLevel, displayName, mcpProfile, mcpServers, codexPlugins, promptProfile },
+        payload: { workDir, args, model, provider, thinkingLevel, displayName, mcpProfile, mcpServers, codexPlugins, promptProfile, structured },
       });
 
       if (res.statusCode >= 400) {

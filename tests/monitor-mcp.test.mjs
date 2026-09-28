@@ -588,6 +588,7 @@ describe('Monitor MCP server', () => {
           initialPrompt: 'Start here',
           skills: ['tdd'],
           mcpProfile: 'dueno',
+          structured: true,
         },
       },
     }]);
@@ -643,6 +644,7 @@ describe('Monitor MCP server', () => {
             thinkingLevel: undefined,
             initialPrompt: undefined,
             mcpProfile: 'dueno',
+            structured: true,
           },
         },
       },
@@ -974,6 +976,7 @@ describe('Monitor MCP server', () => {
       },
     ]);
     assert.deepEqual(requests[1].opts.body.codexPlugins, { add: ['browser@openai-bundled'] });
+    assert.equal(requests[1].opts.body.structured, true);
     assert.equal(result.threadType, 'collab');
   });
 
@@ -1109,6 +1112,7 @@ describe('Monitor MCP server', () => {
     assert.deepEqual(requests[1].opts.body.participants[0].codexPlugins, { add: ['browser@openai-bundled'] });
     assert.equal(Object.hasOwn(requests[1].opts.body.participants[1], 'codexPlugins'), false);
     assert.deepEqual(requests[1].opts.body.participants[2].codexPlugins, { add: ['browser@openai-bundled'] });
+    assert.equal(requests[1].opts.body.structured, true);
     assert.equal(result.threadType, 'conference');
   });
 

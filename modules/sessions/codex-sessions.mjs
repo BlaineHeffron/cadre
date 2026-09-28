@@ -1,5 +1,5 @@
 import { getAgentSessionsProvider, stripCodexIndent } from './index.mjs';
-import { claudeStreamJsonSessionsPlugin } from './claude-stream-json-sessions.mjs';
+import { claudeStreamJsonSessionsPlugin, hybridSessionsPlugin, isStructuredAutomatedSpawnsEnabled } from './claude-stream-json-sessions.mjs';
 
 const codexProvider = getAgentSessionsProvider('codex');
 
@@ -10,6 +10,7 @@ export function isCodexAppServerEnabled(value = process.env.CODEX_APP_SERVER_ENA
 }
 
 export function codexSessionsPlugin(app, options = {}) {
-  const enabled = options.appServerEnabled ?? isCodexAppServerEnabled();
-  return enabled ? claudeStreamJsonSessionsPlugin(app, { ...options, provider: 'codex' }) : codexProvider.plugin(app, options);
+  if (options.appServerEnabled ?? isCodexAppServerEnabled()) return claudeStreamJsonSessionsPlugin(app, { ...options, provider: 'codex' });
+  return isStructuredAutomatedSpawnsEnabled('codex')
+    ? hybridSessionsPlugin(app, { ...options, provider: 'codex', tmuxPlugin: codexProvider.plugin }) : codexProvider.plugin(app, options);
 }

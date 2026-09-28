@@ -14,6 +14,7 @@ import {
   sanitizedMcpSnapshot,
 } from '../integrations/mcp-launch-preflight.mjs';
 import { buildMcpCapabilityCatalog } from '../integrations/mcp-server-catalog.mjs';
+import { composeLaunchUserPrompt } from '../integrations/launch-skills.mjs';
 import { buildPromptLaunchArgs, cleanupPromptProfileLaunch, preparePromptProfileLaunch } from '../integrations/prompt-profile-launch.mjs';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { permissionAuthorityForRequest } from '../platform/auth.mjs';
@@ -243,6 +244,8 @@ export async function claudeStreamJsonSessionsPlugin(app, {
     try {
       const workDir = await normalizeSessionWorkDir(req.body?.workDir);
       if (!workDir) return reply.code(400).send({ error: `workDir is required for ${label} sessions` });
+      // Resolve launch skills before starting so an unknown skill cannot orphan a process.
+      const initialPrompt = composeLaunchUserPrompt({ skillIds: req.body?.skills, initialPrompt: req.body?.initialPrompt });
       id = randomBytes(8).toString('hex');
       const model = await (claude ? assertValidClaudeModel : assertValidCodexModel)(text(req.body?.model));
       const resolvedMcp = resolveMcpCapabilities({
@@ -265,7 +268,6 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         ...launch, sessionId: id, displayName: text(req.body?.displayName), workDir, model, permissionMode,
         mcpCapabilities: sanitizedMcpSnapshot(resolvedMcp, preflight),
       });
-      const initialPrompt = text(req.body?.initialPrompt);
       if (initialPrompt) {
         await service.prompt(id, { blocks: [{ type: 'text', text: initialPrompt }], idempotencyKey: `initial:${id}`, source: 'session_create' });
         session = service.get(id);
@@ -412,4 +414,54 @@ export async function claudeStreamJsonSessionsPlugin(app, {
     )));
     await processSupervisor.close();
   });
+  return { service };
+}
+
+export function isStructuredAutomatedSpawnsEnabled(kind, value = process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS) {
+  const raw = String(value || '').trim();
+  return /^(1|true|yes)$/i.test(raw) || raw.split(',').map((entry) => entry.trim()).includes(kind);
+}
+
+// Serves structured and tmux sessions on the same /api/{kind}/sessions routes. Automated spawns
+// (body.structured) start structured; human (UI principal) and coordinator-authority creates stay
+// tmux. Per-session routes dispatch on which runtime owns the id; lists and ws broadcasts merge.
+export async function hybridSessionsPlugin(app, { tmuxPlugin, ...options }) {
+  const kind = options.provider || 'claude';
+  const ws = options.wsManager;
+  const lists = { tmux: [], structured: [] };
+  const wsFor = (side) => ws && Object.assign(Object.create(ws), {
+    broadcast(channel, type, data) {
+      if (channel !== `${kind}:sessions`) return ws.broadcast(channel, type, data);
+      lists[side] = data.sessions;
+      return ws.broadcast(channel, type, { sessions: [...lists.tmux, ...lists.structured] });
+    },
+    onChannel: (prefix, handler) => ws.onChannel(prefix, (socket, channel, data) => (
+      owned(String(channel).split(':')[2]) ? undefined : handler(socket, channel, data))),
+  });
+  const routes = new Map();
+  const record = (method) => (url, handler) => { routes.set(`${method} ${url}`, handler); };
+  const { service } = await claudeStreamJsonSessionsPlugin({
+    log: app.log, addHook: app.addHook.bind(app), get: record('GET'), post: record('POST'), delete: record('DELETE'),
+  }, { ...options, wsManager: wsFor('structured') });
+  const owned = (id) => Boolean(id && service.get(String(id)));
+  const shared = new Set();
+  app.addHook('onRoute', (route) => {
+    const key = `${route.method} ${route.url}`;
+    const own = routes.get(key);
+    if (!own) return;
+    shared.add(key);
+    const tmux = route.handler;
+    route.handler = key === `GET /api/${kind}/sessions`
+      ? async (req, reply) => ({ sessions: [...(await tmux(req, reply)).sessions, ...(await own(req, reply)).sessions] })
+      : (req, reply) => {
+        const structured = req.params?.id ? owned(req.params.id)
+          : req.body?.structured === true && !req.duenoAuth?.coordinatorPolicy && req.duenoAuth?.principal?.type !== 'ui';
+        return (structured ? own : tmux)(req, reply);
+      };
+  });
+  await tmuxPlugin(app, { ...options, wsManager: wsFor('tmux') });
+  for (const [key, handler] of routes) {
+    const [method, url] = key.split(' ');
+    if (!shared.has(key)) app.route({ method, url, handler });
+  }
 }

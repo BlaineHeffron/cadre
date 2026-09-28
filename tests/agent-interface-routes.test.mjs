@@ -40,9 +40,11 @@ async function buildApp({ idempotencyStore = makeMemoryIdempotencyStore(), sessi
   const { agentInterfacePlugin } = await import(`../modules/agent/interface.mjs?agentInterfaceRoutes=${Date.now()}_${Math.random().toString(36).slice(2)}`);
   const app = Fastify({ logger: false });
   let spawnCount = 0;
+  const createBodies = [];
 
-  app.post('/api/codex/sessions', async () => {
+  app.post('/api/codex/sessions', async (req) => {
     spawnCount += 1;
+    createBodies.push(req.body);
     return { id: `codex_route_${spawnCount}`, sessionName: `codex-route-${spawnCount}` };
   });
   app.post('/api/pi/sessions', async (_req, reply) => reply.code(503).send({
@@ -85,6 +87,7 @@ async function buildApp({ idempotencyStore = makeMemoryIdempotencyStore(), sessi
 
   return {
     app,
+    createBodies,
     get spawnCount() {
       return spawnCount;
     },
@@ -180,6 +183,19 @@ describe('agent interface routes', () => {
     assert.equal(harness.spawnCount, 1);
     assert.equal(second.json().session.id, first.json().session.id);
     assert.equal(second.json().session.threadId, '');
+    await harness.app.close();
+  });
+
+  it('forwards only an explicit structured-runtime request to the backend create route', async () => {
+    const harness = await buildApp();
+    for (const structured of [true, 'yes', undefined]) {
+      const res = await harness.app.inject({
+        method: 'POST', url: '/api/agents/sessions', headers: authHeaders(),
+        payload: { provider: 'codex', workDir: '/tmp/bos', structured },
+      });
+      assert.equal(res.statusCode, 200, res.body);
+    }
+    assert.deepEqual(harness.createBodies.map((body) => body.structured), [true, undefined, undefined]);
     await harness.app.close();
   });
 

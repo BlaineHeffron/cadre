@@ -169,7 +169,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
       for (const participant of requested) plans.push(await planParticipant(participant, req.body.workDir || '', {
         model: req.body.model, thinkingLevel: req.body.thinkingLevel, mcpProfile: req.body.mcpProfile,
         mcpServers: req.body.mcpServers, codexPlugins: req.body.codexPlugins,
-        promptProfile: req.body.promptProfile, requireDueno: true,
+        promptProfile: req.body.promptProfile, requireDueno: true, structured: req.body.structured === true,
       }));
       for (const plan of plans) created.push(await executeParticipantPlan(plan));
       const thread = await store.createThread({ title: req.body.title, projectKey: req.body.projectKey,

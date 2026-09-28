@@ -358,6 +358,7 @@ export function buildAgentInterface({
         promptProfile: input.promptProfile,
         skills: input.skills,
         initialPrompt: input.initialPrompt,
+        structured: input.structured === true || undefined,
         metadata: {
           ...(input.metadata && typeof input.metadata === 'object' ? input.metadata : {}),
           ...(worktree ? {
