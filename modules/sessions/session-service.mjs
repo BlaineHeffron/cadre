@@ -588,7 +588,13 @@ export class SessionService {
     });
   }
 
-  async recordInteractionAuthority(sessionId, { interactionId, authority } = {}) {
+  // Authority audits and answers share the per-session command lock so concurrent
+  // answers cannot both reach the provider or overwrite each other's audit patch.
+  recordInteractionAuthority(sessionId, input) {
+    return this.#withCommandLock(String(sessionId || ''), () => this.#recordInteractionAuthority(sessionId, input));
+  }
+
+  async #recordInteractionAuthority(sessionId, { interactionId, authority } = {}) {
     const session = this.#requireActive(sessionId);
     const interaction = session.interactions.find((item) => item.interactionId === String(interactionId));
     if (!interaction || interaction.status !== 'open') {
@@ -631,7 +637,11 @@ export class SessionService {
     }
   }
 
-  async answerInteraction(sessionId, { interactionId, optionId, text: answerText, authority = null, expected = {} } = {}) {
+  answerInteraction(sessionId, input) {
+    return this.#withCommandLock(String(sessionId || ''), () => this.#answerInteractionUnlocked(sessionId, input));
+  }
+
+  async #answerInteractionUnlocked(sessionId, { interactionId, optionId, text: answerText, authority = null, expected = {} } = {}) {
     const session = this.#requireActive(sessionId);
     const interaction = session.interactions.find((item) => item.interactionId === String(interactionId));
     if (!interaction || interaction.status !== 'open') {
@@ -640,7 +650,7 @@ export class SessionService {
       error.statusCode = 409;
       throw error;
     }
-    const authorityAudit = await this.recordInteractionAuthority(sessionId, { interactionId, authority });
+    const authorityAudit = await this.#recordInteractionAuthority(sessionId, { interactionId, authority });
     if (authorityAudit.decision !== 'allowed' || authorityAudit.principalType === 'agent') {
       const error = new Error('Permission interactions require an authenticated operator or a pre-approved automation policy');
       error.code = 'permission_authority_required';

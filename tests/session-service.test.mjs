@@ -292,6 +292,32 @@ describe('SessionService', () => {
     await harness.service.close();
   });
 
+  it('lets exactly one of two concurrent conflicting answers reach the provider', { timeout: 15000 }, async () => {
+    let transport;
+    const harness = await fixture({ factory: () => { transport = new FakeTransport(); return transport; } });
+    const created = await harness.service.start({ workDir: harness.workDir, permissionMode: 'workspace-write' });
+    await harness.service.prompt(created.id, { blocks: [{ type: 'text', text: 'needs permission' }], idempotencyKey: 'race-key' });
+    await waitFor(() => harness.service.get(created.id).turns[0]?.status === 'inflight');
+    const interactionId = transport.permission();
+    await waitFor(() => harness.service.get(created.id).lifecycle === 'blocked');
+    // Like the real Claude transport: the write is slow and does not dedupe answers itself.
+    const calls = [];
+    transport.answerInteraction = async (input) => { calls.push(input.optionId); await new Promise((r) => setTimeout(r, 20)); return { ok: true }; };
+    const { canonicalState } = harness.service.get(created.id);
+    const expected = { expectedRevision: canonicalState.revision, expectedFingerprint: canonicalState.interaction.fingerprint, expectedInteractionKind: 'permission' };
+    const authority = { actor: 'dashboard:user:1', principalType: 'ui', decision: 'allowed' };
+    const results = await Promise.allSettled(['allow_once', 'deny'].map((optionId) => (
+      harness.service.answerInteraction(created.id, { interactionId, optionId, authority, expected })
+    )));
+    assert.deepEqual(results.map((result) => result.status), ['fulfilled', 'rejected']);
+    assert.equal(results[1].reason.statusCode, 409);
+    assert.deepEqual(calls, ['allow_once']);
+    const interaction = harness.service.get(created.id).interactions[0];
+    assert.deepEqual([interaction.status, interaction.answer, interaction.authorityAudit.length], ['answered', { optionId: 'allow_once' }, 1]);
+    transport.queue.close();
+    await harness.service.close({ interrupt: false });
+  });
+
   it('records and denies an agent attempt to self-approve a permission interaction', { timeout: 15000 }, async () => {
     let transport;
     const harness = await fixture({ factory: () => { transport = new FakeTransport(); return transport; } });
