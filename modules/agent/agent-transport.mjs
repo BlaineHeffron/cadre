@@ -113,3 +113,13 @@ export function assertAgentTransport(transport) {
   }
   return transport;
 }
+
+// Provider questions (Claude AskUserQuestion, Codex requestUserInput) surface as one
+// interaction per question; option labels double as option ids and free text is accepted.
+export function questionInteraction(question = {}) {
+  const options = (question.options || []).map(({ label }) => ({ optionId: String(label), name: String(label) }));
+  return {
+    kind: options.length ? 'selection' : 'unknown_blocking', options,
+    toolCall: { title: [question.header, question.question].filter(Boolean).join(': ') || 'Question', input: { question: question.question } },
+  };
+}

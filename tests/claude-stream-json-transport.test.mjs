@@ -96,7 +96,7 @@ process.stdin.on('data', (chunk) => {
     if (message.type === 'user') send({
       type: 'control_request', request_id: 'permission-1', request: {
         subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'npm test' },
-        tool_use_id: 'toolu_1', permission_suggestions: [], title: 'Run tests?',
+        tool_use_id: 'toolu_1', permission_suggestions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }], title: 'Run tests?',
       },
     });
     if (message.type === 'control_response') {
@@ -105,6 +105,46 @@ process.stdin.on('data', (chunk) => {
         || value.response?.toolUseID !== 'toolu_1' || value.response?.updatedInput?.command !== 'npm test') process.exit(7);
       send({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }] } });
       send({ type: 'result', subtype: 'success', is_error: false });
+    }
+  }
+});
+`;
+
+const QUESTIONS = [
+  { question: 'Which color?', header: 'Color', options: [{ label: 'Red', description: 'warm' }, { label: 'Blue', description: 'cool' }], multiSelect: false },
+  { question: 'Which size?', header: 'Size', options: [{ label: 'Small', description: '' }, { label: 'Large', description: '' }], multiSelect: false },
+];
+// Frames mirror claude 2.1.283 control_request shapes (AskUserQuestion captured from a real CLI run).
+const REQUESTS_CLAUDE = String.raw`
+const { appendFileSync } = require('node:fs');
+const questions = ${JSON.stringify(QUESTIONS)};
+process.stdin.setEncoding('utf8');
+let buffer = '';
+const seen = new Set();
+function send(value) { process.stdout.write(JSON.stringify(value) + '\n'); }
+function control(request_id, request) { send({ type: 'control_request', request_id, request }); }
+const ask = (tool_use_id) => ({ subtype: 'can_use_tool', tool_name: 'AskUserQuestion', display_name: 'AskUserQuestion', input: { questions }, tool_use_id, requires_user_interaction: true });
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  let newline;
+  while ((newline = buffer.indexOf('\n')) >= 0) {
+    const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
+    if (!line.trim()) continue;
+    const message = JSON.parse(line);
+    if (message.type === 'user') {
+      control('elicit-1', { subtype: 'elicitation', mcp_server_name: 'fixture', message: 'Token?', requested_schema: { type: 'object', properties: {} } });
+      control('hook-1', { subtype: 'hook_callback', callback_id: 'hook', input: {} });
+      control('bash-1', { subtype: 'can_use_tool', tool_name: 'Bash', display_name: 'Bash', input: { command: 'npm test' }, tool_use_id: 'toolu_1',
+        permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'localSettings' },
+          { type: 'setMode', mode: 'acceptEdits', destination: 'session' }, { type: 'addDirectories', directories: ['/etc'], destination: 'session' }] });
+      control('ask-1', ask('toolu_2'));
+      control('ask-2', ask('toolu_3'));
+      send({ type: 'control_cancel_request', request_id: 'ask-2' });
+    }
+    if (message.type === 'control_response') {
+      appendFileSync('responses.jsonl', JSON.stringify(message.response) + '\n');
+      seen.add(message.response.request_id);
+      if (seen.has('bash-1') && seen.has('ask-1')) send({ type: 'result', subtype: 'success', is_error: false });
     }
   }
 });
@@ -370,6 +410,75 @@ setInterval(() => {}, 1000);
       transport.answerInteraction({ interactionId: requested.interactionId, optionId: 'allow_once' }),
       (error) => error.code === 'interaction_not_open',
     );
+  });
+
+  it('answers session grants, AskUserQuestion selections, and unsupported control requests with exact replies', async () => {
+    const { transport, workDir } = await harness();
+    await transport.start({ cwd: workDir, args: ['-e', REQUESTS_CLAUDE] });
+    const events = [];
+    void (async () => { for await (const event of transport.events()) events.push(event); })();
+    const prompt = transport.prompt({ turnId: 'turn-requests', blocks: [{ type: 'text', text: 'go' }] });
+    await waitFor(() => events.filter((event) => event.type === 'interaction.cancelled').length === 2);
+    const requested = events.filter((event) => event.type === 'interaction.requested');
+    const [bash, color, size] = requested;
+    assert.deepEqual(bash.options.map((option) => option.optionId), ['allow_once', 'allow_session', 'deny']);
+    assert.deepEqual([color.kind, color.toolCall.title, color.options.map((option) => option.optionId)], ['selection', 'Color: Which color?', ['Red', 'Blue']]);
+    assert.deepEqual(events.filter((event) => event.type === 'interaction.cancelled').map((event) => event.interactionId),
+      requested.slice(3).map((event) => event.interactionId));
+    await transport.answerInteraction({ interactionId: bash.interactionId, optionId: 'allow_session' });
+    await transport.answerInteraction({ interactionId: color.interactionId, optionId: 'Blue' });
+    assert.equal(transport.snapshot().lifecycle, 'blocked');
+    await assert.rejects(transport.answerInteraction({ interactionId: size.interactionId }), { code: 'invalid_interaction_option' });
+    await transport.answerInteraction({ interactionId: size.interactionId, text: 'Medium, please' });
+    assert.equal((await prompt).stopReason, 'success');
+    const replies = Object.fromEntries((await readFile(join(workDir, 'responses.jsonl'), 'utf8')).trim().split('\n')
+      .map((line) => JSON.parse(line)).map((reply) => [reply.request_id, reply]));
+    assert.deepEqual(replies['elicit-1'], { subtype: 'success', request_id: 'elicit-1', response: { action: 'decline' } });
+    assert.deepEqual(replies['hook-1'], { subtype: 'error', request_id: 'hook-1', error: 'Unsupported control request: hook_callback' });
+    assert.deepEqual(replies['bash-1'].response, {
+      behavior: 'allow', updatedInput: { command: 'npm test' }, toolUseID: 'toolu_1',
+      updatedPermissions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'session' }],
+    });
+    assert.deepEqual(replies['ask-1'].response, {
+      behavior: 'allow', toolUseID: 'toolu_2',
+      updatedInput: { questions: QUESTIONS, answers: { 'Which color?': 'Blue', 'Which size?': 'Medium, please' } },
+    });
+    assert.equal(replies['ask-2'], undefined);
+  });
+
+  it('projects AskUserQuestion as an answerable canonical selection through SessionService', async () => {
+    const { root, workDir, supervisor } = await harness();
+    const binary = join(root, 'fake-claude-requests');
+    await writeFile(binary, `#!/usr/bin/env node\n${REQUESTS_CLAUDE}`, { mode: 0o755 });
+    const service = new SessionService({
+      provider: 'claude',
+      journal: createJournalStore({ rootDir: join(root, 'journal') }),
+      transportFactory: () => {
+        const transport = new ClaudeStreamJsonTransport({ binary, supervisor });
+        transports.push(transport);
+        return transport;
+      },
+    });
+    const { id } = await service.start({ sessionId: '11111111-2222-4333-8444-666666666666', workDir, permissionMode: 'workspace-write' });
+    await service.prompt(id, { blocks: [{ type: 'text', text: 'go' }], idempotencyKey: 'ask-turn' });
+    const authority = { actor: 'dashboard:user:1', principalType: 'ui', decision: 'allowed' };
+    const shown = async (detail) => (await waitFor(() => service.get(id).canonicalState?.interaction?.detail === detail
+      && service.get(id).canonicalState)).interaction;
+    const permission = await shown('Bash');
+    assert.deepEqual([permission.kind, permission.options.map((option) => option.label)], ['permission', ['Allow once', 'Allow for session', 'Deny']]);
+    const open = () => service.get(id).interactions.find((item) => item.status === 'open').interactionId;
+    await service.answerInteraction(id, { interactionId: open(), optionId: 'allow_session', authority });
+    const selection = await shown('Color: Which color?');
+    assert.deepEqual([selection.kind, selection.options.map((option) => option.label)], ['selection', ['Red', 'Blue']]);
+    assert.equal(service.get(id).canonicalState.capabilities.canAnswerInteraction, true);
+    await service.answerInteraction(id, { interactionId: open(), optionId: 'Blue', authority });
+    assert.equal((await shown('Size: Which size?')).kind, 'selection');
+    await service.answerInteraction(id, { interactionId: open(), text: 'Medium, please', authority });
+    await waitFor(() => service.get(id).turns[0]?.status === 'settled');
+    const reply = (await readFile(join(workDir, 'responses.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+      .find((item) => item.request_id === 'ask-1');
+    assert.deepEqual(reply.response.updatedInput.answers, { 'Which color?': 'Blue', 'Which size?': 'Medium, please' });
+    await service.close();
   });
 
 });

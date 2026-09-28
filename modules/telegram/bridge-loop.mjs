@@ -102,6 +102,9 @@ export async function defaultSendSessionInput({
   const interactionKind = String(expectedState.kind || '');
   const blocking = interactionAnswer && BLOCKING_INTERACTION_KINDS.has(interactionKind);
   const dialogKeyAnswer = blocking && (runtime === 'claude' || interactionKind === 'selection');
+  // Telegram buttons number options from 1; resolve the position to the option's key.
+  const key = blocking && /^[1-9]\d*$/.test(text) ? session.state?.interaction?.options?.[text - 1]?.key : null;
+  if (key) text = String(key);
   const response = await requestImpl(
     dialogKeyAnswer ? sessionKeysPath(runtime, session.id) : sessionInputPath(runtime, session.id), {
     method: 'POST',

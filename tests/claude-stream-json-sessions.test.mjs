@@ -11,6 +11,7 @@ import { claudeSessionsPlugin, isClaudeStreamJsonEnabled } from '../modules/sess
 import { codexSessionsPlugin, isCodexAppServerEnabled } from '../modules/sessions/codex-sessions.mjs';
 import { getProtocolSessionProvider } from '../modules/sessions/protocol-session-registry.mjs';
 import { TASK_ADMISSION } from '../modules/sessions/session-service.mjs';
+import { defaultSendSessionInput } from '../modules/telegram/bridge-loop.mjs';
 import { RESEARCH_PROFILE_ID } from '../modules/integrations/research-profile.mjs';
 import { CLAUDE_STREAM_JSON_E2E_VERSION, claudeStreamJsonBusE2eEvidence } from '../modules/sessions/claude-stream-json-mcp.mjs';
 
@@ -216,6 +217,19 @@ describe('Claude stream-json sessions', () => {
     // A delayed duplicate click finds no open interaction; it must not become a prompt.
     const replay = await answer(guards);
     assert.deepEqual([replay.statusCode, replay.json().code, clients[0].prompts.length, clients[0].answers.length], [409, 'interaction_changed', 2, 1]);
+    clients[0].emit('interaction.requested', { interactionId: `${clients[0].attemptId}:ask-1`, turnId: clients[0].activeTurnId, kind: 'selection',
+      toolCall: { title: 'Retries?' }, options: ['1', '3', '5'].map((label) => ({ optionId: label, name: label })) });
+    await waitFor(async () => (await app.inject({ method: 'GET', url: `/api/claude/sessions/${session.id}` })).json().state.interaction.kind === 'selection');
+    // Toolbar keys, captured keystrokes and non-key digits must not become answers.
+    const strayKey = await app.inject({ method: 'POST', url: `/api/claude/sessions/${session.id}/keys`, payload: { keys: 'Up' } });
+    const digit = await app.inject({ method: 'POST', url: `/api/claude/sessions/${session.id}/keys`, payload: { keys: '2' } });
+    const keystroke = await app.inject({ method: 'POST', url: `/api/claude/sessions/${session.id}/input`, payload: { text: 'j', enter: false } });
+    assert.deepEqual([strayKey.statusCode, strayKey.json().code, digit.statusCode, keystroke.statusCode, clients[0].answers.length], [400, 'unsupported_capability', 400, 400, 1]);
+    // Telegram's hook buttons send answer:N; the bridge resolves N to the Nth option's key, so button 3 is "5", not the label "3".
+    const { state: selection } = (await app.inject({ method: 'GET', url: `/api/claude/sessions/${session.id}` })).json();
+    await defaultSendSessionInput({ session: { id: session.id, runtime: 'claude', state: selection }, text: '3', interactionAnswer: true,
+      requestImpl: async (url, { method, body }) => { const res = await app.inject({ method, url, payload: body }); return { statusCode: res.statusCode, payload: res.json() }; } });
+    assert.equal(clients[0].answers[1]?.optionId, '5');
     const unsupported = await app.inject({
       method: 'POST', url: `/api/claude/sessions/${session.id}/keys`, payload: { keys: 'Up Enter' },
     });

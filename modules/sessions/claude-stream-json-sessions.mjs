@@ -324,6 +324,10 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         ? structuredClone(req.body.blocks) : [{ type: 'text', text: text(req.body?.text || req.body?.keys) }];
       const interaction = openInteraction(session);
       if (interaction) {
+        if (req.body?.enter === false) {
+          const error = new Error('Keystrokes cannot answer an open interaction');
+          error.statusCode = 400; error.code = 'unsupported_capability'; throw error;
+        }
         await service.answerInteraction(session.id, {
           interactionId: interaction.interactionId,
           optionId: text(req.body?.optionId || req.body?.text || req.body?.keys),
@@ -364,9 +368,12 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   });
   app.post(`/api/${kind}/sessions/:id/keys`, async (req, reply) => {
     try {
-      requireSession(req.params.id);
+      const session = requireSession(req.params.id);
       const keys = text(req.body?.keys);
       if (keys === 'Escape' || keys === 'C-c') return { ok: true, ...(await service.cancel(req.params.id)) };
+      // Dashboard and Telegram buttons post an exact option key.
+      const option = (openInteraction(session)?.options || []).find((item) => item.optionId === keys);
+      if (option) { req.body = { ...req.body, optionId: option.optionId }; return input(req, reply); }
       const error = new Error(`${label} ${claude ? 'stream-json' : 'app-server'} does not support terminal keys: ${keys || '(empty)'}`);
       error.statusCode = 400; error.code = 'unsupported_capability'; throw error;
     } catch (error) { return errorReply(reply, error); }

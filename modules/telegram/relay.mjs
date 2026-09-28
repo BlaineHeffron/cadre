@@ -703,7 +703,8 @@ export class TelegramRelayLoop {
           : String(index + 1);
         return label ? {
           text: label.slice(0, 64),
-          callback_data: `answer:${key || index + 1}`,
+          // Digit keys are sent by position so the bridge cannot confuse them with Telegram's numbering.
+          callback_data: `answer:${key && !/^\d+$/.test(key) ? key : index + 1}`,
         } : null;
       }).filter(Boolean);
       if (!buttons?.length) buttons = undefined;

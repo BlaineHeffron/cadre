@@ -3,6 +3,7 @@ import {
   AsyncEventQueue,
   createBaseCapabilities,
   createTransportEvent,
+  questionInteraction,
 } from './agent-transport.mjs';
 import { mapPromptBlocksForClaude } from './prompt-blocks.mjs';
 import { ProcessSupervisor } from './process-supervisor.mjs';
@@ -196,27 +197,35 @@ export class ClaudeStreamJsonTransport {
     }
   }
 
-  async answerInteraction({ interactionId, optionId } = {}) {
+  async answerInteraction({ interactionId, optionId, text } = {}) {
     const entry = this.interactions.get(String(interactionId || ''));
-    if (!entry || entry.answered) {
+    if (!entry) {
       const error = new Error('Interaction is missing or already answered');
       error.code = 'interaction_not_open'; error.statusCode = 409; throw error;
     }
-    const allow = optionId === 'allow_once';
-    if (!allow && optionId !== 'deny') {
+    const answer = String(text || optionId || '');
+    if (entry.question ? !answer : !entry.options.includes(optionId)) {
       const error = new Error(`Unknown permission option: ${optionId || '(empty)'}`);
       error.code = 'invalid_interaction_option'; error.statusCode = 400; throw error;
     }
-    const response = allow
-      ? { behavior: 'allow', updatedInput: entry.input, toolUseID: entry.toolUseId }
-      : { behavior: 'deny', message: 'Operator denied this tool request', toolUseID: entry.toolUseId };
-    await this.#write({
-      type: 'control_response',
-      response: { subtype: 'success', request_id: entry.requestId, response },
-    });
-    entry.answered = true;
+    // AskUserQuestion answers are keyed by question text; allow-for-session re-scopes
+    // the CLI's permission_suggestions. Both mappings follow t3code's ClaudeAdapter (MIT).
+    if (entry.question) entry.pending.answers[entry.question] = answer;
+    const response = entry.question
+      ? { behavior: 'allow', updatedInput: { ...entry.input, answers: entry.pending.answers }, toolUseID: entry.toolUseId }
+      : optionId === 'deny'
+        ? { behavior: 'deny', message: 'Operator denied this tool request', toolUseID: entry.toolUseId }
+        : { behavior: 'allow', updatedInput: entry.input, toolUseID: entry.toolUseId,
+          ...(optionId === 'allow_session' ? { updatedPermissions: entry.suggestions.map((item) => ({ ...item, destination: 'session' })) } : {}) };
+    if (!entry.question || entry.pending.remaining === 1) {
+      await this.#write({
+        type: 'control_response',
+        response: { subtype: 'success', request_id: entry.requestId, response },
+      });
+    }
+    if (entry.question) entry.pending.remaining -= 1;
     this.interactions.delete(entry.interactionId);
-    if (this.currentTurn) this.lifecycle = 'working';
+    if (this.currentTurn && !this.interactions.size) this.lifecycle = 'working';
     this.#emit('interaction.answered', { interactionId: entry.interactionId, optionId });
     return { ok: true };
   }
@@ -304,29 +313,51 @@ export class ClaudeStreamJsonTransport {
       if (!requestId || this.interactions.has(`${this.attemptId}:${requestId}`)) return;
       const interactionId = `${this.attemptId}:${requestId}`;
       const request = message.request;
-      const entry = {
-        interactionId, requestId, toolUseId: String(request.tool_use_id || ''),
-        input: structuredClone(request.input || {}), answered: false,
-      };
-      this.interactions.set(interactionId, entry);
+      const base = { requestId, toolUseId: String(request.tool_use_id || ''), input: structuredClone(request.input || {}) };
+      const questions = request.tool_name === 'AskUserQuestion' ? base.input.questions || [] : [];
       this.lifecycle = 'blocked';
+      if (questions.length) {
+        const pending = { answers: {}, remaining: questions.length };
+        questions.forEach((question, index) => {
+          const id = index ? `${interactionId}:${index}` : interactionId;
+          this.interactions.set(id, { ...base, interactionId: id, question: String(question.question || ''), pending });
+          const { kind, options, toolCall } = questionInteraction(question);
+          this.#emit('interaction.requested', {
+            interactionId: id, turnId, kind, options, toolCall: { ...toolCall, toolCallId: base.toolUseId, name: request.tool_name },
+          }, 'secret');
+        });
+        return;
+      }
+      // Session grants forward only rule suggestions; setMode/addDirectories would silently widen the session.
+      const suggestions = (request.permission_suggestions || []).filter((item) => /Rules$/.test(item?.type));
+      const options = [
+        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
+        ...(suggestions.length ? [{ optionId: 'allow_session', name: 'Allow for session', kind: 'allow_always' }] : []),
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+      ];
+      this.interactions.set(interactionId, { ...base, interactionId, suggestions, options: options.map((option) => option.optionId) });
       this.#emit('interaction.requested', {
-        interactionId, turnId, kind: 'permission',
-        options: [
-          { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
-          { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
-        ],
+        interactionId, turnId, kind: 'permission', options,
         toolCall: {
-          toolCallId: entry.toolUseId, name: request.tool_name,
+          toolCallId: base.toolUseId, name: request.tool_name,
           title: request.title || request.display_name || `${request.tool_name} requires permission`,
-          description: request.description || request.decision_reason || '', input: entry.input,
+          description: request.description || request.decision_reason || '', input: base.input,
         },
       }, 'secret');
       return;
     }
+    if (message.type === 'control_request') {
+      // Cadre does not host MCP elicitation forms: decline so the CLI does not hang.
+      const elicitation = message.request?.subtype === 'elicitation';
+      void this.#write({ type: 'control_response', response: elicitation
+        ? { subtype: 'success', request_id: message.request_id, response: { action: 'decline' } }
+        : { subtype: 'error', request_id: message.request_id, error: `Unsupported control request: ${message.request?.subtype}` } }).catch(() => {});
+      return;
+    }
     if (message.type === 'control_cancel_request') {
-      const interactionId = `${this.attemptId}:${String(message.request_id || '')}`;
-      if (this.interactions.delete(interactionId)) {
+      for (const [interactionId, entry] of this.interactions) {
+        if (entry.requestId !== String(message.request_id || '')) continue;
+        this.interactions.delete(interactionId);
         this.#emit('interaction.cancelled', { interactionId, reason: 'provider_cancelled' });
       }
       return;

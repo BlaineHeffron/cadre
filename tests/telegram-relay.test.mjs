@@ -1396,7 +1396,7 @@ Telegram Q&A beta final: choose an option
           interaction: {
             kind: 'confirmation',
             detail: 'Proceed?',
-            options: [{ key: 'y', label: 'Yes' }, { key: 'n', label: 'No' }],
+            options: [{ key: 'y', label: 'Yes' }, { key: 'n', label: 'No' }, { key: '5', label: '5' }],
             fingerprint: 'confirmation-1',
           },
         })] },
@@ -1404,9 +1404,11 @@ Telegram Q&A beta final: choose an option
 
       await loop.step();
       await loop.step();
+      // A digit key is sent by position, which the bridge resolves back to the key.
       assert.deepEqual(deliveries[0].buttons, [
         { text: 'Yes', callback_data: 'answer:y' },
         { text: 'No', callback_data: 'answer:n' },
+        { text: '5', callback_data: 'answer:3' },
       ]);
     });
   });
