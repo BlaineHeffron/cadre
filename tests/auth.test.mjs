@@ -386,10 +386,35 @@ describe('Auth middleware', () => {
       assert.equal((await redeem(codes[5], '192.0.2.12')).statusCode, 200);
     });
 
-    it('counts bad pairing codes toward the login lockout', async () => {
+    it('locks out pairing-code guessing without locking out a valid session on the same IP', async () => {
       for (let i = 0; i < 10; i += 1) assert.equal((await redeem('guess', '192.0.2.13')).statusCode, 403);
+      const desktop = await app.inject({ method: 'GET', url: '/api/protected', headers: sessionHeaders(), remoteAddress: '192.0.2.13' });
+      assert.equal(desktop.statusCode, 200);
       const { code } = await issue();
       assert.equal((await redeem(code, '192.0.2.13')).statusCode, 429);
+      assert.equal((await redeem('guess', '192.0.2.13')).statusCode, 429);
+    });
+
+    it('refuses cross-origin browser issuance without evicting live codes, but allows same-origin and bearer', async () => {
+      const { code } = await issue();
+      for (const headers of [
+        { origin: 'https://preview.example.com', 'sec-fetch-site': 'same-site' },
+        { origin: 'https://preview.example.com' },
+        { 'sec-fetch-site': 'cross-site' },
+        { origin: 'null' },
+        { 'sec-fetch-site': 'same-site' },
+      ]) {
+        const res = await app.inject({ method: 'POST', url: '/api/auth/pair', headers: { ...sessionHeaders(), host: 'cadre.example.com', ...headers } });
+        assert.equal(res.statusCode, 403);
+      }
+      const sameOrigin = await app.inject({
+        method: 'POST', url: '/api/auth/pair',
+        headers: { ...sessionHeaders(), host: 'cadre.example.com', origin: 'https://cadre.example.com', 'sec-fetch-site': 'same-origin' },
+      });
+      assert.equal(sameOrigin.statusCode, 200);
+      const bearer = await app.inject({ method: 'POST', url: '/api/auth/pair', headers: { authorization: `Bearer ${TEST_TOKEN}` } });
+      assert.equal(bearer.statusCode, 200);
+      assert.equal((await redeem(code, '192.0.2.14')).statusCode, 200);
     });
   });
 });

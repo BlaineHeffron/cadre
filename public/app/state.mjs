@@ -286,11 +286,10 @@ export async function initAuth() {
     window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
     try {
       await loginWithToken({ pairCode });
-    } catch (error) {
-      isAuthenticated.value = false;
-      addToast(`Pairing failed: ${error.message}`, 'error');
-    } finally {
       authChecked.value = true;
+    } catch (error) {
+      addToast(`Pairing failed: ${error.message}`, 'error');
+      await refreshAuthStatus(); // a spent link must not hide an existing session
     }
     return;
   }

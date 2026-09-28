@@ -311,8 +311,12 @@ function authPluginImpl(app, opts = {}, done) {
   // Operator-only: mint a short-lived, single-use code for signing in another device.
   // The client puts it in a URL fragment (#pair=) so it never reaches server logs.
   app.post('/api/auth/pair', async (request, reply) => {
-    if (request.duenoAuth?.principal?.type !== 'ui') {
-      return reply.code(403).send({ error: 'Pairing requires an authenticated operator' });
+    const { origin, host } = request.headers;
+    const site = request.headers['sec-fetch-site'];
+    const crossOrigin = (site && site !== 'same-origin' && site !== 'none')
+      || (origin && origin.replace(/^[a-z]+:\/\//i, '') !== host);
+    if (request.duenoAuth?.principal?.type !== 'ui' || crossOrigin) {
+      return reply.code(403).send({ error: 'Pairing requires an authenticated same-origin operator' });
     }
     const nowMs = Date.now();
     takePairCode('', nowMs);
@@ -403,6 +407,19 @@ function authPluginImpl(app, opts = {}, done) {
     }
 
     const ip = request.ip;
+    const authHeader = request.headers.authorization;
+    const hasBearer = Boolean(authHeader?.startsWith('Bearer '));
+
+    // A signed session cookie is not a guessable credential, so a same-IP lockout
+    // (e.g. failed pairing codes behind a shared NAT) must not lock it out, nor may it reset the lockout.
+    if (!hasBearer && verifyBrowserSessionRequest(request)) {
+      request.duenoAuth = {
+        authenticated: true,
+        principal: { type: 'ui', kind: 'dashboard', sessionId: 'browser' },
+        automationPolicy: '',
+      };
+      return;
+    }
 
     // Check lockout before even parsing the token
     if (isLockedOut(ip)) {
@@ -410,19 +427,7 @@ function authPluginImpl(app, opts = {}, done) {
       return reply.code(429).send({ error: 'Too many failed attempts. Try again later.' });
     }
 
-    const authHeader = request.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      if (verifyBrowserSessionRequest(request)) {
-        clearFailures(ip);
-        request.duenoAuth = {
-          authenticated: true,
-          principal: { type: 'ui', kind: 'dashboard', sessionId: 'browser' },
-          automationPolicy: '',
-        };
-        return;
-      }
-      return reply.code(401).send({ error: 'Missing or invalid Authorization header' });
-    }
+    if (!hasBearer) return reply.code(401).send({ error: 'Missing or invalid Authorization header' });
 
     const token = authHeader.slice(7);
     if (!authToken) {
