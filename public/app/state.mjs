@@ -8,6 +8,8 @@ export const isAuthenticated = signal(false);
 
 // Connection state
 export const wsConnected = signal(false);
+// Bumped on every WebSocket open; wsConnected is debounced and can stay true across a quick reconnect.
+export const wsOpens = signal(0);
 
 // Threat state
 export const alerts = signal([]);
@@ -357,14 +359,6 @@ function promptMeta(kind, sessionId, fallback = '') {
 function promptDetail(fallback = '') {
   const text = String(fallback || '').trim();
   return text || 'Waiting for your next prompt';
-}
-
-export function hasSeenClaudePromptNotification(key) {
-  return hasSeenPromptNotification('claude', key);
-}
-
-export function hasSeenCodexPromptNotification(key) {
-  return hasSeenPromptNotification('codex', key);
 }
 
 export function hasSeenPromptNotification(kind, key) {

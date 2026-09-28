@@ -1,4 +1,4 @@
-import { isAuthenticated, wsConnected } from './state.mjs';
+import { isAuthenticated, wsConnected, wsOpens } from './state.mjs';
 import { shouldPauseRealtimeWhenHidden, shouldReduceNetworkActivity } from './network-profile.mjs';
 
 let ws = null;
@@ -29,6 +29,7 @@ export function connectWs() {
   ws.onopen = () => {
     clearTimeout(offlineTimer);
     wsConnected.value = true;
+    wsOpens.value++;
     reconnectAttempt = 0;
     startHeartbeat();
     // Re-subscribe to all channels (with metadata if available)

@@ -1,6 +1,5 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 
 import {
   applyRevalidatedCacheHeader,
@@ -21,18 +20,6 @@ describe('static cache controls', () => {
     assert.equal(isRevalidatedStaticAsset('/app.js'), true);
     assert.equal(isRevalidatedStaticAsset('/index.html'), true);
     assert.equal(isRevalidatedStaticAsset('/styles.css'), false);
-  });
-
-  it('keeps a service worker tombstone without page registration code', async () => {
-    const script = await readFile('public/sw.js', 'utf8');
-    assert.match(script, /skipWaiting\(\)/);
-    assert.match(script, /registration\.unregister\(\)/);
-    assert.match(script, /clients\.matchAll\(\{ type: 'window' \}\)/);
-
-    const index = await readFile('public/index.html', 'utf8');
-    assert.doesNotMatch(index, /serviceWorker/);
-    assert.doesNotMatch(index, /getRegistrations\(\)/);
-    assert.doesNotMatch(index, /unregister\(\)/);
   });
 
   it('sets no-cache must-revalidate for served modules and scripts', () => {

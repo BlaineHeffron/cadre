@@ -32,6 +32,7 @@ const DEFAULT_RUNTIME_STATE_FILES = [
   'fleet_incidents.json',
   'fleet_deployment_notifications.json',
   'audio_recordings.json',
+  'web_push.json',
 ];
 
 const DEFAULT_LEGACY_STATE_FILES = [

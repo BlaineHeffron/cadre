@@ -8,6 +8,7 @@ import { normalizeProviderPane } from '../session-state/providers/pane-view.mjs'
 import { assertValidCodexModel } from './codex-models.mjs';
 import { assertValidClaudeModel, normalizeClaudeProvider } from './claude-models.mjs';
 import { sendTmuxText, sleep } from '../platform/tmux-input.mjs';
+import { notifyPush } from '../platform/push.mjs';
 import { saveImageToWorkspace, buildAgentImagePrompt, buildImageAttachmentResult } from './image-handoff.mjs';
 import { AttachmentStore } from '../agent/attachment-store.mjs';
 import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
@@ -3310,7 +3311,7 @@ async function sessionsPlugin(app, {
           if (attention?.active && previousAttentionKey !== attention.key) {
             const lastAlert = lastAlertTime.get(s.id) || 0;
             if (now - lastAlert > 30000) {
-              wsManager.broadcast(`${config.id}:alerts`, 'alert', {
+              const alert = {
                 sessionId: s.id,
                 sessionName: s.displayName || s.name,
                 status: state.status,
@@ -3329,7 +3330,9 @@ async function sessionsPlugin(app, {
                 route: attention?.route || `/${config.id}/${s.id}`,
                 target: attention?.target || tn,
                 createdAt: attention?.createdAt || now,
-              });
+              };
+              wsManager.broadcast(`${config.id}:alerts`, 'alert', alert);
+              void notifyPush(config, alert);
               lastAlertTime.set(s.id, now);
               lastBroadcastAttentionKey.set(s.id, attention.key);
             }

@@ -29,6 +29,7 @@ import { scheduledAgentsPlugin } from './modules/integrations/scheduled-agents-p
 import { buildScheduledAgentStore, SchedulerLoop } from './modules/integrations/scheduled-agents.mjs';
 import { audioPlugin } from './modules/audio/index.mjs';
 import { quickCapturePlugin } from './modules/integrations/quick-capture.mjs';
+import { pushPlugin } from './modules/platform/push.mjs';
 import { researchWorkbenchPlugin } from './modules/integrations/research-workbench.mjs';
 import { buildSessionDeliveryAuditStore, sessionDeliveryAuditPlugin } from './modules/sessions/delivery-audit.mjs';
 import { buildMonitorMcpServer } from './modules/platform/monitor-mcp.mjs';
@@ -194,6 +195,9 @@ await app.register(audioPlugin, { wsManager });
 
 // Phone-friendly quick capture notes
 await app.register(quickCapturePlugin);
+
+// Web Push alerts for installed PWAs; sending is a side effect.
+await app.register(pushPlugin, { sendEnabled: !sideEffectLoopsSuppressed });
 
 await app.register(mcpOauthPlugin);
 
