@@ -481,7 +481,7 @@ describe('Claude stream-json sessions', () => {
       };
       const base = `/api/${kind}/sessions`;
       const first = await register();
-      const created = await first.inject({ method: 'POST', url: base, payload: { workDir, displayName: 'Idle', model: kind === 'claude' ? 'claude-sonnet-5' : '' } });
+      const created = await first.inject({ method: 'POST', url: base, payload: { workDir, displayName: 'Idle', model: kind === 'claude' ? 'claude-sonnet-5-5' : '' } });
       assert.equal(created.statusCode, 200, created.body);
       const { id } = created.json();
       let taskId = null;

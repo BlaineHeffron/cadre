@@ -23,7 +23,7 @@ describe('Claude model validation', () => {
         'claude-opus-5',
         'claude-opus-5-5',
         'claude-sonnet-4-6',
-        'claude-sonnet-5',
+        'claude-sonnet-5-5',
       ]);
       assert.equal(normalizeClaudeModel(' claude-opus-5 '), 'claude-opus-5');
       assert.equal(await isValidClaudeModel('claude-opus-5', { apiKey: '', cacheFile, forceRefresh: true, env: {} }), true);
@@ -46,7 +46,7 @@ describe('Claude model validation', () => {
       ['opus 4.8', 'claude-opus-4-8'],
       ['opus-4.8', 'claude-opus-4-8'],
       ['sonnet 4.6', 'claude-sonnet-4-6'],
-      ['sonnet 5', 'claude-sonnet-5'],
+      ['sonnet 5.5', 'claude-sonnet-5-5'],
       ['haiku 4.5', 'claude-haiku-4-5'],
     ];
 
@@ -62,8 +62,8 @@ describe('Claude model validation', () => {
         'claude-opus-4-8',
       );
       assert.equal(
-        await assertValidClaudeModel('sonnet 5', { apiKey: '', cacheFile, forceRefresh: true, env: {} }),
-        'claude-sonnet-5',
+        await assertValidClaudeModel('sonnet 5.5', { apiKey: '', cacheFile, forceRefresh: true, env: {} }),
+        'claude-sonnet-5-5',
       );
       assert.equal(
         await assertValidClaudeModel('opus 5.5', { apiKey: '', cacheFile, forceRefresh: true, env: {} }),
@@ -139,7 +139,7 @@ describe('Claude model validation', () => {
         'claude-opus-5',
         'claude-opus-5-5',
         'claude-sonnet-4-6',
-        'claude-sonnet-5',
+        'claude-sonnet-5-5',
       ]);
       assert.equal(await isValidClaudeModel('claude-opus-4-6', options), false);
       assert.equal(await isValidClaudeModel('claude-sonnet-4-7', options), false);
