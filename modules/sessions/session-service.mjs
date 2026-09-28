@@ -44,7 +44,7 @@ function transportErrorKind(value) {
   return allowed.has(normalized) ? normalized : 'other';
 }
 
-function newSession({ sessionId, provider, displayName, workDir, permissionMode, model, mcpCapabilities, createdAt, taskId = null }) {
+function newSession({ sessionId, provider, displayName, workDir, permissionMode, model, thinkingLevel = '', codexPlugins = null, mcpCapabilities, createdAt, taskId = null }) {
   return {
     id: sessionId,
     taskId,
@@ -53,6 +53,8 @@ function newSession({ sessionId, provider, displayName, workDir, permissionMode,
     workDir,
     permissionMode,
     model,
+    thinkingLevel,
+    codexPlugins: clone(codexPlugins) || null,
     mcpCapabilities: clone(mcpCapabilities) || null,
     createdAt,
     updatedAt: createdAt,
@@ -129,6 +131,8 @@ function reduceSessionEvent(session, event) {
       workDir: data.workDir,
       permissionMode: data.permissionMode,
       model: data.model,
+      thinkingLevel: data.thinkingLevel,
+      codexPlugins: data.codexPlugins,
       taskId: data.taskId,
       mcpCapabilities: data.mcpCapabilities,
       createdAt: data.createdAt || event.recordedAt,
@@ -387,6 +391,8 @@ export class SessionService {
       workDir: text(spec.workDir),
       permissionMode,
       model: text(spec.model),
+      thinkingLevel: text(spec.thinkingLevel),
+      codexPlugins: spec.codexPlugins,
       taskId: spec.metadata?.taskId || null,
       mcpCapabilities: spec.mcpCapabilities,
       createdAt,
@@ -398,6 +404,8 @@ export class SessionService {
       workDir: session.workDir,
       permissionMode,
       model: session.model,
+      thinkingLevel: session.thinkingLevel,
+      codexPlugins: session.codexPlugins,
       taskId: session.taskId,
       mcpCapabilities: session.mcpCapabilities,
       createdAt,
@@ -427,7 +435,7 @@ export class SessionService {
           throw Object.assign(new Error('Previous structured runtime did not exit'), { code: 'terminate_failed', statusCode: 409 });
         }
         await session.consumePromise;
-        return await this.#launch(session, { model: session.model, ...spec, resumeFrom });
+        return await this.#launch(session, { model: session.model, thinkingLevel: session.thinkingLevel, ...spec, resumeFrom });
       } catch (error) {
         await cleanup(error);
         throw error;

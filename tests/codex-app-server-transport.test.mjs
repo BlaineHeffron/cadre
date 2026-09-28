@@ -27,8 +27,10 @@ const prompt = (transport) => transport.prompt({ turnId: 'fleet-turn', blocks: [
 
 test('handshake records provider model/tool evidence and sends normal turn/start, settling on terminal receipt', async () => {
   const { transport, cwd, events, frames } = await setup();
-  const started = await transport.start({ cwd, model: 'fixture-model', requiredTools: ['room_context', 'room_send'] });
+  const started = await transport.start({ cwd, model: 'fixture-model', thinkingLevel: 'low', requiredTools: ['room_context', 'room_send'] });
   assert.equal(started.startup.effectiveModel, 'fixture-model');
+  assert.equal(started.startup.requestedReasoningEffort, 'low');
+  assert.equal((await frames()).find((e) => e.method === 'thread/start').params.config.model_reasoning_effort, 'low');
   assert.equal(started.startup.modelEvidence.inferenceIdentityVerified, false);
   assert.equal(started.startup.roomRead.status, 'unverified');
   assert.equal(started.negotiated.busParticipation, 'none');

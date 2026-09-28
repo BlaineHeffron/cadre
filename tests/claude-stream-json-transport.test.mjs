@@ -216,6 +216,8 @@ describe('ClaudeStreamJsonTransport', () => {
       '--mcp-config', '/state/dueno-mcp.json', '--strict-mcp-config',
       '--settings', '/state/hooks.json', '--append-system-prompt-file', '/state/prompt.md',
     ]);
+    const effort = buildClaudeStreamJsonArgs({ sessionId: '11111111-2222-4333-8444-555555555555', resume: true, thinkingLevel: 'high' });
+    assert.equal(effort[effort.indexOf('--effort') + 1], 'high');
     assert.throws(() => buildClaudeStreamJsonArgs({
       sessionId: '11111111-2222-4333-8444-555555555555', permissionMode: 'mystery',
     }), (error) => error.code === 'unsupported_permission_mode');
