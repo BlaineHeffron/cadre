@@ -1,6 +1,10 @@
+import { execFile } from 'node:child_process';
 import { watch } from 'node:fs';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { config } from '../../config.mjs';
 import { buildAudioRecordingStore, safeAudioRecording } from './recordings.mjs';
 import { expandHomePath, pruneStaleAudio, scanAudioInbox } from './ingest.mjs';
@@ -149,6 +153,35 @@ async function validateActionLaunchDir(path) {
   return resolved;
 }
 
+const TRANSCRIBE_SCRIPT = fileURLToPath(new URL('../../scripts/fleet-transcribe.sh', import.meta.url));
+
+// whisper-cpp writes plain text; faster-whisper adds a header and `[start - end]` line prefixes.
+function transcriptText(raw) {
+  return raw.split('\n')
+    .filter((line) => !/^(# Transcript:|Language:)/.test(line))
+    .map((line) => line.replace(/^\[[\d.]+ - [\d.]+\]/, '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
+// Push-to-talk dictation: run one clip through the same engine config (FLEET_TRANSCRIBE_ENGINE,
+// FLEET_WHISPER_*) the inbox transcriber uses. `timeout` kills the whole engine process group.
+async function transcribeClip(audio, ext) {
+  const dir = await mkdtemp(resolve(tmpdir(), 'cadre-ptt-'));
+  try {
+    await writeFile(resolve(dir, `clip.${ext}`), audio);
+    await promisify(execFile)('timeout', ['120', TRANSCRIBE_SCRIPT], {
+      env: { ...process.env, FLEET_AUDIO_INBOX: dir, FLEET_TRANSCRIBE_GLOB: `clip.${ext}`, FLEET_TRANSCRIBE_MIN_AGE_SEC: '0' },
+    }).catch((error) => {
+      if (/ is required/.test(error.stderr)) error.statusCode = 503;
+      throw error;
+    });
+    return transcriptText(await readFile(resolve(dir, 'clip.txt'), 'utf8'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 function startAudioIngestLoop({ sourceConfig, scan, log }) {
   if (sourceConfig.ingestEnabled !== true) return null;
   const handles = [];
@@ -208,6 +241,7 @@ export async function audioPlugin(app, opts = {}) {
   });
   const sessionLauncher = opts.sessionLauncher || defaultSessionLauncher;
   const log = opts.log || app.log;
+  const transcribe = opts.transcribe || transcribeClip;
 
   async function handleIngestResult(result) {
     const payload = {
@@ -284,6 +318,21 @@ export async function audioPlugin(app, opts = {}) {
   });
 
   app.post('/api/recordings/scan', async () => scan());
+
+  // Body size is bounded by the server bodyLimit; the client caps clips at two minutes.
+  app.post('/api/audio/transcribe', async (req, reply) => {
+    const match = String(req.body?.audio || '').match(/^data:audio\/([\w.+-]+)[^,]*;base64,(.+)$/);
+    if (!match) return reply.code(400).send({ error: 'Expected a base64 audio data URL', code: 'invalid_audio' });
+    try {
+      return { text: await transcribe(Buffer.from(match[2], 'base64'), match[1]) };
+    } catch (error) {
+      if (error.statusCode === 503) {
+        return reply.code(503).send({ error: 'No speech-to-text engine on the server', code: 'transcriber_unavailable' });
+      }
+      log.warn({ reason: error.message }, 'Audio transcription failed');
+      return reply.code(502).send({ error: 'Transcription failed', code: 'transcription_failed' });
+    }
+  });
 
   app.post('/api/recordings/cleanup', async (_req, reply) => {
     if (sourceConfig.audioCleanupEnabled !== true) {

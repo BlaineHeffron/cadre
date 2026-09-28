@@ -7,7 +7,7 @@ import { addToast } from '../app/state.mjs';
 import { route } from 'preact-router';
 import { isEditableTarget, mapKeyboardEventToTmux } from '../app/terminal-input.mjs';
 import { Terminal } from '../components/terminal.mjs';
-import { VoiceInput } from '../components/voice-input.mjs';
+import { appendTranscript, VoiceInput } from '../components/voice-input.mjs';
 import { TerminalKeys } from '../components/terminal-keys.mjs';
 
 export function TmuxPanePage({ target }) {
@@ -102,7 +102,7 @@ export function TmuxPanePage({ target }) {
   }
 
   function onVoiceResult(text) {
-    setInputKeys(text);
+    setInputKeys((current) => appendTranscript(current, text));
   }
 
   async function killPane() {

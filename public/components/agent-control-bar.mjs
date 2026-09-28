@@ -5,6 +5,7 @@ import { useSignal } from '../app/use-signal.mjs';
 import { openSkillWriterWithDraft } from '../app/skill-drafts.mjs';
 import { LaunchSkillSelector } from './launch-skill-selector.mjs';
 import { SkillPromptComposer } from './skill-prompt-composer.mjs';
+import { appendTranscript, VoiceInput } from './voice-input.mjs';
 
 function haptic(ms = 50) {
   if (navigator.vibrate) navigator.vibrate(ms);
@@ -245,6 +246,7 @@ export function AgentControlBar({
           onDropFiles=${onDropFiles}
           ariaLabel="Session prompt"
         />
+        <${VoiceInput} className="ctrl-btn" hotkey onResult=${(text) => { inputText.value = appendTranscript(inputText.value, text); }} />
         <button
           type="submit"
           class="ctrl-btn ctrl-send"

@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { config as appConfig } from '../config.mjs';
@@ -41,7 +41,7 @@ function memoryStateStore(initial = null) {
   };
 }
 
-async function buildApp({ store = null, config = {}, sessionLauncher = null, wsManager = null, pruneStaleAudio = null } = {}) {
+async function buildApp({ store = null, config = {}, sessionLauncher = null, wsManager = null, pruneStaleAudio = null, transcribe = null } = {}) {
   process.env.AUTH_TOKEN = TEST_TOKEN;
   process.env.INTERNAL_BYPASS_TOKEN = TEST_TOKEN;
   appConfig.auth.token = TEST_TOKEN;
@@ -54,6 +54,7 @@ async function buildApp({ store = null, config = {}, sessionLauncher = null, wsM
     ...(sessionLauncher ? { sessionLauncher } : {}),
     ...(wsManager ? { wsManager } : {}),
     ...(pruneStaleAudio ? { pruneStaleAudio } : {}),
+    ...(transcribe ? { transcribe } : {}),
   });
   await app.ready();
   return app;
@@ -443,5 +444,84 @@ describe('audio cleanup route', () => {
     assert.equal(enabledRes.statusCode, 200);
     assert.deepEqual(JSON.parse(enabledRes.body), { deleted: [], kept: [], scanned: 0 });
     await enabled.close();
+  });
+});
+
+describe('push-to-talk transcribe route', () => {
+  const clip = `data:audio/webm;codecs=opus;base64,${Buffer.from('fake opus bytes').toString('base64')}`;
+  const post = (app, body, headers = authHeaders()) => app.inject({ method: 'POST', url: '/api/audio/transcribe', headers, payload: body });
+
+  async function withEngineEnv(env, fn) {
+    const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+    Object.assign(process.env, env);
+    try {
+      return await fn();
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
+  it('decodes the clip for the injected transcriber and maps its failures', async () => {
+    const calls = [];
+    let failure = null;
+    const app = await buildApp({
+      transcribe: async (audio, ext) => {
+        calls.push({ audio: audio.toString(), ext });
+        if (failure) throw failure;
+        return 'hello world';
+      },
+    });
+
+    assert.equal((await post(app, { audio: clip }, {})).statusCode, 401);
+    const bad = await post(app, { audio: 'data:image/png;base64,AAAA' });
+    assert.equal(bad.statusCode, 400);
+    assert.equal(bad.json().code, 'invalid_audio');
+
+    const ok = await post(app, { audio: clip });
+    assert.equal(ok.statusCode, 200);
+    assert.deepEqual(ok.json(), { text: 'hello world' });
+    assert.deepEqual(calls, [{ audio: 'fake opus bytes', ext: 'webm' }]);
+
+    failure = Object.assign(new Error('whisper-cli is required'), { statusCode: 503 });
+    const unavailable = await post(app, { audio: clip });
+    assert.equal(unavailable.statusCode, 503);
+    assert.equal(unavailable.json().code, 'transcriber_unavailable');
+
+    failure = new Error('engine crashed');
+    const failed = await post(app, { audio: clip });
+    assert.equal(failed.statusCode, 502);
+    assert.equal(failed.json().code, 'transcription_failed');
+    await app.close();
+  });
+
+  it('runs the configured fleet-transcribe engine and strips faster-whisper formatting', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dueno-ptt-engine-'));
+    tempDirs.push(dir);
+    const engine = join(dir, 'fake-faster-whisper');
+    const seen = join(dir, 'seen-audio-path');
+    // Mimics faster-whisper-cli.py: AUDIO --model M ... --output_dir DIR, writes DIR/<stem>.txt.
+    await writeFile(engine, `#!/usr/bin/env bash
+audio="$1"; shift
+while [[ $# -gt 0 ]]; do [[ "$1" == --output_dir ]] && out="$2"; shift; done
+printf '%s' "$audio" > ${JSON.stringify(seen)}
+printf '# Transcript: clip.webm\n\nLanguage: en (0.99)\n\n[0.00 - 1.20] heard: %s\n[1.20 - 2.00] second line\n' "$(cat "$audio")" > "$out/clip.txt"
+`);
+    await chmod(engine, 0o755);
+    const app = await buildApp();
+
+    const res = await withEngineEnv({ FLEET_TRANSCRIBE_ENGINE: 'faster-whisper', FLEET_WHISPER_BIN: engine }, () => post(app, { audio: clip }));
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json(), { text: 'heard: fake opus bytes second line' });
+    const audioPath = await readFile(seen, 'utf8');
+    assert.match(audioPath, /clip\.webm$/);
+    assert.equal(existsSync(audioPath), false);
+
+    const missing = await withEngineEnv({ FLEET_TRANSCRIBE_ENGINE: 'whisper-cpp', FLEET_WHISPER_BIN: join(dir, 'no-such-whisper-cli') }, () => post(app, { audio: clip }));
+    assert.equal(missing.statusCode, 503);
+    assert.equal(missing.json().code, 'transcriber_unavailable');
+    await app.close();
   });
 });
