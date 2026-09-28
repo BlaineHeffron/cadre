@@ -10,6 +10,8 @@ import { buildMcpCapabilityCatalog } from '../modules/integrations/mcp-server-ca
 import { claudeSessionsPlugin, isClaudeStreamJsonEnabled } from '../modules/sessions/claude-sessions.mjs';
 import { codexSessionsPlugin, isCodexAppServerEnabled } from '../modules/sessions/codex-sessions.mjs';
 import { getProtocolSessionProvider } from '../modules/sessions/protocol-session-registry.mjs';
+import { TASK_ADMISSION } from '../modules/sessions/session-service.mjs';
+import { RESEARCH_PROFILE_ID } from '../modules/integrations/research-profile.mjs';
 import { CLAUDE_STREAM_JSON_E2E_VERSION, claudeStreamJsonBusE2eEvidence } from '../modules/sessions/claude-stream-json-mcp.mjs';
 
 const roots = [];
@@ -395,21 +397,26 @@ describe('Claude stream-json sessions', () => {
 
       const second = await register();
       const interrupted = (await second.inject({ method: 'GET', url: `${base}/${id}` })).json();
-      assert.deepEqual([interrupted.state.status, interrupted.canResume, interrupted.nonResumable], ['ended', true, false]);
+      assert.deepEqual([interrupted.state.status, interrupted.sessionEnded, interrupted.canResume, interrupted.nonResumable], ['ended', true, true, false]);
       FakeTransport.failNextAttach = true;
       const failed = await second.inject({ method: 'POST', url: `${base}/${id}/resume` });
       assert.equal(failed.statusCode, 500);
       assert.equal((await credentialStore.authenticate(clients[1].attachSpec.env.DUENO_AGENT_BUS_TOKEN)).reason, 'revoked');
       assert.equal((await second.inject({ method: 'GET', url: `${base}/${id}` })).json().canResume, true);
-      const resumed = await second.inject({ method: 'POST', url: `${base}/${id}/resume` });
-      assert.equal(resumed.statusCode, 200, resumed.body);
+      // Concurrent resumes serialize: the loser must not revoke or delete what the winner issued.
+      const racing = await Promise.all([1, 2].map(() => second.inject({ method: 'POST', url: `${base}/${id}/resume` })));
+      assert.deepEqual(racing.map((response) => response.statusCode).sort(), [200, 409]);
+      const resumed = racing.find((response) => response.statusCode === 200);
       assert.equal(resumed.json().canResume, false);
       const attach = clients[2].attachSpec;
       assert.ok(created.json().attempts[0].protocolSessionId);
       assert.equal(attach.protocolSessionId, created.json().attempts[0].protocolSessionId);
       assert.deepEqual(attach.promptArgs || [], []);
       assert.equal(attach.permissionMode, 'workspace-write');
-      if (kind === 'claude') assert.match(attach.mcpConfigPath, /attempt-3\/dueno-mcp\.json$/);
+      if (kind === 'claude') {
+        assert.match(attach.mcpConfigPath, /attempt-3\/dueno-mcp\.json$/);
+        await stat(attach.mcpConfigPath);
+      }
       const resumedToken = attach.env.DUENO_AGENT_BUS_TOKEN;
       assert.notEqual(resumedToken, firstToken);
       assert.equal((await credentialStore.authenticate(resumedToken)).ok, true);
@@ -424,8 +431,83 @@ describe('Claude stream-json sessions', () => {
       assert.equal((await second.inject({ method: 'POST', url: `${base}/missing/resume` })).statusCode, 404);
       assert.equal((await second.inject({ method: 'DELETE', url: `${base}/${id}` })).json().ok, true);
       assert.equal((await credentialStore.authenticate(resumedToken)).reason, 'revoked');
+      await assert.rejects(stat(join(root, 'sessions', id)), { code: 'ENOENT' });
+    });
+
+    it(`offers ${kind} Start Fresh instead of resuming a conversation that was never proven`, async () => {
+      const root = await mkdtemp(join(tmpdir(), `dueno-${kind}-structured-unproven-`));
+      roots.push(root);
+      const workDir = join(root, 'work');
+      await mkdir(workDir);
+      const clients = [];
+      const register = async () => {
+        const app = Fastify({ logger: false });
+        apps.push(app);
+        await app.register(kind === 'claude' ? claudeSessionsPlugin : codexSessionsPlugin, {
+          streamJsonEnabled: true, appServerEnabled: true, sessionRoot: join(root, 'sessions'),
+          sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
+          mcpDiscovery: async () => ({ authenticated: true }), e2eEvidence: { proven: true, expectedVersion: 'test' },
+          transportFactory() { const client = new FakeTransport(kind); clients.push(client); return client; },
+        });
+        return app;
+      };
+      const base = `/api/${kind}/sessions`;
+      const first = await register();
+      const created = await first.inject({ method: 'POST', url: base, payload: { workDir, displayName: 'Idle', model: kind === 'claude' ? 'claude-sonnet-5' : '' } });
+      assert.equal(created.statusCode, 200, created.body);
+      const { id } = created.json();
+      let taskId = null;
+      if (kind === 'claude') {
+        // A task-owned session is resumable only through task_resume.
+        const { service } = getProtocolSessionProvider('claude');
+        taskId = (await service.start({ workDir, permissionMode: 'workspace-write', metadata: { taskId: 'task-1' } })).id;
+        await service.prompt(taskId, { blocks: [{ type: 'text', text: 'task work' }], idempotencyKey: 'task', taskAdmission: TASK_ADMISSION });
+        await waitFor(() => service.get(taskId).turns[0]?.status === 'settled');
+      }
+      await first.close();
+      apps.splice(apps.indexOf(first), 1);
+
+      const second = await register();
+      const launched = clients.length;
+      const idle = (await second.inject({ method: 'GET', url: `${base}/${id}` })).json();
+      assert.deepEqual([idle.canResume, idle.nonResumable, idle.model], [false, true, created.json().model]);
+      const refused = await second.inject({ method: 'POST', url: `${base}/${id}/resume` });
+      assert.deepEqual([refused.statusCode, refused.json().code], [409, 'session_not_resumable']);
+      assert.deepEqual(refused.json().freshSession, { workDir, model: created.json().model, displayName: 'Idle' });
+      if (taskId) {
+        assert.equal((await second.inject({ method: 'GET', url: `${base}/${taskId}` })).json().canResume, false);
+        const task = await second.inject({ method: 'POST', url: `${base}/${taskId}/resume` });
+        assert.deepEqual([task.statusCode, task.json().code, task.json().freshSession], [409, 'task_managed', undefined]);
+      }
+      assert.equal(clients.length, launched);
     });
   }
+
+  it('gives Research Workbench Codex sessions the read-only untrusted sandbox and validates permission modes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dueno-codex-structured-research-'));
+    roots.push(root);
+    const workDir = join(root, 'work');
+    await mkdir(workDir);
+    const clients = [];
+    const app = Fastify({ logger: false });
+    apps.push(app);
+    await app.register(codexSessionsPlugin, {
+      appServerEnabled: true, sessionRoot: join(root, 'sessions'),
+      sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
+      transportFactory() { const client = new FakeTransport('codex'); clients.push(client); return client; },
+    });
+    const research = await app.inject({ method: 'POST', url: '/api/codex/sessions', payload: {
+      workDir, permissionMode: 'danger-full-access', metadata: { researchWorkbench: { profileId: RESEARCH_PROFILE_ID } },
+    } });
+    assert.equal(research.statusCode, 200, research.body);
+    assert.deepEqual([clients[0].startSpec.permissionMode, clients[0].startSpec.approvalPolicy], ['read-only', 'untrusted']);
+    const plain = await app.inject({ method: 'POST', url: '/api/codex/sessions', payload: { workDir } });
+    assert.equal(plain.statusCode, 200, plain.body);
+    assert.deepEqual([clients[1].startSpec.permissionMode, clients[1].startSpec.approvalPolicy], ['workspace-write', 'on-request']);
+    const invalid = await app.inject({ method: 'POST', url: '/api/codex/sessions', payload: { workDir, permissionMode: 'yolo' } });
+    assert.deepEqual([invalid.statusCode, invalid.json().code], [400, 'unsupported_permission_mode']);
+    assert.equal(clients.length, 2);
+  });
 
   it('keeps interactive Codex on the tmux provider unless opted in', () => {
     assert.equal(isCodexAppServerEnabled(''), false);

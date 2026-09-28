@@ -86,6 +86,14 @@ function publicSession(session) {
   return clone(value);
 }
 
+// A provider conversation is proven to exist once a turn settled on an attempt bound to it; only then attach.
+export function resumableProtocolSessionId(session) {
+  if (session?.negotiated?.sessionOps?.resume !== 'supported') return null;
+  const proven = new Set(session.turns.filter((turn) => turn.status === 'settled')
+    .map((turn) => session.attempts.find((attempt) => attempt.generation === turn.generation)?.protocolSessionId));
+  return session.attempts.findLast((attempt) => attempt.protocolSessionId && proven.has(attempt.protocolSessionId))?.protocolSessionId || null;
+}
+
 function applyInterruptedProjection(session, event, {
   attemptId = session.activeAttemptId,
   reason = 'transport_error',
@@ -398,24 +406,32 @@ export class SessionService {
     return this.#launch(session, spec);
   }
 
-  // An interrupted session resumes as a new attempt attached to its last provider session.
-  resume(sessionId, spec = {}) {
+  // An interrupted session resumes as a new attempt attached to its proven provider conversation.
+  // prepare/cleanup run under the session lock so a concurrent resume cannot race credential issuance.
+  resume(sessionId, { prepare = () => ({}), cleanup = () => {} } = {}) {
     return this.#withCommandLock(String(sessionId || ''), async () => {
       const session = this.sessions.get(String(sessionId || ''));
-      const resumeFrom = session?.attempts.findLast((attempt) => attempt.protocolSessionId)?.protocolSessionId;
-      if (session?.lifecycle !== 'interrupted' || !resumeFrom) {
+      if (session?.taskId) throw Object.assign(new Error('Task-owned sessions resume through task_resume'), { code: 'task_managed', statusCode: 409 });
+      const resumeFrom = session?.lifecycle === 'interrupted' && resumableProtocolSessionId(session);
+      if (!resumeFrom) {
         throw Object.assign(new Error(`Session is ${session?.lifecycle || 'missing'} and cannot be resumed`), {
           code: 'session_not_resumable', statusCode: session ? 409 : 404,
         });
       }
-      await this.#transition(session, 'starting', 'Resuming structured attempt');
-      // Reap a runtime left by an earlier failed attempt; its exit is stale while starting.
-      if (session.transport && !(await session.transport.terminate({ grace: 500 })).ok) {
-        await this.#append(session, 'session.interrupted', { reason: 'resume_failed', detail: 'Previous structured runtime did not exit' });
-        throw Object.assign(new Error('Previous structured runtime did not exit'), { code: 'terminate_failed', statusCode: 409 });
+      try {
+        const spec = await prepare(this.#public(session));
+        await this.#transition(session, 'starting', 'Resuming structured attempt');
+        // Reap a runtime left by an earlier failed attempt or terminate; its exit is stale while starting.
+        if (session.transport && !(await session.transport.terminate({ grace: 500 })).ok) {
+          await this.#append(session, 'session.interrupted', { reason: 'resume_failed', detail: 'Previous structured runtime did not exit' });
+          throw Object.assign(new Error('Previous structured runtime did not exit'), { code: 'terminate_failed', statusCode: 409 });
+        }
+        await session.consumePromise;
+        return await this.#launch(session, { model: session.model, ...spec, resumeFrom });
+      } catch (error) {
+        await cleanup(error);
+        throw error;
       }
-      await session.consumePromise;
-      return this.#launch(session, { model: session.model, ...spec, resumeFrom });
     });
   }
 
@@ -760,7 +776,8 @@ export class SessionService {
     const verdict = await session.transport.terminate({ grace });
     if (verdict.ok) {
       await this.#append(session, 'attempt.ended', { attemptId, reason });
-      await this.#transition(session, 'ended', reason);
+      if (session.lifecycle !== 'interrupted') await this.#transition(session, 'ended', reason);
+      session.transport = null;
     } else {
       await this.#append(session, 'session.interrupted', {
         attemptId,
@@ -768,7 +785,7 @@ export class SessionService {
         detail: verdict.status || 'Structured runtime did not exit cleanly',
       });
     }
-    session.transport = null;
+    // A runtime that did not exit keeps its handle, so a later terminate or resume reaps it first.
     return verdict;
   }
 

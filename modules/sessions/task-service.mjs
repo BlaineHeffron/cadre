@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import { TASK_ADMISSION } from './session-service.mjs';
+import { resumableProtocolSessionId, TASK_ADMISSION } from './session-service.mjs';
 import { DURABLE_TASK_RECORD_TYPE, isDurableTaskRecord } from './task-record.mjs';
 
 // A zero-time poll still gets a finite allowance to confirm its supplied cursor.
@@ -560,8 +560,9 @@ export class TaskService {
       if (previous && !['ended', 'interrupted'].includes(previous.lifecycle)) throw fail('task_active', 'The current attempt is still active');
       task.requests[`resume:${requestKey}`] = { createdAt: this.now() };
       await this.#save(task);
-      const canAttach = previous?.negotiated?.sessionOps?.resume === 'supported';
-      await this.#start(task, binding, canAttach ? previous.attempts.at(-1)?.protocolSessionId : null);
+      // Attach to the latest conversation proven to exist; otherwise start fresh.
+      const resumeFrom = task.attempts.map((attempt) => resumableProtocolSessionId(binding.service.get(attempt.sessionId))).findLast(Boolean);
+      await this.#start(task, binding, resumeFrom || null);
       await this.#reconcile(task);
       return this.status(taskId);
     });

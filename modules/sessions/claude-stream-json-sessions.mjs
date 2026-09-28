@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { prepareHeadroomLaunch } from '../agent/headroom.mjs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { AttachmentStore } from '../agent/attachment-store.mjs';
 import { ClaudeStreamJsonTransport } from '../agent/claude-stream-json-transport.mjs';
@@ -24,7 +24,7 @@ import { assertValidClaudeModel } from './claude-models.mjs';
 import { assertValidCodexModel } from './codex-models.mjs';
 import { registerProtocolSessionProvider } from './protocol-session-registry.mjs';
 import { notifyAgentSessionDeleted } from '../agent/session-delete-events.mjs';
-import { SessionService } from './session-service.mjs';
+import { resumableProtocolSessionId, SessionService } from './session-service.mjs';
 import { normalizeSessionWorkDir } from './workdir.mjs';
 import { discoverDeepSeekDuenoTools } from './deepseek-mcp.mjs';
 import {
@@ -36,8 +36,14 @@ import {
 } from './claude-stream-json-mcp.mjs';
 import { config } from '../../config.mjs';
 import { withCadreEnv } from '../platform/cadre-env.mjs';
+import { hasResearchWorkbenchLaunchProfile } from '../integrations/research-profile.mjs';
 
 const text = (value) => String(value || '').trim();
+const TRANSCRIPT = {
+  claude: { source: 'stream_json_committed_text', transport: 'stream-json' },
+  codex: { source: 'app_server_committed_text', transport: 'app-server' },
+};
+const CODEX_SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
 
 function openInteraction(session) {
   return session.interactions.find((interaction) => interaction.status === 'open') || null;
@@ -61,28 +67,24 @@ function content(session) {
 // Shared by structured Claude (stream-json) and Codex (app-server) interactive sessions.
 export function projectClaudeStreamJsonSession(session, kind = 'claude') {
   const state = projectCompatibility(session.canonicalState);
-  const canResume = session.lifecycle === 'interrupted' && session.negotiated?.sessionOps?.resume === 'supported'
-    && session.attempts.some((attempt) => attempt.protocolSessionId);
+  const canResume = session.lifecycle === 'interrupted' && !session.taskId && Boolean(resumableProtocolSessionId(session));
   return {
     id: session.id, name: `${kind}-${session.id}`, sessionName: `${kind}-${session.id}`,
-    displayName: session.displayName, provider: kind, runtime: kind,
-    ...(kind === 'claude'
-      ? { source: 'stream_json_committed_text', transport: 'stream-json' }
-      : { source: 'app_server_committed_text', transport: 'app-server' }),
-    transcriptGrade: 'committed_text',
+    displayName: session.displayName, provider: kind, runtime: kind, model: session.model,
+    ...TRANSCRIPT[kind], transcriptGrade: 'committed_text',
     workDir: session.workDir, created: session.createdAt, content: content(session),
     diagnostics: session.diagnostics.map((entry) => entry.message || '').join('\n'),
     state, canonicalState: session.canonicalState,
     pendingResponse: state.execution === 'working' ? { sentAt: session.updatedAt } : null,
-    canResume, nonResumable: !canResume && (session.nonResumable || session.lifecycle === 'interrupted'),
-    endedWithHistory: session.endedWithHistory || session.lifecycle === 'interrupted', attachCommand: '',
+    sessionEnded: ['ended', 'interrupted'].includes(session.lifecycle),
+    canResume, nonResumable: !canResume && session.nonResumable, endedWithHistory: session.endedWithHistory, attachCommand: '',
     attempts: session.attempts, turns: session.turns, negotiated: session.negotiated,
     mcpCapabilities: session.mcpCapabilities,
   };
 }
 
-function errorReply(reply, error) {
-  return reply.code(error?.statusCode || 500).send({ error: error?.message || 'Structured session request failed', code: error?.code || null });
+function errorReply(reply, error, extra = {}) {
+  return reply.code(error?.statusCode || 500).send({ error: error?.message || 'Structured session request failed', code: error?.code || null, ...extra });
 }
 
 export async function claudeStreamJsonSessionsPlugin(app, {
@@ -133,7 +135,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
 
   // Scoped credential, MCP config, and launch args for one attempt. A resumed attempt reuses the
   // persisted MCP selection; the provider replays the system prompt it recorded at first launch.
-  async function prepareAttempt({ id, workDir, body = {}, generation = 1, resolvedMcp }) {
+  async function prepareAttempt({ id, workDir, body = {}, generation = 1, resolvedMcp, permissionMode }) {
     const mcpPreparation = await prepareMcpCapabilityLaunch({
       resolved: resolvedMcp, backendType: kind, sessionId: id, workDir,
       sourceConfig, attemptGeneration: generation, rotation: generation > 1,
@@ -161,7 +163,9 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       }),
     };
     if (!claude) {
-      return { env, preflight: mcpPreparation.preflight, args: [...headroom.args, ...mcpPreparation.prepared.codexArgs, ...promptArgs,
+      // Read-only Codex asks before untrusted commands, matching the tmux safe runtime.
+      return { env, preflight: mcpPreparation.preflight, approvalPolicy: permissionMode === 'read-only' ? 'untrusted' : 'on-request',
+        args: [...headroom.args, ...mcpPreparation.prepared.codexArgs, ...promptArgs,
         ...(headroom.modelProvider ? ['-c', `model_provider=${JSON.stringify(headroom.modelProvider)}`] : [])] };
     }
     const discovery = await mcpDiscovery({ url: buildAgentBusMcpUrl(sourceConfig), token: mcpPreparation.credentialToken });
@@ -249,11 +253,16 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         provider: kind, runtime: kind, require: ['dueno'],
         catalog: mcpCatalog || buildMcpCapabilityCatalog({ sourceConfig }),
       });
+      // Research Workbench sessions handle untrusted input, so Codex gets the tmux path's read-only sandbox.
+      const permissionMode = !claude && hasResearchWorkbenchLaunchProfile(req.body?.metadata)
+        ? 'read-only' : text(req.body?.permissionMode) || 'workspace-write';
+      if (!claude && !CODEX_SANDBOX_MODES.has(permissionMode)) {
+        return reply.code(400).send({ error: `Unsupported Codex permission mode: ${permissionMode}`, code: 'unsupported_permission_mode' });
+      }
       selectedMcpServerIds = resolvedMcp.serverIds;
-      const { preflight, ...launch } = await prepareAttempt({ id, workDir, body: req.body || {}, resolvedMcp });
+      const { preflight, ...launch } = await prepareAttempt({ id, workDir, body: req.body || {}, resolvedMcp, permissionMode });
       let session = await service.start({
-        ...launch, sessionId: id, displayName: text(req.body?.displayName), workDir,
-        model, permissionMode: text(req.body?.permissionMode) || 'workspace-write',
+        ...launch, sessionId: id, displayName: text(req.body?.displayName), workDir, model, permissionMode,
         mcpCapabilities: sanitizedMcpSnapshot(resolvedMcp, preflight),
       });
       const initialPrompt = text(req.body?.initialPrompt);
@@ -279,21 +288,28 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   });
   // Reattach an interrupted session (e.g. after a Fleet restart) to its provider conversation.
   app.post(`/api/${kind}/sessions/:id/resume`, async (req, reply) => {
-    let attempt = null;
     try {
       const session = requireSession(req.params.id);
-      if (!project(session).canResume) {
-        const error = new Error(`${label} session is ${session.lifecycle} and cannot be resumed`);
-        error.statusCode = 409; error.code = 'session_not_resumable'; throw error;
-      }
-      attempt = { generation: session.generation + 1, serverIds: session.mcpCapabilities?.serverIds || [] };
-      const { preflight: _preflight, ...launch } = await prepareAttempt({
-        id: session.id, workDir: session.workDir, generation: attempt.generation, resolvedMcp: { serverIds: attempt.serverIds },
-      });
-      return project(await service.resume(session.id, launch));
+      let generation = 0;
+      const serverIds = session.mcpCapabilities?.serverIds || [];
+      return project(await service.resume(session.id, {
+        prepare: async (current) => {
+          generation = current.generation + 1;
+          const { preflight: _preflight, ...launch } = await prepareAttempt({
+            id: current.id, workDir: current.workDir, generation, resolvedMcp: { serverIds }, permissionMode: current.permissionMode,
+          });
+          return launch;
+        },
+        // Runs under the session lock, so the principal's credential is still the one this request issued.
+        cleanup: async () => {
+          await cleanupAttempt(session.id, generation, 'resume_failed', serverIds);
+          if (claude) await cleanupClaudeHookSettings({ sessionId: session.id });
+        },
+      }));
     } catch (error) {
-      if (attempt) await cleanupSessionLaunch(req.params.id, attempt.generation, 'resume_failed', attempt.serverIds);
-      return errorReply(reply, error);
+      const session = service.get(req.params.id);
+      return errorReply(reply, error, session && error?.code !== 'task_managed'
+        ? { freshSession: { workDir: session.workDir, model: session.model, displayName: session.displayName } } : {});
     }
   });
   const input = async (req, reply) => {
@@ -363,8 +379,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   app.get(`/api/${kind}/sessions/:id/transcript`, async (req, reply) => {
     try {
       const session = requireSession(req.params.id);
-      const { source, transcriptGrade } = project(session);
-      return { text: content(session), entries: session.transcript, source, transcriptGrade };
+      return { text: content(session), entries: session.transcript, source: TRANSCRIPT[kind].source, transcriptGrade: 'committed_text' };
     } catch (error) { return errorReply(reply, error); }
   });
   app.get(`/api/${kind}/sessions/:id/events`, async (req, reply) => {
@@ -382,6 +397,8 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       const verdict = await service.delete(req.params.id, { reason: 'Deleted' });
       if (verdict.ok) await notifyAgentSessionDeleted({ kind, sessionId: req.params.id });
       await cleanupSessionLaunch(req.params.id, generation, 'session_terminated', serverIds);
+      // Drop every attempt directory, including one a concurrent resume created after generation was read.
+      if (verdict.ok) await rm(resolve(sessionRoot, existing.id), { recursive: true, force: true });
       return verdict.ok ? verdict : reply.code(500).send(verdict);
     } catch (error) { return errorReply(reply, error); }
   });

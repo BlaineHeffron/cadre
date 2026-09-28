@@ -400,6 +400,23 @@ test('recovery journals a newer resolved outcome on the old attempt without repl
   assert.equal((await f.tasks.wait([task.taskId])).results.filter((event) => event.data.state === 'completed').length, 1);
 });
 
+test('resume attaches only to a provider conversation proven by a settled turn', async () => {
+  const f = await fixture(); const task = await f.spawn();
+  // The bootstrap turn never settled, so the provider may hold no conversation: start fresh.
+  await f.service.terminate(task.sessionId);
+  const fresh = await f.tasks.resume(task.taskId, 'fresh');
+  assert.equal(f.providers.at(-1).attached, undefined);
+  await f.handshake(fresh);
+  const proven = f.providers.at(-1).threadId;
+  await f.service.terminate(fresh.sessionId);
+  const attached = await f.tasks.resume(task.taskId, 'attach');
+  assert.equal(f.providers.at(-1).attached, proven);
+  // A failed attempt with no settled turn falls back to the latest earlier proven conversation.
+  await f.service.terminate(attached.sessionId);
+  await f.tasks.resume(task.taskId, 'again');
+  assert.equal(f.providers.at(-1).attached, proven);
+});
+
 test('replacement parent retains child spawn identity and can consume existing child results', async () => {
   const f = await fixture();
   const parent = await f.spawn('parent', { scope: { providers: ['fixture'], workDirs: [f.workDir], maxDepth: 1, maxChildren: 2 } });
