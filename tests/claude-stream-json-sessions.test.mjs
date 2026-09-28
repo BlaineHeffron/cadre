@@ -8,6 +8,8 @@ import { AsyncEventQueue, createBaseCapabilities, createTransportEvent } from '.
 import { AgentBusCredentialStore } from '../modules/agent-bus/mcp-auth.mjs';
 import { buildMcpCapabilityCatalog } from '../modules/integrations/mcp-server-catalog.mjs';
 import { claudeSessionsPlugin, isClaudeStreamJsonEnabled } from '../modules/sessions/claude-sessions.mjs';
+import { codexSessionsPlugin, isCodexAppServerEnabled } from '../modules/sessions/codex-sessions.mjs';
+import { getProtocolSessionProvider } from '../modules/sessions/protocol-session-registry.mjs';
 import { CLAUDE_STREAM_JSON_E2E_VERSION, claudeStreamJsonBusE2eEvidence } from '../modules/sessions/claude-stream-json-mcp.mjs';
 
 const roots = [];
@@ -18,9 +20,9 @@ afterEach(async () => {
 });
 
 class FakeTransport {
-  constructor() { this.queue = new AsyncEventQueue(); this.prompts = []; this.cancelCalls = 0; this.answers = []; }
+  constructor(provider = 'claude') { this.provider = provider; this.queue = new AsyncEventQueue(); this.prompts = []; this.cancelCalls = 0; this.answers = []; }
   emit(type, payload = {}) {
-    this.queue.push(createTransportEvent(type, payload, { attemptId: this.attemptId, provider: 'claude', transport: 'claude-stream-json' }));
+    this.queue.push(createTransportEvent(type, payload, { attemptId: this.attemptId, provider: this.provider, transport: 'structured' }));
   }
   async start(spec) {
     this.startSpec = structuredClone(spec);
@@ -38,7 +40,11 @@ class FakeTransport {
     this.activeTurnId = null;
     return { stopReason: 'end_turn' };
   }
-  async attach() { throw new Error('unsupported'); }
+  async attach(spec) {
+    this.attachSpec = structuredClone(spec);
+    if (FakeTransport.failNextAttach) { FakeTransport.failNextAttach = false; throw new Error('provider unavailable'); }
+    return this.start({ ...spec, sessionId: spec.protocolSessionId });
+  }
   async cancel() {
     this.cancelCalls += 1;
     this.emit('turn.settled', {
@@ -66,6 +72,7 @@ class FakeTransport {
     return createBaseCapabilities({
       protocol: { name: 'claude-stream-json', version: '1' },
       interaction: { permissions: 'structured_options', elicitation: false, answerOnce: true },
+      sessionOps: { list: 'unsupported', load: 'unsupported', resume: 'supported', fork: 'unsupported', close: 'unsupported', delete: 'supported' },
       ...(this.startSpec?.capabilityEvidence || {}),
     });
   }
@@ -334,5 +341,95 @@ describe('Claude stream-json sessions', () => {
     assert.equal((await readdir(sessionRoot, { recursive: true }))
       .some((entry) => entry.endsWith('dueno-mcp.json')), false);
     assert.deepEqual((await app.inject({ method: 'GET', url: '/api/claude/sessions' })).json().sessions, []);
+  });
+
+  for (const kind of ['claude', 'codex']) {
+    it(`resumes an interrupted ${kind} structured session through its route after a Fleet restart`, async () => {
+      const root = await mkdtemp(join(tmpdir(), `dueno-${kind}-structured-resume-`));
+      roots.push(root);
+      const workDir = join(root, 'work');
+      await mkdir(workDir);
+      let credentialState = null;
+      const credentialStore = new AgentBusCredentialStore({
+        mode: 'issue_only', store: {
+          mode: 'memory', async load() { return credentialState; },
+          async save(next) { credentialState = structuredClone(next); }, async close() {},
+        },
+      });
+      const clients = [];
+      const register = async () => {
+        const app = Fastify({ logger: false });
+        apps.push(app);
+        await app.register(kind === 'claude' ? claudeSessionsPlugin : codexSessionsPlugin, {
+          streamJsonEnabled: true, appServerEnabled: true, sessionRoot: join(root, 'sessions'), credentialStore,
+          sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
+          mcpDiscovery: async () => ({ authenticated: true }), e2eEvidence: { proven: true, expectedVersion: 'test' },
+          transportFactory() { const client = new FakeTransport(kind); clients.push(client); return client; },
+        });
+        return app;
+      };
+      const base = `/api/${kind}/sessions`;
+      const first = await register();
+      assert.equal(Boolean(getProtocolSessionProvider(kind)), kind === 'claude');
+      const created = await first.inject({ method: 'POST', url: base, payload: { workDir, initialPrompt: 'remember PELICAN' } });
+      assert.equal(created.statusCode, 200, created.body);
+      const { id } = created.json();
+      assert.deepEqual([created.json().provider, created.json().sessionName, created.json().canResume],
+        [kind, `${kind}-${id}`, false]);
+      const firstToken = clients[0].startSpec.env.DUENO_AGENT_BUS_TOKEN;
+      assert.equal(clients[0].startSpec.env.DUENO_PROVIDER, kind);
+      assert.equal(clients[0].startSpec.permissionMode, 'workspace-write');
+      if (kind === 'codex') {
+        assert.equal(created.json().transport, 'app-server');
+        const args = clients[0].startSpec.args.join(' ');
+        assert.match(args, /mcp_servers=\{\}/);
+        assert.match(args, /bearer_token_env_var="DUENO_AGENT_BUS_TOKEN"/);
+        assert.equal(args.includes(firstToken), false);
+      }
+      await waitFor(async () => (await first.inject({ method: 'GET', url: `${base}/${id}` })).json().content.includes('Structured reply'));
+      const early = await first.inject({ method: 'POST', url: `${base}/${id}/resume` });
+      assert.deepEqual([early.statusCode, early.json().code], [409, 'session_not_resumable']);
+      await first.close(); // Fleet restart: the provider process is gone, the provider conversation is not.
+      apps.splice(apps.indexOf(first), 1);
+      assert.equal((await credentialStore.authenticate(firstToken)).reason, 'revoked');
+
+      const second = await register();
+      const interrupted = (await second.inject({ method: 'GET', url: `${base}/${id}` })).json();
+      assert.deepEqual([interrupted.state.status, interrupted.canResume, interrupted.nonResumable], ['ended', true, false]);
+      FakeTransport.failNextAttach = true;
+      const failed = await second.inject({ method: 'POST', url: `${base}/${id}/resume` });
+      assert.equal(failed.statusCode, 500);
+      assert.equal((await credentialStore.authenticate(clients[1].attachSpec.env.DUENO_AGENT_BUS_TOKEN)).reason, 'revoked');
+      assert.equal((await second.inject({ method: 'GET', url: `${base}/${id}` })).json().canResume, true);
+      const resumed = await second.inject({ method: 'POST', url: `${base}/${id}/resume` });
+      assert.equal(resumed.statusCode, 200, resumed.body);
+      assert.equal(resumed.json().canResume, false);
+      const attach = clients[2].attachSpec;
+      assert.ok(created.json().attempts[0].protocolSessionId);
+      assert.equal(attach.protocolSessionId, created.json().attempts[0].protocolSessionId);
+      assert.deepEqual(attach.promptArgs || [], []);
+      assert.equal(attach.permissionMode, 'workspace-write');
+      if (kind === 'claude') assert.match(attach.mcpConfigPath, /attempt-3\/dueno-mcp\.json$/);
+      const resumedToken = attach.env.DUENO_AGENT_BUS_TOKEN;
+      assert.notEqual(resumedToken, firstToken);
+      assert.equal((await credentialStore.authenticate(resumedToken)).ok, true);
+      const sent = await second.inject({ method: 'POST', url: `${base}/${id}/input`, payload: { text: 'what word?' } });
+      assert.equal(sent.statusCode, 200, sent.body);
+      await waitFor(async () => (await second.inject({ method: 'GET', url: `${base}/${id}` })).json().state.status === 'ready');
+      assert.equal(clients[2].prompts.length, 1);
+      const detail = (await second.inject({ method: 'GET', url: `${base}/${id}` })).json();
+      assert.match(detail.content, /remember PELICAN[\s\S]*what word\?/);
+      const again = await second.inject({ method: 'POST', url: `${base}/${id}/resume` });
+      assert.equal(again.statusCode, 409);
+      assert.equal((await second.inject({ method: 'POST', url: `${base}/missing/resume` })).statusCode, 404);
+      assert.equal((await second.inject({ method: 'DELETE', url: `${base}/${id}` })).json().ok, true);
+      assert.equal((await credentialStore.authenticate(resumedToken)).reason, 'revoked');
+    });
+  }
+
+  it('keeps interactive Codex on the tmux provider unless opted in', () => {
+    assert.equal(isCodexAppServerEnabled(''), false);
+    assert.equal(isCodexAppServerEnabled('0'), false);
+    assert.equal(isCodexAppServerEnabled('yes'), true);
   });
 });

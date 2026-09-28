@@ -214,6 +214,59 @@ describe('SessionService', () => {
     await restarted.close({ interrupt: false });
   });
 
+  it('resumes a restart-interrupted session by attaching to its provider session', { timeout: 15000 }, async () => {
+    const first = await fixture({ factory: () => new FakeTransport() });
+    const created = await first.service.start({ workDir: first.workDir, permissionMode: 'workspace-write', model: 'model-a' });
+    await assert.rejects(first.service.resume(created.id), (error) => error.code === 'session_not_resumable' && error.statusCode === 409);
+    await first.service.prompt(created.id, { blocks: [{ type: 'text', text: 'needs approval' }], idempotencyKey: 'approval' });
+    await waitFor(() => first.service.get(created.id).turns[0]?.status === 'inflight');
+    const firstTransport = [...first.service.sessions.values()][0].transport;
+    firstTransport.permission();
+    await waitFor(() => first.service.get(created.id).lifecycle === 'blocked');
+    await first.journal.close(); // Abrupt Fleet loss.
+
+    const attaches = [];
+    let failAttach = true;
+    class ResumableTransport extends FakeTransport {
+      async attach(spec) {
+        attaches.push(structuredClone(spec));
+        if (failAttach) throw Object.assign(new Error('provider unavailable'), { code: 'provider_unavailable' });
+        this.attemptId = spec.attemptId;
+        this.emit('attempt.started', { protocolSessionId: spec.protocolSessionId });
+        return { attemptId: spec.attemptId, protocolSessionId: spec.protocolSessionId, negotiated: this.capabilities() };
+      }
+    }
+    const restarted = new SessionService({
+      journal: new FileJournalStore({ rootDir: join(first.root, 'journal') }), transportFactory: () => new ResumableTransport({ settle: true }),
+    });
+    await restarted.init();
+    assert.equal(restarted.get(created.id).lifecycle, 'interrupted');
+    await assert.rejects(restarted.resume('missing'), (error) => error.statusCode === 404);
+
+    // A failed attach leaves the provider session intact, so the session stays interrupted and resumable.
+    await assert.rejects(restarted.resume(created.id, { env: { MARKER: '1' } }), /provider unavailable/);
+    assert.equal(restarted.get(created.id).lifecycle, 'interrupted');
+
+    failAttach = false;
+    const resumed = await restarted.resume(created.id, { env: { MARKER: '2' } });
+    assert.equal(resumed.lifecycle, 'ready');
+    assert.equal(resumed.generation, 3);
+    assert.equal(resumed.nonResumable, false);
+    assert.deepEqual(attaches.map((spec) => [spec.protocolSessionId, spec.permissionMode, spec.model, spec.env.MARKER, spec.cwd]), [
+      ['protocol-1', 'workspace-write', 'model-a', '1', first.workDir],
+      ['protocol-1', 'workspace-write', 'model-a', '2', first.workDir],
+    ]);
+    // The dead attempt's permission prompt can never be answered, so it no longer blocks.
+    assert.deepEqual(resumed.interactions.map((item) => item.status), ['cancelled']);
+    assert.equal(resumed.canonicalState.execution, 'idle');
+    await restarted.prompt(created.id, { blocks: [{ type: 'text', text: 'continue' }], idempotencyKey: 'after-resume' });
+    await waitFor(() => restarted.get(created.id).turns.at(-1)?.status === 'settled');
+    assert.equal((await restarted.journal.read(created.id)).events
+      .filter((event) => event.type === 'session.interrupted').at(-1).data.reason, 'resume_failed');
+    firstTransport.queue.close();
+    await restarted.close({ interrupt: false });
+  });
+
   it('journals transport interruption and keeps an unreturned prompt outcome unknown', { timeout: 15000 }, async () => {
     let transport;
     const harness = await fixture({ factory: () => { transport = new FakeTransport(); return transport; } });

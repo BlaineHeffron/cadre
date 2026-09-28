@@ -22,7 +22,7 @@ const TRANSITIONS = Object.freeze({
   working: new Set(['blocked', 'cancelling', 'ready', 'ended', 'interrupted']),
   blocked: new Set(['working', 'cancelling', 'ended', 'interrupted']),
   cancelling: new Set(['ready', 'ended', 'interrupted']),
-  interrupted: new Set([]),
+  interrupted: new Set(['starting']),
   ended: new Set([]),
 });
 
@@ -137,6 +137,12 @@ function reduceSessionEvent(session, event) {
   if (event.type === 'session.lifecycle') {
     session.lifecycle = data.lifecycle;
     session.detail = data.detail || data.lifecycle;
+    // Starting again after an interruption: the dead attempt's prompts can no longer be answered.
+    if (data.lifecycle === 'starting') {
+      session.nonResumable = false;
+      session.endedWithHistory = false;
+      for (const interaction of session.interactions) if (UNSETTLED_INTERACTIONS.has(interaction.status)) interaction.status = 'cancelled';
+    }
   } else if (event.type === 'attempt.created') {
     session.generation = Math.max(session.generation, data.generation);
     session.activeAttemptId = data.attemptId;
@@ -339,7 +345,7 @@ export class SessionService {
         await this.#append(restored, 'session.interrupted', {
           attemptId: activeAttemptId,
           reason: 'fleet_restart',
-          detail: 'Fleet restarted; attempt ended with preserved history and is not resumable',
+          detail: 'Fleet restarted; attempt ended with preserved history',
         });
       }
     }
@@ -389,6 +395,32 @@ export class SessionService {
       createdAt,
     }, { idempotencyKey: `session:${sessionId}:created` });
     await this.#transition(session, 'starting', 'Starting structured attempt');
+    return this.#launch(session, spec);
+  }
+
+  // An interrupted session resumes as a new attempt attached to its last provider session.
+  resume(sessionId, spec = {}) {
+    return this.#withCommandLock(String(sessionId || ''), async () => {
+      const session = this.sessions.get(String(sessionId || ''));
+      const resumeFrom = session?.attempts.findLast((attempt) => attempt.protocolSessionId)?.protocolSessionId;
+      if (session?.lifecycle !== 'interrupted' || !resumeFrom) {
+        throw Object.assign(new Error(`Session is ${session?.lifecycle || 'missing'} and cannot be resumed`), {
+          code: 'session_not_resumable', statusCode: session ? 409 : 404,
+        });
+      }
+      await this.#transition(session, 'starting', 'Resuming structured attempt');
+      // Reap a runtime left by an earlier failed attempt; its exit is stale while starting.
+      if (session.transport && !(await session.transport.terminate({ grace: 500 })).ok) {
+        await this.#append(session, 'session.interrupted', { reason: 'resume_failed', detail: 'Previous structured runtime did not exit' });
+        throw Object.assign(new Error('Previous structured runtime did not exit'), { code: 'terminate_failed', statusCode: 409 });
+      }
+      await session.consumePromise;
+      return this.#launch(session, { model: session.model, ...spec, resumeFrom });
+    });
+  }
+
+  async #launch(session, spec) {
+    const { id: sessionId, permissionMode } = session;
     const generation = session.generation + 1;
     const attemptId = text(spec.attemptId) || randomUUID();
     const runtimeInstanceId = text(spec.runtimeInstanceId) || attemptId;
@@ -401,6 +433,7 @@ export class SessionService {
       const started = await transport[spec.resumeFrom ? 'attach' : 'start']({
         ...spec,
         ...(spec.resumeFrom ? { protocolSessionId: spec.resumeFrom } : {}),
+        permissionMode,
         attemptId,
         instanceId: runtimeInstanceId,
         cwd: session.workDir,
@@ -436,7 +469,10 @@ export class SessionService {
       recordOpsTiming('start_latency', this.now() - startedAt, { transport: 'acp', provider: session.provider, outcome: 'failed' });
       this.#log('error', 'Structured attempt start failed', { sessionId, attemptId, error: error?.message });
       await this.#append(session, 'attempt.ended', { attemptId, reason: error?.code || 'start_failed' });
-      if (!['ended', 'interrupted'].includes(session.lifecycle)) await this.#transition(session, 'ended', error?.message || 'Structured attempt failed to start');
+      // A failed resume leaves the provider session intact, so it stays resumable.
+      if (session.lifecycle === 'starting' && session.attempts.some((attempt) => attempt.protocolSessionId)) {
+        await this.#append(session, 'session.interrupted', { attemptId, reason: 'resume_failed', detail: error?.message || 'Resume failed' });
+      } else if (!['ended', 'interrupted'].includes(session.lifecycle)) await this.#transition(session, 'ended', error?.message || 'Structured attempt failed to start');
       throw error;
     }
   }
@@ -770,7 +806,7 @@ export class SessionService {
       if (!['ended', 'interrupted'].includes(session.lifecycle)) await this.#append(session, 'session.interrupted', {
         attemptId,
         reason: 'fleet_restart',
-        detail: 'Fleet stopped; history preserved and this attempt is not resumable',
+        detail: 'Fleet stopped; history preserved',
       });
       // Fence exit/cancel events emitted during teardown from changing the
       // recovered interrupted projection.
