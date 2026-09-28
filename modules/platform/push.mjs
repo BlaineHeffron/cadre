@@ -4,9 +4,9 @@ import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { readEnv } from './cadre-env.mjs';
 
 const MAX_SUBSCRIPTIONS = 20;
-// Browser push services (Chrome/Android FCM incl. *.google.com, Firefox, Safari/iOS, Edge).
+// Browser push services: FCM (Chrome/Android; desktop Chrome also issues jmt17.google.com), Firefox, Safari/iOS, Edge.
 // Anything else would let an authenticated caller aim alert POSTs at arbitrary hosts.
-const PUSH_SERVICE_HOST = /(^|\.)(fcm\.googleapis\.com|google\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)$/;
+const PUSH_SERVICE_HOST = /^(fcm\.googleapis\.com|jmt17\.google\.com)$|(^|\.)(push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)$/;
 
 // Set by pushPlugin; session alert broadcasts call notifyPush after their 30s throttle.
 let notifier = null;
@@ -15,7 +15,7 @@ export const notifyPush = (provider, alert) => notifier?.({
   body: alert.interaction?.detail || alert.reason || 'Waiting for your next prompt',
   url: alert.route,
   tag: `${provider.id}-${alert.sessionId}`, // same tag as the in-app alert, so they replace each other
-}, alert.status === 'blocked');
+}, alert.status === 'blocked', `${provider.id}:${alert.sessionId}`); // client sessionMuteKey
 
 const sendWebPush = (subscription, payload, vapidDetails) =>
   webpush.sendNotification(subscription, payload, { vapidDetails, TTL: 3600, timeout: 10000 });
@@ -44,29 +44,40 @@ export async function pushPlugin(app, {
     ...state, subscriptions: state.subscriptions.filter((sub) => !endpoints.includes(sub.endpoint)),
   }));
 
-  notifier = !sendEnabled ? null : async (message, blocked) => {
-    const { subscriptions = [] } = (await store.load()) || {};
-    const payload = JSON.stringify(message);
-    const gone = [];
-    await Promise.all(subscriptions.filter((sub) => blocked || !sub.approvalOnly).map(async (sub) => {
-      try {
-        await send(sub, payload, { subject, ...vapid });
-      } catch (err) {
-        if (err?.statusCode === 404 || err?.statusCode === 410) gone.push(sub.endpoint);
-        else app.log.warn({ err: err?.message, statusCode: err?.statusCode }, 'Web push send failed');
-      }
-    }));
-    if (gone.length) await dropSubscriptions(gone).catch((err) => app.log.warn({ err }, 'Web push prune failed'));
+  // Fire-and-forget from the alert loop, so it must never reject.
+  notifier = !sendEnabled ? null : async (message, blocked, muteKey) => {
+    try {
+      const { subscriptions = [] } = (await store.load()) || {};
+      const payload = JSON.stringify(message);
+      const gone = [];
+      const wanted = subscriptions.filter((sub) => (blocked || !sub.approvalOnly) && !sub.mutedSessions?.includes(muteKey));
+      await Promise.all(wanted.map(async (sub) => {
+        try {
+          await send(sub, payload, { subject, ...vapid });
+        } catch (err) {
+          if (err?.statusCode === 404 || err?.statusCode === 410) gone.push(sub.endpoint);
+          else app.log.warn({ err: err?.message, statusCode: err?.statusCode }, 'Web push send failed');
+        }
+      }));
+      if (gone.length) await dropSubscriptions(gone);
+    } catch (err) {
+      app.log.warn({ err: err?.message }, 'Web push notify failed');
+    }
   };
 
   app.get('/api/push/key', async () => ({ publicKey: vapid.publicKey }));
 
   app.post('/api/push/subscribe', async (req, reply) => {
-    const { endpoint, keys, approvalOnly } = req.body || {};
+    const { endpoint, keys, approvalOnly, mutedSessions } = req.body || {};
     if (!isPushEndpoint(endpoint) || !isKey(keys?.p256dh) || !isKey(keys?.auth)) {
       return reply.code(400).send({ error: 'Invalid push subscription' });
     }
-    const subscription = { endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, approvalOnly: approvalOnly === true };
+    const subscription = {
+      endpoint,
+      keys: { p256dh: keys.p256dh, auth: keys.auth },
+      approvalOnly: approvalOnly === true,
+      mutedSessions: Array.isArray(mutedSessions) ? mutedSessions.filter(isKey).slice(0, 1000) : [],
+    };
     await update((state) => ({
       ...state,
       subscriptions: [...state.subscriptions.filter((sub) => sub.endpoint !== endpoint), subscription].slice(-MAX_SUBSCRIPTIONS),

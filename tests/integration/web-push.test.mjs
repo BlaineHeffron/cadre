@@ -87,16 +87,12 @@ test('smoke server registers the service worker and shows a delivered push', {
     return null;
   };
 
-  // A visible Cadre tab already shows the in-app alert, so the push is not duplicated.
-  await deliver({ title: 'Claude: seen', tag: 'claude-seen' });
-  // In-app alerts go through the service worker (Android rejects `new Notification`).
-  await page.evaluate(() => import('/app/notifications.mjs').then((m) => m.showNotification('Codex: tests', 'Ready', { tag: 'codex-s2', url: '/codex/s2' })));
-  assert.deepEqual(await notification('codex-s2'), { title: 'Codex: tests', body: 'Ready', tag: 'codex-s2', url: '/codex/s2' });
-  assert.equal(await notification('claude-seen'), null);
-
-  // With no Cadre tab open the push is shown.
-  await page.goto('about:blank');
+  // Pushes are always shown, even with a Cadre tab open (the in-app path defers to push instead).
   const message = { title: 'Claude: build', body: 'Approve edit?', url: '/claude/s1', tag: 'claude-s1' };
   await deliver(message);
   assert.deepEqual(await notification(message.tag), message);
+
+  // Without a push subscription, in-app alerts still show via the service worker (Android rejects `new Notification`).
+  await page.evaluate(() => import('/app/notifications.mjs').then((m) => m.showNotification('Codex: tests', 'Ready', { tag: 'codex-s2', url: '/codex/s2', pushed: true })));
+  assert.deepEqual(await notification('codex-s2'), { title: 'Codex: tests', body: 'Ready', tag: 'codex-s2', url: '/codex/s2' });
 });

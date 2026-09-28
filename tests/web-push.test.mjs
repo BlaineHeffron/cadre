@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createStateBackup, restoreStateBackup } from '../modules/ops/backup.mjs';
@@ -55,6 +55,8 @@ test('subscribe validates, dedupes, persists, and unsubscribe removes', async (t
     'https://127.0.0.1/push',
     'https://internal.corp/push',
     'https://fcm.googleapis.com.evil.test/a',
+    'https://script.google.com/macros/s/a/exec',
+    'https://android.googleapis.com/gcm/send/a',
     'https://user:pw@fcm.googleapis.com/fcm/send/a',
     `https://fcm.googleapis.com/${'x'.repeat(2048)}`,
     ['https://fcm.googleapis.com/fcm/send/a'],
@@ -144,6 +146,28 @@ test('approval-only subscriptions get pushes only for blocked sessions', async (
   sent.length = 0;
   await notifyPush(codex, { sessionId: 's1', sessionName: 'x', status: 'blocked', route: '/codex/s1' });
   assert.deepEqual(sent.map((entry) => entry.endpoint).sort(), [subscription('all').endpoint, subscription('approvals').endpoint].sort());
+});
+
+test('subscriptions skip sessions muted on that device', async (t) => {
+  const storeFile = await tempStoreFile(t);
+  const { app, sent } = await startPush(t, storeFile);
+  await subscribe(app, subscription('laptop'));
+  await subscribe(app, { ...subscription('phone'), mutedSessions: ['codex:s1', 42] });
+  const codex = { id: 'codex', displayName: 'Codex' };
+  await notifyPush(codex, { sessionId: 's1', sessionName: 'x', route: '/codex/s1' });
+  assert.deepEqual(sent.map((entry) => entry.endpoint), [subscription('laptop').endpoint]);
+  sent.length = 0;
+  await notifyPush(codex, { sessionId: 's2', sessionName: 'y', route: '/codex/s2' });
+  assert.deepEqual(sent.map((entry) => entry.endpoint).sort(), [subscription('laptop').endpoint, subscription('phone').endpoint].sort());
+});
+
+test('an unreadable store never rejects the fire-and-forget notifier', async (t) => {
+  const storeFile = await tempStoreFile(t);
+  const { app, sent } = await startPush(t, storeFile);
+  await subscribe(app, subscription('a'));
+  await writeFile(storeFile, '{ corrupt');
+  await notifyPush({ id: 'codex', displayName: 'Codex' }, { sessionId: 's1', sessionName: 'x', route: '/codex/s1' });
+  assert.deepEqual(sent, []);
 });
 
 test('default state backup restores the VAPID key and subscriptions', async (t) => {

@@ -176,7 +176,7 @@ for (const kind of ['claude', 'codex', 'pi']) {
     upsertPromptNotificationFromAlert(kind, data);
     const title = promptNotificationTitle(kind, data.sessionId, data.sessionName);
     const body = data.interaction?.detail || data.reason || 'Waiting for your next prompt';
-    showNotification(title, body, { tag: `${kind}-${data.sessionId}`, url: route });
+    showNotification(title, body, { tag: `${kind}-${data.sessionId}`, url: route, pushed: true });
   });
 }
 
