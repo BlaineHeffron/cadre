@@ -272,6 +272,31 @@ describe('pure session state reducer', () => {
     assert.match(snapshot.degradedReasons.join('\n'), /differs from requested/i);
   });
 
+  it('treats a case-only model/thinking difference as the same runtime but a reroute as a mismatch', () => {
+    const ready = (requestedModel, effectiveModel) => reduce(createInitialSnapshot('model-case'), [
+      running(), freeText(), idlePane(),
+      observation('runtime', 'requested_runtime', { requestedModel, requestedThinkingLevel: 'high' }),
+      observation('pane', 'effective_runtime', { effectiveModel, effectiveThinkingLevel: 'High' }),
+    ], 100);
+    const sameModel = ready('gpt-6-sol', 'GPT-6-Sol');
+    assert.deepEqual([sameModel.capabilities.needsAttention, sameModel.degradedReasons, sameModel.reason],
+      [false, [], 'Stable free-text prompt visible']);
+    assert.equal(sameModel.runtime.effectiveModel, 'GPT-6-Sol');
+    const rerouted = ready('gpt-6-sol', 'GPT-6-Astra');
+    assert.deepEqual([rerouted.capabilities.needsAttention, rerouted.reason],
+      [true, 'Ready; effective runtime differs from requested runtime']);
+  });
+
+  it('keeps clear unavailable when protocol lifecycle evidence says the provider has no clear operation', () => {
+    const snapshot = (lifecycle) => reduce(createInitialSnapshot('clear'), [
+      observation('protocol', 'lifecycle', lifecycle),
+      observation('protocol', 'execution', { execution: 'idle' }),
+      freeText(),
+    ], 100).capabilities;
+    assert.deepEqual([snapshot({ lifecycle: 'running' }).sendMessage, snapshot({ lifecycle: 'running' }).clear], [true, true]);
+    assert.deepEqual([snapshot({ lifecycle: 'running', clear: false }).sendMessage, snapshot({ lifecycle: 'running', clear: false }).clear], [true, false]);
+  });
+
   it('preserves protocol model evidence over newer pane model text', () => {
     const snapshot = reduce(createInitialSnapshot('protocol-runtime'), [
       running(), freeText(), idlePane(),

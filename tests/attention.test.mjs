@@ -52,6 +52,7 @@ describe('attention triage state', () => {
     localStorage.clear();
     state.claudeSessions.value = [];
     state.codexSessions.value = [];
+    state.deepseekSessions.value = [];
     state.agentThreads.value = [];
     state.agentBusAlerts.value = [];
     attention.updateNotificationPrefs({ sound: true, approvalOnly: false, mutedSessions: [] });
@@ -81,6 +82,19 @@ describe('attention triage state', () => {
 
     assert.deepEqual(attention.attentionItems.value.map((item) => `${item.type}:${item.sessionId}`), [
       'session:claude-1',
+    ]);
+  });
+
+  it('queues DeepSeek sessions and labels a ready runtime mismatch with its reason', () => {
+    const mismatch = { ...canonicalState('ready', { detail: 'Ready; effective runtime differs from requested runtime' }) };
+    mismatch.capabilities = { ...mismatch.capabilities, needsAttention: true };
+    state.deepseekSessions.value = [
+      { id: 'ds-1', state: canonicalState('blocked', { detail: 'Run tests' }), created: 10 },
+      { id: 'ds-2', state: mismatch, created: 20 },
+    ];
+    assert.deepEqual(attention.attentionItems.value.map(({ kind, route, statusLabel }) => [kind, route, statusLabel]), [
+      ['deepseek', '/deepseek/ds-1', 'needs approval'],
+      ['deepseek', '/deepseek/ds-2', 'Ready; effective runtime differs from requested runtime'],
     ]);
   });
 

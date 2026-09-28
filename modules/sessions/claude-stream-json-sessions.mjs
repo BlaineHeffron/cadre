@@ -266,8 +266,10 @@ export async function claudeStreamJsonSessionsPlugin(app, {
           interactionId: interaction.interactionId,
           optionId: text(req.body?.optionId || req.body?.text || req.body?.keys),
           authority: await interactionAuthority(req, session, interaction),
+        expected: req.body || {},
         });
       } else {
+        service.assertExpectedState(session.id, req.body || {});
         await service.prompt(req.params.id, {
           blocks, idempotencyKey: text(req.body?.idempotencyKey) || randomBytes(16).toString('hex'),
           source: text(req.body?.source) || 'api',
@@ -293,6 +295,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         optionId: text(req.body?.optionId) || undefined,
         text: text(req.body?.text) || undefined,
         authority: await interactionAuthority(req, session, interaction),
+        expected: req.body || {},
       });
       return { ok: true, state: 'sent' };
     } catch (error) { return errorReply(reply, error); }

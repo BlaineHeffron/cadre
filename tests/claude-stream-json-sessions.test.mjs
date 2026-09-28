@@ -193,11 +193,20 @@ describe('Claude stream-json sessions', () => {
     await waitFor(async () => (await app.inject({
       method: 'GET', url: `/api/claude/sessions/${session.id}`,
     })).json().state.status === 'blocked');
-    const allowed = await app.inject({
-      method: 'POST', url: `/api/claude/sessions/${session.id}/interaction`, payload: { optionId: 'allow_once' },
-    });
+    const { state: blocked } = (await app.inject({ method: 'GET', url: `/api/claude/sessions/${session.id}` })).json();
+    const guards = { expectedRevision: blocked.revision, expectedFingerprint: blocked.interaction.fingerprint, expectedInteractionKind: 'permission' };
+    const answer = (payload) => app.inject({ method: 'POST', url: `/api/claude/sessions/${session.id}/input`, payload: { text: 'allow_once', source: 'ui_dialog_answer', ...payload } });
+    for (const stale of [{ expectedRevision: blocked.revision - 1 }, { expectedFingerprint: 'other-interaction' }, { expectedInteractionKind: 'selection' }]) {
+      const rejected = await answer({ ...guards, ...stale });
+      assert.deepEqual([rejected.statusCode, rejected.json().code], [409, 'interaction_changed'], JSON.stringify(stale));
+    }
+    assert.deepEqual(clients[0].answers, []);
+    const allowed = await answer(guards);
     assert.equal(allowed.statusCode, 200, allowed.body);
     assert.equal(clients[0].answers[0].optionId, 'allow_once');
+    // A delayed duplicate click finds no open interaction; it must not become a prompt.
+    const replay = await answer(guards);
+    assert.deepEqual([replay.statusCode, replay.json().code, clients[0].prompts.length, clients[0].answers.length], [409, 'interaction_changed', 2, 1]);
     const unsupported = await app.inject({
       method: 'POST', url: `/api/claude/sessions/${session.id}/keys`, payload: { keys: 'Up Enter' },
     });

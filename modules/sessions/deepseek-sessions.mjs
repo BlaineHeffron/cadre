@@ -406,8 +406,10 @@ export async function deepseekSessionsPlugin(app, {
           interactionId: interaction.interactionId,
           optionId: value,
           authority,
+          expected: req.body || {},
         });
       } else {
+        service.assertExpectedState(session.id, req.body || {});
         await service.prompt(session.id, {
           blocks: blocks || [{ type: 'text', text: value }],
           idempotencyKey: text(req.body?.idempotencyKey) || randomBytes(16).toString('hex'),
@@ -438,6 +440,7 @@ export async function deepseekSessionsPlugin(app, {
         optionId: text(req.body?.optionId) || undefined,
         text: text(req.body?.text) || undefined,
         authority: await interactionAuthority(req, session, interaction),
+        expected: req.body || {},
       });
       return { ok: true, state: 'sent' };
     } catch (error) { return errorReply(reply, error); }

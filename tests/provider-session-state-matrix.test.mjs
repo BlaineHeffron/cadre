@@ -215,7 +215,7 @@ describe('structured provider sessions read the canonical tracker', () => {
         }
         const { state } = projected;
         run.rows.push([state.status, state.state, state.execution, state.interaction.kind, state.interaction.options.map((o) => o.label),
-          state.capabilities.sendMessage, state.capabilities.canAnswerInteraction, state.capabilities.needsAttention, Boolean(projected.pendingResponse)]);
+          state.capabilities.sendMessage, state.capabilities.clear, state.capabilities.canAnswerInteraction, state.capabilities.needsAttention, Boolean(projected.pendingResponse)]);
       };
       const steps = [
         ['ready', () => {}],
@@ -233,12 +233,12 @@ describe('structured provider sessions read the canonical tracker', () => {
       }
       const [claude, codex] = runs;
       assert.deepEqual(claude.rows, [
-        ['ready', 'waiting_for_input', 'idle', 'free_text', [], true, false, false, false],
-        ['working', 'working', 'working', 'none', [], false, false, false, true],
-        ['blocked', 'needs_approval', 'working', 'permission', ['Allow once'], false, true, true, true],
-        ['working', 'working', 'working', 'none', [], false, false, false, true],
-        ['ready', 'waiting_for_input', 'idle', 'free_text', [], true, false, false, false],
-        ['ended', 'exited', 'unknown', 'none', [], false, false, false, false],
+        ['ready', 'waiting_for_input', 'idle', 'free_text', [], true, false, false, false, false],
+        ['working', 'working', 'working', 'none', [], false, false, false, false, true],
+        ['blocked', 'needs_approval', 'working', 'permission', ['Allow once'], false, false, true, true, true],
+        ['working', 'working', 'working', 'none', [], false, false, false, false, true],
+        ['ready', 'waiting_for_input', 'idle', 'free_text', [], true, false, false, false, false],
+        ['ended', 'exited', 'unknown', 'none', [], false, false, false, false, false],
       ]);
       assert.deepEqual(codex.rows, claude.rows);
     } finally {

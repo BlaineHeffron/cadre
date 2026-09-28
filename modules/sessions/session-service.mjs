@@ -619,7 +619,19 @@ export class SessionService {
     return audit;
   }
 
-  async answerInteraction(sessionId, { interactionId, optionId, text: answerText, authority = null } = {}) {
+  // Stale-write guard (same contract as the tmux command gate): a UI answer built
+  // against an older canonical snapshot must not land on a newer interaction.
+  assertExpectedState(sessionId, { expectedRevision, expectedFingerprint, expectedInteractionKind } = {}) {
+    const session = this.#requireActive(sessionId);
+    const snapshot = this.stateTracker.get(canonicalSessionStateId(session.provider, session.id));
+    if ((Number.isInteger(expectedRevision) && expectedRevision !== snapshot.revision)
+      || (expectedFingerprint && expectedFingerprint !== snapshot.interaction.fingerprint)
+      || (expectedInteractionKind && expectedInteractionKind !== snapshot.interaction.kind)) {
+      throw Object.assign(new Error('Session state changed before the input could be sent'), { code: 'interaction_changed', statusCode: 409 });
+    }
+  }
+
+  async answerInteraction(sessionId, { interactionId, optionId, text: answerText, authority = null, expected = {} } = {}) {
     const session = this.#requireActive(sessionId);
     const interaction = session.interactions.find((item) => item.interactionId === String(interactionId));
     if (!interaction || interaction.status !== 'open') {
@@ -635,6 +647,7 @@ export class SessionService {
       error.statusCode = 403;
       throw error;
     }
+    this.assertExpectedState(sessionId, expected);
     const result = await session.transport.answerInteraction({ interactionId, optionId, text: answerText });
     const answer = optionId ? { optionId: String(optionId) } : { text: String(answerText || '') };
     await this.#append(session, 'interaction.updated', {
@@ -889,7 +902,7 @@ export class SessionService {
           value: { effectiveModel: session.negotiated.effectiveModel, effectiveThinkingLevel: session.negotiated.effectiveThinkingLevel || null,
             evidence: clone(session.negotiated.modelEvidence) }, observedAt, expiresAt: 0,
           fingerprint: `protocol:effective:${session.revision}` }] : []),
-        { source: 'protocol', kind: 'lifecycle', value: { lifecycle }, observedAt, expiresAt: 0, fingerprint: `protocol:lifecycle:${session.revision}` },
+        { source: 'protocol', kind: 'lifecycle', value: { lifecycle, clear: false }, observedAt, expiresAt: 0, fingerprint: `protocol:lifecycle:${session.revision}` },
         { source: 'protocol', kind: 'execution', value: { execution }, observedAt, expiresAt: 0, fingerprint: `protocol:execution:${session.revision}` },
         {
           source: 'protocol', kind: 'interaction',
