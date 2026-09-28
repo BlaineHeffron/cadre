@@ -71,9 +71,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     if (scenario === 'hold') return;
     if (scenario === 'requests') {
       const base = { threadId: 'thread-1', turnId: active };
-      awaiting = new Set(['elicit-1', 'unknown-1', 'file-1', 'perm-1', 'input-1']);
+      awaiting = new Set(['elicit-1', 'unknown-1', 'secret-1', 'file-1', 'perm-1', 'input-1']);
       send({ id: 'elicit-1', method: 'mcpServer/elicitation/request', params: { ...base, serverName: 'fixture', mode: 'form', message: 'Token?', requestedSchema: { type: 'object', properties: {} } } });
       send({ id: 'unknown-1', method: 'item/tool/call', params: { ...base, callId: 'call-1', tool: 'fixture', arguments: {} } });
+      send({ id: 'secret-1', method: 'item/tool/requestUserInput', params: { ...base, itemId: 'ask-0', isBlocking: true, questions: [
+        { id: 'user', header: 'User', question: 'Username?', options: null }, { id: 'token', header: 'Token', question: 'API token?', isSecret: true, options: null }] } });
       send({ id: 'file-1', method: 'item/fileChange/requestApproval', params: { ...base, itemId: 'patch-1', reason: 'Write fixture file' } });
       send({ id: 'perm-1', method: 'item/permissions/requestApproval', params: { ...base, itemId: 'perm-1', cwd: '/tmp', reason: 'Needs network', permissions: { network: { enabled: true } } } });
       return send({ id: 'input-1', method: 'item/tool/requestUserInput', params: { ...base, itemId: 'ask-1', isBlocking: true, questions: [

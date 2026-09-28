@@ -122,7 +122,7 @@ test('approval decisions are single-use structured replies', async () => {
   assert.deepEqual((await frames()).find((e) => e.id === 'approval-1').result, { decision: 'decline' });
 });
 
-test('server requests round-trip session grants, permission profiles, user-input answers, and declines', async () => {
+test('server requests round-trip session grants, permission profiles, user-input answers, and declines (including secret questions)', async () => {
   const { transport, cwd, events, frames } = await setup('requests'); await transport.start({ cwd });
   for (const decision of ['acceptForSession', 'decline']) {
     const seen = events.length;
@@ -150,6 +150,9 @@ test('server requests round-trip session grants, permission profiles, user-input
   assert.deepEqual(await replies('perm-1'), [{ permissions: { network: { enabled: true } }, scope: 'session' }, { permissions: {} }]);
   assert.deepEqual(await replies('input-1'), Array(2).fill({ answers: { color: { answers: ['Blue'] }, name: { answers: ['notes.txt'] } } }));
   assert.deepEqual(await replies('elicit-1'), [{ action: 'decline' }, { action: 'decline' }]);
+  // A request with a secret question is declined whole and never surfaces, so no secret reaches the journal.
+  assert.deepEqual(await replies('secret-1'), [{ answers: {} }, { answers: {} }]);
+  assert.equal(events.some((e) => e.type === 'interaction.requested' && /Username|API token/.test(e.toolCall.title)), false);
   assert.deepEqual(await replies('unknown-1'), [-32601, -32601]);
 });
 

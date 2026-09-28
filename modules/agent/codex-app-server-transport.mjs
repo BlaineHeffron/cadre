@@ -323,7 +323,8 @@ export class CodexAppServerTransport {
     if (this.interactions.has(interactionId)) return DEFER_JSON_RPC_RESPONSE;
     const turnId = this.currentTurn.turnId;
     if (method === 'item/tool/requestUserInput') {
-      if (!params.questions?.length) return { answers: {} };
+      // Secret answers would be stored in plaintext in the journal and delivery audit; decline them.
+      if (!params.questions?.length || params.questions.some((question) => question.isSecret)) return { answers: {} };
       const pending = { answers: {}, remaining: params.questions.length };
       params.questions.forEach((question, index) => {
         const id = index ? `${interactionId}:${index}` : interactionId;

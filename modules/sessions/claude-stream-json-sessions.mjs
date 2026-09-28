@@ -371,9 +371,8 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       const session = requireSession(req.params.id);
       const keys = text(req.body?.keys);
       if (keys === 'Escape' || keys === 'C-c') return { ok: true, ...(await service.cancel(req.params.id)) };
-      // Dashboard/Telegram buttons post an exact option key, or Telegram's 1-based hook numbering.
-      const options = openInteraction(session)?.options || [];
-      const option = options.find((item) => item.optionId === keys) || (/^[1-9]$/.test(keys) ? options[keys - 1] : null);
+      // Dashboard and Telegram buttons post an exact option key.
+      const option = (openInteraction(session)?.options || []).find((item) => item.optionId === keys);
       if (option) { req.body = { ...req.body, optionId: option.optionId }; return input(req, reply); }
       const error = new Error(`${label} ${claude ? 'stream-json' : 'app-server'} does not support terminal keys: ${keys || '(empty)'}`);
       error.statusCode = 400; error.code = 'unsupported_capability'; throw error;
