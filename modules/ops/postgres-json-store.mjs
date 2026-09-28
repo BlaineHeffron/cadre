@@ -192,6 +192,7 @@ export function buildPostgresJsonStore({
       const result = await mutator(null);
       return result?.result;
     }
+    await mkdir(dirname(filePath), { recursive: true });
     return withDirectoryLock(`${filePath}.lock`, async () => {
       const current = await readFileJson();
       const mutation = await mutator(current);

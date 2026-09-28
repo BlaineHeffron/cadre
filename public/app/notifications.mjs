@@ -3,6 +3,7 @@
  */
 
 import {
+  isApprovalOnlyEnabled,
   isSoundEnabled as readSoundEnabled,
   setSoundEnabled as writeSoundEnabled,
 } from './attention.mjs';
@@ -48,11 +49,15 @@ function playBeep() {
   }
 }
 
-const swRegistration = () => navigator.serviceWorker?.getRegistration() ?? Promise.resolve(null);
+// Registered once on import; resolves to the active registration, or null when unsupported/failed.
+const swReady = globalThis.navigator?.serviceWorker
+  ? navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready, () => null)
+  : Promise.resolve(null);
 
 /**
- * Show a notification via the service worker (Android Chrome rejects `new Notification`).
- * Clicks are handled by sw.js, which focuses the app and navigates to opts.url.
+ * Show a notification via the service worker (Android Chrome rejects `new Notification`),
+ * falling back to a page Notification on desktop browsers without one.
+ * Clicks go to opts.url (sw.js handles them for service-worker notifications).
  * @param {string} title
  * @param {string} body
  * @param {{ tag?: string, url?: string }} opts
@@ -60,22 +65,29 @@ const swRegistration = () => navigator.serviceWorker?.getRegistration() ?? Promi
 export async function showNotification(title, body, opts = {}) {
   playBeep();
   if (!isNotificationPermitted()) return;
-  const registration = await swRegistration();
-  await registration?.showNotification(title, {
-    body,
-    tag: opts.tag || 'dueno-alert',
-    icon: '/icons/icon.svg',
-    data: { url: opts.url || '/' },
-  });
+  const url = opts.url || '/';
+  const options = { body, tag: opts.tag || 'dueno-alert', icon: '/icons/icon.svg', data: { url } };
+  try {
+    const registration = await swReady;
+    if (registration) return await registration.showNotification(title, options);
+    const n = new Notification(title, options);
+    n.onclick = () => {
+      window.focus();
+      window.location.href = url;
+      n.close();
+    };
+  } catch (error) {
+    console.warn('Notification failed', error);
+  }
 }
 
 export async function isPushSubscribed() {
-  return Boolean(await (await swRegistration())?.pushManager?.getSubscription());
+  return Boolean(await (await swReady)?.pushManager?.getSubscription());
 }
 
 /** Subscribe or unsubscribe this device from server-sent Web Push alerts. */
 export async function setPushEnabled(enabled) {
-  const pushManager = (await swRegistration())?.pushManager;
+  const pushManager = (await swReady)?.pushManager;
   if (!pushManager) throw new Error('Push needs HTTPS (on iOS, add Cadre to the Home Screen first)');
   const existing = await pushManager.getSubscription();
   if (!enabled) {
@@ -87,5 +99,5 @@ export async function setPushEnabled(enabled) {
   const { publicKey } = await api.get('/push/key');
   const applicationServerKey = Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
   const subscription = existing || await pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
-  await api.post('/push/subscribe', subscription.toJSON());
+  await api.post('/push/subscribe', { ...subscription.toJSON(), approvalOnly: isApprovalOnlyEnabled() });
 }

@@ -3,6 +3,11 @@ import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { readEnv } from './cadre-env.mjs';
 
+const MAX_SUBSCRIPTIONS = 20;
+// Browser push services (Chrome/Android FCM incl. *.google.com, Firefox, Safari/iOS, Edge).
+// Anything else would let an authenticated caller aim alert POSTs at arbitrary hosts.
+const PUSH_SERVICE_HOST = /(^|\.)(fcm\.googleapis\.com|google\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)$/;
+
 // Set by pushPlugin; session alert broadcasts call notifyPush after their 30s throttle.
 let notifier = null;
 export const notifyPush = (provider, alert) => notifier?.({
@@ -10,10 +15,17 @@ export const notifyPush = (provider, alert) => notifier?.({
   body: alert.interaction?.detail || alert.reason || 'Waiting for your next prompt',
   url: alert.route,
   tag: `${provider.id}-${alert.sessionId}`, // same tag as the in-app alert, so they replace each other
-});
+}, alert.status === 'blocked');
 
 const sendWebPush = (subscription, payload, vapidDetails) =>
-  webpush.sendNotification(subscription, payload, { vapidDetails, TTL: 3600 });
+  webpush.sendNotification(subscription, payload, { vapidDetails, TTL: 3600, timeout: 10000 });
+
+function isPushEndpoint(endpoint) {
+  const url = typeof endpoint === 'string' && endpoint.length <= 2048 && URL.canParse(endpoint) ? new URL(endpoint) : null;
+  return url?.protocol === 'https:' && !url.username && !url.password && PUSH_SERVICE_HOST.test(url.hostname);
+}
+
+const isKey = (value) => typeof value === 'string' && value.length > 0 && value.length <= 256;
 
 export async function pushPlugin(app, {
   storeFile = runtimeStatePath('web_push.json'),
@@ -22,22 +34,23 @@ export async function pushPlugin(app, {
   subject = readEnv('DUENO_VAPID_SUBJECT') || 'https://github.com/BlaineHeffron/cadre',
 } = {}) {
   const store = buildPostgresJsonStore({ namespace: 'web_push', filePath: storeFile, modeEnvKey: 'WEB_PUSH_STORAGE' });
-  const state = { subscriptions: [], ...(await store.load()) };
-  if (!state.vapid) {
-    state.vapid = webpush.generateVAPIDKeys();
-    await store.save(state);
-  }
-  const dropSubscriptions = (endpoints) => {
-    state.subscriptions = state.subscriptions.filter((sub) => !endpoints.includes(sub.endpoint));
-    return store.save(state);
-  };
+  // Atomic read-modify-write (file lock / row lock) so concurrent writers cannot drop subscriptions.
+  const update = (change) => store.mutate((current) => {
+    const data = change({ subscriptions: [], ...current });
+    return { data, result: data };
+  });
+  const { vapid } = await update((state) => ({ ...state, vapid: state.vapid || webpush.generateVAPIDKeys() }));
+  const dropSubscriptions = (endpoints) => update((state) => ({
+    ...state, subscriptions: state.subscriptions.filter((sub) => !endpoints.includes(sub.endpoint)),
+  }));
 
-  notifier = !sendEnabled ? null : async (message) => {
+  notifier = !sendEnabled ? null : async (message, blocked) => {
+    const { subscriptions = [] } = (await store.load()) || {};
     const payload = JSON.stringify(message);
     const gone = [];
-    await Promise.all(state.subscriptions.map(async (sub) => {
+    await Promise.all(subscriptions.filter((sub) => blocked || !sub.approvalOnly).map(async (sub) => {
       try {
-        await send(sub, payload, { subject, ...state.vapid });
+        await send(sub, payload, { subject, ...vapid });
       } catch (err) {
         if (err?.statusCode === 404 || err?.statusCode === 410) gone.push(sub.endpoint);
         else app.log.warn({ err: err?.message, statusCode: err?.statusCode }, 'Web push send failed');
@@ -46,18 +59,18 @@ export async function pushPlugin(app, {
     if (gone.length) await dropSubscriptions(gone).catch((err) => app.log.warn({ err }, 'Web push prune failed'));
   };
 
-  app.get('/api/push/key', async () => ({ publicKey: state.vapid.publicKey }));
+  app.get('/api/push/key', async () => ({ publicKey: vapid.publicKey }));
 
   app.post('/api/push/subscribe', async (req, reply) => {
-    const { endpoint, keys } = req.body || {};
-    if (!/^https:\/\//.test(String(endpoint)) || typeof keys?.p256dh !== 'string' || typeof keys?.auth !== 'string') {
+    const { endpoint, keys, approvalOnly } = req.body || {};
+    if (!isPushEndpoint(endpoint) || !isKey(keys?.p256dh) || !isKey(keys?.auth)) {
       return reply.code(400).send({ error: 'Invalid push subscription' });
     }
-    state.subscriptions = [
-      ...state.subscriptions.filter((sub) => sub.endpoint !== endpoint),
-      { endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth } },
-    ];
-    await store.save(state);
+    const subscription = { endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, approvalOnly: approvalOnly === true };
+    await update((state) => ({
+      ...state,
+      subscriptions: [...state.subscriptions.filter((sub) => sub.endpoint !== endpoint), subscription].slice(-MAX_SUBSCRIPTIONS),
+    }));
     return reply.code(201).send({ ok: true });
   });
 

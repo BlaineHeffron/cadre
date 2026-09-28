@@ -35,6 +35,8 @@ function makeSaveToken(inputToken) {
 }
 
 async function logout() {
+  // Stop pushing private alerts to this device once it is signed out.
+  await setPushEnabled(false).catch(() => {});
   disconnectWs();
   await logoutBrowserSession();
   addToast('Logged out', 'info');
@@ -141,6 +143,7 @@ export function SettingsPage({ section }) {
   function toggleApprovalOnly() {
     approvalOnly.value = !approvalOnly.value;
     setApprovalOnlyEnabled(approvalOnly.value);
+    if (pushOn.value) setPushEnabled(true).catch((error) => addToast(`Phone notifications: ${error.message}`, 'error'));
     addToast(approvalOnly.value ? 'Approval-only notifications enabled' : 'All attention notifications enabled', 'info');
   }
 

@@ -73,22 +73,30 @@ test('smoke server registers the service worker and shows a delivered push', {
   await page.goto(origin);
   assert.equal(await page.evaluate(() => navigator.serviceWorker.ready.then((r) => r.active.scriptURL)), `${origin}/sw.js`);
 
-  const message = { title: 'Claude: build', body: 'Approve edit?', url: '/claude/s1', tag: 'claude-s1' };
-  await cdp.send('ServiceWorker.deliverPushMessage', { origin, registrationId: await registrationId, data: JSON.stringify(message) });
+  const deliver = async (message) => cdp.send('ServiceWorker.deliverPushMessage', { origin, registrationId: await registrationId, data: JSON.stringify(message) });
   const notification = async (tag) => {
     for (let i = 0; i < 50; i += 1) {
-      const shown = await page.evaluate(async (wanted) => {
-        const [n] = await (await navigator.serviceWorker.ready).getNotifications({ tag: wanted });
+      const [worker] = context.serviceWorkers();
+      const shown = await worker?.evaluate(async (wanted) => {
+        const [n] = await self.registration.getNotifications({ tag: wanted });
         return n ? { title: n.title, body: n.body, tag: n.tag, url: n.data?.url } : null;
-      }, tag);
+      }, tag).catch(() => null);
       if (shown) return shown;
-      await page.waitForTimeout(100);
+      await new Promise((r) => setTimeout(r, 100));
     }
     return null;
   };
-  assert.deepEqual(await notification(message.tag), message);
 
-  // In-app alerts also go through the service worker (Android rejects `new Notification`).
+  // A visible Cadre tab already shows the in-app alert, so the push is not duplicated.
+  await deliver({ title: 'Claude: seen', tag: 'claude-seen' });
+  // In-app alerts go through the service worker (Android rejects `new Notification`).
   await page.evaluate(() => import('/app/notifications.mjs').then((m) => m.showNotification('Codex: tests', 'Ready', { tag: 'codex-s2', url: '/codex/s2' })));
   assert.deepEqual(await notification('codex-s2'), { title: 'Codex: tests', body: 'Ready', tag: 'codex-s2', url: '/codex/s2' });
+  assert.equal(await notification('claude-seen'), null);
+
+  // With no Cadre tab open the push is shown.
+  await page.goto('about:blank');
+  const message = { title: 'Claude: build', body: 'Approve edit?', url: '/claude/s1', tag: 'claude-s1' };
+  await deliver(message);
+  assert.deepEqual(await notification(message.tag), message);
 });

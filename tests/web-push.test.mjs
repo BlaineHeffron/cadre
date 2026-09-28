@@ -4,9 +4,10 @@ import Fastify from 'fastify';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createStateBackup, restoreStateBackup } from '../modules/ops/backup.mjs';
 import { notifyPush, pushPlugin } from '../modules/platform/push.mjs';
 
-const subscription = (id) => ({ endpoint: `https://push.example/${id}`, keys: { p256dh: `p256dh-${id}`, auth: `auth-${id}` } });
+const subscription = (id) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/${id}`, keys: { p256dh: `p256dh-${id}`, auth: `auth-${id}` } });
 
 async function tempStoreFile(t) {
   const dir = await mkdtemp(join(tmpdir(), 'cadre-web-push-test-'));
@@ -48,8 +49,30 @@ test('subscribe validates, dedupes, persists, and unsubscribe removes', async (t
   const storeFile = await tempStoreFile(t);
   const { app, sent } = await startPush(t, storeFile);
 
-  assert.equal((await subscribe(app, { endpoint: 'http://push.example/a', keys: subscription('a').keys })).statusCode, 400);
+  const keys = subscription('a').keys;
+  for (const endpoint of [
+    'http://fcm.googleapis.com/fcm/send/a',
+    'https://127.0.0.1/push',
+    'https://internal.corp/push',
+    'https://fcm.googleapis.com.evil.test/a',
+    'https://user:pw@fcm.googleapis.com/fcm/send/a',
+    `https://fcm.googleapis.com/${'x'.repeat(2048)}`,
+    ['https://fcm.googleapis.com/fcm/send/a'],
+    'not a url',
+  ]) {
+    assert.equal((await subscribe(app, { endpoint, keys })).statusCode, 400, String(endpoint).slice(0, 60));
+  }
   assert.equal((await subscribe(app, { endpoint: subscription('a').endpoint })).statusCode, 400);
+  assert.equal((await subscribe(app, { ...subscription('a'), keys: { ...keys, auth: 'x'.repeat(257) } })).statusCode, 400);
+  for (const endpoint of [
+    'https://jmt17.google.com/fcm/send/a',
+    'https://updates.push.services.mozilla.com/wpush/v2/a',
+    'https://web.push.apple.com/a',
+    'https://wns2-par02p.notify.windows.com/w/?token=a',
+  ]) {
+    assert.equal((await subscribe(app, { endpoint, keys })).statusCode, 201, endpoint);
+    await app.inject({ method: 'DELETE', url: '/api/push/subscribe', payload: { endpoint } });
+  }
   assert.equal((await subscribe(app, subscription('a'))).statusCode, 201);
   assert.equal((await subscribe(app, { ...subscription('a'), keys: subscription('a2').keys })).statusCode, 201);
   assert.equal((await subscribe(app, subscription('b'))).statusCode, 201);
@@ -100,4 +123,43 @@ test('side-effects-disabled servers never send', async (t) => {
   assert.equal((await subscribe(app, subscription('a'))).statusCode, 201);
   await notifyPush({ id: 'codex', displayName: 'Codex' }, { sessionId: 's1', sessionName: 'x', route: '/codex/s1' });
   assert.deepEqual(sent, []);
+});
+
+test('keeps only the newest 20 subscriptions', async (t) => {
+  const storeFile = await tempStoreFile(t);
+  const { app, sent } = await startPush(t, storeFile);
+  for (let i = 0; i < 25; i += 1) assert.equal((await subscribe(app, subscription(`d${i}`))).statusCode, 201);
+  await notifyPush({ id: 'codex', displayName: 'Codex' }, { sessionId: 's1', sessionName: 'x', route: '/codex/s1' });
+  assert.deepEqual(sent.map((entry) => entry.endpoint).sort(), Array.from({ length: 20 }, (_, i) => subscription(`d${i + 5}`).endpoint).sort());
+});
+
+test('approval-only subscriptions get pushes only for blocked sessions', async (t) => {
+  const storeFile = await tempStoreFile(t);
+  const { app, sent } = await startPush(t, storeFile);
+  await subscribe(app, { ...subscription('all') });
+  await subscribe(app, { ...subscription('approvals'), approvalOnly: true });
+  const codex = { id: 'codex', displayName: 'Codex' };
+  await notifyPush(codex, { sessionId: 's1', sessionName: 'x', status: 'ready', route: '/codex/s1' });
+  assert.deepEqual(sent.map((entry) => entry.endpoint), [subscription('all').endpoint]);
+  sent.length = 0;
+  await notifyPush(codex, { sessionId: 's1', sessionName: 'x', status: 'blocked', route: '/codex/s1' });
+  assert.deepEqual(sent.map((entry) => entry.endpoint).sort(), [subscription('all').endpoint, subscription('approvals').endpoint].sort());
+});
+
+test('default state backup restores the VAPID key and subscriptions', async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), 'cadre-web-push-backup-'));
+  const restoreDir = await mkdtemp(join(tmpdir(), 'cadre-web-push-restore-'));
+  t.after(() => Promise.all([workspace, restoreDir].map((dir) => rm(dir, { recursive: true, force: true }))));
+  const original = await startPush(t, join(workspace, '.dueno/state/web_push.json'));
+  await subscribe(original.app, subscription('phone'));
+  const key = (await original.app.inject({ method: 'GET', url: '/api/push/key' })).json().publicKey;
+
+  const manifest = await createStateBackup({ workspaceDir: workspace, outputDir: join(workspace, 'backups'), databaseUrl: '', env: {} });
+  const restored = await restoreStateBackup({ backupDir: manifest.backupDir, workspaceDir: restoreDir });
+  assert.equal(restored.ok, true);
+
+  const { app, sent } = await startPush(t, join(restoreDir, '.dueno/state/web_push.json'));
+  assert.equal((await app.inject({ method: 'GET', url: '/api/push/key' })).json().publicKey, key);
+  await notifyPush({ id: 'pi', displayName: 'Pi' }, { sessionId: 's1', sessionName: 'x', route: '/pi/s1' });
+  assert.deepEqual(sent.map((entry) => entry.endpoint), [subscription('phone').endpoint]);
 });
