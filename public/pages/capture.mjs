@@ -4,7 +4,7 @@ import { signal } from '@preact/signals';
 import { useEffect, useMemo, useRef } from 'preact/hooks';
 import { api } from '../app/api.mjs';
 import { addToast, claudeSessions, codexSessions, piSessions } from '../app/state.mjs';
-import { VoiceInput } from '../components/voice-input.mjs';
+import { appendTranscript, VoiceInput } from '../components/voice-input.mjs';
 import { FolderPicker } from '../components/folder-picker.mjs';
 import { DirQuickSelect } from '../components/dir-quick-select.mjs';
 import { recentWorkDirs } from '../app/recent-dirs.mjs';
@@ -137,11 +137,7 @@ export function CapturePage() {
   }, []);
 
   function onVoiceResult(text) {
-    const trimmed = String(text || '').trim();
-    if (!trimmed) return;
-    const current = draft.value;
-    const sep = current && !/\s$/.test(current) ? ' ' : '';
-    draft.value = `${current}${sep}${trimmed}`.slice(0, MAX_TEXT_LENGTH);
+    draft.value = appendTranscript(draft.value, text, MAX_TEXT_LENGTH);
     if (textareaRef.current) {
       try { textareaRef.current.focus(); } catch {}
     }

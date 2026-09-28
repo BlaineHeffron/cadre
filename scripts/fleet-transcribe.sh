@@ -11,6 +11,8 @@
 #   FLEET_TRANSCRIBE_MIN_AGE_SEC skip audio modified more recently than this, default 0
 #   FLEET_WHISPER_DEVICE       faster-whisper device, default cpu
 #   FLEET_WHISPER_COMPUTE_TYPE faster-whisper compute type, default int8
+#
+# Exits 3 when the engine is unavailable (binary, interpreter, or python package missing).
 
 set -euo pipefail
 
@@ -37,7 +39,7 @@ has_transcript() {
 transcribe_whisper_cpp() {
   local audio="$1"
   local tmpbase="$2"
-  "$bin" -m "$model" -l "$lang" -f "$audio" -otxt -of "$tmpbase" >/dev/null
+  "$bin" -m "$model" -l "$lang" -f "$audio" -otxt -of "$tmpbase" >/dev/null || return
   [[ -s "${tmpbase}.txt" ]]
 }
 
@@ -47,11 +49,12 @@ transcribe_faster_whisper() {
   local tmpdir tmpoutdir produced
   tmpdir="$(dirname "$tmpbase")"
   tmpoutdir="$(mktemp -d "${tmpdir}/.faster-whisper.XXXXXX")"
-  if ! "$bin" "$audio" --model "$model" --language "$lang" --output_dir "$tmpoutdir" --output_format txt \
-    --device "$device" --compute_type "$compute_type" >/dev/null; then
+  "$bin" "$audio" --model "$model" --language "$lang" --output_dir "$tmpoutdir" --output_format txt \
+    --device "$device" --compute_type "$compute_type" >/dev/null || {
+    local status=$?
     rm -rf "$tmpoutdir"
-    return 1
-  fi
+    return "$status"
+  }
   produced="${tmpoutdir}/$(basename "${audio%.*}").txt"
   [[ -s "$produced" ]] && mv "$produced" "${tmpbase}.txt"
   rm -rf "$tmpoutdir"
@@ -77,7 +80,7 @@ esac
 
 if (( check_only == 0 )) && ! command -v "$bin" >/dev/null 2>&1; then
   echo "$bin is required" >&2
-  exit 1
+  exit 3
 fi
 
 if [[ ! -d "$inbox" ]]; then
@@ -90,6 +93,7 @@ read -r -a globs <<< "$glob_text"
 processed=0
 skipped=0
 failed=0
+unavailable=0
 
 for pattern in "${globs[@]}"; do
   for audio in "$inbox"/$pattern; do
@@ -128,6 +132,8 @@ for pattern in "${globs[@]}"; do
       echo "transcribed: $audio -> $out"
       processed=$((processed + 1))
     else
+      # 3 = faster-whisper package missing; 126/127 = engine interpreter missing.
+      [[ "$?" =~ ^(3|126|127)$ ]] && unavailable=1
       rm -f "${tmpbase}.txt"
       echo "transcription failed: $audio" >&2
       failed=$((failed + 1))
@@ -137,6 +143,9 @@ for pattern in "${globs[@]}"; do
 done
 
 echo "done processed=$processed skipped=$skipped failed=$failed"
+if (( unavailable > 0 )); then
+  exit 3
+fi
 if (( failed > 0 )); then
   exit 1
 fi

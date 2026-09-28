@@ -1,6 +1,10 @@
+import { spawn } from 'node:child_process';
 import { watch } from 'node:fs';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import { config } from '../../config.mjs';
 import { buildAudioRecordingStore, safeAudioRecording } from './recordings.mjs';
 import { expandHomePath, pruneStaleAudio, scanAudioInbox } from './ingest.mjs';
@@ -149,6 +153,64 @@ async function validateActionLaunchDir(path) {
   return resolved;
 }
 
+const TRANSCRIBE_SCRIPT = fileURLToPath(new URL('../../scripts/fleet-transcribe.sh', import.meta.url));
+
+// whisper-cpp writes plain text; faster-whisper adds a header and `[start - end]` line prefixes.
+function transcriptText(raw) {
+  return raw.split('\n')
+    .filter((line) => !/^(# Transcript:|Language:)/.test(line))
+    .map((line) => line.replace(/^\[[\d.]+ - [\d.]+\]/, '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
+// Push-to-talk dictation: run one clip through the same engine config (FLEET_TRANSCRIBE_ENGINE,
+// FLEET_WHISPER_*) the inbox transcriber uses. The engine runs in its own process group; at the
+// deadline, on abort, or if anything in the group outlives the wrapper, the group gets TERM, then
+// KILL after five seconds, and cleanup waits until the group is gone.
+async function transcribeClip(audio, ext, signal) {
+  const dir = await mkdtemp(resolve(tmpdir(), 'cadre-ptt-'));
+  let child;
+  let stopping;
+  let deadline;
+  const group = (sig) => { try { process.kill(-child.pid, sig); return true; } catch { return false; } };
+  const stop = () => {
+    stopping ??= (async () => {
+      group('SIGTERM');
+      for (let i = 0; i < 50 && group(0); i++) await sleep(100);
+      group('SIGKILL');
+      for (let i = 0; i < 50 && group(0); i++) await sleep(100);
+    })();
+  };
+  try {
+    await writeFile(resolve(dir, `clip.${ext}`), audio);
+    child = spawn(TRANSCRIBE_SCRIPT, [], {
+      env: { ...process.env, FLEET_AUDIO_INBOX: dir, FLEET_TRANSCRIBE_GLOB: `clip.${ext}`, FLEET_TRANSCRIBE_MIN_AGE_SEC: '0' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+      detached: true,
+    });
+    deadline = setTimeout(stop, 120000);
+    if (signal?.aborted) stop();
+    signal?.addEventListener('abort', stop);
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', () => {}); // spawn failures still emit `close` with a non-zero code
+    const code = await new Promise((done) => child.on('close', done));
+    if (code !== 0) throw Object.assign(new Error(`fleet-transcribe exited ${code}: ${stderr}`), { statusCode: code === 3 ? 503 : 502 });
+    return transcriptText(await readFile(resolve(dir, 'clip.txt'), 'utf8'));
+  } finally {
+    clearTimeout(deadline);
+    signal?.removeEventListener('abort', stop);
+    // `close` only means the wrapper exited; an engine that dropped stderr can still be running.
+    if (group(0)) stop();
+    await stopping;
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+// One engine run at a time across the process: each run loads a whole model onto the GPU/CPU.
+let transcribing = false;
+
 function startAudioIngestLoop({ sourceConfig, scan, log }) {
   if (sourceConfig.ingestEnabled !== true) return null;
   const handles = [];
@@ -208,6 +270,7 @@ export async function audioPlugin(app, opts = {}) {
   });
   const sessionLauncher = opts.sessionLauncher || defaultSessionLauncher;
   const log = opts.log || app.log;
+  const transcribe = opts.transcribe || transcribeClip;
 
   async function handleIngestResult(result) {
     const payload = {
@@ -284,6 +347,30 @@ export async function audioPlugin(app, opts = {}) {
   });
 
   app.post('/api/recordings/scan', async () => scan());
+
+  // Body size is bounded by the server bodyLimit; the client caps clips at two minutes.
+  app.post('/api/audio/transcribe', async (req, reply) => {
+    const match = String(req.body?.audio || '').match(/^data:audio\/([\w.+-]+)[^,]*;base64,(.+)$/);
+    if (!match) return reply.code(400).send({ error: 'Expected a base64 audio data URL', code: 'invalid_audio' });
+    if (transcribing) {
+      return reply.code(429).header('retry-after', '5').send({ error: 'Another transcription is running', code: 'transcription_busy' });
+    }
+    transcribing = true;
+    // Client went away before the reply: stop the engine instead of finishing unwanted work.
+    const abort = new AbortController();
+    reply.raw.on('close', () => { if (!reply.raw.writableEnded) abort.abort(); });
+    try {
+      return { text: await transcribe(Buffer.from(match[2], 'base64'), match[1], abort.signal) };
+    } catch (error) {
+      if (error.statusCode === 503) {
+        return reply.code(503).send({ error: 'No speech-to-text engine on the server', code: 'transcriber_unavailable' });
+      }
+      log.warn({ reason: error.message }, 'Audio transcription failed');
+      return reply.code(502).send({ error: 'Transcription failed', code: 'transcription_failed' });
+    } finally {
+      transcribing = false;
+    }
+  });
 
   app.post('/api/recordings/cleanup', async (_req, reply) => {
     if (sourceConfig.audioCleanupEnabled !== true) {
