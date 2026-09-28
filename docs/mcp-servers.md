@@ -47,7 +47,7 @@ workspace-global `.mcp.json`, `.codex/config.toml`, or `.claude/settings.local.j
 | `notion`, `atlassian` | http | OAuth (discovery) | vendor remote servers |
 | `exa`, `huggingface` | http | API key env | vendor remote servers |
 | `deepwiki`, `wolfram` | http | none | open remote servers |
-| `playwright` | stdio | none | `@playwright/mcp` (Microsoft) |
+| `playwright` | stdio | none | `@playwright/mcp` (Microsoft; pinned npm dependency) |
 | `filesystem`, `git`, `fetch`, `memory`, `sequential-thinking`, `time` | stdio | none | maintained MCP reference servers |
 | `espocrm`, `invoice-ninja` | http | API key env | self-hosted; endpoint must be supplied |
 | `seodata` | stdio | none (optional `SEODATA_API_KEY`) | locally built [`seodata-mcp`](https://github.com/BlaineHeffron/seodata-mcp) |
