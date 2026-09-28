@@ -370,6 +370,25 @@ describe('SessionService', () => {
     await harness.service.close({ interrupt: false });
   });
 
+  it('stops projecting a fenced answer as blocking once the session ends', { timeout: 15000 }, async () => {
+    let transport;
+    const harness = await fixture({ answerTimeoutMs: 50, factory: () => { transport = new FakeTransport(); return transport; } });
+    const created = await harness.service.start({ workDir: harness.workDir, permissionMode: 'workspace-write' });
+    await harness.service.prompt(created.id, { blocks: [{ type: 'text', text: 'needs permission' }], idempotencyKey: 'fence-end-key' });
+    await waitFor(() => harness.service.get(created.id).turns[0]?.status === 'inflight');
+    const interactionId = transport.permission();
+    await waitFor(() => harness.service.get(created.id).lifecycle === 'blocked');
+    transport.answerInteraction = () => new Promise(() => {});
+    await assert.rejects(harness.service.answerInteraction(created.id, {
+      interactionId, optionId: 'allow_once', authority: { actor: 'dashboard:user:1', principalType: 'ui', decision: 'allowed' },
+    }), (error) => error.code === 'interaction_answer_timeout');
+    assert.equal(harness.service.get(created.id).canonicalState.capabilities.needsAttention, true);
+    await harness.service.terminate(created.id);
+    const { canonicalState } = harness.service.get(created.id);
+    assert.deepEqual([canonicalState.interaction.kind, canonicalState.capabilities.needsAttention], ['none', false]);
+    await harness.service.close({ interrupt: false });
+  });
+
   it('records and denies an agent attempt to self-approve a permission interaction', { timeout: 15000 }, async () => {
     let transport;
     const harness = await fixture({ factory: () => { transport = new FakeTransport(); return transport; } });

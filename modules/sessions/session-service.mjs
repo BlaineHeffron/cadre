@@ -919,10 +919,11 @@ export class SessionService {
 
   #observeProtocol(session) {
     const execution = ['working', 'blocked', 'cancelling'].includes(session.lifecycle) ? 'working' : session.lifecycle === 'ready' ? 'idle' : 'unknown';
-    const openInteraction = session.interactions.find((item) => UNSETTLED_INTERACTIONS.has(item.status));
+    const lifecycle = ['ended', 'interrupted'].includes(session.lifecycle) ? 'ended' : session.lifecycle === 'created' || session.lifecycle === 'starting' ? 'starting' : 'running';
+    // An ended session has nothing left to answer, so no interaction can keep it blocked.
+    const openInteraction = lifecycle !== 'ended' && session.interactions.find((item) => UNSETTLED_INTERACTIONS.has(item.status));
     // A timed-out answer keeps the session blocked but not answerable until the provider settles it.
     const fenced = openInteraction?.status === 'answer_timeout';
-    const lifecycle = ['ended', 'interrupted'].includes(session.lifecycle) ? 'ended' : session.lifecycle === 'created' || session.lifecycle === 'starting' ? 'starting' : 'running';
     const observedAt = this.now();
     try {
       this.stateTracker.observe(canonicalSessionStateId(session.provider, session.id), [
