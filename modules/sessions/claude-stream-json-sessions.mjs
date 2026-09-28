@@ -7,6 +7,7 @@ import { ClaudeStreamJsonTransport } from '../agent/claude-stream-json-transport
 import { CodexAppServerTransport } from '../agent/codex-app-server-transport.mjs';
 import { cleanupClaudeHookSettings, prepareClaudeHookSettings } from '../agent/claude-hook-settings.mjs';
 import { ProcessSupervisor } from '../agent/process-supervisor.mjs';
+import { buildCodexPluginConfigArgs } from '../agent/runtime-args.mjs';
 import { resolveMcpCapabilities } from '../integrations/mcp-capability-resolver.mjs';
 import {
   cleanupMcpCapabilityLaunch,
@@ -136,7 +137,9 @@ export async function claudeStreamJsonSessionsPlugin(app, {
 
   // Scoped credential, MCP config, and launch args for one attempt. A resumed attempt reuses the
   // persisted MCP selection; the provider replays the system prompt it recorded at first launch.
-  async function prepareAttempt({ id, workDir, body = {}, generation = 1, resolvedMcp, permissionMode }) {
+  async function prepareAttempt({ id, workDir, body = {}, generation = 1, resolvedMcp, permissionMode, codexPlugins }) {
+    // Validate plugins before issuing a credential; tmux's default plugin removals apply here too.
+    const pluginArgs = claude ? [] : buildCodexPluginConfigArgs(codexPlugins ?? undefined);
     const mcpPreparation = await prepareMcpCapabilityLaunch({
       resolved: resolvedMcp, backendType: kind, sessionId: id, workDir,
       sourceConfig, attemptGeneration: generation, rotation: generation > 1,
@@ -167,7 +170,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       // Read-only Codex asks before untrusted commands; full access never asks, matching the tmux runtime.
       const approvalPolicy = { 'read-only': 'untrusted', 'danger-full-access': 'never' }[permissionMode] || 'on-request';
       return { env, preflight: mcpPreparation.preflight, approvalPolicy,
-        args: [...headroom.args, ...mcpPreparation.prepared.codexArgs, ...promptArgs,
+        args: [...headroom.args, ...pluginArgs, ...mcpPreparation.prepared.codexArgs, ...promptArgs,
         ...(headroom.modelProvider ? ['-c', `model_provider=${JSON.stringify(headroom.modelProvider)}`] : [])] };
     }
     const discovery = await mcpDiscovery({ url: buildAgentBusMcpUrl(sourceConfig), token: mcpPreparation.credentialToken });
@@ -265,9 +268,11 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         return reply.code(400).send({ error: `Unsupported Codex permission mode: ${permissionMode}`, code: 'unsupported_permission_mode' });
       }
       selectedMcpServerIds = resolvedMcp.serverIds;
-      const { preflight, ...launch } = await prepareAttempt({ id, workDir, body: req.body || {}, resolvedMcp, permissionMode });
+      const thinkingLevel = text(req.body?.thinkingLevel);
+      const codexPlugins = claude ? null : req.body?.codexPlugins;
+      const { preflight, ...launch } = await prepareAttempt({ id, workDir, body: req.body || {}, resolvedMcp, permissionMode, codexPlugins });
       let session = await service.start({
-        ...launch, sessionId: id, displayName: text(req.body?.displayName), workDir, model, permissionMode,
+        ...launch, sessionId: id, displayName: text(req.body?.displayName), workDir, model, thinkingLevel, codexPlugins, permissionMode,
         mcpCapabilities: sanitizedMcpSnapshot(resolvedMcp, preflight),
       });
       if (initialPrompt) {
@@ -300,7 +305,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         prepare: async (current) => {
           generation = current.generation + 1;
           const { preflight: _preflight, ...launch } = await prepareAttempt({
-            id: current.id, workDir: current.workDir, generation, resolvedMcp: { serverIds }, permissionMode: current.permissionMode,
+            id: current.id, workDir: current.workDir, generation, resolvedMcp: { serverIds }, permissionMode: current.permissionMode, codexPlugins: current.codexPlugins,
           });
           return launch;
         },

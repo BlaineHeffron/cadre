@@ -126,7 +126,7 @@ export class CodexAppServerTransport {
         clientInfo: { name: 'dueno_fleet', version: '1.0.0' }, capabilities: { experimentalApi: false },
       });
       await this.codec.notify('initialized', {});
-      const config = { ...(spec.config || {}) };
+      const config = { ...(spec.config || {}), ...(spec.thinkingLevel ? { model_reasoning_effort: spec.thinkingLevel } : {}) };
       if (spec.allowedMcpServers) {
         config.mcp_servers = { ...(config.mcp_servers || {}) };
         for (const server of await this.#inventory()) {
@@ -165,7 +165,7 @@ export class CodexAppServerTransport {
         userAgent: initialized.userAgent, platformFamily: initialized.platformFamily, platformOs: initialized.platformOs,
       }, schema: evidence, requestedModel: spec.model || null, effectiveModel: response.model || null,
       modelEvidence: { source: `${method}.response.model`, inferenceIdentityVerified: false },
-      requestedReasoningEffort: spec.config?.model_reasoning_effort || null,
+      requestedReasoningEffort: config.model_reasoning_effort || null,
       effectiveReasoningEffort: response.reasoningEffort || null,
       providerThreadId: this.protocolSessionId, attemptId: this.attemptId,
       taskId: spec.metadata?.taskId || null,

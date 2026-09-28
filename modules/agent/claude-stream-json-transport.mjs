@@ -15,7 +15,7 @@ export const CLAUDE_STREAM_JSON_ENV_ALLOWLIST = Object.freeze([
 ]);
 
 export function buildClaudeStreamJsonArgs({
-  sessionId, resume = false, model = '', permissionMode = '', mcpConfigPath = '', settingsPath = '', promptArgs = [],
+  sessionId, resume = false, model = '', thinkingLevel = '', permissionMode = '', mcpConfigPath = '', settingsPath = '', promptArgs = [],
 } = {}) {
   const args = [
     '-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
@@ -24,6 +24,7 @@ export function buildClaudeStreamJsonArgs({
     '--permission-prompt-tool', 'stdio',
   ];
   if (model) args.push('--model', String(model));
+  if (thinkingLevel) args.push('--effort', String(thinkingLevel));
   if (permissionMode === 'danger-full-access') args.push('--dangerously-skip-permissions');
   else if (permissionMode === 'read-only' || permissionMode === 'plan') args.push('--permission-mode', 'plan');
   else if (permissionMode === 'workspace-write') args.push('--permission-mode', 'acceptEdits');
@@ -114,7 +115,7 @@ export class ClaudeStreamJsonTransport {
         driverVersion: this.driverVersion,
         command: this.binary,
         args: spec.args || buildClaudeStreamJsonArgs({
-          sessionId: this.protocolSessionId, resume: spec.resume, model: spec.model, permissionMode: spec.permissionMode,
+          sessionId: this.protocolSessionId, resume: spec.resume, model: spec.model, thinkingLevel: spec.thinkingLevel, permissionMode: spec.permissionMode,
           mcpConfigPath: spec.mcpConfigPath, settingsPath: spec.settingsPath, promptArgs: spec.promptArgs,
         }),
         cwd,

@@ -387,11 +387,20 @@ describe('Claude stream-json sessions', () => {
       const base = `/api/${kind}/sessions`;
       const first = await register();
       assert.equal(Boolean(getProtocolSessionProvider(kind)), kind === 'claude');
-      const created = await first.inject({ method: 'POST', url: base, payload: { workDir, initialPrompt: 'remember PELICAN' } });
+      if (kind === 'codex') {
+        const invalid = await first.inject({ method: 'POST', url: base, payload: { workDir, codexPlugins: 'x' } });
+        assert.deepEqual([invalid.statusCode, invalid.json().code, clients.length], [400, 'codex_plugin_selection_invalid', 0]);
+      }
+      const created = await first.inject({ method: 'POST', url: base, payload: {
+        workDir, initialPrompt: 'remember PELICAN', thinkingLevel: 'high',
+        ...(kind === 'codex' ? { codexPlugins: { add: ['fixture@local'] } } : {}),
+      } });
       assert.equal(created.statusCode, 200, created.body);
       const { id } = created.json();
       assert.deepEqual([created.json().provider, created.json().sessionName, created.json().canResume],
         [kind, `${kind}-${id}`, false]);
+      assert.equal(clients[0].startSpec.thinkingLevel, 'high');
+      const pluginArgs = /plugins\."browser@openai-bundled"\.enabled=false[\s\S]*plugins\."fixture@local"\.enabled=true/;
       const firstToken = clients[0].startSpec.env.DUENO_AGENT_BUS_TOKEN;
       assert.equal(clients[0].startSpec.env.DUENO_PROVIDER, kind);
       assert.equal(clients[0].startSpec.permissionMode, 'workspace-write');
@@ -401,6 +410,7 @@ describe('Claude stream-json sessions', () => {
         assert.match(args, /mcp_servers=\{\}/);
         assert.match(args, /bearer_token_env_var="DUENO_AGENT_BUS_TOKEN"/);
         assert.equal(args.includes(firstToken), false);
+        assert.match(args, pluginArgs);
       }
       await waitFor(async () => (await first.inject({ method: 'GET', url: `${base}/${id}` })).json().content.includes('Structured reply'));
       const early = await first.inject({ method: 'POST', url: `${base}/${id}/resume` });
@@ -429,6 +439,8 @@ describe('Claude stream-json sessions', () => {
       assert.equal(attach.protocolSessionId, created.json().attempts[0].protocolSessionId);
       assert.deepEqual(attach.promptArgs || [], []);
       assert.equal(attach.permissionMode, 'workspace-write');
+      assert.equal(attach.thinkingLevel, 'high');
+      if (kind === 'codex') assert.match(attach.args.join(' '), pluginArgs);
       if (kind === 'claude') {
         assert.match(attach.mcpConfigPath, /attempt-3\/dueno-mcp\.json$/);
         await stat(attach.mcpConfigPath);
