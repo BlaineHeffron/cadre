@@ -6,6 +6,7 @@ import {
   isSoundEnabled as readSoundEnabled,
   setSoundEnabled as writeSoundEnabled,
 } from './attention.mjs';
+import { api } from './api.mjs';
 
 export function isSoundEnabled() {
   return readSoundEnabled();
@@ -47,38 +48,44 @@ function playBeep() {
   }
 }
 
+const swRegistration = () => navigator.serviceWorker?.getRegistration() ?? Promise.resolve(null);
+
 /**
- * Show a browser notification with optional sound.
+ * Show a notification via the service worker (Android Chrome rejects `new Notification`).
+ * Clicks are handled by sw.js, which focuses the app and navigates to opts.url.
  * @param {string} title
  * @param {string} body
- * @param {{ tag?: string, url?: string, vibrate?: number[], newTab?: boolean }} opts
+ * @param {{ tag?: string, url?: string }} opts
  */
-export function showNotification(title, body, opts = {}) {
+export async function showNotification(title, body, opts = {}) {
   playBeep();
-
   if (!isNotificationPermitted()) return;
-
-  const n = new Notification(title, {
+  const registration = await swRegistration();
+  await registration?.showNotification(title, {
     body,
     tag: opts.tag || 'dueno-alert',
     icon: '/icons/icon.svg',
-    vibrate: opts.vibrate || [200, 100, 200],
-    requireInteraction: true,
+    data: { url: opts.url || '/' },
   });
+}
 
-  if (opts.url) {
-    n.onclick = () => {
-      window.focus();
-      if (opts.newTab === false) {
-        window.location.hash = '';
-        window.location.href = opts.url;
-      } else {
-        window.open(opts.url, '_blank', 'noopener');
-      }
-      n.close();
-    };
+export async function isPushSubscribed() {
+  return Boolean(await (await swRegistration())?.pushManager?.getSubscription());
+}
+
+/** Subscribe or unsubscribe this device from server-sent Web Push alerts. */
+export async function setPushEnabled(enabled) {
+  const pushManager = (await swRegistration())?.pushManager;
+  if (!pushManager) throw new Error('Push needs HTTPS (on iOS, add Cadre to the Home Screen first)');
+  const existing = await pushManager.getSubscription();
+  if (!enabled) {
+    if (existing) await api.delete('/push/subscribe', { endpoint: existing.endpoint });
+    await existing?.unsubscribe();
+    return;
   }
-
-  // Auto-close after 15s
-  setTimeout(() => n.close(), 15000);
+  if (!(await requestPermission())) throw new Error('Notification permission denied');
+  const { publicKey } = await api.get('/push/key');
+  const applicationServerKey = Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+  const subscription = existing || await pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
+  await api.post('/push/subscribe', subscription.toJSON());
 }

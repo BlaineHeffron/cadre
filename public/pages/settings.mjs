@@ -11,6 +11,8 @@ import {
   isNotificationPermitted,
   isSoundEnabled,
   setSoundEnabled,
+  isPushSubscribed,
+  setPushEnabled,
 } from '../app/notifications.mjs';
 import { isApprovalOnlyEnabled, setApprovalOnlyEnabled } from '../app/attention.mjs';
 import { encodeQr, qrSvgPath } from '../lib/qrcodegen.mjs';
@@ -44,6 +46,7 @@ export function SettingsPage({ section }) {
   const saveToken = useMemo(() => makeSaveToken(inputToken), []);
   const notifPermitted = useMemo(() => signal(isNotificationPermitted()), []);
   const soundOn = useMemo(() => signal(isSoundEnabled()), []);
+  const pushOn = useMemo(() => signal(false), []);
   const approvalOnly = useMemo(() => signal(isApprovalOnlyEnabled()), []);
   const lowDataMode = useMemo(() => signal(isLowDataModeEnabled()), []);
   const connectionSaver = useMemo(() => signal(connectionPrefersLowData()), []);
@@ -118,6 +121,17 @@ export function SettingsPage({ section }) {
     }
   }
 
+  async function togglePush() {
+    try {
+      await setPushEnabled(!pushOn.value);
+      pushOn.value = !pushOn.value;
+      notifPermitted.value = isNotificationPermitted();
+      addToast(pushOn.value ? 'Phone notifications enabled' : 'Phone notifications disabled', 'success');
+    } catch (error) {
+      addToast(`Phone notifications: ${error.message}`, 'error');
+    }
+  }
+
   function toggleSound() {
     soundOn.value = !soundOn.value;
     setSoundEnabled(soundOn.value);
@@ -146,6 +160,10 @@ export function SettingsPage({ section }) {
     };
     connection.addEventListener('change', update);
     return () => connection.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    isPushSubscribed().then((subscribed) => { pushOn.value = subscribed; }, () => {});
   }, []);
 
   useEffect(() => {
@@ -289,6 +307,9 @@ export function SettingsPage({ section }) {
           ` : html`
             <span style="font-size:13px; color:var(--success)">Browser notifications active</span>
           `}
+          <button class="btn ${pushOn.value ? 'btn-primary' : ''}" onclick=${togglePush}>
+            Phone notifications: ${pushOn.value ? 'On' : 'Off'}
+          </button>
           <button class="btn ${soundOn.value ? '' : 'btn-danger'}" onclick=${toggleSound}>
             Sound: ${soundOn.value ? 'On' : 'Off'}
           </button>

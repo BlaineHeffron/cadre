@@ -359,14 +359,6 @@ function promptDetail(fallback = '') {
   return text || 'Waiting for your next prompt';
 }
 
-export function hasSeenClaudePromptNotification(key) {
-  return hasSeenPromptNotification('claude', key);
-}
-
-export function hasSeenCodexPromptNotification(key) {
-  return hasSeenPromptNotification('codex', key);
-}
-
 export function hasSeenPromptNotification(kind, key) {
   return seenPromptStoreForKind(kind).value.has(key);
 }

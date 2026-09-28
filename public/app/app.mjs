@@ -20,8 +20,6 @@ import {
   setDeepseekSessions,
   setPiSessions,
   upsertPromptNotificationFromAlert,
-  hasSeenClaudePromptNotification,
-  hasSeenCodexPromptNotification,
   hasSeenPromptNotification,
 } from './state.mjs';
 import { connectWs, subscribe } from './ws-client.mjs';
@@ -135,6 +133,7 @@ normalizeInitialRoute();
 installSpaLinkNavigation();
 installViewportKeyboardInset();
 connectWs();
+navigator.serviceWorker?.register('/sw.js').catch((error) => console.warn('Service worker registration failed', error));
 const routeScrollRestoration = installRouteScrollRestoration();
 
 effect(() => {
@@ -154,58 +153,9 @@ subscribe('claude:sessions', (type, data) => {
   }
 });
 
-// Subscribe to claude alerts for browser notifications
-subscribe('claude:alerts', (type, data) => {
-  if (type === 'alert' && data) {
-    const route = data.route || `/claude/${data.sessionId}`;
-    if (isActiveVisibleRoute(route)) {
-      return;
-    }
-    if (data.status === 'ready' && data.attentionKey && hasSeenClaudePromptNotification(data.attentionKey)) {
-      return;
-    }
-    if (!shouldNotifyForSession('claude', data.sessionId, data.status)) {
-      return;
-    }
-    upsertPromptNotificationFromAlert('claude', data);
-    const title = promptNotificationTitle('claude', data.sessionId, data.sessionName);
-    const body = data.interaction?.detail || data.reason || 'Waiting for your next prompt';
-    showNotification(title, body, {
-      tag: `claude-${data.sessionId}`,
-      url: route,
-      vibrate: [200, 100, 200],
-      newTab: false,
-    });
-  }
-});
-
 subscribe('codex:sessions', (type, data) => {
   if (type === 'sessions' && data?.sessions) {
     setCodexSessions(data.sessions);
-  }
-});
-
-subscribe('codex:alerts', (type, data) => {
-  if (type === 'alert' && data) {
-    const route = data.route || `/codex/${data.sessionId}`;
-    if (isActiveVisibleRoute(route)) {
-      return;
-    }
-    if (data.status === 'ready' && data.attentionKey && hasSeenCodexPromptNotification(data.attentionKey)) {
-      return;
-    }
-    if (!shouldNotifyForSession('codex', data.sessionId, data.status)) {
-      return;
-    }
-    upsertPromptNotificationFromAlert('codex', data);
-    const title = promptNotificationTitle('codex', data.sessionId, data.sessionName);
-    const body = data.interaction?.detail || data.reason || 'Waiting for your next prompt';
-    showNotification(title, body, {
-      tag: `codex-${data.sessionId}`,
-      url: route,
-      vibrate: [200, 100, 200],
-      newTab: false,
-    });
   }
 });
 
@@ -217,22 +167,19 @@ subscribe('deepseek:sessions', (type, data) => {
   if (type === 'sessions' && data?.sessions) setDeepseekSessions(data.sessions);
 });
 
-subscribe('pi:alerts', (type, data) => {
-  if (type !== 'alert' || !data) return;
-  const route = data.route || `/pi/${data.sessionId}`;
-  if (isActiveVisibleRoute(route)) return;
-  if (data.status === 'ready' && data.attentionKey && hasSeenPromptNotification('pi', data.attentionKey)) return;
-  if (!shouldNotifyForSession('pi', data.sessionId, data.status)) return;
-  upsertPromptNotificationFromAlert('pi', data);
-  const title = promptNotificationTitle('pi', data.sessionId, data.sessionName);
-  const body = data.interaction?.detail || data.reason || 'Waiting for your next prompt';
-  showNotification(title, body, {
-    tag: `pi-${data.sessionId}`,
-    url: route,
-    vibrate: [200, 100, 200],
-    newTab: false,
+for (const kind of ['claude', 'codex', 'pi']) {
+  subscribe(`${kind}:alerts`, (type, data) => {
+    if (type !== 'alert' || !data) return;
+    const route = data.route || `/${kind}/${data.sessionId}`;
+    if (isActiveVisibleRoute(route)) return;
+    if (data.status === 'ready' && data.attentionKey && hasSeenPromptNotification(kind, data.attentionKey)) return;
+    if (!shouldNotifyForSession(kind, data.sessionId, data.status)) return;
+    upsertPromptNotificationFromAlert(kind, data);
+    const title = promptNotificationTitle(kind, data.sessionId, data.sessionName);
+    const body = data.interaction?.detail || data.reason || 'Waiting for your next prompt';
+    showNotification(title, body, { tag: `${kind}-${data.sessionId}`, url: route });
   });
-});
+}
 
 subscribe('agent-bus:threads', (type, data) => {
   if (type === 'threads' && data?.threads) {
@@ -261,8 +208,6 @@ subscribe('agent-bus:alerts', (type, data) => {
     showNotification('Agent Collab', data.error || type, {
       tag: alert.id,
       url: data.threadId ? `/collab/${data.threadId}` : '/collab',
-      vibrate: [200, 100, 200],
-      newTab: true,
     });
   }
 });
