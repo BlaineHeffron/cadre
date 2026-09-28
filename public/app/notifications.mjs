@@ -9,6 +9,7 @@ import {
   setSoundEnabled as writeSoundEnabled,
 } from './attention.mjs';
 import { api } from './api.mjs';
+import { wsConnected } from './state.mjs';
 
 export function isSoundEnabled() {
   return readSoundEnabled();
@@ -68,8 +69,8 @@ const pushSubscription = () => swReady.then((registration) => registration?.push
 export async function showNotification(title, body, opts = {}) {
   playBeep();
   if (!isNotificationPermitted()) return;
-  // One source per device: a push-subscribed browser gets server-pushed alerts from sw.js.
-  if (opts.pushed && await pushSubscription()) return;
+  // One source per device: once the server confirms it pushes to this browser, alerts come from sw.js.
+  if (opts.pushed && confirmedEndpoint && (await pushSubscription())?.endpoint === confirmedEndpoint) return;
   const url = opts.url || '/';
   const options = { body, tag: opts.tag || 'dueno-alert', icon: '/icons/icon.svg', data: { url } };
   const registration = await swReady;
@@ -94,11 +95,19 @@ export async function isPushSubscribed() {
   return Boolean(await pushSubscription());
 }
 
+// Endpoint the server last accepted with sending enabled; until then in-app notifications stay on.
+let confirmedEndpoint = null;
+
 // The server applies this device's approval-only and muted-session prefs to its pushes.
-const postSubscription = (subscription, { approvalOnly, mutedSessions } = notificationPrefs.value) =>
-  api.post('/push/subscribe', { ...subscription.toJSON(), approvalOnly, mutedSessions });
+async function postSubscription(subscription, { approvalOnly, mutedSessions } = notificationPrefs.value) {
+  confirmedEndpoint = null;
+  const { sending } = await api.post('/push/subscribe', { ...subscription.toJSON(), approvalOnly, mutedSessions });
+  if (sending) confirmedEndpoint = subscription.endpoint;
+}
+// Sync on pref changes and on every (re)connect, which also retries a failed sync after login or an outage.
 effect(() => {
   const prefs = notificationPrefs.value;
+  if (!wsConnected.value) return;
   pushSubscription().then((subscription) => subscription && postSubscription(subscription, prefs)).catch(() => {});
 });
 
@@ -109,14 +118,20 @@ export async function setPushEnabled(enabled) {
   const existing = await pushManager.getSubscription();
   if (!enabled) {
     if (!existing) return;
-    // Unsubscribe locally first; the server also prunes it on the push service's 410.
-    await existing.unsubscribe();
-    await api.delete('/push/subscribe', { endpoint: existing.endpoint }).catch(() => {});
+    confirmedEndpoint = null;
+    // Either one revokes the device (the server prunes a locally-unsubscribed endpoint on the push service's 410).
+    const [local, remote] = await Promise.allSettled([existing.unsubscribe(), api.delete('/push/subscribe', { endpoint: existing.endpoint })]);
+    if (local.status === 'rejected' && remote.status === 'rejected') throw local.reason;
     return;
   }
   if (!(await requestPermission())) throw new Error('Notification permission denied');
   const { publicKey } = await api.get('/push/key');
   const applicationServerKey = Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
   const subscription = existing || await pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
-  await postSubscription(subscription);
+  try {
+    await postSubscription(subscription);
+  } catch (error) {
+    if (!existing) await subscription.unsubscribe().catch(() => {});
+    throw error;
+  }
 }

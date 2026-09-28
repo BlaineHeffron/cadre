@@ -75,7 +75,9 @@ test('subscribe validates, dedupes, persists, and unsubscribe removes', async (t
     assert.equal((await subscribe(app, { endpoint, keys })).statusCode, 201, endpoint);
     await app.inject({ method: 'DELETE', url: '/api/push/subscribe', payload: { endpoint } });
   }
-  assert.equal((await subscribe(app, subscription('a'))).statusCode, 201);
+  const created = await subscribe(app, subscription('a'));
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.json().sending, true, 'client may rely on push instead of in-app notifications');
   assert.equal((await subscribe(app, { ...subscription('a'), keys: subscription('a2').keys })).statusCode, 201);
   assert.equal((await subscribe(app, subscription('b'))).statusCode, 201);
 
@@ -122,7 +124,9 @@ test('alerts are sent to every subscription and 404/410 subscriptions are pruned
 test('side-effects-disabled servers never send', async (t) => {
   const storeFile = await tempStoreFile(t);
   const { app, sent } = await startPush(t, storeFile, { sendEnabled: false });
-  assert.equal((await subscribe(app, subscription('a'))).statusCode, 201);
+  const created = await subscribe(app, subscription('a'));
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.json().sending, false, 'client keeps its in-app notifications');
   await notifyPush({ id: 'codex', displayName: 'Codex' }, { sessionId: 's1', sessionName: 'x', route: '/codex/s1' });
   assert.deepEqual(sent, []);
 });

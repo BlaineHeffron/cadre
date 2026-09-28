@@ -36,7 +36,7 @@ function makeSaveToken(inputToken) {
 
 async function logout() {
   // Stop pushing private alerts to this device once it is signed out.
-  await setPushEnabled(false).catch(() => {});
+  await setPushEnabled(false).catch((error) => addToast(`Phone notifications still on: ${error.message}`, 'error'));
   disconnectWs();
   await logoutBrowserSession();
   addToast('Logged out', 'info');

@@ -82,7 +82,8 @@ export async function pushPlugin(app, {
       ...state,
       subscriptions: [...state.subscriptions.filter((sub) => sub.endpoint !== endpoint), subscription].slice(-MAX_SUBSCRIPTIONS),
     }));
-    return reply.code(201).send({ ok: true });
+    // sending: false on side-effects-disabled servers, so the client keeps its in-app notifications.
+    return reply.code(201).send({ ok: true, sending: sendEnabled });
   });
 
   app.delete('/api/push/subscribe', async (req) => {
