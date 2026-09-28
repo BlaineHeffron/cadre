@@ -1,10 +1,9 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { watch } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import { config } from '../../config.mjs';
 import { buildAudioRecordingStore, safeAudioRecording } from './recordings.mjs';
 import { expandHomePath, pruneStaleAudio, scanAudioInbox } from './ingest.mjs';
@@ -165,22 +164,43 @@ function transcriptText(raw) {
 }
 
 // Push-to-talk dictation: run one clip through the same engine config (FLEET_TRANSCRIBE_ENGINE,
-// FLEET_WHISPER_*) the inbox transcriber uses. `timeout` kills the whole engine process group.
-async function transcribeClip(audio, ext) {
+// FLEET_WHISPER_*) the inbox transcriber uses. The engine runs in its own process group; at the
+// deadline or when `signal` aborts, the whole group gets TERM, then KILL five seconds later.
+// `close` waits for every descendant holding stderr, so cleanup never races a live engine.
+async function transcribeClip(audio, ext, signal) {
   const dir = await mkdtemp(resolve(tmpdir(), 'cadre-ptt-'));
+  const timers = [];
+  let child;
+  const stop = () => {
+    const kill = (sig) => { try { process.kill(-child.pid, sig); } catch {} };
+    kill('SIGTERM');
+    timers.push(setTimeout(kill, 5000, 'SIGKILL'));
+  };
   try {
     await writeFile(resolve(dir, `clip.${ext}`), audio);
-    await promisify(execFile)('timeout', ['120', TRANSCRIBE_SCRIPT], {
+    child = spawn(TRANSCRIBE_SCRIPT, [], {
       env: { ...process.env, FLEET_AUDIO_INBOX: dir, FLEET_TRANSCRIBE_GLOB: `clip.${ext}`, FLEET_TRANSCRIBE_MIN_AGE_SEC: '0' },
-    }).catch((error) => {
-      if (/ is required/.test(error.stderr)) error.statusCode = 503;
-      throw error;
+      stdio: ['ignore', 'ignore', 'pipe'],
+      detached: true,
     });
+    timers.push(setTimeout(stop, 120000));
+    if (signal?.aborted) stop();
+    signal?.addEventListener('abort', stop);
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', () => {}); // spawn failures still emit `close` with a non-zero code
+    const code = await new Promise((done) => child.on('close', done));
+    if (code !== 0) throw Object.assign(new Error(`fleet-transcribe exited ${code}: ${stderr}`), { statusCode: code === 3 ? 503 : 502 });
     return transcriptText(await readFile(resolve(dir, 'clip.txt'), 'utf8'));
   } finally {
+    timers.forEach(clearTimeout);
+    signal?.removeEventListener('abort', stop);
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+// One engine run at a time across the process: each run loads a whole model onto the GPU/CPU.
+let transcribing = false;
 
 function startAudioIngestLoop({ sourceConfig, scan, log }) {
   if (sourceConfig.ingestEnabled !== true) return null;
@@ -323,14 +343,23 @@ export async function audioPlugin(app, opts = {}) {
   app.post('/api/audio/transcribe', async (req, reply) => {
     const match = String(req.body?.audio || '').match(/^data:audio\/([\w.+-]+)[^,]*;base64,(.+)$/);
     if (!match) return reply.code(400).send({ error: 'Expected a base64 audio data URL', code: 'invalid_audio' });
+    if (transcribing) {
+      return reply.code(429).header('retry-after', '5').send({ error: 'Another transcription is running', code: 'transcription_busy' });
+    }
+    transcribing = true;
+    // Client went away before the reply: stop the engine instead of finishing unwanted work.
+    const abort = new AbortController();
+    reply.raw.on('close', () => { if (!reply.raw.writableEnded) abort.abort(); });
     try {
-      return { text: await transcribe(Buffer.from(match[2], 'base64'), match[1]) };
+      return { text: await transcribe(Buffer.from(match[2], 'base64'), match[1], abort.signal) };
     } catch (error) {
       if (error.statusCode === 503) {
         return reply.code(503).send({ error: 'No speech-to-text engine on the server', code: 'transcriber_unavailable' });
       }
       log.warn({ reason: error.message }, 'Audio transcription failed');
       return reply.code(502).send({ error: 'Transcription failed', code: 'transcription_failed' });
+    } finally {
+      transcribing = false;
     }
   });
 

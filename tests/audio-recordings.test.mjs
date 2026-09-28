@@ -8,6 +8,7 @@ import { config as appConfig } from '../config.mjs';
 import { authPlugin } from '../modules/platform/auth.mjs';
 import { groupRecordingFiles, recordingManifestFromFiles } from '../modules/audio/manifest.mjs';
 import { existsSync } from 'node:fs';
+import { request } from 'node:http';
 import { realpath } from 'node:fs/promises';
 import { pruneStaleAudio, scanAudioInbox } from '../modules/audio/ingest.mjs';
 import { buildAudioRecordingStore } from '../modules/audio/recordings.mjs';
@@ -450,19 +451,46 @@ describe('audio cleanup route', () => {
 describe('push-to-talk transcribe route', () => {
   const clip = `data:audio/webm;codecs=opus;base64,${Buffer.from('fake opus bytes').toString('base64')}`;
   const post = (app, body, headers = authHeaders()) => app.inject({ method: 'POST', url: '/api/audio/transcribe', headers, payload: body });
+  const setEnv = (env) => {
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
 
   async function withEngineEnv(env, fn) {
     const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
-    Object.assign(process.env, env);
+    setEnv(env);
     try {
       return await fn();
     } finally {
-      for (const [key, value] of Object.entries(saved)) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
+      setEnv(saved);
     }
   }
+
+  async function executable(dir, name, body) {
+    const path = join(dir, name);
+    await writeFile(path, `#!/usr/bin/env bash\n${body}\n`);
+    await chmod(path, 0o755);
+    return path;
+  }
+
+  async function waitFor(check, timeoutMs = 10000) {
+    const deadline = Date.now() + timeoutMs;
+    while (!(await check())) {
+      if (Date.now() > deadline) throw new Error('condition not met in time');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   it('decodes the clip for the injected transcriber and maps its failures', async () => {
     const calls = [];
@@ -497,19 +525,40 @@ describe('push-to-talk transcribe route', () => {
     await app.close();
   });
 
+  it('runs one transcription at a time and frees the slot after a failure', async () => {
+    let started;
+    const running = new Promise((resolve) => { started = resolve; });
+    let fail;
+    const app = await buildApp({
+      transcribe: (audio) => (audio.toString() === 'first'
+        ? new Promise((_resolve, reject) => { fail = reject; started(); })
+        : Promise.resolve('next')),
+    });
+    const first = post(app, { audio: `data:audio/webm;base64,${Buffer.from('first').toString('base64')}` });
+    await running;
+
+    const busy = await post(app, { audio: clip });
+    assert.equal(busy.statusCode, 429);
+    assert.equal(busy.headers['retry-after'], '5');
+    assert.equal(busy.json().code, 'transcription_busy');
+
+    fail(new Error('engine crashed'));
+    assert.equal((await first).statusCode, 502);
+    const after = await post(app, { audio: clip });
+    assert.equal(after.statusCode, 200);
+    assert.deepEqual(after.json(), { text: 'next' });
+    await app.close();
+  });
+
   it('runs the configured fleet-transcribe engine and strips faster-whisper formatting', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dueno-ptt-engine-'));
     tempDirs.push(dir);
-    const engine = join(dir, 'fake-faster-whisper');
     const seen = join(dir, 'seen-audio-path');
     // Mimics faster-whisper-cli.py: AUDIO --model M ... --output_dir DIR, writes DIR/<stem>.txt.
-    await writeFile(engine, `#!/usr/bin/env bash
-audio="$1"; shift
+    const engine = await executable(dir, 'fake-faster-whisper', `audio="$1"; shift
 while [[ $# -gt 0 ]]; do [[ "$1" == --output_dir ]] && out="$2"; shift; done
 printf '%s' "$audio" > ${JSON.stringify(seen)}
-printf '# Transcript: clip.webm\n\nLanguage: en (0.99)\n\n[0.00 - 1.20] heard: %s\n[1.20 - 2.00] second line\n' "$(cat "$audio")" > "$out/clip.txt"
-`);
-    await chmod(engine, 0o755);
+printf '# Transcript: clip.webm\n\nLanguage: en (0.99)\n\n[0.00 - 1.20] heard: %s\n[1.20 - 2.00] second line\n' "$(cat "$audio")" > "$out/clip.txt"`);
     const app = await buildApp();
 
     const res = await withEngineEnv({ FLEET_TRANSCRIBE_ENGINE: 'faster-whisper', FLEET_WHISPER_BIN: engine }, () => post(app, { audio: clip }));
@@ -518,10 +567,57 @@ printf '# Transcript: clip.webm\n\nLanguage: en (0.99)\n\n[0.00 - 1.20] heard: %
     const audioPath = await readFile(seen, 'utf8');
     assert.match(audioPath, /clip\.webm$/);
     assert.equal(existsSync(audioPath), false);
+    await app.close();
+  });
 
-    const missing = await withEngineEnv({ FLEET_TRANSCRIBE_ENGINE: 'whisper-cpp', FLEET_WHISPER_BIN: join(dir, 'no-such-whisper-cli') }, () => post(app, { audio: clip }));
-    assert.equal(missing.statusCode, 503);
-    assert.equal(missing.json().code, 'transcriber_unavailable');
+  it('reports a missing engine binary, python, or faster-whisper package as 503', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dueno-ptt-missing-'));
+    tempDirs.push(dir);
+    // Real python running the repo faster-whisper-cli.py, with site-packages disabled.
+    const barepython = await executable(dir, 'bare-python', 'exec python3 -I -S "$@"');
+    const app = await buildApp();
+    for (const env of [
+      { FLEET_TRANSCRIBE_ENGINE: 'whisper-cpp', FLEET_WHISPER_BIN: join(dir, 'no-such-whisper-cli') },
+      { FLEET_TRANSCRIBE_ENGINE: 'faster-whisper', FLEET_WHISPER_BIN: undefined, FLEET_TRANSCRIBE_PYTHON: join(dir, 'no-such-python') },
+      { FLEET_TRANSCRIBE_ENGINE: 'faster-whisper', FLEET_WHISPER_BIN: undefined, FLEET_TRANSCRIBE_PYTHON: barepython },
+    ]) {
+      const res = await withEngineEnv(env, () => post(app, { audio: clip }));
+      assert.equal(res.statusCode, 503, JSON.stringify(env));
+      assert.equal(res.json().code, 'transcriber_unavailable');
+    }
+    await app.close();
+  });
+
+  it('kills the engine process group and cleans up when the client disconnects', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dueno-ptt-disconnect-'));
+    tempDirs.push(dir);
+    const app = await buildApp();
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const { port } = app.server.address();
+    const body = JSON.stringify({ audio: clip });
+
+    // The second engine ignores SIGTERM (as does its sleep child), so only the KILL escalation stops it.
+    for (const trap of ['', "trap '' TERM"]) {
+      const started = join(dir, `started-${trap ? 'ignore' : 'plain'}`);
+      const engine = await executable(dir, `slow-engine-${trap ? 'ignore' : 'plain'}`, `${trap}
+sleep 60 &
+echo "$! $1" > ${JSON.stringify(started)}
+wait`);
+      await withEngineEnv({ FLEET_TRANSCRIBE_ENGINE: 'faster-whisper', FLEET_WHISPER_BIN: engine }, async () => {
+        const req = request({ port, host: '127.0.0.1', method: 'POST', path: '/api/audio/transcribe', headers: { ...authHeaders(), 'content-type': 'application/json' } });
+        req.on('error', () => {});
+        req.end(body);
+        await waitFor(() => existsSync(started));
+        const [pid, audioPath] = (await readFile(started, 'utf8')).trim().split(' ');
+        assert.equal(alive(Number(pid)), true);
+        req.destroy();
+
+        await waitFor(() => !alive(Number(pid)) && !existsSync(audioPath));
+      });
+      // The slot is free again: the next clip reaches the (missing) engine instead of a 429.
+      const missingEngine = { FLEET_TRANSCRIBE_ENGINE: 'whisper-cpp', FLEET_WHISPER_BIN: join(dir, 'no-such-whisper-cli') };
+      await waitFor(async () => (await withEngineEnv(missingEngine, () => post(app, { audio: clip }))).statusCode === 503);
+    }
     await app.close();
   });
 });

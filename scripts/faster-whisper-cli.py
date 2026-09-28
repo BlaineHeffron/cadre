@@ -33,7 +33,7 @@ def main() -> int:
         from faster_whisper import WhisperModel
     except ImportError:
         print("faster-whisper is not installed in this Python environment", file=sys.stderr)
-        return 2
+        return 3
 
     audio_path = Path(args.audio)
     output_dir = Path(args.output_dir)

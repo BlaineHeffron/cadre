@@ -16,85 +16,121 @@ export function appendTranscript(current, text, max = Infinity) {
   return `${base}${base && !/\s$/.test(base) ? ' ' : ''}${trimmed}`.slice(0, max);
 }
 
-async function startRecorder(onBlob) {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const recorder = new MediaRecorder(stream, { audioBitsPerSecond: 32000 });
-  const chunks = [];
-  recorder.ondataavailable = (e) => chunks.push(e.data);
-  recorder.onstop = () => {
-    stream.getTracks().forEach((track) => track.stop());
-    onBlob(new Blob(chunks, { type: recorder.mimeType }));
-  };
-  recorder.start();
-  return () => recorder.stop();
+// One hold at a time: `busy` spans mic acquisition, recording, and transcription, so neither the
+// button nor the hotkey can start over a previous hold. `open()` resolves to a capture session whose
+// finish(keep) stops it, releases the mic, and resolves to the text ('' when the hold ended early).
+export function holdToTalk({ open, onStatus, onText, onError, maxMs = MAX_RECORD_MS }) {
+  let busy = false;
+  let release = null;
+  async function start() {
+    if (busy) return;
+    busy = true;
+    let held = true;
+    release = () => { held = false; };
+    onStatus('recording');
+    try {
+      const session = await open();
+      const keep = held;
+      if (keep) {
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, maxMs);
+          release = () => { clearTimeout(timer); resolve(); };
+        });
+        onStatus('transcribing');
+      }
+      release = null;
+      onText(await session.finish(keep));
+    } catch (error) {
+      onError(error);
+    } finally {
+      busy = false;
+      release = null;
+      onStatus('idle');
+    }
+  }
+  return { start, end: () => release?.() };
 }
 
-function startBrowserSpeech(onText) {
+export async function openRecorder({ getUserMedia, Recorder, transcribe }) {
+  const stream = await getUserMedia({ audio: true });
+  const releaseMic = () => stream.getTracks().forEach((track) => track.stop());
+  try {
+    const recorder = new Recorder(stream, { audioBitsPerSecond: 32000 });
+    const chunks = [];
+    const stopped = new Promise((resolve) => { recorder.onstop = resolve; });
+    recorder.ondataavailable = (e) => chunks.push(e.data);
+    recorder.onerror = releaseMic;
+    recorder.start();
+    return {
+      async finish(keep) {
+        try {
+          if (recorder.state !== 'inactive') recorder.stop();
+          await stopped;
+        } finally {
+          releaseMic();
+        }
+        return keep ? transcribe(new Blob(chunks, { type: recorder.mimeType })) : '';
+      },
+    };
+  } catch (error) {
+    releaseMic();
+    throw error;
+  }
+}
+
+function openBrowserSpeech() {
   const recognition = new SpeechRecognition();
   recognition.lang = navigator.language || 'en-US';
   recognition.continuous = true;
   let text = '';
+  const ended = new Promise((resolve) => { recognition.onend = resolve; });
   recognition.onresult = (e) => { text = Array.from(e.results, (r) => r[0].transcript).join(' '); };
-  recognition.onend = () => onText(text);
   recognition.start();
-  return () => recognition.stop();
+  return { async finish(keep) { recognition.stop(); await ended; return keep ? text : ''; } };
 }
 
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
+async function transcribeBlob(blob) {
+  const audio = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(blob);
   });
+  return (await api.post('/audio/transcribe', { audio })).text;
 }
 
 // Hold to talk: records while pressed (or while Ctrl+Space is held when `hotkey` is set),
 // transcribes on release, and hands the text to onResult.
 export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
   const [status, setStatus] = useState('idle');
-  const stopRef = useRef(null);
   const onResultRef = useRef(onResult);
   onResultRef.current = onResult;
+  const [hold] = useState(() => holdToTalk({
+    open: () => (useBrowserSpeech ? openBrowserSpeech() : openRecorder({
+      getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+      Recorder: MediaRecorder,
+      transcribe: transcribeBlob,
+    })),
+    onStatus: setStatus,
+    onText: (text) => { if (text) onResultRef.current?.(text); },
+    onError: (error) => {
+      const fallback = error.statusCode === 503 && Boolean(SpeechRecognition) && !useBrowserSpeech;
+      if (fallback) useBrowserSpeech = true;
+      addToast(fallback ? 'Server speech-to-text unavailable; hold again to use browser speech' : `Voice input failed: ${error.message}`, 'error');
+    },
+  }));
 
-  function deliver(text) {
-    setStatus('idle');
-    if (text) onResultRef.current?.(text);
-  }
-
-  async function transcribe(blob) {
-    setStatus('transcribing');
-    try {
-      deliver((await api.post('/audio/transcribe', { audio: await blobToDataUrl(blob) })).text);
-    } catch (error) {
-      setStatus('idle');
-      useBrowserSpeech = error.statusCode === 503 && Boolean(SpeechRecognition);
-      addToast(useBrowserSpeech ? 'Server speech-to-text unavailable; hold again to use browser speech' : `Voice input failed: ${error.message}`, 'error');
-    }
-  }
-
-  async function start() {
-    if (stopRef.current) return;
-    let released = false;
-    stopRef.current = () => { released = true; };
-    setStatus('recording');
-    try {
-      const stop = useBrowserSpeech ? startBrowserSpeech(deliver) : await startRecorder(transcribe);
-      const timer = setTimeout(end, MAX_RECORD_MS);
-      stopRef.current = () => { clearTimeout(timer); stop(); };
-      if (released) end();
-    } catch (error) {
-      stopRef.current = null;
-      setStatus('idle');
-      addToast(`Voice input unavailable: ${error.message}`, 'error');
-    }
-  }
-
-  function end() {
-    const stop = stopRef.current;
-    stopRef.current = null;
-    stop?.();
-  }
+  useEffect(() => {
+    // Once the page loses focus the matching keyup/pointerup may never arrive; stop listening.
+    const onHidden = () => { if (document.hidden) hold.end(); };
+    window.addEventListener('blur', hold.end);
+    document.addEventListener('visibilitychange', onHidden);
+    return () => {
+      window.removeEventListener('blur', hold.end);
+      document.removeEventListener('visibilitychange', onHidden);
+      hold.end();
+    };
+  }, []);
 
   useEffect(() => {
     if (!hotkey) return undefined;
@@ -103,9 +139,9 @@ export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
       if (!e.ctrlKey || e.code !== 'Space') return;
       e.preventDefault();
       e.stopPropagation();
-      if (!e.repeat) start();
+      if (!e.repeat) hold.start();
     };
-    const up = (e) => { if (e.code === 'Space' || e.key === 'Control') end(); };
+    const up = (e) => { if (e.code === 'Space' || e.key === 'Control') hold.end(); };
     window.addEventListener('keydown', down, true);
     window.addEventListener('keyup', up, true);
     return () => {
@@ -113,7 +149,6 @@ export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
       window.removeEventListener('keyup', up, true);
     };
   }, [hotkey]);
-  useEffect(() => end, []);
 
   if (!canRecord && !SpeechRecognition) return null;
 
@@ -124,10 +159,10 @@ export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
       title=${`Hold to talk${hotkey ? ' (Ctrl+Space)' : ''}`}
       aria-pressed=${status === 'recording'}
       disabled=${status === 'transcribing'}
-      onpointerdown=${(e) => { e.preventDefault(); start(); }}
-      onpointerup=${end}
-      onpointerleave=${end}
-      onpointercancel=${end}
+      onpointerdown=${(e) => { e.preventDefault(); hold.start(); }}
+      onpointerup=${hold.end}
+      onpointerleave=${hold.end}
+      onpointercancel=${hold.end}
       oncontextmenu=${(e) => e.preventDefault()}
     >
       ${status === 'recording' ? 'Rec' : status === 'transcribing' ? '...' : 'Mic'}
