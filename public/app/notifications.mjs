@@ -9,7 +9,7 @@ import {
   setSoundEnabled as writeSoundEnabled,
 } from './attention.mjs';
 import { api } from './api.mjs';
-import { wsConnected } from './state.mjs';
+import { wsOpens } from './state.mjs';
 
 export function isSoundEnabled() {
   return readSoundEnabled();
@@ -100,14 +100,19 @@ let confirmedEndpoint = null;
 
 // The server applies this device's approval-only and muted-session prefs to its pushes.
 async function postSubscription(subscription, { approvalOnly, mutedSessions } = notificationPrefs.value) {
-  confirmedEndpoint = null;
-  const { sending } = await api.post('/push/subscribe', { ...subscription.toJSON(), approvalOnly, mutedSessions });
-  if (sending) confirmedEndpoint = subscription.endpoint;
+  if (confirmedEndpoint !== subscription.endpoint) confirmedEndpoint = null;
+  try {
+    const { sending } = await api.post('/push/subscribe', { ...subscription.toJSON(), approvalOnly, mutedSessions });
+    confirmedEndpoint = sending ? subscription.endpoint : null;
+  } catch (error) {
+    confirmedEndpoint = null;
+    throw error;
+  }
 }
 // Sync on pref changes and on every (re)connect, which also retries a failed sync after login or an outage.
 effect(() => {
   const prefs = notificationPrefs.value;
-  if (!wsConnected.value) return;
+  if (!wsOpens.value) return;
   pushSubscription().then((subscription) => subscription && postSubscription(subscription, prefs)).catch(() => {});
 });
 
@@ -121,7 +126,7 @@ export async function setPushEnabled(enabled) {
     confirmedEndpoint = null;
     // Either one revokes the device (the server prunes a locally-unsubscribed endpoint on the push service's 410).
     const [local, remote] = await Promise.allSettled([existing.unsubscribe(), api.delete('/push/subscribe', { endpoint: existing.endpoint })]);
-    if (local.status === 'rejected' && remote.status === 'rejected') throw local.reason;
+    if (local.value !== true && remote.status === 'rejected') throw local.reason || remote.reason;
     return;
   }
   if (!(await requestPermission())) throw new Error('Notification permission denied');
