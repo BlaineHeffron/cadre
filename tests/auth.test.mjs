@@ -1,4 +1,4 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 
@@ -329,5 +329,67 @@ describe('Auth middleware', () => {
       headers: { ...buildInternalBypassHeaders(), 'x-dueno-inprocess-mcp-context': 'forged' },
     });
     assert.equal(forgedInternalHandle.statusCode, 403);
+  });
+  describe('phone pairing codes', () => {
+    const sessionHeaders = () => ({ cookie: `${BROWSER_SESSION_COOKIE}=${encodeURIComponent(createBrowserSessionCookieValue())}` });
+    const issue = async () => {
+      const res = await app.inject({ method: 'POST', url: '/api/auth/pair', headers: sessionHeaders() });
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['cache-control'], 'no-store');
+      return res.json();
+    };
+    const redeem = (pairCode, remoteAddress) => app.inject({
+      method: 'POST', url: '/api/auth/login', payload: { pairCode }, remoteAddress,
+    });
+
+    it('rejects pairing-code issuance without an operator session', async () => {
+      const anonymous = await app.inject({ method: 'POST', url: '/api/auth/pair' });
+      assert.equal(anonymous.statusCode, 401);
+      const service = await app.inject({ method: 'POST', url: '/api/auth/pair', headers: buildInternalBypassHeaders() });
+      assert.equal(service.statusCode, 403);
+    });
+
+    it('redeems a code once for a working browser session', async () => {
+      const { code, expiresAt } = await issue();
+      assert.ok(code.length >= 32);
+      assert.ok(Date.parse(expiresAt) > Date.now());
+
+      const first = await redeem(code, '192.0.2.10');
+      assert.equal(first.statusCode, 200);
+      const cookie = first.headers['set-cookie'].find((entry) => entry.startsWith(`${BROWSER_SESSION_COOKIE}=`)).split(';')[0];
+      const protectedRes = await app.inject({ method: 'GET', url: '/api/protected', headers: { cookie } });
+      assert.equal(protectedRes.statusCode, 200);
+
+      const replay = await redeem(code, '192.0.2.10');
+      assert.equal(replay.statusCode, 403);
+      assert.equal(replay.json().error, 'Invalid or expired pairing code');
+      assert.equal(Boolean(replay.headers['set-cookie']), false);
+    });
+
+    it('rejects codes after the five-minute TTL', async () => {
+      mock.timers.enable({ apis: ['Date'], now: Date.now() });
+      try {
+        const [first, second] = [await issue(), await issue()];
+        mock.timers.tick(5 * 60 * 1000);
+        assert.equal((await redeem(first.code, '192.0.2.11')).statusCode, 200);
+        mock.timers.tick(1);
+        assert.equal((await redeem(second.code, '192.0.2.11')).statusCode, 403);
+      } finally {
+        mock.timers.reset();
+      }
+    });
+
+    it('keeps only the five newest outstanding codes', async () => {
+      const codes = [];
+      for (let i = 0; i < 6; i += 1) codes.push((await issue()).code);
+      assert.equal((await redeem(codes[0], '192.0.2.12')).statusCode, 403);
+      assert.equal((await redeem(codes[5], '192.0.2.12')).statusCode, 200);
+    });
+
+    it('counts bad pairing codes toward the login lockout', async () => {
+      for (let i = 0; i < 10; i += 1) assert.equal((await redeem('guess', '192.0.2.13')).statusCode, 403);
+      const { code } = await issue();
+      assert.equal((await redeem(code, '192.0.2.13')).statusCode, 429);
+    });
   });
 });

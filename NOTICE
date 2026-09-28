@@ -38,3 +38,7 @@ The npm package includes its own LICENSE; preserve it when distributing the pack
 AmazingAng/old-coder (MIT)
 Copyright (c) 2026 amazingang
 Test honesty rules in modules/integrations/repo-quality.mjs.
+
+Project Nayuki QR Code generator library (MIT)
+Copyright (c) Project Nayuki.
+public/lib/qrcodegen.mjs is a trimmed JavaScript port (byte mode, ECC level M); it keeps the upstream license header.

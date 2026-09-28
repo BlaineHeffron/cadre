@@ -19,6 +19,9 @@ const AUTH_MAX_FAILURES = 10;
 const AUTH_LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
 export const BROWSER_SESSION_COOKIE = 'dueno_session';
 const authFailures = new Map(); // ip → { count, firstFailure }
+const PAIR_CODE_TTL_MS = 5 * 60 * 1000;
+const PAIR_CODE_MAX = 5;
+const pairCodes = new Map(); // single-use phone pairing code → expiresAt (ms)
 
 function isLockedOut(ip) {
   const entry = authFailures.get(ip);
@@ -60,6 +63,19 @@ function constantTimeMatch(left, right) {
   } catch {
     return false;
   }
+}
+
+// Burns and returns true for a live matching code; always prunes expired codes.
+function takePairCode(supplied, nowMs = Date.now()) {
+  let matched = false;
+  for (const [code, expiresAt] of pairCodes) {
+    if (nowMs > expiresAt) pairCodes.delete(code);
+    else if (!matched && constantTimeMatch(supplied, code)) {
+      pairCodes.delete(code);
+      matched = true;
+    }
+  }
+  return matched;
 }
 
 export function parseCookies(header = '') {
@@ -266,6 +282,7 @@ function authPluginImpl(app, opts = {}, done) {
 
   app.post('/api/auth/login', async (request, reply) => {
     const suppliedToken = typeof request.body?.token === 'string' ? request.body.token : '';
+    const pairCode = typeof request.body?.pairCode === 'string' ? request.body.pairCode : '';
     const ip = request.ip;
     if (isLockedOut(ip)) {
       request.log.warn(`Auth lockout active for ${ip}`);
@@ -275,11 +292,12 @@ function authPluginImpl(app, opts = {}, done) {
       request.log.warn('AUTH_TOKEN not configured — browser login rejected');
       return reply.code(500).send({ error: 'Server auth not configured' });
     }
-    if (!constantTimeMatch(suppliedToken, authToken)) {
+    if (!(pairCode ? takePairCode(pairCode) : constantTimeMatch(suppliedToken, authToken))) {
       recordFailure(ip);
       request.log.warn(`Browser auth failure from ${ip} (${authFailures.get(ip)?.count || 1}/${AUTH_MAX_FAILURES})`);
-      return reply.code(403).send({ error: 'Invalid token' });
+      return reply.code(403).send({ error: pairCode ? 'Invalid or expired pairing code' : 'Invalid token' });
     }
+    if (pairCode) request.log.info(`Browser session paired via pairing code from ${ip}`);
     clearFailures(ip);
     const session = createBrowserSessionCookieValue({ ttlMs: browserSessionTtlMs });
     if (!session) return reply.code(500).send({ error: 'Server auth not configured' });
@@ -288,6 +306,22 @@ function authPluginImpl(app, opts = {}, done) {
       expiredCookie(request, 'dueno_token'),
     ]);
     return { authenticated: true };
+  });
+
+  // Operator-only: mint a short-lived, single-use code for signing in another device.
+  // The client puts it in a URL fragment (#pair=) so it never reaches server logs.
+  app.post('/api/auth/pair', async (request, reply) => {
+    if (request.duenoAuth?.principal?.type !== 'ui') {
+      return reply.code(403).send({ error: 'Pairing requires an authenticated operator' });
+    }
+    const nowMs = Date.now();
+    takePairCode('', nowMs);
+    while (pairCodes.size >= PAIR_CODE_MAX) pairCodes.delete(pairCodes.keys().next().value);
+    const code = randomBytes(24).toString('base64url');
+    pairCodes.set(code, nowMs + PAIR_CODE_TTL_MS);
+    request.log.info(`Browser pairing code issued to ${request.ip}`);
+    reply.header('Cache-Control', 'no-store');
+    return { code, expiresAt: new Date(nowMs + PAIR_CODE_TTL_MS).toISOString() };
   });
 
   app.post('/api/auth/logout', async (request, reply) => {

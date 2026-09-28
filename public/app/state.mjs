@@ -280,19 +280,18 @@ export async function refreshAuthStatus() {
 
 export async function initAuth() {
   localStorage.removeItem('dueno_token');
-  const params = new URLSearchParams(window.location.search);
-  const urlToken = params.get('token');
-  if (urlToken) {
+  const pairCode = /^#pair=([\w-]+)$/.exec(window.location.hash)?.[1];
+  if (pairCode) {
+    // Scrub the single-use code from the address bar and history before redeeming it.
+    window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
     try {
-      await loginWithToken(urlToken);
-    } catch {
+      await loginWithToken({ pairCode });
+    } catch (error) {
       isAuthenticated.value = false;
+      addToast(`Pairing failed: ${error.message}`, 'error');
     } finally {
       authChecked.value = true;
     }
-    params.delete('token');
-    const query = params.toString();
-    window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash || ''}`);
     return;
   }
   await refreshAuthStatus();
@@ -303,7 +302,7 @@ export async function loginWithToken(t) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
-    body: JSON.stringify({ token: t }),
+    body: JSON.stringify(typeof t === 'string' ? { token: t } : t),
   });
   if (!response.ok) {
     let payload = {};
