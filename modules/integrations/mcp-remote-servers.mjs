@@ -8,6 +8,8 @@
  */
 
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { config } from '../../config.mjs';
 import { readEnv } from '../platform/cadre-env.mjs';
 
@@ -249,10 +251,15 @@ const DEFINITIONS = Object.freeze({
     // these have to be forwarded explicitly to reach the spawned server.
     envKeys: ['SEODATA_API_KEY', 'SEODATA_BASE_URL'],
   }),
+  // Installed dependency, not `npx @latest`: concurrent npx installs corrupt the shared cache.
   playwright: remote({
     transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@playwright/mcp@latest', '--headless', '--isolated'],
+    command: process.execPath,
+    args: [
+      join(dirname(createRequire(import.meta.url).resolve('@playwright/mcp/package.json')), 'cli.js'),
+      '--headless',
+      '--isolated',
+    ],
   }),
   filesystem: remote({
     transport: 'stdio',

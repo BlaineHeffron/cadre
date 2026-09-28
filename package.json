@@ -54,6 +54,7 @@
     "@fastify/static": "10.1.2",
     "@fastify/websocket": "11.3.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@playwright/mcp": "0.0.82",
     "@preact/signals": "^2.9.0",
     "@sinclair/typebox": "^0.34.52",
     "dotenv": "^16.4.0",
