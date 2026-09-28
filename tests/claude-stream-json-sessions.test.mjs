@@ -407,6 +407,8 @@ describe('Claude stream-json sessions', () => {
       const racing = await Promise.all([1, 2].map(() => second.inject({ method: 'POST', url: `${base}/${id}/resume` })));
       assert.deepEqual(racing.map((response) => response.statusCode).sort(), [200, 409]);
       const resumed = racing.find((response) => response.statusCode === 200);
+      // The loser must not offer Start Fresh beside the session the winner just resumed.
+      assert.equal(racing.find((response) => response.statusCode === 409).json().freshSession, undefined);
       assert.equal(resumed.json().canResume, false);
       const attach = clients[2].attachSpec;
       assert.ok(created.json().attempts[0].protocolSessionId);

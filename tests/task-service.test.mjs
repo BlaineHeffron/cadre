@@ -411,9 +411,18 @@ test('resume attaches only to a provider conversation proven by a settled turn',
   await f.service.terminate(fresh.sessionId);
   const attached = await f.tasks.resume(task.taskId, 'attach');
   assert.equal(f.providers.at(-1).attached, proven);
+  // A runtime that did not exit is reaped before attaching; until then resume is refused.
+  const stuck = f.providers.at(-1);
+  const exit = stuck.terminate.bind(stuck);
+  stuck.terminate = async () => ({ ok: false, status: 'still_running', residual: [1] });
+  assert.equal((await f.service.terminate(attached.sessionId)).ok, false);
+  const launched = f.providers.length;
+  await assert.rejects(f.tasks.resume(task.taskId, 'stuck'), { code: 'terminate_failed' });
+  assert.equal(f.providers.length, launched);
+  stuck.terminate = exit;
   // A failed attempt with no settled turn falls back to the latest earlier proven conversation.
-  await f.service.terminate(attached.sessionId);
   await f.tasks.resume(task.taskId, 'again');
+  assert.equal(stuck.closed, true);
   assert.equal(f.providers.at(-1).attached, proven);
 });
 

@@ -558,6 +558,8 @@ export class TaskService {
       const binding = await this.#binding(task.provider);
       const previous = binding.service.get(task.attempts.at(-1)?.sessionId);
       if (previous && !['ended', 'interrupted'].includes(previous.lifecycle)) throw fail('task_active', 'The current attempt is still active');
+      // Reap a runtime that did not exit earlier; attaching beside it would run the conversation twice.
+      if (previous && !(await binding.service.terminate(previous.id)).ok) throw fail('terminate_failed', 'Previous task runtime did not exit');
       task.requests[`resume:${requestKey}`] = { createdAt: this.now() };
       await this.#save(task);
       // Attach to the latest conversation proven to exist; otherwise start fresh.

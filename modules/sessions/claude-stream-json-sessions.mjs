@@ -308,7 +308,8 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       }));
     } catch (error) {
       const session = service.get(req.params.id);
-      return errorReply(reply, error, session && error?.code !== 'task_managed'
+      // Offer Start Fresh only while the session is still down (not after a concurrent resume won).
+      return errorReply(reply, error, ['ended', 'interrupted'].includes(session?.lifecycle) && !session.taskId
         ? { freshSession: { workDir: session.workDir, model: session.model, displayName: session.displayName } } : {});
     }
   });
