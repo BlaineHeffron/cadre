@@ -278,11 +278,11 @@ describe('pure session state reducer', () => {
       observation('runtime', 'requested_runtime', { requestedModel, requestedThinkingLevel: 'high' }),
       observation('pane', 'effective_runtime', { effectiveModel, effectiveThinkingLevel: 'High' }),
     ], 100);
-    const sameModel = ready('gpt-6-sol', 'GPT-6-Sol');
+    const sameModel = ready('gpt-6.1-sol', 'GPT-6.1-Sol');
     assert.deepEqual([sameModel.capabilities.needsAttention, sameModel.degradedReasons, sameModel.reason],
       [false, [], 'Stable free-text prompt visible']);
-    assert.equal(sameModel.runtime.effectiveModel, 'GPT-6-Sol');
-    const rerouted = ready('gpt-6-sol', 'GPT-6-Astra');
+    assert.equal(sameModel.runtime.effectiveModel, 'GPT-6.1-Sol');
+    const rerouted = ready('gpt-6.1-sol', 'GPT-6-Astra');
     assert.deepEqual([rerouted.capabilities.needsAttention, rerouted.reason],
       [true, 'Ready; effective runtime differs from requested runtime']);
   });

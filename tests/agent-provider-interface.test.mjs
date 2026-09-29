@@ -213,9 +213,9 @@ describe('Agent provider interface', () => {
       assert.equal(isModelCompatibleWithProvider('claude', 'claude-fable-5-1'), true);
     });
 
-  it('accepts GPT-6 Sol/Luna, Opus 5.5, and Grok 4.7', () => {
+  it('accepts GPT-6.1 Sol/Luna, Opus 5.5, and Grok 4.7', () => {
     assert.equal(isModelCompatibleWithProvider('codex', 'gpt-6-astra'), true);
-    assert.equal(isModelCompatibleWithProvider('codex', 'gpt-6-sol'), true);
+    assert.equal(isModelCompatibleWithProvider('codex', 'gpt-6.1-sol'), true);
     assert.equal(isModelCompatibleWithProvider('codex', 'gpt-6-luna'), true);
     assert.equal(isModelCompatibleWithProvider('claude', 'claude-opus-5-5'), true);
     assert.equal(isModelCompatibleWithProvider('xai', 'grok-4.7'), true);
@@ -227,7 +227,7 @@ describe('Agent provider interface', () => {
 
     assert.deepEqual(
       resolveCompatibleProviderModelPair({ provider: 'codex', model: '', logger }),
-      { provider: 'codex', model: 'gpt-6-sol' },
+      { provider: 'codex', model: 'gpt-6.1-sol' },
     );
     assert.deepEqual(
       resolveCompatibleProviderModelPair({ provider: 'xai', model: '', logger }),
@@ -240,7 +240,7 @@ describe('Agent provider interface', () => {
         label: 'githubAgents',
         logger,
       }),
-      { provider: 'codex', model: 'gpt-6-sol' },
+      { provider: 'codex', model: 'gpt-6.1-sol' },
     );
     assert.match(logs[0], /githubAgents: incompatible provider\/model pair codex\/grok-4\.6/);
     assert.deepEqual(

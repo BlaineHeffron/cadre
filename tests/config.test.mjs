@@ -384,7 +384,7 @@ describe('config.githubAgents', () => {
     });
 
     assert.equal(config.githubAgents.provider, 'codex');
-    assert.equal(config.githubAgents.model, 'gpt-6-sol');
+    assert.equal(config.githubAgents.model, 'gpt-6.1-sol');
   });
 
   it('falls back to the provider default when the explicit pair is incompatible', async () => {
@@ -394,7 +394,7 @@ describe('config.githubAgents', () => {
     });
 
     assert.equal(config.githubAgents.provider, 'codex');
-    assert.equal(config.githubAgents.model, 'gpt-6-sol');
+    assert.equal(config.githubAgents.model, 'gpt-6.1-sol');
     assert.match(stderr, /githubAgents: incompatible provider\/model pair codex\/grok-4\.6/);
   });
 
@@ -405,7 +405,7 @@ describe('config.githubAgents', () => {
     });
 
     assert.equal(config.githubAgents.provider, 'codex');
-    assert.equal(config.githubAgents.model, 'gpt-6-sol');
+    assert.equal(config.githubAgents.model, 'gpt-6.1-sol');
     assert.match(stderr, /githubAgents: incompatible provider\/model pair codex\/gpt-test/);
   });
 });
@@ -436,7 +436,7 @@ describe('config.fleetHygiene', () => {
     });
 
     assert.equal(config.fleetHygiene.provider, 'codex');
-    assert.equal(config.fleetHygiene.model, 'gpt-6-sol');
+    assert.equal(config.fleetHygiene.model, 'gpt-6.1-sol');
   });
 
   it('falls back when hygiene provider/model are an incompatible pair', async () => {
@@ -446,7 +446,7 @@ describe('config.fleetHygiene', () => {
     });
 
     assert.equal(config.fleetHygiene.provider, 'codex');
-    assert.equal(config.fleetHygiene.model, 'gpt-6-sol');
+    assert.equal(config.fleetHygiene.model, 'gpt-6.1-sol');
     assert.match(stderr, /fleetHygiene: incompatible provider\/model pair codex\/grok-4\.6/);
   });
 
@@ -547,7 +547,7 @@ describe('config.repoQuality', () => {
 
     assert.deepEqual(config.repoQuality.repoPaths, {});
     assert.equal(config.repoQuality.provider, 'codex');
-    assert.equal(config.repoQuality.model, 'gpt-6-sol');
+    assert.equal(config.repoQuality.model, 'gpt-6.1-sol');
     assert.equal(config.repoQuality.intervalSeconds, 604800);
     assert.equal(config.repoQuality.maxFanout, 2);
     assert.equal(config.repoQuality.topN, 10);
@@ -593,7 +593,7 @@ describe('config.repoQuality', () => {
     });
 
     assert.equal(config.repoQuality.provider, 'codex');
-    assert.equal(config.repoQuality.model, 'gpt-6-sol');
+    assert.equal(config.repoQuality.model, 'gpt-6.1-sol');
     assert.match(stderr, /repoQuality: incompatible provider\/model pair codex\/grok-4\.6/);
   });
 });

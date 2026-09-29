@@ -26,7 +26,7 @@ describe('Codex model validation', () => {
         'gpt-5.6-terra',
         'gpt-6-astra',
         'gpt-6-luna',
-        'gpt-6-sol',
+        'gpt-6.1-sol',
       ]);
       assert.equal(await isValidCodexModel('gpt-5.4', { forceRefresh: true, cacheFile, env: {} }), true);
       assert.equal(await isValidCodexModel('gpt-5.4-mini', { forceRefresh: true, cacheFile, env: {} }), true);
@@ -35,7 +35,7 @@ describe('Codex model validation', () => {
       assert.equal(await isValidCodexModel('gpt-5.6-sol', { forceRefresh: true, cacheFile, env: {} }), true);
       assert.equal(await isValidCodexModel('gpt-5.6-luna', { forceRefresh: true, cacheFile, env: {} }), true);
       assert.equal(await isValidCodexModel('gpt-6-astra', { forceRefresh: true, cacheFile, env: {} }), true);
-      assert.equal(await isValidCodexModel('gpt-6-sol', { forceRefresh: true, cacheFile, env: {} }), true);
+      assert.equal(await isValidCodexModel('gpt-6.1-sol', { forceRefresh: true, cacheFile, env: {} }), true);
       assert.equal(await isValidCodexModel('gpt-6-luna', { forceRefresh: true, cacheFile, env: {} }), true);
       assert.equal(normalizeCodexModel('gpt-5.4'), 'gpt-5.4');
       assert.equal(await isValidCodexModel('gpt-5.3-codex', { forceRefresh: true, cacheFile, env: {} }), false);
@@ -91,7 +91,7 @@ describe('Codex model validation', () => {
           },
         }),
       });
-      assert.equal(model, 'gpt-6-sol');
+      assert.equal(model, 'gpt-6.1-sol');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -129,7 +129,7 @@ describe('Codex model validation', () => {
         'gpt-5.6-terra',
         'gpt-6-astra',
         'gpt-6-luna',
-        'gpt-6-sol',
+        'gpt-6.1-sol',
       ]);
       assert.equal(await isValidCodexModel('gpt-5.3-codex', options), false);
       assert.equal(await isValidCodexModel('gpt-5.3-codex-spark', options), false);

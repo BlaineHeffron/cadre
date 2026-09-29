@@ -134,7 +134,7 @@ function runtimeFrom(observations, previousRuntime) {
   return runtime;
 }
 
-// Providers report display casing (GPT-6-Sol for gpt-6-sol); compare identities,
+// Providers report display casing (GPT-6.1-Sol for gpt-6.1-sol); compare identities,
 // while the snapshot keeps the original strings for diagnostics.
 function differs(requested, effective) {
   return Boolean(requested && effective && requested.trim().toLowerCase() !== effective.trim().toLowerCase());

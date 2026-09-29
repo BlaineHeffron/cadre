@@ -41,7 +41,7 @@ describe('command center AI', () => {
     assert.equal(normalizeCommandCenterProvider('codex'), 'codex');
   });
 
-  it('defaults to flagship Codex GPT-6 Sol medium when codex is enabled', () => {
+  it('defaults to flagship Codex GPT-6.1 Sol medium when codex is enabled', () => {
     const result = getDefaultCommandCenterTarget({
       codexEnabled: true,
       claudeEnabled: false,
@@ -49,7 +49,7 @@ describe('command center AI', () => {
 
     assert.deepEqual(result, {
       provider: 'codex',
-      model: 'gpt-6-sol',
+      model: 'gpt-6.1-sol',
       backendType: 'codex',
       runtime: 'codex',
       thinkingLevel: 'medium',
@@ -64,7 +64,7 @@ describe('command center AI', () => {
 
     assert.deepEqual(result, {
       provider: 'codex',
-      model: 'gpt-6-sol',
+      model: 'gpt-6.1-sol',
       backendType: 'codex',
       runtime: 'codex',
       thinkingLevel: 'medium',
@@ -95,7 +95,7 @@ describe('command center AI', () => {
 
     assert.deepEqual(result, {
       defaultProvider: 'codex',
-      defaultModel: 'gpt-6-sol',
+      defaultModel: 'gpt-6.1-sol',
       providers: [{ id: 'codex', label: 'Codex' }],
       available: [{ id: 'gpt-5.4', label: 'GPT-5.4', provider: 'codex' }],
     });

@@ -134,7 +134,7 @@ profile and supplies only the policy parameters:
   "prompt": "Run one bounded coordinator tick.",
   "intervalSeconds": 1800,
   "provider": "codex",
-  "model": "gpt-6-sol",
+  "model": "gpt-6.1-sol",
   "controlProfile": "coordinator-v1",
   "coordinator": {
     "policyId": "protocol-o5",

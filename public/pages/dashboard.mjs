@@ -8,7 +8,7 @@ import { ErrorState, LoadingState } from '../components/page-state.mjs';
 import { addToast } from '../app/state.mjs';
 
 const DEFAULT_PROVIDER = 'codex';
-const DEFAULT_MODEL = 'gpt-6-sol';
+const DEFAULT_MODEL = 'gpt-6.1-sol';
 
 const REPORT_TASK_LABELS = {
   sched_bhc_daily_ceo_brief: 'Daily CEO Brief',

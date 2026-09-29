@@ -101,7 +101,7 @@ describe('agent-bus model catalog route data', () => {
     const catalog = await buildAgentModelCatalog({
       listCodexModelsImpl: async () => [
         { id: 'gpt-5.4', label: 'GPT-5.4' },
-        { id: 'gpt-6-sol', label: 'GPT-6 Sol' },
+        { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
       ],
       listProviderModelsImpl: async () => ({
         models: [
@@ -121,7 +121,7 @@ describe('agent-bus model catalog route data', () => {
       }),
     });
 
-    assert.equal(catalog.providers.find((entry) => entry.id === 'codex')?.defaultModel, 'gpt-6-sol');
+    assert.equal(catalog.providers.find((entry) => entry.id === 'codex')?.defaultModel, 'gpt-6.1-sol');
     assert.equal(catalog.providers.find((entry) => entry.id === 'claude')?.defaultModel, 'claude-opus-5-5');
     assert.equal(catalog.providers.find((entry) => entry.id === 'xai')?.defaultModel, 'grok-4.6');
   });

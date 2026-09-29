@@ -18,7 +18,7 @@ export const OPENAI_FALLBACK_MODELS = Object.freeze([
   { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
   { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
   { id: 'gpt-6-astra', label: 'GPT-6 Astra' },
-  { id: 'gpt-6-sol', label: 'GPT-6 Sol' },
+  { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
   { id: 'gpt-6-luna', label: 'GPT-6 Luna' },
 ]);
 
@@ -38,6 +38,7 @@ const PROVIDERS = Object.freeze({
     apiKeyEnv: 'OPENAI_API_KEY',
     fallbackModels: OPENAI_FALLBACK_MODELS,
     removedModelIds: Object.freeze([
+      'gpt-6-sol',
       'gpt-5.3-codex',
       'gpt-5.3-codex-spark',
     ]),

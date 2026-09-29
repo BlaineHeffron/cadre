@@ -40,7 +40,7 @@ const PROVIDER_OPTIONS = [
   { id: 'claude', label: 'Claude' },
 ];
 const FALLBACK_PROVIDER_MODELS = Object.freeze({
-  codex: 'gpt-6-sol',
+  codex: 'gpt-6.1-sol',
   claude: 'claude-opus-5-5',
 });
 const DEFAULT_THINKING_LEVEL = 'medium';
@@ -97,7 +97,7 @@ function defaultModelForProvider(provider = '', modelCatalog = null) {
 
 function isCodexSolModel(model = '') {
   const id = String(model || '').trim().toLowerCase();
-  return id === 'gpt-6-sol' || id === 'gpt-5.6-sol';
+  return id === 'gpt-6.1-sol' || id === 'gpt-5.6-sol';
 }
 
 function codexReasoningLevels(model = '') {

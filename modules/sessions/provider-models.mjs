@@ -8,8 +8,8 @@ import {
 const MODEL_PROVIDER_DEFAULTS = Object.freeze({
   codex: Object.freeze({
     provider: 'openai',
-    defaultModel: 'gpt-6-sol',
-    fastModel: 'gpt-6-sol',
+    defaultModel: 'gpt-6.1-sol',
+    fastModel: 'gpt-6.1-sol',
   }),
   claude: Object.freeze({
     provider: 'anthropic',
@@ -19,7 +19,7 @@ const MODEL_PROVIDER_DEFAULTS = Object.freeze({
 });
 
 const OPENAI_DEFAULT_ORDER = Object.freeze([
-  'gpt-6-sol',
+  'gpt-6.1-sol',
   'gpt-5.6-sol',
   'gpt-5.6-terra',
   'gpt-5.6-luna',

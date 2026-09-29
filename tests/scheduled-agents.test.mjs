@@ -1156,12 +1156,12 @@ describe('scheduled agents routes', () => {
     const setup = await app.inject({ method: 'POST', url: '/api/fleet/hygiene-audit/setup' });
     assert.equal(setup.statusCode, 200);
     assert.equal(setup.json().task.provider, 'codex');
-    assert.equal(setup.json().task.model, 'gpt-6-sol');
+    assert.equal(setup.json().task.model, 'gpt-6.1-sol');
 
     const run = await app.inject({ method: 'POST', url: '/api/fleet/hygiene-audit/run-now' });
     assert.equal(run.statusCode, 200);
     assert.equal(launches[0].provider, 'codex');
-    assert.equal(launches[0].model, 'gpt-6-sol');
+    assert.equal(launches[0].model, 'gpt-6.1-sol');
     await app.close();
   });
 
@@ -1340,7 +1340,7 @@ describe('scheduled agents routes', () => {
     const setup = await app.inject({ method: 'POST', url: '/api/fleet/dependency-watch/setup' });
     assert.equal(setup.statusCode, 200);
     assert.equal(setup.json().task.provider, 'codex');
-    assert.equal(setup.json().task.model, 'gpt-6-sol');
+    assert.equal(setup.json().task.model, 'gpt-6.1-sol');
     await app.close();
   });
 
