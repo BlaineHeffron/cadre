@@ -123,10 +123,11 @@ export function buildPostgresJsonStore({
       targetDir,
       `.${basename(filePath)}.${process.pid}.${Date.now()}.${fileWriteCounter += 1}.tmp`,
     );
-    const serialized = `${JSON.stringify(data, null, 2)}\n`;
+    const serialized = Buffer.from(`${JSON.stringify(data)}\n`);
     await mkdir(targetDir, { recursive: true });
     await writeFile(tempFile, serialized);
     await rename(tempFile, filePath);
+    return serialized.length;
   }
 
   async function queueFileWrite(data) {
@@ -262,10 +263,9 @@ export function buildPostgresJsonStore({
     async save(data) {
       if (mode === 'postgres') {
         await writePostgresJson(data);
-        if (effectiveKeepFileMirror) await queueFileWrite(data);
-        return;
+        return effectiveKeepFileMirror ? queueFileWrite(data) : undefined;
       }
-      await queueFileWrite(data);
+      return queueFileWrite(data);
     },
     async mutate(mutator) {
       if (typeof mutator !== 'function') throw new Error('mutator is required');

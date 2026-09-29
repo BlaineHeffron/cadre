@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { config } from '../../config.mjs';
@@ -31,7 +31,9 @@ function clone(value) {
 }
 
 export class AgentBusStore {
-  constructor({ stateDir = config.agentBus.stateDir, logger = noopLogger, persistDebounceMs = DEFAULT_PERSIST_DEBOUNCE_MS } = {}) {
+  constructor({ stateDir = config.agentBus.stateDir, logger = noopLogger, persistDebounceMs = DEFAULT_PERSIST_DEBOUNCE_MS,
+    closedThreadRetentionDays = config.agentBus.closedThreadRetentionDays } = {}) {
+    this.closedThreadRetentionDays = closedThreadRetentionDays;
     this.stateDir = resolve(stateDir);
     this.stateFile = resolve(this.stateDir, 'state.json');
     this.eventsFile = resolve(this.stateDir, 'events.ndjson');
@@ -100,6 +102,7 @@ export class AgentBusStore {
       throw err;
     }
     this._rebuildIndexes();
+    await this.pruneClosedThreads();
   }
 
   _snapshotState() {
@@ -121,8 +124,7 @@ export class AgentBusStore {
               this._persistDirty = false;
               const snapshot = this._snapshotState();
               const startedAt = Date.now();
-              this.lastPersistStateBytes = Buffer.byteLength(JSON.stringify(snapshot));
-              await this.stateStore.save(snapshot);
+              this.lastPersistStateBytes = (await this.stateStore.save(snapshot)) ?? this.lastPersistStateBytes;
               recordOpsTiming('agent_bus_persist_duration_ms', Date.now() - startedAt);
             } while (this._persistDirty);
             resolvePromise();
@@ -314,6 +316,25 @@ export class AgentBusStore {
     await this.persist();
     await this.appendEvent('thread.deleted', { threadId: resolvedThreadId });
     return true;
+  }
+
+  /** Drops closed threads (with messages, deliveries and room mirrors) idle past the retention window; task records and task parents are kept. */
+  async pruneClosedThreads({ retentionDays = this.closedThreadRetentionDays, now = Date.now() } = {}) {
+    if (!(retentionDays >= 0)) return 0;
+    const cutoff = now - retentionDays * 86_400_000;
+    const tasks = this.state.threads.map((item) => item.metadata?.task).filter(isDurableTaskRecord);
+    const pinned = new Set(tasks.flatMap((task) => [task.parentTaskId, task.parentThreadId]));
+    const doomed = new Set(this.state.threads.filter((item) => item.status === 'closed' && !isDurableTaskRecord(item.metadata?.task)
+      && !pinned.has(item.id) && Number(item.updatedAt || item.createdAt || 0) <= cutoff).map((item) => item.id));
+    if (!doomed.size) return 0;
+    this.state.threads = this.state.threads.filter((item) => !doomed.has(item.id));
+    this.state.messages = this.state.messages.filter((item) => !doomed.has(item.threadId));
+    this.state.deliveries = this.state.deliveries.filter((item) => !doomed.has(item.threadId));
+    this._rebuildIndexes();
+    await this.persist();
+    await Promise.all([...doomed].map((id) => rm(resolve(this.stateDir, 'rooms', id), { recursive: true, force: true }).catch(() => {})));
+    await this.appendEvent('threads.pruned', { count: doomed.size });
+    return doomed.size;
   }
 
   async updateThreadMetadata(threadId, patch) {

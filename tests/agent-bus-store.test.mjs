@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentBusStore } from '../modules/agent-bus/store.mjs';
@@ -130,6 +130,37 @@ describe('AgentBusStore runtime state', () => {
     const updated = await store.removeThreadParticipant(thread.id, { kind: 'claude', sessionId: 'a1' });
     assert.deepEqual(updated.participants, [{ kind: 'codex', sessionId: 'c1' }]);
     assert.equal(updated.status, 'open');
+    await store.close();
+  });
+
+  it('prunes only stale closed threads and keeps task records and task parents', async () => {
+    const dir = await makeTempDir();
+    const stateDir = join(dir, 'agent_bus');
+    const now = Date.now();
+    const old = now - 40 * 86_400_000;
+    const task = (extra = {}) => ({ task: { recordType: 'dueno.durable-task.v1', ...extra } });
+    await mkdir(join(stateDir, 'rooms', 'old_closed'), { recursive: true });
+    await writeFile(join(stateDir, 'state.json'), JSON.stringify({
+      threads: [
+        { id: 'old_closed', status: 'closed', updatedAt: old },
+        { id: 'recent_closed', status: 'closed', updatedAt: now },
+        { id: 'old_open', status: 'open', updatedAt: old },
+        { id: 'old_task', status: 'closed', updatedAt: old, metadata: task({ tombstone: true }) },
+        { id: 'old_parent', status: 'closed', updatedAt: old },
+        { id: 'child', status: 'open', updatedAt: now, metadata: task({ parentThreadId: 'old_parent' }) },
+      ],
+      messages: ['old_closed', 'recent_closed'].map((threadId) => ({ id: `m_${threadId}`, threadId })),
+      deliveries: [{ id: 'd_old_closed', threadId: 'old_closed' }],
+    }));
+
+    const store = new AgentBusStore({ stateDir, closedThreadRetentionDays: 30 });
+    await store.init();
+
+    assert.deepEqual(store.listThreads().map((thread) => thread.id).sort(), ['child', 'old_open', 'old_parent', 'old_task', 'recent_closed']);
+    assert.deepEqual(store.state.messages.map((message) => message.id), ['m_recent_closed']);
+    assert.deepEqual(store.state.deliveries, []);
+    await assert.rejects(access(join(stateDir, 'rooms', 'old_closed')), { code: 'ENOENT' });
+    assert.equal(await store.pruneClosedThreads({ retentionDays: 0 }), 1);
     await store.close();
   });
 
