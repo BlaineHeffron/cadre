@@ -86,6 +86,8 @@ if (sideEffectLoopsSuppressed) {
 const app = Fastify({
   logger: { level: config.logLevel },
   bodyLimit: 12 * 1024 * 1024,
+  // agentBusPlugin loads a large state file at startup and can exceed Fastify's 10s default.
+  pluginTimeout: 180_000,
   trustProxy: trustProxyHop,
   ...(tlsOpts ? { https: tlsOpts } : {}),
 });
