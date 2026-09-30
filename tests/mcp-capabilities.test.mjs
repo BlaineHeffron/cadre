@@ -51,7 +51,7 @@ describe('MCP capability catalog', () => {
       'google-docs', 'google-sheets', 'google-slides', 'google-calendar', 'google-chat', 'google-contacts',
       'github', 'sentry', 'linear', 'vercel', 'supabase', 'cloudflare-observability',
       'notion', 'atlassian', 'exa', 'huggingface', 'deepwiki', 'wolfram',
-      'playwright', 'filesystem', 'git', 'fetch', 'memory', 'sequential-thinking', 'time',
+      'playwright', 'meshy', 'pixellab', 'filesystem', 'git', 'fetch', 'memory', 'sequential-thinking', 'time',
       'invoice-ninja',
     ]);
     const serialized = JSON.stringify(value);

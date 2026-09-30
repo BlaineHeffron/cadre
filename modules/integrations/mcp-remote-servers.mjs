@@ -261,6 +261,20 @@ const DEFINITIONS = Object.freeze({
       '--isolated',
     ],
   }),
+  // Pinned: spends paid credits, so upgrades are deliberate. The server exits without MESHY_API_KEY.
+  meshy: remote({
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@meshy-ai/meshy-mcp-server@0.5.2'],
+    envKeys: ['MESHY_API_KEY'],
+    secretEnv: ['MESHY_API_KEY'],
+  }),
+  pixellab: remote({
+    url: 'https://api.pixellab.ai/mcp',
+    auth: REMOTE_MCP_AUTH.apiKeyEnv,
+    secretEnv: ['DM_MCP_PIXELLAB_API_KEY', 'PIXELLAB_API_KEY'],
+    docsUrl: 'https://www.pixellab.ai/mcp',
+  }),
   filesystem: remote({
     transport: 'stdio',
     command: 'npx',
@@ -464,6 +478,9 @@ export function remoteMcpAvailability(id, {
     // An out-of-repo entry point may simply not be built yet.
     if (server.entryPathKey && !(text(server.entryPath) && existsSync(server.entryPath))) {
       return { configured: false, reasonCode: 'entry_point_missing' };
+    }
+    if (server.secretEnv?.length && !firstEnv(server.secretEnv, env)) {
+      return { configured: false, reasonCode: 'credential_missing' };
     }
     return { configured: true };
   }

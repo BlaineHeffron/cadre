@@ -327,6 +327,26 @@ describe('seodata stdio server', () => {
   });
 });
 
+describe('paid-credit servers', () => {
+  it('keeps meshy unavailable until its key is set, then forwards it', () => {
+    const sourceConfig = testConfig();
+    assert.deepEqual(
+      remoteMcpAvailability('meshy', { sourceConfig, env: {} }),
+      { configured: false, reasonCode: 'credential_missing' },
+    );
+    assert.equal(remoteMcpAvailability('meshy', { sourceConfig, env: { MESHY_API_KEY: 'k' } }).configured, true);
+    assert.deepEqual(remoteMcpStdioEnv(remoteMcpServer('meshy', { sourceConfig }), { env: { MESHY_API_KEY: 'k' } }), {
+      MESHY_API_KEY: 'k',
+    });
+  });
+
+  it('keeps pixellab unavailable until its key is set', () => {
+    const sourceConfig = testConfig();
+    assert.equal(remoteMcpAvailability('pixellab', { sourceConfig, env: {} }).reasonCode, 'credential_missing');
+    assert.equal(remoteMcpAvailability('pixellab', { sourceConfig, env: { PIXELLAB_API_KEY: 'k' } }).configured, true);
+  });
+});
+
 describe('remote MCP credential injection', () => {
   it('normalizes persisted capabilities and drops incomplete or unsafe records', async () => {
     const persisted = {

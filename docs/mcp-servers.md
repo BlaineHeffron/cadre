@@ -48,6 +48,8 @@ workspace-global `.mcp.json`, `.codex/config.toml`, or `.claude/settings.local.j
 | `exa`, `huggingface` | http | API key env | vendor remote servers |
 | `deepwiki`, `wolfram` | http | none | open remote servers |
 | `playwright` | stdio | none | `@playwright/mcp` (Microsoft; pinned npm dependency) |
+| `meshy` | stdio | `MESHY_API_KEY` (forwarded) | `@meshy-ai/meshy-mcp-server@0.5.2` (official; pinned) |
+| `pixellab` | http | `DM_MCP_PIXELLAB_API_KEY` / `PIXELLAB_API_KEY` | PixelLab's official `https://api.pixellab.ai/mcp` |
 | `filesystem`, `git`, `fetch`, `memory`, `sequential-thinking`, `time` | stdio | none | maintained MCP reference servers |
 | `espocrm`, `invoice-ninja` | http | API key env | self-hosted; endpoint must be supplied |
 | `seodata` | stdio | none (optional `SEODATA_API_KEY`) | locally built [`seodata-mcp`](https://github.com/BlaineHeffron/seodata-mcp) |
@@ -74,6 +76,8 @@ only. No send scope is requested anywhere.
   services work with a free Google account.
 - `espocrm` and `invoice-ninja` have no public endpoint; both report
   `endpoint_not_configured` until an override supplies one.
+- `meshy` and `pixellab` spend paid credits. They require explicit
+  selection (`mcpServers: { add: ['meshy'] }`) and are in no profile.
 - No Telegram server is offered. The fleet already owns the bot token and the
   bus, so that integration belongs in-tree rather than in a third-party server.
 - `seodata` runs from a local clone of
@@ -125,6 +129,8 @@ DM_MCP_SLACK_CLIENT_ID=...                            # managed mode only
 DM_MCP_SLACK_CLIENT_SECRET=...                        # managed mode only
 DM_MCP_GITHUB_TOKEN=...
 DM_MCP_EXA_API_KEY=...
+DM_MCP_PIXELLAB_API_KEY=...                           # pixellab.ai account API token
+MESHY_API_KEY=...                                     # forwarded into the meshy stdio server
 DM_MCP_HUGGINGFACE_TOKEN=...
 DM_MCP_ESPOCRM_TOKEN=...
 DM_MCP_INVOICE_NINJA_TOKEN=...
