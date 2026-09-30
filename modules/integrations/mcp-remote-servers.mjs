@@ -261,11 +261,14 @@ const DEFINITIONS = Object.freeze({
       '--isolated',
     ],
   }),
+  // Installed dependency, not npx: concurrent npx installs corrupt the shared cache.
   // Pinned: spends paid credits, so upgrades are deliberate. The server exits without MESHY_API_KEY.
   meshy: remote({
     transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@meshy-ai/meshy-mcp-server@0.5.2'],
+    command: process.execPath,
+    args: [
+      join(dirname(createRequire(import.meta.url).resolve('@meshy-ai/meshy-mcp-server/package.json')), 'dist/index.js'),
+    ],
     envKeys: ['MESHY_API_KEY'],
     secretEnv: ['MESHY_API_KEY'],
   }),

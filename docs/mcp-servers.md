@@ -48,7 +48,7 @@ workspace-global `.mcp.json`, `.codex/config.toml`, or `.claude/settings.local.j
 | `exa`, `huggingface` | http | API key env | vendor remote servers |
 | `deepwiki`, `wolfram` | http | none | open remote servers |
 | `playwright` | stdio | none | `@playwright/mcp` (Microsoft; pinned npm dependency) |
-| `meshy` | stdio | `MESHY_API_KEY` (forwarded) | `@meshy-ai/meshy-mcp-server@0.5.2` (official; pinned) |
+| `meshy` | stdio | `MESHY_API_KEY` (forwarded) | `@meshy-ai/meshy-mcp-server` (official; pinned npm dependency) |
 | `pixellab` | http | `DM_MCP_PIXELLAB_API_KEY` / `PIXELLAB_API_KEY` | PixelLab's official `https://api.pixellab.ai/mcp` |
 | `filesystem`, `git`, `fetch`, `memory`, `sequential-thinking`, `time` | stdio | none | maintained MCP reference servers |
 | `espocrm`, `invoice-ninja` | http | API key env | self-hosted; endpoint must be supplied |
@@ -78,6 +78,9 @@ only. No send scope is requested anywhere.
   `endpoint_not_configured` until an override supplies one.
 - `meshy` and `pixellab` spend paid credits. They require explicit
   selection (`mcpServers: { add: ['meshy'] }`) and are in no profile.
+  `MESHY_API_KEY` is forwarded into the stdio server, so it lands in the
+  `0600` Claude/Pi launch config and in Codex `-c` (visible in `ps`).
+  `pixellab` stays on the loopback proxy; the agent never sees the token.
 - No Telegram server is offered. The fleet already owns the bot token and the
   bus, so that integration belongs in-tree rather than in a third-party server.
 - `seodata` runs from a local clone of
@@ -130,7 +133,7 @@ DM_MCP_SLACK_CLIENT_SECRET=...                        # managed mode only
 DM_MCP_GITHUB_TOKEN=...
 DM_MCP_EXA_API_KEY=...
 DM_MCP_PIXELLAB_API_KEY=...                           # pixellab.ai account API token
-MESHY_API_KEY=...                                     # forwarded into the meshy stdio server
+MESHY_API_KEY=...                                     # forwarded into the meshy stdio server (agent-visible)
 DM_MCP_HUGGINGFACE_TOKEN=...
 DM_MCP_ESPOCRM_TOKEN=...
 DM_MCP_INVOICE_NINJA_TOKEN=...

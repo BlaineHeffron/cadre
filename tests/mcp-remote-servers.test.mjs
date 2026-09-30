@@ -330,20 +330,28 @@ describe('seodata stdio server', () => {
 describe('paid-credit servers', () => {
   it('keeps meshy unavailable until its key is set, then forwards it', () => {
     const sourceConfig = testConfig();
+    const server = remoteMcpServer('meshy', { sourceConfig });
+    assert.equal(server.command, process.execPath);
+    assert.equal(server.args.length, 1);
+    assert.match(server.args[0], /@meshy-ai[/\\]meshy-mcp-server[/\\]dist[/\\]index\.js$/);
     assert.deepEqual(
       remoteMcpAvailability('meshy', { sourceConfig, env: {} }),
       { configured: false, reasonCode: 'credential_missing' },
     );
     assert.equal(remoteMcpAvailability('meshy', { sourceConfig, env: { MESHY_API_KEY: 'k' } }).configured, true);
-    assert.deepEqual(remoteMcpStdioEnv(remoteMcpServer('meshy', { sourceConfig }), { env: { MESHY_API_KEY: 'k' } }), {
+    assert.deepEqual(remoteMcpStdioEnv(server, { env: { MESHY_API_KEY: 'k' } }), {
       MESHY_API_KEY: 'k',
     });
   });
 
   it('keeps pixellab unavailable until its key is set', () => {
     const sourceConfig = testConfig();
+    const server = remoteMcpServer('pixellab', { sourceConfig });
+    assert.equal(server.url, 'https://api.pixellab.ai/mcp');
+    assert.equal(server.auth, REMOTE_MCP_AUTH.apiKeyEnv);
     assert.equal(remoteMcpAvailability('pixellab', { sourceConfig, env: {} }).reasonCode, 'credential_missing');
     assert.equal(remoteMcpAvailability('pixellab', { sourceConfig, env: { PIXELLAB_API_KEY: 'k' } }).configured, true);
+    assert.equal(remoteMcpSecret(server, { env: { DM_MCP_PIXELLAB_API_KEY: 'k' } }), 'k');
   });
 });
 

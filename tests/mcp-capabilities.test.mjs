@@ -62,6 +62,12 @@ describe('MCP capability catalog', () => {
     assert.equal(value.servers.find((entry) => entry.id === 'dueno').required, true);
     assert.equal(value.servers.find((entry) => entry.id === 'businessos').required, false);
     assert.equal(value.servers.find((entry) => entry.id === 'businessos').requiresExplicitSelection, true);
+    for (const id of ['meshy', 'pixellab']) {
+      const entry = value.servers.find((server) => server.id === id);
+      assert.equal(entry.requiresExplicitSelection, true);
+      assert.equal(entry.alwaysLoad, false);
+      assert.equal(value.profiles.some((profile) => profile.serverIds.includes(id)), false);
+    }
     assert.throws(() => value.servers.push({}), TypeError);
   });
 
