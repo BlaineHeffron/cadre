@@ -53,6 +53,7 @@
     "@fastify/rate-limit": "11.1.0",
     "@fastify/static": "10.1.2",
     "@fastify/websocket": "11.3.0",
+    "@meshy-ai/meshy-mcp-server": "0.5.2",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@playwright/mcp": "0.0.82",
     "@preact/signals": "^2.9.0",
