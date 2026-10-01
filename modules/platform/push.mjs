@@ -48,12 +48,11 @@ export async function pushPlugin(app, {
   notifier = !sendEnabled ? null : async (message, blocked, muteKey) => {
     try {
       const { subscriptions = [] } = (await store.load()) || {};
-      const payload = JSON.stringify(message);
       const gone = [];
       const wanted = subscriptions.filter((sub) => (blocked || !sub.approvalOnly) && !sub.mutedSessions?.includes(muteKey));
       await Promise.all(wanted.map(async (sub) => {
         try {
-          await send(sub, payload, { subject, ...vapid });
+          await send(sub, JSON.stringify({ ...message, silent: sub.silent === true }), { subject, ...vapid });
         } catch (err) {
           if (err?.statusCode === 404 || err?.statusCode === 410) gone.push(sub.endpoint);
           else app.log.warn({ err: err?.message, statusCode: err?.statusCode }, 'Web push send failed');
@@ -68,7 +67,7 @@ export async function pushPlugin(app, {
   app.get('/api/push/key', async () => ({ publicKey: vapid.publicKey }));
 
   app.post('/api/push/subscribe', async (req, reply) => {
-    const { endpoint, keys, approvalOnly, mutedSessions } = req.body || {};
+    const { endpoint, keys, approvalOnly, mutedSessions, silent } = req.body || {};
     if (!isPushEndpoint(endpoint) || !isKey(keys?.p256dh) || !isKey(keys?.auth)) {
       return reply.code(400).send({ error: 'Invalid push subscription' });
     }
@@ -76,6 +75,7 @@ export async function pushPlugin(app, {
       endpoint,
       keys: { p256dh: keys.p256dh, auth: keys.auth },
       approvalOnly: approvalOnly === true,
+      silent: silent === true,
       mutedSessions: Array.isArray(mutedSessions) ? mutedSessions.filter(isKey).slice(0, 1000) : [],
     };
     await update((state) => ({

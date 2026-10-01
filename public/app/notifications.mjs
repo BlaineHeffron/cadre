@@ -5,6 +5,7 @@
 import { effect } from '@preact/signals';
 import {
   notificationPrefs,
+  isBrowserNotificationsEnabled,
   isSoundEnabled as readSoundEnabled,
   setSoundEnabled as writeSoundEnabled,
 } from './attention.mjs';
@@ -68,11 +69,12 @@ const pushSubscription = () => swReady.then((registration) => registration?.push
  */
 export async function showNotification(title, body, opts = {}) {
   playBeep();
-  if (!isNotificationPermitted()) return;
+  if (!isNotificationPermitted() || !isBrowserNotificationsEnabled()) return;
   // One source per device: once the server confirms it pushes to this browser, alerts come from sw.js.
   if (opts.pushed && confirmedEndpoint && (await pushSubscription())?.endpoint === confirmedEndpoint) return;
   const url = opts.url || '/';
-  const options = { body, tag: opts.tag || 'dueno-alert', icon: '/icons/icon.svg', data: { url } };
+  // silent: the OS plays its own notification sound unless told not to.
+  const options = { body, tag: opts.tag || 'dueno-alert', icon: '/icons/icon.svg', data: { url }, silent: !readSoundEnabled() };
   const registration = await swReady;
   try {
     if (registration) return await registration.showNotification(title, options);
@@ -98,11 +100,11 @@ export async function isPushSubscribed() {
 // Endpoint the server last accepted with sending enabled; until then in-app notifications stay on.
 let confirmedEndpoint = null;
 
-// The server applies this device's approval-only and muted-session prefs to its pushes.
-async function postSubscription(subscription, { approvalOnly, mutedSessions } = notificationPrefs.value) {
+// The server applies this device's approval-only, muted-session, and sound prefs to its pushes.
+async function postSubscription(subscription, { approvalOnly, mutedSessions, sound } = notificationPrefs.value) {
   if (confirmedEndpoint !== subscription.endpoint) confirmedEndpoint = null;
   try {
-    const { sending } = await api.post('/push/subscribe', { ...subscription.toJSON(), approvalOnly, mutedSessions });
+    const { sending } = await api.post('/push/subscribe', { ...subscription.toJSON(), approvalOnly, mutedSessions, silent: sound === false });
     confirmedEndpoint = sending ? subscription.endpoint : null;
   } catch (error) {
     confirmedEndpoint = null;

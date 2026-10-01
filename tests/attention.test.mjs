@@ -55,7 +55,7 @@ describe('attention triage state', () => {
     state.deepseekSessions.value = [];
     state.agentThreads.value = [];
     state.agentBusAlerts.value = [];
-    attention.updateNotificationPrefs({ sound: true, approvalOnly: false, mutedSessions: [] });
+    attention.updateNotificationPrefs({ browser: true, sound: true, approvalOnly: false, mutedSessions: [] });
     attention.clearDismissedAttentionItems();
   });
 
@@ -139,6 +139,13 @@ describe('attention triage state', () => {
     assert.equal(attention.attentionBadgeCount.value, 2);
     attention.setSessionMuted('claude', 'claude-1', true);
     assert.equal(attention.attentionBadgeCount.value, 1);
+  });
+
+  it('turns browser notifications off and persists the choice', () => {
+    assert.equal(attention.isBrowserNotificationsEnabled(), true);
+    attention.setBrowserNotificationsEnabled(false);
+    assert.equal(attention.isBrowserNotificationsEnabled(), false);
+    assert.equal(JSON.parse(localStorage.getItem(attention.NOTIFICATION_PREFS_KEY)).browser, false);
   });
 
   it('dismisses one attention generation without hiding the next one for the same session', () => {

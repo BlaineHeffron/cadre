@@ -14,7 +14,12 @@ import {
   isPushSubscribed,
   setPushEnabled,
 } from '../app/notifications.mjs';
-import { isApprovalOnlyEnabled, setApprovalOnlyEnabled } from '../app/attention.mjs';
+import {
+  isApprovalOnlyEnabled,
+  setApprovalOnlyEnabled,
+  isBrowserNotificationsEnabled,
+  setBrowserNotificationsEnabled,
+} from '../app/attention.mjs';
 import { encodeQr, qrSvgPath } from '../lib/qrcodegen.mjs';
 
 function makeSaveToken(inputToken) {
@@ -47,6 +52,7 @@ export function SettingsPage({ section }) {
   const pairing = useMemo(() => signal(null), []);
   const saveToken = useMemo(() => makeSaveToken(inputToken), []);
   const notifPermitted = useMemo(() => signal(isNotificationPermitted()), []);
+  const browserOn = useMemo(() => signal(isBrowserNotificationsEnabled()), []);
   const soundOn = useMemo(() => signal(isSoundEnabled()), []);
   const pushOn = useMemo(() => signal(false), []);
   const approvalOnly = useMemo(() => signal(isApprovalOnlyEnabled()), []);
@@ -117,10 +123,18 @@ export function SettingsPage({ section }) {
     const granted = await requestPermission();
     notifPermitted.value = granted;
     if (granted) {
+      browserOn.value = true;
+      setBrowserNotificationsEnabled(true);
       addToast('Notifications enabled', 'success');
     } else {
       addToast('Notification permission denied', 'warning');
     }
+  }
+
+  function toggleBrowser() {
+    browserOn.value = !browserOn.value;
+    setBrowserNotificationsEnabled(browserOn.value);
+    addToast(browserOn.value ? 'Browser notifications enabled' : 'Browser notifications disabled', 'info');
   }
 
   async function togglePush() {
@@ -296,8 +310,8 @@ export function SettingsPage({ section }) {
       <div class="card">
         <div class="card-header">
           <span class="card-title">Notifications</span>
-          <span class="badge ${notifPermitted.value ? 'badge-success' : 'badge-low'}">
-            ${notifPermitted.value ? 'Enabled' : 'Disabled'}
+          <span class="badge ${notifPermitted.value && browserOn.value ? 'badge-success' : 'badge-low'}">
+            ${notifPermitted.value && browserOn.value ? 'Enabled' : 'Disabled'}
           </span>
         </div>
         <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px">
@@ -307,7 +321,9 @@ export function SettingsPage({ section }) {
           ${!notifPermitted.value ? html`
             <button class="btn btn-primary" onclick=${enableNotifications}>Enable Notifications</button>
           ` : html`
-            <span style="font-size:13px; color:var(--success)">Browser notifications active</span>
+            <button class="btn ${browserOn.value ? 'btn-primary' : ''}" onclick=${toggleBrowser}>
+              Browser notifications: ${browserOn.value ? 'On' : 'Off'}
+            </button>
           `}
           <button class="btn ${pushOn.value ? 'btn-primary' : ''}" onclick=${togglePush}>
             Phone notifications: ${pushOn.value ? 'On' : 'Off'}

@@ -7,6 +7,7 @@ export const NOTIFICATION_PREFS_KEY = 'dueno_notification_prefs';
 const DISMISSED_KEY = 'dueno_dismissed_attention_items';
 
 const DEFAULT_PREFS = Object.freeze({
+  browser: true,
   sound: true,
   approvalOnly: false,
   mutedSessions: [],
@@ -51,6 +52,15 @@ export function isSoundEnabled() {
 
 export function setSoundEnabled(enabled) {
   updateNotificationPrefs({ sound: Boolean(enabled) });
+}
+
+// The browser permission cannot be revoked from a page, so this is the in-app off switch.
+export function isBrowserNotificationsEnabled() {
+  return notificationPrefs.value.browser !== false;
+}
+
+export function setBrowserNotificationsEnabled(enabled) {
+  updateNotificationPrefs({ browser: Boolean(enabled) });
 }
 
 export function isApprovalOnlyEnabled() {

@@ -4,8 +4,8 @@ self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim(
 
 // Always shown: a subscribed device skips the in-app OS notification instead (notifications.mjs).
 self.addEventListener('push', (event) => {
-  const { title = 'Cadre', body = '', url = '/', tag } = event.data?.json() || {};
-  event.waitUntil(self.registration.showNotification(title, { body, tag, data: { url }, icon: '/icons/icon.svg' }));
+  const { title = 'Cadre', body = '', url = '/', tag, silent = false } = event.data?.json() || {};
+  event.waitUntil(self.registration.showNotification(title, { body, tag, silent, data: { url }, icon: '/icons/icon.svg' }));
 });
 
 self.addEventListener('notificationclick', (event) => {

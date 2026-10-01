@@ -103,7 +103,7 @@ test('alerts are sent to every subscription and 404/410 subscriptions are pruned
 
   const claude = { id: 'claude', displayName: 'Claude' };
   const alert = { sessionId: 's1', sessionName: 'build', reason: 'Needs input', interaction: { detail: 'Approve edit?' }, route: '/claude/s1' };
-  const message = { title: 'Claude: build', body: 'Approve edit?', url: '/claude/s1', tag: 'claude-s1' };
+  const message = { title: 'Claude: build', body: 'Approve edit?', url: '/claude/s1', tag: 'claude-s1', silent: false };
   await notifyPush(claude, alert);
   assert.equal(sent.length, 4);
   for (const entry of sent) {
@@ -115,7 +115,7 @@ test('alerts are sent to every subscription and 404/410 subscriptions are pruned
 
   sent.length = 0;
   await notifyPush({ id: 'pi', displayName: 'Pi' }, { sessionId: 's2', sessionName: 'docs', route: '/pi/s2' });
-  assert.deepEqual(sent[0].message, { title: 'Pi: docs', body: 'Waiting for your next prompt', url: '/pi/s2', tag: 'pi-s2' });
+  assert.deepEqual(sent[0].message, { title: 'Pi: docs', body: 'Waiting for your next prompt', url: '/pi/s2', tag: 'pi-s2', silent: false });
   assert.deepEqual(sent.map((entry) => entry.endpoint).sort(), [flaky, subscription('ok').endpoint].sort());
   const persisted = JSON.parse(await readFile(storeFile, 'utf8'));
   assert.deepEqual(persisted.subscriptions.map((sub) => sub.endpoint).sort(), [flaky, subscription('ok').endpoint].sort());
@@ -163,6 +163,16 @@ test('subscriptions skip sessions muted on that device', async (t) => {
   sent.length = 0;
   await notifyPush(codex, { sessionId: 's2', sessionName: 'y', route: '/codex/s2' });
   assert.deepEqual(sent.map((entry) => entry.endpoint).sort(), [subscription('laptop').endpoint, subscription('phone').endpoint].sort());
+});
+
+test('subscriptions with sound off receive silent pushes', async (t) => {
+  const storeFile = await tempStoreFile(t);
+  const { app, sent } = await startPush(t, storeFile);
+  await subscribe(app, subscription('laptop'));
+  await subscribe(app, { ...subscription('phone'), silent: true });
+  await notifyPush({ id: 'codex', displayName: 'Codex' }, { sessionId: 's1', sessionName: 'x', route: '/codex/s1' });
+  const silentByEndpoint = Object.fromEntries(sent.map((entry) => [entry.endpoint, entry.message.silent]));
+  assert.deepEqual(silentByEndpoint, { [subscription('laptop').endpoint]: false, [subscription('phone').endpoint]: true });
 });
 
 test('an unreadable store never rejects the fire-and-forget notifier', async (t) => {
