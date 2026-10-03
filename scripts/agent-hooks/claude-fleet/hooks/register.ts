@@ -8,22 +8,28 @@ let queue: Promise<unknown> = Promise.resolve();
 let queued = 0;
 let skipThrough = 0;
 
+function report($: any, payload: object) {
+  return $.process.run(['node', `${$.plugin.root}/../log-event.mjs`, '--provider', 'claude'], {
+    stdin: JSON.stringify(payload),
+  });
+}
+
 function record($: any, payload: object) {
   const n = ++queued;
   queue = queue
-    .then(() => n > skipThrough && $.process.run(['node', `${$.plugin.root}/../log-event.mjs`, '--provider', 'claude'], {
-      stdin: JSON.stringify(payload),
-    }))
+    .then(() => n > skipThrough && report($, payload))
     .catch(() => {});
   return queue;
 }
 
 async function relay($: any, e: any, next: any) {
-  // The process exits after SessionEnd within a short bound, so its record skips any backlog and lands first.
-  const ending = e.hook_event_name === 'SessionEnd';
-  if (ending) skipThrough = queued;
-  const recorded = record($, e);
-  if (ending) await recorded;
+  // SessionEnd shares a short bound with session.end; start its record now and skip not-yet-started backlog.
+  if (e.hook_event_name === 'SessionEnd') {
+    skipThrough = queued;
+    await report($, e).catch(() => {});
+    return next(e);
+  }
+  record($, e);
   return next(e);
 }
 

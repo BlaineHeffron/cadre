@@ -51,10 +51,9 @@ test('SessionEnd skips the queued backlog so it lands within the exit bound', as
   await $.classic.UserPromptSubmit({ prompt: 'one' });
   await $.classic.UserPromptSubmit({ prompt: 'two' });
   await $.classic.Stop({ stop_hook_active: false });
-  const ended = $.classic.SessionEnd({ reason: 'other' });
-  release();
-  await ended;
+  await $.classic.SessionEnd({ reason: 'other' });
   expect(reported().map((r) => r.payload.prompt ?? r.payload.hook_event_name)).toEqual(['one', 'SessionEnd']);
+  release();
 });
 
 test('a failed reporter run does not stop later events', async ($, on) => {
