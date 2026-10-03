@@ -50,7 +50,7 @@ describe('Claude fleet plugin', () => {
     }
   });
 
-  it('log-event reporter writes a real hook slot bound to DUENO_SESSION_ID', async () => {
+  it('log-event reporter writes a real hook slot bound to CADRE_SESSION_ID', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'claude-hook-report-'));
     tempDirs.push(dir);
     await writeFile(join(dir, '.git'), 'gitdir: test\n');
@@ -65,8 +65,8 @@ describe('Claude fleet plugin', () => {
       cwd: dir,
       env: {
         ...process.env,
-        DUENO_SESSION_ID: 'fleet-session-1',
-        DUENO_PROVIDER: 'claude',
+        CADRE_SESSION_ID: 'fleet-session-1',
+        CADRE_PROVIDER: 'claude',
       },
       payload,
     });

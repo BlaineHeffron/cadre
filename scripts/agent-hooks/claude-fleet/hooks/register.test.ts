@@ -8,9 +8,9 @@ function engine(on: any, runReporter: (e: any) => unknown = () => ran) {
   for (const event of ['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionEnd']) on(`classic.${event}`, () => ({}));
   on('session.id', () => ({ value: 'cli-session-1' }));
   on('session.cwd', () => ({ value: '/work/repo' }));
-  on('process.run', (_$: any, e: any) => {
+  on('process.run', async (_$: any, e: any) => {
     runs.push(e);
-    return { value: runReporter(e) };
+    return { value: await runReporter(e) };
   });
   return () => runs.map((run) => ({ argv: run.argv, payload: JSON.parse(run.init.stdin) }));
 }
@@ -32,11 +32,28 @@ test('relays each classic event to the reporter, in order', async ($, on) => {
 test('fills the classic base fields for PreToolUse', async ($, on) => {
   const reported = engine(on);
   on('tool.call', () => ({ result: { stdout: 'hi', stderr: '', interrupted: false } }));
-  await $.tool.call({ tool: 'Bash', command: 'echo hi' });
+  await $.tool.call({ tool: 'Bash', command: 'echo hi', cwd: '/elsewhere' } as any);
   await $.classic.SessionEnd({ reason: 'other' });
   expect(reported()[0]?.payload).toMatchObject({
     hook_event_name: 'PreToolUse', session_id: 'cli-session-1', cwd: '/work/repo', tool_name: 'Bash', command: 'echo hi',
   });
+});
+
+test('SessionEnd skips the queued backlog so it lands within the exit bound', async ($, on) => {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let calls = 0;
+  const reported = engine(on, async () => {
+    calls += 1;
+    if (calls === 1) await held;
+    return ran;
+  });
+  await $.classic.UserPromptSubmit({ prompt: 'one' });
+  await $.classic.UserPromptSubmit({ prompt: 'two' });
+  await $.classic.Stop({ stop_hook_active: false });
+  await $.classic.SessionEnd({ reason: 'other' });
+  expect(reported().map((r) => r.payload.prompt ?? r.payload.hook_event_name)).toEqual(['one', 'SessionEnd']);
+  release();
 });
 
 test('a failed reporter run does not stop later events', async ($, on) => {
