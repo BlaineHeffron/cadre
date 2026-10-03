@@ -468,6 +468,11 @@ export function AgentsPage() {
     body.mcpServers = newMcpSelection.value.mcpServers;
     body.promptProfile = newPromptProfile.value;
     if (newPrompt.value.trim()) body.initialPrompt = newPrompt.value;
+    if (body.promptProfile === 'coordinator') {
+      // Coordinators route decisions through the Command Queue, which needs the Cadre MCP.
+      const { add = [], remove = [] } = body.mcpServers || {};
+      body.mcpServers = { add: [...new Set([...add, 'dueno'])], remove: remove.filter((id) => id !== 'dueno') };
+    }
 
     creatingSession.value = true;
     try {
@@ -933,6 +938,14 @@ export function AgentsPage() {
                 onInput=${e => { newIsolatedWorktree.value = e.target.checked; }} />
               <span>Isolated git worktree</span>
               <span class="new-agent-hint">fresh branch from origin/main or origin/master</span>
+            </label>
+            <label class="new-agent-check">
+              <input
+                type="checkbox"
+                checked=${newPromptProfile.value === 'coordinator'}
+                onInput=${e => { newPromptProfile.value = e.target.checked ? 'coordinator' : 'none'; }} />
+              <span>Coordinator</span>
+              <span class="new-agent-hint">runs workers and sends your decisions to the Queue</span>
             </label>
           </div>
 

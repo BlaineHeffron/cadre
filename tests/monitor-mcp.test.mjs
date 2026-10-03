@@ -21,6 +21,9 @@ describe('Monitor MCP server', () => {
         if (path === '/api/command-center/work-queue/ccq_2/acknowledge') {
           return { id: 'ccq_2', status: 'acknowledged' };
         }
+        if (path === '/api/command-center/work-queue/ccq_3/dismiss') {
+          return { id: 'ccq_3', status: 'dismissed' };
+        }
         throw new Error(`Unexpected path: ${path}`);
       },
     });
@@ -29,10 +32,11 @@ describe('Monitor MCP server', () => {
     assert.ok(toolNames.includes('monitor_list_human_queue'));
     assert.ok(toolNames.includes('monitor_add_human_queue_item'));
     assert.ok(toolNames.includes('monitor_answer_human_queue_item'));
+    assert.ok(toolNames.includes('monitor_dismiss_human_queue_item'));
     assert.ok(toolNames.includes('monitor_list_pi_sessions'));
     assert.deepEqual(
       server.listTools().find((tool) => tool.name === 'monitor_list_human_queue').inputSchema.properties.status.enum,
-      ['open', 'answered', 'routed', 'delivery_failed', 'acknowledged', 'all'],
+      ['open', 'answered', 'routed', 'delivery_failed', 'acknowledged', 'dismissed', 'all'],
     );
 
     assert.deepEqual(await server.handleToolCall('monitor_list_human_queue', {}), {
@@ -61,6 +65,10 @@ describe('Monitor MCP server', () => {
       id: 'ccq_2',
       status: 'acknowledged',
     });
+    assert.deepEqual(await server.handleToolCall('monitor_dismiss_human_queue_item', { id: 'ccq_3' }), {
+      id: 'ccq_3',
+      status: 'dismissed',
+    });
 
     assert.deepEqual(calls, [
       { path: '/api/command-center/work-queue?status=open', opts: {} },
@@ -88,6 +96,10 @@ describe('Monitor MCP server', () => {
           method: 'POST',
           body: { note: 'Session acted' },
         },
+      },
+      {
+        path: '/api/command-center/work-queue/ccq_3/dismiss',
+        opts: { method: 'POST', body: {} },
       },
     ]);
   });

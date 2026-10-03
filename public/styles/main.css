@@ -526,81 +526,6 @@ a:focus-visible {
   color: #9cf;
 }
 
-/* Attention triage */
-.attention-page {
-  display: grid;
-  gap: 12px;
-}
-
-.attention-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.attention-header-actions,
-.attention-row-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.attention-list {
-  display: grid;
-  gap: 10px;
-}
-
-.attention-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--warning);
-  border-radius: var(--radius);
-  background: var(--bg-card);
-}
-
-.attention-row:first-child {
-  border-left-color: var(--danger);
-}
-
-.attention-row-main {
-  min-width: 0;
-}
-
-.attention-row-title {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  font-weight: 700;
-}
-
-.attention-row-meta {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-
-.attention-row-snippet {
-  margin-top: 8px;
-  max-height: 4.4em;
-  overflow: hidden;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
 .terminal-fullheight {
   flex: 1;
   min-height: 0;
@@ -3133,19 +3058,6 @@ body:has(.tmux-pane-page) {
 
   .recordings-toolbar .btn,
   .recording-actions .btn {
-    justify-content: center;
-  }
-
-  .attention-row {
-    grid-template-columns: 1fr;
-  }
-
-  .attention-row-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .attention-row-actions .btn {
     justify-content: center;
   }
 

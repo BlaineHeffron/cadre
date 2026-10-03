@@ -12,12 +12,12 @@ import {
   unseenPiSessionCount,
   openAgentThreadCount,
   unreadAgentAlerts,
+  queueOpenCount,
 } from '../app/state.mjs';
 import {
-  attentionBadgeCount,
   visibleSessionPromptNotifications,
   visibleSessionPromptNotificationCount,
-} from '../app/attention.mjs';
+} from '../app/notification-prefs.mjs';
 
 const PRIMARY_NAV = [
   { label: 'Command Center', path: '/' },
@@ -25,7 +25,6 @@ const PRIMARY_NAV = [
   { label: 'Capture', path: '/capture', mobileDefault: true },
   { label: 'Fleet', path: '/fleet' },
   { label: 'GitHub', path: '/github-agents' },
-  { label: 'Attention', path: '/attention' },
   { label: 'Agents', path: '/agents', mobileDefault: true },
   { label: 'Collab', path: '/collab' },
   { label: 'Schedules', path: '/scheduled-agents' },
@@ -55,8 +54,8 @@ function navBadge(path) {
     if (unseen > 0) return html`<span class="badge badge-info nav-link-badge">${unseen} new</span>`;
     return null;
   }
-  if (path === '/attention') {
-    const waiting = attentionBadgeCount.value;
+  if (path === '/queue') {
+    const waiting = queueOpenCount.value;
     if (waiting > 0) return html`<span class="badge badge-critical badge-pulse nav-link-badge">${waiting}</span>`;
     return null;
   }

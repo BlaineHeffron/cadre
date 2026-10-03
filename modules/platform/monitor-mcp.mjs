@@ -858,7 +858,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         properties: {
           status: {
             type: 'string',
-            enum: ['open', 'answered', 'routed', 'delivery_failed', 'acknowledged', 'all'],
+            enum: ['open', 'answered', 'routed', 'delivery_failed', 'acknowledged', 'dismissed', 'all'],
             description: 'Queue status filter: open, answered, routed, delivery_failed, acknowledged, or all. Defaults to open.',
           },
         },
@@ -944,6 +944,20 @@ export function buildMonitorMcpServer({ requestImpl }) {
           method: 'POST',
           body: { note },
         }),
+    },
+    {
+      name: 'monitor_dismiss_human_queue_item',
+      description: 'Withdraw a Command Center human queue item that no longer needs a decision.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Queue item id.' },
+        },
+        required: ['id'],
+        additionalProperties: false,
+      },
+      handler: async ({ id }) =>
+        request(`/api/command-center/work-queue/${encodeURIComponent(String(id || ''))}/dismiss`, { method: 'POST', body: {} }),
     },
     {
       name: 'monitor_send_to_session',
@@ -1370,6 +1384,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     'monitor_list_human_queue',
     'monitor_add_human_queue_item',
     'monitor_answer_human_queue_item',
+    'monitor_dismiss_human_queue_item',
     'monitor_send_to_session',
     'monitor_list_session_deliveries',
     'monitor_get_session_output',

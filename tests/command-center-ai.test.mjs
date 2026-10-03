@@ -10,6 +10,7 @@ import {
   acknowledgeHumanQueueItem,
   addHumanQueueItem,
   answerHumanQueueItem,
+  dismissHumanQueueItem,
   getDefaultCommandCenterTarget,
   launchCommandCenterAI,
   launchFleetSupervisorAI,
@@ -485,6 +486,46 @@ describe('command center AI', () => {
         },
       }),
       (error) => error.statusCode === 409 && /already acknowledged/.test(error.message),
+    );
+  });
+
+  it('dismisses queue items, tells a waiting pass-through session, and drops them from the open count', async () => {
+    const sent = [];
+    const broadcasts = [];
+    const item = await addHumanQueueItem({
+      question: 'Pick a migration strategy?',
+      sessionKind: 'pi',
+      sessionId: 'sess_coordinator',
+      passThrough: true,
+    }, { persist: false });
+    const openBefore = (await serializeWorkQueue()).openCount;
+
+    const dismissed = await dismissHumanQueueItem(item.id, {
+      persist: false,
+      wsManager: { broadcast: (...args) => broadcasts.push(args) },
+      sendSessionInput: async (input) => { sent.push(input); },
+    });
+
+    assert.equal(dismissed.status, 'dismissed');
+    assert.equal(dismissed.events.at(-1).type, 'dismissed');
+    assert.equal(broadcasts.at(-1)[1], 'item_dismissed');
+    assert.equal((await serializeWorkQueue()).openCount, openBefore - 1);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].kind, 'pi');
+    assert.equal(sent[0].sessionId, 'sess_coordinator');
+    assert.match(sent[0].text, /Dismissed by the operator without an answer/);
+
+    await dismissHumanQueueItem(item.id, {
+      persist: false,
+      sendSessionInput: async () => assert.fail('a dismissed item must not notify again'),
+    });
+    await assert.rejects(
+      () => answerHumanQueueItem(item.id, { answer: 'Late answer' }, { persist: false }),
+      (error) => error.statusCode === 409 && /already dismissed/.test(error.message),
+    );
+    await assert.rejects(
+      () => dismissHumanQueueItem('ccq_missing', { persist: false }),
+      (error) => error.statusCode === 404,
     );
   });
 });

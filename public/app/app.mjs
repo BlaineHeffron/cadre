@@ -15,6 +15,8 @@ import {
   piSessions,
   unreadAlerts,
   unreadAgentAlerts,
+  queueOpenCount,
+  wsOpens,
   setClaudeSessions,
   setCodexSessions,
   setDeepseekSessions,
@@ -26,7 +28,8 @@ import { connectWs, subscribe } from './ws-client.mjs';
 import { showNotification } from './notifications.mjs';
 import { installRouteScrollRestoration, installSpaLinkNavigation } from './navigation.mjs';
 import { installViewportKeyboardInset } from './viewport-keyboard.mjs';
-import { attentionBadgeCount, shouldNotifyForSession, visibleSessionPromptNotificationCount } from './attention.mjs';
+import { shouldNotifyForSession, visibleSessionPromptNotificationCount } from './notification-prefs.mjs';
+import { api } from './api.mjs';
 
 // Components
 import { Nav } from '../components/nav.mjs';
@@ -40,7 +43,6 @@ import { GitHubAgentsPage } from '../pages/github-agents.mjs';
 import { TmuxPage } from '../pages/tmux.mjs';
 import { TmuxPanePage } from '../pages/tmux-pane.mjs';
 import { AgentsPage } from '../pages/agents.mjs';
-import { AttentionPage } from '../pages/attention.mjs';
 import { ClaudeSessionsPage } from '../pages/claude-sessions.mjs';
 import { CodexSessionsPage } from '../pages/codex-sessions.mjs';
 import { AgentSessionDetailPage } from '../pages/agent-session-detail.mjs';
@@ -103,7 +105,6 @@ function App({ onRouteChange }) {
         <${TmuxPanePage} path="/tmux/pane/:target" />
         <${TmuxPage} path="/tmux" />
         <${AgentsPage} path="/agents" />
-        <${AttentionPage} path="/attention" />
         <${AgentSessionDetailPage} path="/claude/:id" provider="claude" />
         <${ClaudeSessionsPage} path="/claude" />
         <${AgentSessionDetailPage} path="/codex/:id" provider="codex" />
@@ -136,11 +137,11 @@ connectWs();
 const routeScrollRestoration = installRouteScrollRestoration();
 
 effect(() => {
-  const attentionCount = attentionBadgeCount.value;
+  const decisions = queueOpenCount.value;
   const unread = unreadAlerts.value + unreadAgentAlerts.value + visibleSessionPromptNotificationCount.value;
-  const count = attentionCount + unread;
+  const count = decisions + unread;
   const parts = [];
-  if (attentionCount) parts.push(`${attentionCount} needs attention`);
+  if (decisions) parts.push(`${decisions} decisions`);
   if (unread) parts.push(`${unread} unread`);
   document.title = `${count ? `(${count}) ` : ''}Cadre${parts.length ? ` - ${parts.join(', ')}` : ''}`;
 });
@@ -208,6 +209,21 @@ subscribe('agent-bus:alerts', (type, data) => {
       tag: alert.id,
       url: data.threadId ? `/collab/${data.threadId}` : '/collab',
     });
+  }
+});
+
+// Reconnects can miss queue broadcasts, so refetch the open count on every socket open.
+effect(() => {
+  if (!wsOpens.value) return;
+  api.get('/command-center/work-queue').then((data) => { queueOpenCount.value = data?.openCount || 0; }).catch(() => {});
+});
+
+subscribe('command-center:work-queue', (type, data) => {
+  if (!data?.items) return;
+  queueOpenCount.value = data.openCount || 0;
+  const item = data.items.find((entry) => entry.status === 'open');
+  if (type === 'item_created' && item) {
+    showNotification('Decision needed', item.title || item.question, { tag: item.id, url: '/queue' });
   }
 });
 

@@ -32,6 +32,7 @@ function statusBadgeClass(status = '') {
   if (status === 'open') return 'warning';
   if (status === 'delivery_failed') return 'critical';
   if (status === 'routed') return 'info';
+  if (status === 'dismissed') return 'low';
   return 'success';
 }
 
@@ -82,10 +83,24 @@ export function CommandQueuePage() {
     }
   }
 
+  async function dismissQueueItem(item) {
+    try {
+      const dismissed = await api.post(`/command-center/work-queue/${encodeURIComponent(item.id)}/dismiss`, {});
+      const current = Array.isArray(queue.value?.items) ? queue.value.items : [];
+      queue.value = {
+        ...(queue.value || {}),
+        openCount: Math.max(0, Number(queue.value?.openCount || 0) - (item.status === 'open' ? 1 : 0)),
+        items: current.map((entry) => entry.id === dismissed.id ? dismissed : entry),
+      };
+    } catch (error) {
+      addToast(`Dismiss failed: ${error.message}`, 'error');
+    }
+  }
+
   useEffect(() => {
     loadQueue();
     return subscribe('command-center:work-queue', (type, data) => {
-      if ((type === 'updated' || type === 'item_created' || type === 'item_answered' || type === 'item_routed' || type === 'item_delivery_failed' || type === 'item_acknowledged') && data?.items) {
+      if ((type === 'updated' || type === 'item_created' || type === 'item_answered' || type === 'item_routed' || type === 'item_delivery_failed' || type === 'item_acknowledged' || type === 'item_dismissed') && data?.items) {
         queue.value = data;
       }
     });
@@ -98,7 +113,7 @@ export function CommandQueuePage() {
       <div class="card-header">
         <div>
           <h1 class="card-title" style="font-size:18px">Command Queue</h1>
-          <p class="collab-helper" style="margin:4px 0 0">Human decisions requested by Fleet Supervisor.</p>
+          <p class="collab-helper" style="margin:4px 0 0">Human decisions requested by coordinators and the Fleet Supervisor.</p>
         </div>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
           <select class="input" value=${statusFilter.value} onInput=${(event) => { statusFilter.value = event.target.value; }}>
@@ -107,6 +122,7 @@ export function CommandQueuePage() {
             <option value="routed">Routed</option>
             <option value="delivery_failed">Failed</option>
             <option value="acknowledged">Acknowledged</option>
+            <option value="dismissed">Dismissed</option>
             <option value="all">All</option>
           </select>
           <button class="btn" onclick=${loadQueue}>Refresh</button>
@@ -181,6 +197,7 @@ export function CommandQueuePage() {
                       </div>
                       <div class="dashboard-row-actions">
                         ${routePath ? html`<button class="btn btn-subtle" onclick=${() => route(routePath)}>Open</button>` : null}
+                        ${item.status !== 'dismissed' ? html`<button class="btn btn-subtle" onclick=${() => dismissQueueItem(item)}>Dismiss</button>` : null}
                       </div>
                     </div>
                   `;

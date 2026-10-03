@@ -12,17 +12,30 @@ import {
   preparePromptProfileLaunch,
   cleanupPromptProfileLaunch,
 } from '../modules/integrations/prompt-profile-launch.mjs';
+import { buildMonitorMcpServer } from '../modules/platform/monitor-mcp.mjs';
 
 describe('prompt profile catalog', () => {
   it('defaults to no style and publishes command-center as a catalog entry', () => {
     const catalog = getPublicPromptProfileCatalog();
     assert.equal(catalog.defaultProfileId, 'none');
     assert.deepEqual(catalog.profiles.map((entry) => entry.id), [
-      'none', 'command-center', 'fleet-supervisor', 'research', 'caveman', 'asd-ste100',
+      'none', 'command-center', 'fleet-supervisor', 'coordinator', 'research', 'caveman', 'asd-ste100',
     ]);
     assert.equal(catalog.profiles.find((entry) => entry.id === 'none').hasBody, false);
     assert.equal(catalog.profiles.find((entry) => entry.id === 'command-center').hasBody, true);
     assert.equal(JSON.stringify(catalog).includes('Blaine'), false);
+  });
+
+  it('appends a coordinator system prompt whose Command Queue tools exist', () => {
+    const resolved = resolvePromptProfile({ promptProfile: 'coordinator' });
+    const named = [...new Set(resolved.body.match(/monitor_[a-z_]+/g))];
+    const tools = new Set(buildMonitorMcpServer({ requestImpl: async () => ({}) }).listTools().map((tool) => tool.name));
+
+    assert.equal(resolved.placement, 'append');
+    assert.deepEqual(buildPromptLaunchArgs({ runtime: 'pi', promptLaunch: resolved }), ['--append-system-prompt', resolved.body]);
+    assert.ok(named.includes('monitor_add_human_queue_item'));
+    assert.ok(named.includes('monitor_dismiss_human_queue_item'));
+    assert.deepEqual(named.filter((name) => !tools.has(name)), []);
   });
 
   it('renders the command-center body only when selected', () => {

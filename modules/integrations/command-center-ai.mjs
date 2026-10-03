@@ -358,7 +358,7 @@ async function maybeRouteQueueAnswer(item, answerText, { sendSessionInput } = {}
   if (!item.passThrough) return { mode: 'supervisor', routed: false };
   const kind = String(item.sessionKind || '').trim().toLowerCase();
   const sessionId = String(item.sessionId || '').trim();
-  if (!['claude', 'codex'].includes(kind) || !sessionId || typeof sendSessionInput !== 'function') {
+  if (!['claude', 'codex', 'pi'].includes(kind) || !sessionId || typeof sendSessionInput !== 'function') {
     return { mode: 'pass_through', routed: false, error: 'missing_target_session' };
   }
   const text = [
@@ -471,6 +471,29 @@ export async function acknowledgeHumanQueueItem(id, input = {}, { wsManager, per
   item.events.push(queueEvent('acknowledged'));
   if (persist) await persistHumanWorkQueue();
   broadcastWorkQueue(wsManager, 'item_acknowledged');
+  return item;
+}
+
+export async function dismissHumanQueueItem(id, { wsManager, sendSessionInput, persist = true } = {}) {
+  await ensureHumanWorkQueueLoaded();
+  const item = humanWorkQueue.find((entry) => entry.id === id);
+  if (!item) {
+    const error = new Error('Queue item not found');
+    error.statusCode = 404;
+    throw error;
+  }
+  if (item.status === 'dismissed') return item;
+  // An open pass-through item has a session waiting on it; tell it there is no answer coming.
+  if (item.status === 'open' && item.passThrough) {
+    await maybeRouteQueueAnswer(item, 'Dismissed by the operator without an answer.', { sendSessionInput });
+  }
+  if (!Array.isArray(item.events)) item.events = [];
+  item.status = 'dismissed';
+  item.dismissedAt = new Date().toISOString();
+  item.updatedAt = item.dismissedAt;
+  item.events.push(queueEvent('dismissed'));
+  if (persist) await persistHumanWorkQueue();
+  broadcastWorkQueue(wsManager, 'item_dismissed');
   return item;
 }
 
@@ -668,7 +691,7 @@ export async function commandCenterAIPlugin(app, {
 } = {}) {
   async function sendSessionInput({ kind, sessionId, text }) {
     const normalizedKind = String(kind || '').trim().toLowerCase();
-    if (!['claude', 'codex'].includes(normalizedKind)) throw new Error('sessionKind must be claude or codex');
+    if (!['claude', 'codex', 'pi'].includes(normalizedKind)) throw new Error('sessionKind must be claude, codex, or pi');
     return enqueueSessionCommand(normalizedKind, sessionId, {
       source: 'command_center_queue_answer',
       operation: 'message',
@@ -731,6 +754,14 @@ export async function commandCenterAIPlugin(app, {
       return await acknowledgeHumanQueueItem(req.params.id, req.body || {}, { wsManager });
     } catch (err) {
       return reply.code(err.statusCode || 500).send({ error: err.message || 'Failed to acknowledge queue item' });
+    }
+  });
+
+  app.post('/api/command-center/work-queue/:id/dismiss', async (req, reply) => {
+    try {
+      return await dismissHumanQueueItem(req.params.id, { wsManager, sendSessionInput });
+    } catch (err) {
+      return reply.code(err.statusCode || 500).send({ error: err.message || 'Failed to dismiss queue item' });
     }
   });
 
