@@ -8,7 +8,7 @@ import {
   isBrowserNotificationsEnabled,
   isSoundEnabled as readSoundEnabled,
   setSoundEnabled as writeSoundEnabled,
-} from './attention.mjs';
+} from './notification-prefs.mjs';
 import { api } from './api.mjs';
 import { wsOpens } from './state.mjs';
 

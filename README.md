@@ -18,7 +18,9 @@ through structured runtimes.
   agents, exposed to sessions over MCP. Collab and conference threads can
   bootstrap several participants at once.
 - **Coordinators and scheduled agents**: authenticated sessions can spawn child
-  sessions and loops; scheduled agents run prompts on an interval.
+  sessions and loops; scheduled agents run prompts on an interval. Tick
+  **Coordinator** when spawning (or pass `promptProfile: "coordinator"`) to add
+  a system prompt that sends the session's decisions to the Queue.
 - **MCP catalog**: a capability catalog of MCP servers and profiles, selectable
   per session, with a built-in OAuth broker for remote servers.
 - **Launch skills**: reusable prompt snippets inserted at launch, from the
@@ -28,7 +30,7 @@ through structured runtimes.
   file.
 - **Telegram remote control**: relay session output to Telegram topics and
   reply from your phone.
-- **Monitoring dashboard**: session state, attention queue, fleet deployments,
+- **Monitoring dashboard**: session state, decision queue, fleet deployments,
   health and ops metrics, and production controls (kill switches, backups).
 
 ## Requirements

@@ -10,6 +10,7 @@ export const isAuthenticated = signal(false);
 export const wsConnected = signal(false);
 // Bumped on every WebSocket open; wsConnected is debounced and can stay true across a quick reconnect.
 export const wsOpens = signal(0);
+export const queueOpenCount = signal(0);
 
 // Threat state
 export const alerts = signal([]);

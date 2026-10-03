@@ -19,7 +19,7 @@ import {
   setApprovalOnlyEnabled,
   isBrowserNotificationsEnabled,
   setBrowserNotificationsEnabled,
-} from '../app/attention.mjs';
+} from '../app/notification-prefs.mjs';
 import { encodeQr, qrSvgPath } from '../lib/qrcodegen.mjs';
 
 function makeSaveToken(inputToken) {

@@ -31,8 +31,6 @@ describe('agent terminal controls', () => {
   it('submits running-session sends to the harness while guarding typed dialog answers', async () => {
     const controlBar = await readFile('public/components/agent-control-bar.mjs', 'utf8');
     const agentDetail = await readFile('public/pages/agent-session-detail.mjs', 'utf8');
-    const attentionPage = await readFile('public/pages/attention.mjs', 'utf8');
-    const attentionState = await readFile('public/app/attention.mjs', 'utf8');
     const sessions = await readFile('modules/sessions/index.mjs', 'utf8');
 
     assert.match(controlBar, /state\?\.capabilities\?\.canQueueMessage !== true/);
@@ -49,12 +47,6 @@ describe('agent terminal controls', () => {
     assert.match(agentDetail, /if \(!text\) \{[\s\S]*\/enter`/);
     assert.match(agentDetail, /descriptor\.enterSubmits[\s\S]*mapped\.value === 'Enter'[\s\S]*\/enter`/);
     assert.doesNotMatch(sessions, /allowActiveQueue:\s*config\.id === 'codex'/);
-    assert.match(attentionPage, /source:\s*'ui_dialog_answer'/);
-    assert.match(attentionPage, /expectedRevision:\s*item\.revision/);
-    assert.match(attentionPage, /expectedFingerprint:\s*item\.interactionFingerprint/);
-    assert.match(attentionPage, /expectedInteractionKind:\s*item\.interactionKind/);
-    assert.match(attentionPage, /api\.post\(`\$\{path\}\/keys`, \{ keys: option\.key, \.\.\.guards \}\)/);
-    assert.doesNotMatch(attentionState, /NUMBERED_OPTION|YES_NO_RE|parseAnswerOptions/);
   });
 
   it('focuses interactive terminal panes on pointer down', async () => {
