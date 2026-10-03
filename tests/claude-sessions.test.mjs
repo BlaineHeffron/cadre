@@ -603,7 +603,7 @@ describe('Claude Sessions module', () => {
     assert.match(tmuxArgs, new RegExp(`'--add-dir' '${workDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`));
     assert.match(tmuxArgs, /'--mcp-config' '[^']*mcp_client_configs\/claude-[a-f0-9]+\.json'/);
     assert.match(tmuxArgs, /'--strict-mcp-config'/);
-    assert.match(tmuxArgs, /'--settings' '[^']*claude_hook_settings\/claude-[a-f0-9]+\.json'/);
+    assert.match(tmuxArgs, /'--plugin-dir' '[^']*scripts\/agent-hooks\/claude-fleet'/);
     await assert.rejects(readFile(join(workDir, '.mcp.json'), 'utf8'), /ENOENT/);
     await assert.rejects(readFile(join(workDir, '.claude', 'settings.local.json'), 'utf8'), /ENOENT/);
     const claudeJson = JSON.parse(await readFile(join(homeDir, '.claude.json'), 'utf8'));

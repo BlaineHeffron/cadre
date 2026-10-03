@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { CLAUDE_FLEET_PLUGIN_DIR } from './hook-events.mjs';
 
 const HARNESS_ALIASES = Object.freeze({
   anthropic: 'claude',
@@ -156,7 +157,7 @@ class ClaudeRuntimeHarness extends AgentRuntimeHarness {
    * be a fresh uuid per launch and must never be combined with `--resume`.
    */
   buildLaunchArgs({
-    args = [], model = '', thinkingLevel = '', workDir = '', cliSessionId = '', settingsPath = '',
+    args = [], model = '', thinkingLevel = '', workDir = '', cliSessionId = '',
     remoteControl = false,
   } = {}) {
     const resolvedWorkDir = this.normalizeWorkDir(workDir);
@@ -166,11 +167,11 @@ class ClaudeRuntimeHarness extends AgentRuntimeHarness {
       'bypassPermissions',
       '--add-dir',
       resolvedWorkDir,
+      '--plugin-dir',
+      CLAUDE_FLEET_PLUGIN_DIR,
     ];
     // Registers the local session with claude.ai so the Claude app can drive it. Outbound only.
     if (remoteControl) nextArgs.push('--remote-control');
-    const hookSettings = String(settingsPath || '').trim();
-    if (hookSettings) nextArgs.push('--settings', hookSettings);
     const sessionId = String(cliSessionId || '').trim();
     if (sessionId) nextArgs.push('--session-id', sessionId);
     if (model) nextArgs.push('--model', model);

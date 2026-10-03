@@ -178,7 +178,6 @@ describe('Claude stream-json sessions', () => {
     assert.equal(session.negotiated.busParticipation, 'authenticated_scoped');
     assert.equal(session.negotiated.interaction.permissions, 'structured_options');
     assert.match(clients[0].startSpec.mcpConfigPath, /attempt-1\/dueno-mcp\.json$/);
-    assert.ok(clients[0].startSpec.settingsPath);
     assert.equal((await stat(clients[0].startSpec.mcpConfigPath)).mode & 0o777, 0o600);
     const mcpConfig = await readFile(clients[0].startSpec.mcpConfigPath, 'utf8');
     assert.match(mcpConfig, /Bearer \$\{DUENO_AGENT_BUS_TOKEN\}/);
