@@ -5,7 +5,6 @@ import { resolve } from 'node:path';
 import { AttachmentStore } from '../agent/attachment-store.mjs';
 import { ClaudeStreamJsonTransport } from '../agent/claude-stream-json-transport.mjs';
 import { CodexAppServerTransport } from '../agent/codex-app-server-transport.mjs';
-import { cleanupClaudeHookSettings, prepareClaudeHookSettings } from '../agent/claude-hook-settings.mjs';
 import { ProcessSupervisor } from '../agent/process-supervisor.mjs';
 import { buildCodexPluginConfigArgs } from '../agent/runtime-args.mjs';
 import { resolveMcpCapabilities } from '../integrations/mcp-capability-resolver.mjs';
@@ -131,7 +130,6 @@ export async function claudeStreamJsonSessionsPlugin(app, {
     await Promise.all([
       cleanupAttempt(sessionId, generation, reason, serverIds),
       cleanupPromptProfileLaunch({ backendType: kind, sessionId }),
-      claude && cleanupClaudeHookSettings({ sessionId }),
     ]);
   }
 
@@ -184,11 +182,10 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       const error = new Error(`Claude stream-json Agent Bus E2E proof requires Claude Code ${evidence.expectedVersion}`);
       error.statusCode = 503; error.code = 'claude_mcp_capability_unproven'; throw error;
     }
-    const hookSettings = await prepareClaudeHookSettings({ sessionId: id });
     await seedClaudeWorkspaceTrust(workDir, { logger: app.log });
     return {
       env, preflight: mcpPreparation.preflight, promptArgs, capabilityEvidence,
-      mcpConfigPath: mcpPreparation.prepared.claudeConfigPath, settingsPath: hookSettings.settingsPath,
+      mcpConfigPath: mcpPreparation.prepared.claudeConfigPath,
     };
   }
 
@@ -312,7 +309,6 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         // Runs under the session lock, so the principal's credential is still the one this request issued.
         cleanup: async () => {
           await cleanupAttempt(session.id, generation, 'resume_failed', serverIds);
-          if (claude) await cleanupClaudeHookSettings({ sessionId: session.id });
         },
       }));
     } catch (error) {

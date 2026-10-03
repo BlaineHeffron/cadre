@@ -1,6 +1,10 @@
 import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { deriveHookState } from '../session-state/providers/hook.mjs';
+
+// Claude Code plugin that forwards lifecycle hooks to scripts/agent-hooks/log-event.mjs.
+export const CLAUDE_FLEET_PLUGIN_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../scripts/agent-hooks/claude-fleet');
 
 const HOOKS_DIRNAME = join('.agent_bus', 'hooks');
 const STATE_DIRNAME = join(HOOKS_DIRNAME, 'state');

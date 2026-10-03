@@ -13,10 +13,6 @@ import { saveImageToWorkspace, buildAgentImagePrompt, buildImageAttachmentResult
 import { AttachmentStore } from '../agent/attachment-store.mjs';
 import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
 import { recordRuntimeHookEvent } from '../agent/hook-events.mjs';
-import {
-  cleanupClaudeHookSettings,
-  prepareClaudeHookSettings,
-} from '../agent/claude-hook-settings.mjs';
 import { readHookDerivedState, readHookSessionMetadata } from '../session-state/providers/hook.mjs';
 import { canonicalSessionStateId, projectCompatibility } from '../session-state/contract.mjs';
 import { isFinishedWorkEdge, nextRememberedStatus } from '../session-state/attention-edge.mjs';
@@ -292,24 +288,22 @@ const PROVIDER_CONFIGS = {
       }
       return { provider: 'anthropic', runtime: 'claude', launchRuntime: 'claude' };
     },
-    buildArgs({ args = [], model = '', thinkingLevel = '', workDir = '', mcpLaunch = {}, promptLaunch = {}, cliSessionId = '', hookSettings = {} } = {}) {
+    buildArgs({ args = [], model = '', thinkingLevel = '', workDir = '', mcpLaunch = {}, promptLaunch = {}, cliSessionId = '' } = {}) {
       return [
         ...buildClaudeLaunchArgs({
           args, model, thinkingLevel, workDir, cliSessionId,
-          settingsPath: hookSettings.settingsPath,
           remoteControl: appConfig.agentInterface.claudeRemoteControlEnabled,
         }),
         ...(mcpLaunch.claudeConfigPath ? ['--mcp-config', mcpLaunch.claudeConfigPath, '--strict-mcp-config'] : []),
         ...buildPromptLaunchArgs({ runtime: 'claude', promptLaunch }),
       ];
     },
-    buildResumeArgs({ cliSessionId = '', model = '', thinkingLevel = '', workDir = '', mcpLaunch = {}, promptLaunch = {}, hookSettings = {} } = {}) {
+    buildResumeArgs({ cliSessionId = '', model = '', thinkingLevel = '', workDir = '', mcpLaunch = {}, promptLaunch = {} } = {}) {
       const resumeId = String(cliSessionId || '').trim();
       if (!resumeId) throw new Error('Claude resume requires a CLI session id');
       return [
         ...buildClaudeLaunchArgs({
           args: [], model, thinkingLevel, workDir,
-          settingsPath: hookSettings.settingsPath,
           remoteControl: appConfig.agentInterface.claudeRemoteControlEnabled,
         }),
         ...(mcpLaunch.claudeConfigPath ? ['--mcp-config', mcpLaunch.claudeConfigPath, '--strict-mcp-config'] : []),
@@ -1064,7 +1058,6 @@ async function createSession({ workDir, args, model = '', provider = config.id, 
     ...credentialStoreOptions(),
   });
   let promptPreparation = null;
-  let hookSettings = {};
   let launchLogPath = '';
   let scopeLaunch = null;
   // Fresh per launch: claude rejects a session id that already has a transcript.
@@ -1076,9 +1069,6 @@ async function createSession({ workDir, args, model = '', provider = config.id, 
       backendType: config.id,
       sessionId: id,
     });
-    hookSettings = config.id === 'claude'
-      ? await prepareClaudeHookSettings({ sessionId: id })
-      : {};
     launchLogPath = await prepareLaunchLog(sessionName);
     const renderedLaunch = renderAgentSessionLaunch({
       headroom: await prepareHeadroomLaunch(sessionRuntime.provider),
@@ -1097,7 +1087,6 @@ async function createSession({ workDir, args, model = '', provider = config.id, 
         mcpLaunch: mcpPreparation.prepared,
         promptLaunch: promptPreparation.prepared,
         cliSessionId,
-        hookSettings,
         researchSafeRuntime: config.id === 'codex' && hasResearchWorkbenchLaunchProfile(metadata),
         codexPlugins: selectedCodexPlugins,
       },
@@ -1124,7 +1113,6 @@ async function createSession({ workDir, args, model = '', provider = config.id, 
       backendType: config.id, sessionId: id, credentialProfile: mcpCredentialProfile, ...credentialStoreOptions(),
     });
     await cleanupPromptProfileLaunch({ backendType: config.id, sessionId: id });
-    if (config.id === 'claude') await cleanupClaudeHookSettings({ sessionId: id });
     throw error;
   }
 
@@ -1295,7 +1283,6 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
     ...credentialStoreOptions(),
   });
   let promptPreparation = null;
-  let hookSettings = {};
   let launchLogPath = '';
   let scopeLaunch = null;
 
@@ -1305,9 +1292,6 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
       backendType: config.id,
       sessionId: id,
     });
-    hookSettings = config.id === 'claude'
-      ? await prepareClaudeHookSettings({ sessionId: id })
-      : {};
     launchLogPath = await prepareLaunchLog(sessionName);
     const { allArgs, paneCommand } = renderAgentSessionLaunch({
       headroom: await prepareHeadroomLaunch(sessionRuntime.provider),
@@ -1326,7 +1310,6 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
         runtime: sessionRuntime.launchRuntime,
         mcpLaunch: mcpPreparation.prepared,
         promptLaunch: promptPreparation.prepared,
-        hookSettings,
         researchSafeRuntime: config.id === 'codex' && hasResearchWorkbenchLaunchProfile(refreshed.metadata),
         codexPlugins: refreshed.codexPlugins,
       },
@@ -1353,7 +1336,6 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
       ...credentialStoreOptions(),
     });
     await cleanupPromptProfileLaunch({ backendType: config.id, sessionId: id });
-    if (config.id === 'claude') await cleanupClaudeHookSettings({ sessionId: id });
     if (launchLogPath) await rm(launchLogPath, { force: true }).catch(() => {});
     throw error;
   }
@@ -1606,7 +1588,6 @@ async function cleanupSessionArtifacts(id, meta = {}) {
     ...credentialStoreOptions(),
   });
   await cleanupPromptProfileLaunch({ backendType: config.id, sessionId: id });
-  if (config.id === 'claude') await cleanupClaudeHookSettings({ sessionId: id });
   if (meta?.launchLogPath) {
     await rm(meta.launchLogPath, { force: true }).catch(() => {});
   }

@@ -7,6 +7,7 @@ import {
   buildClaudeStreamJsonArgs,
   ClaudeStreamJsonTransport,
 } from '../modules/agent/claude-stream-json-transport.mjs';
+import { CLAUDE_FLEET_PLUGIN_DIR } from '../modules/agent/hook-events.mjs';
 import { ProcessSupervisor } from '../modules/agent/process-supervisor.mjs';
 import { createJournalStore } from '../modules/sessions/journal-store.mjs';
 import { SessionService } from '../modules/sessions/session-service.mjs';
@@ -206,7 +207,7 @@ describe('ClaudeStreamJsonTransport', () => {
       sessionId: '11111111-2222-4333-8444-555555555555',
       model: 'claude-sonnet-4-6',
       permissionMode: 'workspace-write',
-      mcpConfigPath: '/state/dueno-mcp.json', settingsPath: '/state/hooks.json',
+      mcpConfigPath: '/state/dueno-mcp.json',
       promptArgs: ['--append-system-prompt-file', '/state/prompt.md'],
     }), [
       '-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
@@ -214,7 +215,7 @@ describe('ClaudeStreamJsonTransport', () => {
       '--permission-prompt-tool', 'stdio',
       '--model', 'claude-sonnet-4-6', '--permission-mode', 'acceptEdits',
       '--mcp-config', '/state/dueno-mcp.json', '--strict-mcp-config',
-      '--settings', '/state/hooks.json', '--append-system-prompt-file', '/state/prompt.md',
+      '--plugin-dir', CLAUDE_FLEET_PLUGIN_DIR, '--append-system-prompt-file', '/state/prompt.md',
     ]);
     const effort = buildClaudeStreamJsonArgs({ sessionId: '11111111-2222-4333-8444-555555555555', resume: true, thinkingLevel: 'high' });
     assert.equal(effort[effort.indexOf('--effort') + 1], 'high');

@@ -5,6 +5,7 @@ import {
   createTransportEvent,
   questionInteraction,
 } from './agent-transport.mjs';
+import { CLAUDE_FLEET_PLUGIN_DIR } from './hook-events.mjs';
 import { mapPromptBlocksForClaude } from './prompt-blocks.mjs';
 import { ProcessSupervisor } from './process-supervisor.mjs';
 
@@ -15,7 +16,7 @@ export const CLAUDE_STREAM_JSON_ENV_ALLOWLIST = Object.freeze([
 ]);
 
 export function buildClaudeStreamJsonArgs({
-  sessionId, resume = false, model = '', thinkingLevel = '', permissionMode = '', mcpConfigPath = '', settingsPath = '', promptArgs = [],
+  sessionId, resume = false, model = '', thinkingLevel = '', permissionMode = '', mcpConfigPath = '', promptArgs = [],
 } = {}) {
   const args = [
     '-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
@@ -30,7 +31,7 @@ export function buildClaudeStreamJsonArgs({
   else if (permissionMode === 'workspace-write') args.push('--permission-mode', 'acceptEdits');
   else if (permissionMode) throw Object.assign(new Error(`Unsupported Claude permission mode: ${permissionMode}`), { code: 'unsupported_permission_mode' });
   if (mcpConfigPath) args.push('--mcp-config', String(mcpConfigPath), '--strict-mcp-config');
-  if (settingsPath) args.push('--settings', String(settingsPath));
+  args.push('--plugin-dir', CLAUDE_FLEET_PLUGIN_DIR);
   args.push(...promptArgs.map(String));
   return args;
 }
@@ -116,7 +117,7 @@ export class ClaudeStreamJsonTransport {
         command: this.binary,
         args: spec.args || buildClaudeStreamJsonArgs({
           sessionId: this.protocolSessionId, resume: spec.resume, model: spec.model, thinkingLevel: spec.thinkingLevel, permissionMode: spec.permissionMode,
-          mcpConfigPath: spec.mcpConfigPath, settingsPath: spec.settingsPath, promptArgs: spec.promptArgs,
+          mcpConfigPath: spec.mcpConfigPath, promptArgs: spec.promptArgs,
         }),
         cwd,
         env: spec.env || this.env,

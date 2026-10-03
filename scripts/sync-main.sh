@@ -60,6 +60,9 @@ fi
 # ── 3. Validate before systemd starts the server ─────────────────────────────
 log "checking syntax"
 "$NODE_BIN" "$LIVE_DIR/scripts/check-syntax.mjs"
+# Claude sessions report lifecycle hooks through this plugin; an invalid one silently drops them.
+log "validating claude fleet plugin"
+claude plugin validate "$LIVE_DIR/scripts/agent-hooks/claude-fleet" >/dev/null
 
 # ── 4. Symlink runtime state from the dev clone (no data loss) ────────────────
 # Everything git-ignored at the repo root is runtime state (env, certs, agent

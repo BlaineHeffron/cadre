@@ -1,0 +1,52 @@
+import { expect, test } from 'claude-code/testing';
+
+const ran = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false };
+
+// Stands in for the engine beneath the plugin: the classic events, the session, and the reporter runs.
+function engine(on: any, runReporter: (e: any) => unknown = () => ran) {
+  const runs: any[] = [];
+  for (const event of ['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionEnd']) on(`classic.${event}`, () => ({}));
+  on('session.id', () => ({ value: 'cli-session-1' }));
+  on('session.cwd', () => ({ value: '/work/repo' }));
+  on('process.run', (_$: any, e: any) => {
+    runs.push(e);
+    return { value: runReporter(e) };
+  });
+  return () => runs.map((run) => ({ argv: run.argv, payload: JSON.parse(run.init.stdin) }));
+}
+
+test('relays each classic event to the reporter, in order', async ($, on) => {
+  const reported = engine(on);
+  await $.classic.SessionStart({ source: 'startup' });
+  await $.classic.UserPromptSubmit({ prompt: 'hi' });
+  await $.classic.Stop({ stop_hook_active: false });
+  await $.classic.SessionEnd({ reason: 'other' });
+  expect(reported().map((r) => r.payload.hook_event_name)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionEnd']);
+  const [start, prompt] = reported();
+  expect(prompt?.payload.prompt).toBe('hi');
+  expect(start?.argv[0]).toBe('node');
+  expect(start?.argv[1]).toMatch(/\/agent-hooks\/claude-fleet\/\.\.\/log-event\.mjs$/);
+  expect(start?.argv.slice(2)).toEqual(['--provider', 'claude']);
+});
+
+test('fills the classic base fields for PreToolUse', async ($, on) => {
+  const reported = engine(on);
+  on('tool.call', () => ({ result: { stdout: 'hi', stderr: '', interrupted: false } }));
+  await $.tool.call({ tool: 'Bash', command: 'echo hi' });
+  await $.classic.SessionEnd({ reason: 'other' });
+  expect(reported()[0]?.payload).toMatchObject({
+    hook_event_name: 'PreToolUse', session_id: 'cli-session-1', cwd: '/work/repo', tool_name: 'Bash', command: 'echo hi',
+  });
+});
+
+test('a failed reporter run does not stop later events', async ($, on) => {
+  let calls = 0;
+  const reported = engine(on, () => {
+    calls += 1;
+    if (calls === 1) throw new Error('node missing');
+    return ran;
+  });
+  await $.classic.Stop({ stop_hook_active: false });
+  await $.classic.SessionEnd({ reason: 'other' });
+  expect(reported().map((r) => r.payload.hook_event_name)).toEqual(['Stop', 'SessionEnd']);
+});
