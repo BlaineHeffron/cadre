@@ -107,6 +107,15 @@ test('cleanup uses the base ref policy recorded at creation, not the local check
   assert.equal(await exists(f.metadata.path), false);
 });
 
+test('base ref cleanup off keeps the worktree despite local on-merge config', async (t) => {
+  const f = await fixture(t); await pushConfig(f, JSON.stringify({ cleanup: 'off' }));
+  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ cleanup: 'on-merge' }));
+  const metadata = await createManagedWorktree({ repo: f.repo, branch: 'off', roomId: 'thr_off', baseDir: f.options.baseDir });
+  assert.equal(metadata.cleanup, 'off');
+  assert.equal((await cleanupManagedWorktree(metadata, f.options)).reason, 'cleanup off');
+  assert.equal(await exists(metadata.path), true);
+});
+
 test('legacy metadata without a recorded cleanup policy is kept', async (t) => {
   const f = await fixture(t); await git(f.repo, 'merge', '--ff-only', 'topic');
   const { cleanup, ...legacy } = f.metadata;
