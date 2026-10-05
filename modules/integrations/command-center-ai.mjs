@@ -811,7 +811,7 @@ export async function commandCenterAIPlugin(app, {
         executeOperatorAction: (action) => app.inject({
           method: action.method,
           url: action.path,
-          payload: action.body,
+          payload: action.body ?? {},
           headers: { cookie: `${BROWSER_SESSION_COOKIE}=${createBrowserSessionCookieValue()}` },
         }),
       });

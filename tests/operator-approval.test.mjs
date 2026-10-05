@@ -7,6 +7,8 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { chromium } from 'playwright-core';
+import { AgentBusStore } from '../modules/agent-bus/store.mjs';
+import { registerAgentBusRoutes } from '../modules/agent-bus/routes.mjs';
 import { config } from '../config.mjs';
 import { authPlugin, createBrowserSessionCookieValue, BROWSER_SESSION_COOKIE } from '../modules/platform/auth.mjs';
 import { buildInProcessFastifyRequest } from '../modules/agent-bus/in-process-mcp.mjs';
@@ -30,6 +32,14 @@ test('operator actions use the real queue, auth, MCP transport and GitHub routes
   const { commandCenterAIPlugin, OPERATOR_ACTION_ROUTES } = await import('../modules/integrations/command-center-ai.mjs');
   const app = Fastify();
   t.after(() => app.close());
+  const busStore = new AgentBusStore({ stateDir: join(dir, 'agent-bus') });
+  await busStore.init();
+  t.after(() => busStore.close());
+  app.decorate('agentBusLifecycle', {});
+  registerAgentBusRoutes({ app, store: busStore, adapters: {},
+    broadcastThreadSummary: async () => {}, enrichThread: async (thread) => thread,
+    normalizeThreadSummary: (thread) => thread, participantRef: (ref) => ref, pruneObservedParticipant: () => {},
+  });
   const commands = [];
   const executions = [];
   await app.register(authPlugin, { token: 'fixture-token', internalBypassToken: 'fixture-bypass' });
@@ -133,6 +143,16 @@ test('operator actions use the real queue, auth, MCP transport and GitHub routes
     const result = (await answer(id)).json();
     assert.equal(result.operatorActionResult.statusCode, 400);
     assert.match(commands.at(-1).text, /→ 400/);
+    assert.equal((await answer(id)).statusCode, 409);
+  });
+
+  await t.test('a body-less end-room request executes against the real schema and store', async () => {
+    const thread = await busStore.createThread({ title: 'Empty fixture room', participants: [], createdBy: { kind: 'claude', sessionId: 'another-owner' } });
+    const { id } = await create({ method: 'POST', path: `/api/agent-bus/threads/${thread.id}/end` });
+    const result = (await answer(id)).json();
+    assert.equal(result.operatorActionResult.statusCode, 200, result.operatorActionResult.response);
+    assert.equal(busStore.getThread(thread.id).thread.status, 'closed');
+    assert.match(commands.at(-1).text, /→ 200/);
     assert.equal((await answer(id)).statusCode, 409);
   });
 
