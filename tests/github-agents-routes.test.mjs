@@ -42,6 +42,8 @@ describe('GitHub agents routes', () => {
 
     assert.equal(result.id, 'session-98');
     assert.equal(creates[0].backendType, 'codex');
+    assert.equal(creates[0].input.autoCloseMode, 'when_waiting_for_input');
+    assert.equal(creates[0].input.autoCloseAfterMs, 7200000);
     assert.deepEqual(commands, [{
       backendType: 'codex',
       sessionId: 'session-98',
@@ -109,6 +111,21 @@ describe('GitHub agents routes', () => {
       'prEnabled',
       'repo',
     ].sort());
+    await app.close();
+  });
+
+  it('preserves poll state when repo settings are posted again', async () => {
+    const app = await buildApp();
+    const payload = { owner: 'octo', repo: 'demo', authRef: 'GITHUB_TOKEN_REF' };
+    await app.inject({ method: 'POST', url: '/api/agents/github', payload: {
+      ...payload, lastSeenPrNumber: 20, lastSeenIssueNumber: 19, spawnedItemKeys: ['pr:20', 'issue:19'],
+    } });
+    const saved = await app.inject({ method: 'POST', url: '/api/agents/github', payload: { ...payload, issueEnabled: false } });
+    assert.equal(saved.statusCode, 200);
+    assert.equal(saved.json().repo.lastSeenPrNumber, 20);
+    assert.equal(saved.json().repo.lastSeenIssueNumber, 19);
+    const reset = await app.inject({ method: 'POST', url: '/api/agents/github', payload: { ...payload, lastSeenPrNumber: null } });
+    assert.equal(reset.json().repo.lastSeenPrNumber, null);
     await app.close();
   });
 

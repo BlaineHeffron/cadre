@@ -368,6 +368,13 @@ export function buildGithubAgentRepoStore({
       nowMs: now(),
     });
     const prior = state.repos[repo.id];
+    for (const [key, alias] of [
+      ['lastSeenPrNumber', 'last_seen_pr_number'],
+      ['lastSeenIssueNumber', 'last_seen_issue_number'],
+      ['spawnedItemKeys', 'spawned_item_keys'],
+    ]) {
+      if (prior && !Object.hasOwn(input, key) && !Object.hasOwn(input, alias)) repo[key] = prior[key];
+    }
     state.repos[repo.id] = {
       ...repo,
       createdAtMs: prior?.createdAtMs || repo.createdAtMs,
@@ -455,8 +462,8 @@ export async function pollGithubRepo(repoInput = {}, {
       .filter((item) => !item?.pull_request && trusted(item))
       .map(normalizeGithubItem)
       .filter((item) => item.number > 0);
-    const baselinePr = repo.lastSeenPrNumber == null;
-    const baselineIssue = repo.lastSeenIssueNumber == null;
+    const baselinePr = repo.prEnabled && repo.lastSeenPrNumber == null;
+    const baselineIssue = repo.issueEnabled && repo.lastSeenIssueNumber == null;
     const baselined = baselinePr || baselineIssue;
     const maxPrNumber = repo.prEnabled ? maxNumber(openPulls, repo.lastSeenPrNumber, baselinePr ? 0 : null) : repo.lastSeenPrNumber;
     const maxIssueNumber = repo.issueEnabled ? maxNumber(openIssues, repo.lastSeenIssueNumber, baselineIssue ? 0 : null) : repo.lastSeenIssueNumber;
@@ -478,6 +485,8 @@ export async function pollGithubRepo(repoInput = {}, {
       baselineIssue,
       newPullRequests,
       newIssues,
+      openPullRequestNumbers: repo.prEnabled ? pulls.map((item) => Number(item.number)) : null,
+      openIssueNumbers: repo.issueEnabled ? issues.filter((item) => !item.pull_request).map((item) => Number(item.number)) : null,
       updatedRepo: safeRepoRecord(updatedRepo),
     };
   } catch (error) {
@@ -512,6 +521,7 @@ export class GithubAgentPoller {
     reapWorktreesImpl = reapWorktrees,
     listExistingSessions = null,
     tmuxSessionExists = null,
+    deleteSession = null,
     onResult = () => {},
     log = null,
   } = {}) {
@@ -529,6 +539,8 @@ export class GithubAgentPoller {
     this.reapWorktrees = reapWorktreesImpl;
     this.listExistingSessions = listExistingSessions;
     this.tmuxSessionExists = tmuxSessionExists;
+    this.deleteSession = deleteSession;
+    this.pollQueue = Promise.resolve();
     this.onResult = onResult;
     this.log = log;
     this.timer = null;
@@ -554,6 +566,34 @@ export class GithubAgentPoller {
       now: this.now,
       timeoutMs: this.timeoutMs,
     });
+    const deletedSessions = [];
+    if (!suppressSpawn && !result.error && !result.skipped && typeof this.deleteSession === 'function') {
+      const sessions = this.listExistingSessions
+        ? await this.listExistingSessions()
+        : await listRegisteredGithubSessions(this.config);
+      for (const session of sessions) {
+        if (session.source !== 'github-agent' || session.endedAt) continue;
+        try {
+          const metadata = session.metadata || {};
+          const kind = metadata.github_kind;
+          const number = Number(metadata.github_number);
+          if (!sessionMatchesGithubItem(session, repo, kind, { number }, this.config)) continue;
+          const openNumbers = kind === 'pr' ? result.openPullRequestNumbers : kind === 'issue' ? result.openIssueNumbers : null;
+          if (!openNumbers || openNumbers.includes(number)) continue;
+          if (session.tmuxSession && !(await (this.tmuxSessionExists || tmuxSessionExists)(session.tmuxSession))) continue;
+          const item = await fetchGithubJson(this.fetchImpl,
+            `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/${kind === 'pr' ? 'pulls' : 'issues'}/${number}`, {
+              token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs,
+            });
+          if (item?.state !== 'closed') continue;
+          await this.deleteSession(session);
+          deletedSessions.push({ sessionId: session.id || session.sessionId, kind, number });
+          this.log?.info?.({ repoId: repo.id, sessionId: session.id || session.sessionId, kind, number }, 'Deleted GitHub agent session for closed item');
+        } catch (error) {
+          this.log?.warn?.({ repoId: repo.id, sessionId: session.id || session.sessionId, code: sanitizedError(error) }, 'Failed to delete GitHub agent session for closed item');
+        }
+      }
+    }
     const spawn = suppressSpawn
       ? { spawned: [], capped: false, updatedRepo: result.updatedRepo }
       : await spawnGithubAgentsForPollResult(result, {
@@ -579,6 +619,7 @@ export class GithubAgentPoller {
     const payload = {
       ...result,
       spawned: spawn.spawned,
+      deletedSessions,
       spawnCapped: spawn.capped,
       updatedRepo,
     };
@@ -586,7 +627,13 @@ export class GithubAgentPoller {
     return payload;
   }
 
-  async pollOnce({ id = '', suppressSpawn = false } = {}) {
+  pollOnce(options = {}) {
+    const poll = this.pollQueue.catch(() => {}).then(() => this.runPollOnce(options));
+    this.pollQueue = poll;
+    return poll;
+  }
+
+  async runPollOnce({ id = '', suppressSpawn = false } = {}) {
     await this.runReaper();
     const repos = await this.listRepos();
     const selected = normalizeText(id)
@@ -692,9 +739,11 @@ export async function spawnGithubAgentsForPollResult(pollResult = {}, {
     ...(Array.isArray(pollResult.newPullRequests) ? pollResult.newPullRequests.map((item) => ({ kind: 'pr', item })) : []),
     ...(Array.isArray(pollResult.newIssues) ? pollResult.newIssues.map((item) => ({ kind: 'issue', item })) : []),
   ];
+  const candidateKeys = new Set();
   const candidates = newEntries.filter((entry) => {
     const key = githubItemSpawnKey(entry.kind, entry.item);
-    if (!key || processedKeys.has(key)) return false;
+    if (!key || processedKeys.has(key) || candidateKeys.has(key)) return false;
+    candidateKeys.add(key);
     return !shouldSkipGithubSpawnBackoff(spawnBackoff, repo.id, entry.kind, entry.item, nowMs);
   });
 
@@ -984,7 +1033,12 @@ function githubIssuesUrl(repo) {
   return `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/issues?state=open&sort=created&per_page=100`;
 }
 
-async function fetchGithubList(fetchImpl, url, { token = '', timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+async function fetchGithubList(fetchImpl, url, options) {
+  const payload = await fetchGithubJson(fetchImpl, url, options);
+  return Array.isArray(payload) ? payload : [];
+}
+
+async function fetchGithubJson(fetchImpl, url, { token = '', timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -1018,7 +1072,7 @@ async function fetchGithubList(fetchImpl, url, { token = '', timeoutMs = DEFAULT
       error.code = 'json_parse_failed';
       throw error;
     });
-    return Array.isArray(payload) ? payload : [];
+    return payload;
   } finally {
     clearTimeout(timer);
   }
@@ -1152,18 +1206,28 @@ export function buildGithubAgentPrompt({
     '',
     'Read and analyze first. Draft review notes and proposed fixes.',
   ];
-  if (autoReview && kind === 'pr') {
+  if (kind === 'pr') {
     lines.push(
-      'autoReviewEnabled=true: you ARE authorized to post a GitHub pull-request review (COMMENT or REQUEST_CHANGES; APPROVE only if clearly warranted) summarizing your findings.',
-      'Use the configured fleet GitHub token / gh auth available in this environment. Prefer one structured review body; add inline comments only for concrete line issues.',
-      'Do not push commits, merge, force-push, change repo settings, or deploy. Do not mutate BusinessOS or other systems.',
+      'Post exactly one GitHub pull-request review, with or without autoReviewEnabled. Do not post a separate PR comment.',
+      'The review body must start with this fixed format (counts match findings; use the short reviewed PR head SHA):',
+      'VERDICT: BLOCKING <n> | NON-BLOCKING <m> | sha <short head sha>',
+      '- [B] <file:line> <one line>',
+      '- [N] <file:line> <one line>',
+      'Include one [B] or [N] line per finding, omit finding lines when there are none, then add optional detail.',
+      autoReview
+        ? 'autoReviewEnabled=true: you ARE authorized to post a GitHub pull-request review. Use REQUEST_CHANGES only when BLOCKING > 0; APPROVE only when BLOCKING = 0 and the change is clearly safe; otherwise COMMENT.'
+        : 'autoReviewEnabled=false: use COMMENT only, regardless of findings. Never REQUEST_CHANGES or APPROVE.',
+      'Add inline comments only for concrete line issues, as part of that single review.',
     );
   } else {
-    lines.push(
-      'Do not post comments, reviews, commits, pushes, GitHub mutations, BusinessOS mutations, or system mutations without explicit human approval.',
-    );
+    lines.push('Post exactly one issue triage comment with suspected files, likely cause and proposed fix. No code pushed.');
   }
-  lines.push('MCP tools may be available in this workspace; use them for coordination, not for unapproved mutations.');
+  lines.push(
+    'Use the configured fleet GitHub token / gh auth available in this environment.',
+    'Do not push commits, merge, force-push, change branches, change repo settings, or deploy. Do not mutate BusinessOS or other systems. The single review or triage comment is the only authorized mutation.',
+    'MCP tools may be available in this workspace; use them for coordination, not for unapproved mutations.',
+    'After posting, exit the session (end the agent process). Do not wait for replies or post again.',
+  );
   return `${lines.join('\n')}\n`;
 }
 

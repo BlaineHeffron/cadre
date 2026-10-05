@@ -1,10 +1,10 @@
+import { createAgentAdapters } from '../agent-bus/adapters.mjs';
 import { config as appConfig } from '../../config.mjs';
 import { createAgentSession, enqueueAgentSessionCommand } from '../sessions/index.mjs';
 import { resolveAgentProviderSelection } from '../agent/provider-interface.mjs';
 import {
   buildGithubAgentRepoStore,
   GithubAgentPoller,
-  normalizeGithubAgentRepo,
 } from './github-agents.mjs';
 
 function normalizeText(value) {
@@ -62,6 +62,7 @@ function safePollResult(result = {}) {
     newIssueNumbers: Array.isArray(result.newIssues) ? result.newIssues.map((item) => Number(item.number || 0)).filter(Boolean) : [],
     spawned: Array.isArray(result.spawned) ? result.spawned.map(safeSpawn) : [],
     spawnCapped: result.spawnCapped === true,
+    deletedSessions: result.deletedSessions || [],
     repo: result.updatedRepo ? safeRepo(result.updatedRepo) : null,
   };
 }
@@ -90,6 +91,8 @@ export async function defaultSessionLauncher({
     runtime: selection.runtime,
     thinkingLevel,
     source: 'github-agent',
+    autoCloseMode: 'when_waiting_for_input',
+    autoCloseAfterMs: 2 * 60 * 60 * 1000,
     metadata,
   });
   await enqueueSessionCommand(selection.backendType, result.id, {
@@ -147,6 +150,9 @@ export async function githubAgentsPlugin(app, opts = {}) {
     createIssueWorktree: opts.createIssueWorktree,
     resolveScratchWorkDir: opts.resolveScratchWorkDir,
     reapWorktreesImpl: opts.reapWorktreesImpl,
+    listExistingSessions: opts.listExistingSessions,
+    tmuxSessionExists: opts.tmuxSessionExists,
+    deleteSession: opts.deleteSession || ((session) => createAgentAdapters()[session.backendType].deleteSession(app, session.id || session.sessionId)),
     onResult: handleResult,
     log: opts.log || app.log,
   });
@@ -177,11 +183,7 @@ export async function githubAgentsPlugin(app, opts = {}) {
 
   app.post('/api/agents/github', async (req, reply) => {
     try {
-      const normalized = normalizeGithubAgentRepo(req.body || {}, {
-        defaultAutoReviewEnabled: sourceConfig.autoReviewEnabled,
-        nowMs: opts.now ? opts.now() : Date.now(),
-      });
-      const repo = await repoStore.upsertRepo(normalized);
+      const repo = await repoStore.upsertRepo(req.body || {});
       return { repo: safeRepo(repo) };
     } catch (error) {
       return reply.code(400).send({ error: error.message || 'Invalid GitHub repo config', code: error.code || 'github_repo_invalid' });
