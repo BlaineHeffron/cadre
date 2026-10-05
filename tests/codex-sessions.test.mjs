@@ -13,6 +13,7 @@ import { buildMcpCapabilityCatalog } from '../modules/integrations/mcp-server-ca
 import { sanitizedMcpSnapshot } from '../modules/integrations/mcp-launch-preflight.mjs';
 
 const execFileAsync = promisify(execFile);
+const coverageEnv = process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {};
 const tempDirs = [];
 
 afterEach(async () => {
@@ -24,6 +25,7 @@ afterEach(async () => {
 async function runClearScenario({ paneContent, deadlineMs = 5000 }) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-clear-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const paneFile = join(tempDir, 'pane.txt');
   const bufferFile = join(tempDir, 'buffer.txt');
@@ -96,8 +98,11 @@ async function runClearScenario({ paneContent, deadlineMs = 5000 }) {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX_TEST_PANE: paneFile,
       TMUX_TEST_BUFFER: bufferFile,
       LOG_LEVEL: 'error',
@@ -112,6 +117,7 @@ async function runClearScenario({ paneContent, deadlineMs = 5000 }) {
 async function runStateTransitionScenario({ initialPaneContent, updatedPaneContent }) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-state-hooks-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const paneFile = join(tempDir, 'pane.txt');
   await mkdir(binDir, { recursive: true });
@@ -168,8 +174,11 @@ async function runStateTransitionScenario({ initialPaneContent, updatedPaneConte
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX_TEST_PANE: paneFile,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
@@ -188,6 +197,7 @@ async function runInputPendingListScenario({
 } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-pending-input-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const paneFile = join(tempDir, 'pane.txt');
   const bufferFile = join(tempDir, 'buffer.txt');
@@ -249,7 +259,7 @@ async function runInputPendingListScenario({
   const pluginModuleUrl = pathToFileURL(resolve('modules/sessions/codex-sessions.mjs')).href;
   const wrapped = `
     import Fastify from ${JSON.stringify(fastifyModuleUrl)};
-    import { readFile, writeFile } from 'node:fs/promises';
+    import { readFile, writeFile, rename } from 'node:fs/promises';
     process.chdir(${JSON.stringify(tempDir)});
     const pluginRef = await import(${JSON.stringify(pluginModuleUrl)});
     const broadcasts = [];
@@ -267,7 +277,9 @@ async function runInputPendingListScenario({
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
       await new Promise((resolve) => setTimeout(resolve, 350));
-      await writeFile(${JSON.stringify(paneFile)}, ${JSON.stringify(afterSendPaneContent)});
+      // Publish a complete pane snapshot while the command gate polls fake tmux.
+      await writeFile(${JSON.stringify(paneFile + '.tmp')}, ${JSON.stringify(afterSendPaneContent)});
+      await rename(${JSON.stringify(paneFile + '.tmp')}, ${JSON.stringify(paneFile)});
       await app.inject({ method: 'GET', url: '/api/codex/sessions/pending-1' });
       await new Promise((resolve) => setTimeout(resolve, 50));
       await app.inject({ method: 'GET', url: '/api/codex/sessions/pending-1' });
@@ -302,8 +314,11 @@ async function runInputPendingListScenario({
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX_TEST_PANE: paneFile,
       TMUX_TEST_BUFFER: bufferFile,
       TMUX_TEST_WORKDIR: tempDir,
@@ -319,6 +334,7 @@ async function runInputPendingListScenario({
 async function runMissingPaneDetailScenario() {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-ended-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   await mkdir(binDir, { recursive: true });
   await writeFile(join(binDir, 'tmux'), [
@@ -367,8 +383,11 @@ async function runMissingPaneDetailScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX: '/tmp/tmux-1000/dm-agent,123,0',
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
@@ -382,6 +401,7 @@ async function runMissingPaneDetailScenario() {
 async function runMissingPaneListScenario() {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-ended-list-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   await mkdir(binDir, { recursive: true });
   await writeFile(join(binDir, 'tmux'), [
@@ -431,8 +451,11 @@ async function runMissingPaneListScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX: '/tmp/tmux-1000/dm-agent,123,0',
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
@@ -450,6 +473,7 @@ async function runMissingTmuxDeleteScenario({
 } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-stale-delete-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const storeFile = join(tempDir, '.codex_sessions.json');
   const migratedStoreFile = join(tempDir, '.dueno', 'state', 'codex_sessions.json');
@@ -519,8 +543,11 @@ async function runMissingTmuxDeleteScenario({
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
       CODEX_SESSIONS_STORAGE: 'file',
@@ -533,6 +560,7 @@ async function runMissingTmuxDeleteScenario({
 async function runDeadPaneDeleteScenario() {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-dead-pane-delete-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const storeFile = join(tempDir, '.codex_sessions.json');
   const killedFile = join(tempDir, 'killed');
@@ -581,8 +609,11 @@ async function runDeadPaneDeleteScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX_KILLED_FILE: killedFile,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
@@ -596,6 +627,7 @@ async function runDeadPaneDeleteScenario() {
 async function runNoTmuxServerListScenario() {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-no-tmux-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const storeFile = join(tempDir, '.codex_sessions.json');
   const migratedStoreFile = join(tempDir, '.dueno', 'state', 'codex_sessions.json');
@@ -642,8 +674,11 @@ async function runNoTmuxServerListScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
       CODEX_SESSIONS_STORAGE: 'file',
@@ -656,6 +691,7 @@ async function runNoTmuxServerListScenario() {
 async function runOrphanMetadataRecoveryScenario({ liveTmux = true } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-orphan-recovery-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const migratedStoreFile = join(tempDir, '.dueno', 'state', 'codex_sessions.json');
   await mkdir(binDir, { recursive: true });
@@ -706,8 +742,11 @@ async function runOrphanMetadataRecoveryScenario({ liveTmux = true } = {}) {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
       CODEX_SESSIONS_STORAGE: 'file',
@@ -726,6 +765,7 @@ async function runPruneHasSessionListScenario({
 } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-prune-has-session-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const storeFile = join(tempDir, '.codex_sessions.json');
   const migratedStoreFile = join(tempDir, '.dueno', 'state', 'codex_sessions.json');
@@ -796,8 +836,11 @@ async function runPruneHasSessionListScenario({
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
       CODEX_SESSIONS_STORAGE: 'file',
@@ -810,6 +853,7 @@ async function runPruneHasSessionListScenario({
 async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-lifecycle-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const launchLog = join(tempDir, 'agent.log');
   const gitLog = join(tempDir, 'git.log');
@@ -888,8 +932,11 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
       CODEX_SESSIONS_STORAGE: 'file',
@@ -902,6 +949,7 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
 async function runStartupFailureLaunchLogScenario() {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-startup-log-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   await mkdir(binDir, { recursive: true });
   await writeFile(join(binDir, 'tmux'), [
@@ -936,8 +984,11 @@ async function runStartupFailureLaunchLogScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
       CODEX_SESSIONS_STORAGE: 'file',
@@ -950,6 +1001,7 @@ async function runStartupFailureLaunchLogScenario() {
 async function runEmptyCreateAuditScenario(payload = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-empty-create-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
 
   const fastifyModuleUrl = pathToFileURL(resolve('node_modules/fastify/fastify.js')).href;
   const pluginModuleUrl = pathToFileURL(resolve('modules/sessions/codex-sessions.mjs')).href;
@@ -978,7 +1030,10 @@ async function runEmptyCreateAuditScenario(payload = {}) {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
       CODEX_SESSIONS_STORAGE: 'file',
@@ -991,6 +1046,7 @@ async function runEmptyCreateAuditScenario(payload = {}) {
 async function runScheduledSendPersistenceScenario() {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-scheduled-persist-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const scheduledStoreFile = join(tempDir, '.dueno', 'state', 'codex_scheduled_sends.json');
   await mkdir(binDir, { recursive: true });
@@ -1030,8 +1086,11 @@ async function runScheduledSendPersistenceScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
       CODEX_SESSIONS_STORAGE: 'file',
@@ -1044,6 +1103,7 @@ async function runScheduledSendPersistenceScenario() {
 async function runBareProcessPruneScenario() {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-bare-prune-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const migratedStoreFile = join(tempDir, '.dueno', 'state', 'codex_sessions.json');
   await mkdir(binDir, { recursive: true });
@@ -1084,8 +1144,11 @@ async function runBareProcessPruneScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
       CODEX_SESSIONS_STORAGE: 'file',
@@ -1103,6 +1166,7 @@ async function runHookReconcileScenario({
 } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-hook-reconcile-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const paneFile = join(tempDir, 'pane.txt');
   await mkdir(binDir, { recursive: true });
@@ -1168,8 +1232,11 @@ async function runHookReconcileScenario({
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX_TEST_PANE: paneFile,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
@@ -1191,6 +1258,7 @@ async function runCreateCommandScenario({
 } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-create-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const tmuxArgsFile = join(tempDir, 'tmux-args.txt');
   await mkdir(binDir, { recursive: true });
@@ -1227,8 +1295,10 @@ async function runCreateCommandScenario({
   await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX_TEST_ARGS: tmuxArgsFile,
       ...(staleTmuxSocket ? {
         TMUX: `${join(tempDir, 'missing-tmux-socket')},123,0`,
@@ -1259,6 +1329,7 @@ async function runResumeScenario({
 } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-resume-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const tmuxArgsFile = join(tempDir, 'tmux-resume-args.txt');
   const sessionMarker = join(tempDir, 'tmux-session-created');
@@ -1376,8 +1447,10 @@ async function runResumeScenario({
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      ...coverageEnv,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX_TEST_ARGS: tmuxArgsFile,
       TMUX_SESSION_MARKER: sessionMarker,
       LOG_LEVEL: 'error',

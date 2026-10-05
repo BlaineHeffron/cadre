@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { detectState as detectClaudeState } from '../modules/sessions/claude-state-detector.mjs';
@@ -222,8 +222,10 @@ describe('Session state detectors', () => {
     });
   }
 
-  it('uses fresh hook-derived prompt-ready state ahead of scrape state', async () => {
+  it('uses fresh hook-derived prompt-ready state ahead of scrape state', async (t) => {
     const workDir = await mkdtemp(join(tmpdir(), 'dueno-hook-first-'));
+    t.after(() => rm(workDir, { recursive: true, force: true }));
+    await mkdir(join(workDir, '.git'));
     const stateDir = join(workDir, '.agent_bus', 'hooks', 'state');
     await mkdir(stateDir, { recursive: true });
     const now = Date.now();
@@ -249,8 +251,10 @@ describe('Session state detectors', () => {
     assert.equal(state.safe_to_message, true);
   });
 
-  it('falls back to scrape state when hook-derived state is stale', async () => {
+  it('falls back to scrape state when hook-derived state is stale', async (t) => {
     const workDir = await mkdtemp(join(tmpdir(), 'dueno-hook-stale-'));
+    t.after(() => rm(workDir, { recursive: true, force: true }));
+    await mkdir(join(workDir, '.git'));
     const stateDir = join(workDir, '.agent_bus', 'hooks', 'state');
     await mkdir(stateDir, { recursive: true });
     const now = Date.now();
@@ -276,8 +280,10 @@ describe('Session state detectors', () => {
     assert.equal(state.safe_to_message, false);
   });
 
-  it('ignores hook state older than a resumed launch while keeping CLI metadata readable', async () => {
+  it('ignores hook state older than a resumed launch while keeping CLI metadata readable', async (t) => {
     const workDir = await mkdtemp(join(tmpdir(), 'dueno-hook-resume-min-'));
+    t.after(() => rm(workDir, { recursive: true, force: true }));
+    await mkdir(join(workDir, '.git'));
     const stateDir = join(workDir, '.agent_bus', 'hooks', 'state');
     await mkdir(stateDir, { recursive: true });
     const endedAt = Date.now();

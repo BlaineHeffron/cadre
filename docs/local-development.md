@@ -8,6 +8,8 @@
 
 ## Checks
 
+Tests must be hermetic: use temporary directories and explicit environment/configuration fixtures, never personal setup or real services.
+
 ```
 npm run check:node
 npm run check
