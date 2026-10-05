@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { renderBusEnvelope } from '../modules/agent-bus/envelope.mjs';
 import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
 
 const owner = { kind: 'pi', sessionId: 'pi-1' };
@@ -135,4 +136,62 @@ test('a DM participant may archive while both participant sessions are alive', a
     assert.equal(h.sessionCatalog[kind].has(sessionId), true);
     assert.deepEqual(h.deletedSessions[kind], []);
   }
+});
+
+
+test('poster summaries persist through MCP room and DM calls and compact contexts', async (t) => {
+  const { h, thread, call, requestImpl } = await setup(t);
+  const summary = 'ready · PR #42 · Summary delivery works';
+  const body = 'Full report\n' + 'details '.repeat(200);
+  const sent = await call('room_send', { thread_id: thread.id, body, summary, type: 'result' });
+  const stored = h.store.getMessage(sent.structuredContent.message.id);
+  assert.equal(stored.metadata.summary, summary);
+  const compact = await call('room_context', { thread_id: thread.id, summary_only: true });
+  assert.equal(compact.structuredContent.messages[0].summary, summary);
+  assert.equal(compact.structuredContent.messages[0].body, undefined);
+  const envelope = renderBusEnvelope(stored);
+  assert.ok(envelope.includes(summary));
+  assert.ok(envelope.includes(`Body length: ${body.length} characters`));
+  assert.ok(envelope.includes(`Full body: room_context(thread_id="${thread.id}", message_id="${stored.id}")`));
+  assert.equal(envelope.includes(body), false);
+  const page = await call('room_context', { thread_id: thread.id, message_id: stored.id });
+  assert.equal(page.structuredContent.messages[0].body, body.slice(0, 1200));
+
+  const fallback = '\n  \n' + 'f'.repeat(201) + '\nOther details';
+  await call('room_send', { thread_id: thread.id, body: fallback });
+  const history = await call('room_context', { thread_id: thread.id, summary_only: true });
+  assert.equal(history.structuredContent.messages[1].summary, 'f'.repeat(199) + '…');
+  assert.equal((await call('room_context', { thread_id: thread.id, bodies: false })).structuredContent.messages[0].summary, undefined);
+  const changed = await call('room_send', { thread_id: thread.id, body, summary: 'Updated summary', type: 'result' });
+  assert.notEqual(changed.structuredContent.message.id, stored.id);
+
+  const dm = await call('agent_dm', { kind: 'claude', session_id: 'claude-1', body, summary });
+  const dmMessage = h.store.getMessage(dm.structuredContent.message.id);
+  assert.equal(dmMessage.metadata.summary, summary);
+  assert.equal(dmMessage.metadata.dm, true);
+  const dmEnvelope = renderBusEnvelope(dmMessage);
+  assert.ok(dmEnvelope.includes(summary));
+  assert.ok(dmEnvelope.includes(`Full body: room_context(thread_id="${dmMessage.threadId}", message_id="${dmMessage.id}")`));
+  assert.equal(dmEnvelope.includes(body), false);
+  assert.equal((await call('room_context', { thread_id: dmMessage.threadId, summary_only: true })).structuredContent.messages[0].summary, summary);
+
+  for (const tool of ['room_send', 'agent_dm']) {
+    const args = tool === 'room_send' ? { thread_id: thread.id } : { kind: 'claude', session_id: 'claude-1' };
+    await assert.rejects(call(tool, { ...args, body: 'Rejected', summary: 'x'.repeat(201) }), /summary must be at most 200 characters/);
+    await assert.rejects(call(tool, { ...args, body: 'Rejected', summary: 42 }), /summary must be a string/);
+  }
+  for (const [path, args] of [
+    ['/api/agent-bus/messages', { threadId: thread.id, from: owner }],
+    ['/api/agent-bus/dm', { from: owner, target: participants[0] }],
+  ]) {
+    await assert.rejects(requestImpl(path, { method: 'POST', body: { ...args, body: 'Rejected', summary: 'x'.repeat(201) } }), (err) => err.statusCode === 400 && /summary/.test(err.payload?.message));
+  }
+  for (const summary of ['', '   ']) {
+    const sent = await call('room_send', { thread_id: thread.id, body: 'Fallback headline\n' + 'd'.repeat(1200), summary });
+    const message = h.store.getMessage(sent.structuredContent.message.id);
+    assert.match(renderBusEnvelope(message), /Summary: Fallback headline/);
+    assert.equal((await call('room_context', { thread_id: thread.id, message_id: message.id, summary_only: true })).structuredContent.messages[0].summary, 'Fallback headline');
+  }
+  const boundary = await call('room_send', { thread_id: thread.id, body: 'Accepted', summary: 'x'.repeat(200) });
+  assert.equal(h.store.getMessage(boundary.structuredContent.message.id).metadata.summary.length, 200);
 });

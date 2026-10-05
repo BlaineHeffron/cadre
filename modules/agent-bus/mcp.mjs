@@ -5,6 +5,7 @@ import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { getAgentBusCredentialStore, isAgentSpawnTool } from './mcp-auth.mjs';
+import { messageSummary } from './envelope.mjs';
 import { TASK_TOOLS } from './task-routes.mjs';
 import {
   coordinatorAuditTarget,
@@ -193,6 +194,7 @@ function compactRoomContext(payload, args = {}) {
     if (!includeBodies) {
       return {
         id: message.id, from: message.from, type: message.type, createdAt: message.createdAt, replyTo: message.replyTo || null,
+        ...(summaryOnly ? { summary: messageSummary(message) } : {}),
       };
     }
     const slice = body.slice(bodyOffset, bodyOffset + bodyLimit);
@@ -411,9 +413,9 @@ export function buildAgentBusMcpServer({
     ...TASK_TOOLS,
     {
       name: 'room_send',
-      description: 'Post in any non-DM room without subscribing; DMs require membership. Participants receive messages; the owner also receives results.',
+      description: 'Post in any non-DM room without subscribing; DMs require membership. Participants receive messages; the owner also receives results. Set summary on type=result as <merged|ready|blocked|needs-decision> · PR #n · <one line>.',
       inputSchema: { type: 'object', properties: {
-        thread_id: { type: 'string' }, body: { type: 'string' }, reply_to: { type: 'string' },
+        thread_id: { type: 'string' }, body: { type: 'string' }, summary: { type: 'string', maxLength: 200 }, reply_to: { type: 'string' },
         type: { type: 'string', enum: ['message', 'result'] },
       }, required: ['thread_id', 'body'], additionalProperties: false },
     },
@@ -462,7 +464,7 @@ export function buildAgentBusMcpServer({
       name: 'agent_dm',
       description: 'Send a direct message to any agent, creating the deterministic pair room when needed.',
       inputSchema: { type: 'object', properties: {
-        kind: { type: 'string' }, session_id: { type: 'string' }, body: { type: 'string' },
+        kind: { type: 'string' }, session_id: { type: 'string' }, body: { type: 'string' }, summary: { type: 'string', maxLength: 200 },
       }, required: ['kind', 'session_id', 'body'], additionalProperties: false },
     },
     {
@@ -517,6 +519,7 @@ export function buildAgentBusMcpServer({
         const payload = await request('/api/agent-bus/messages', { method: 'POST', body: {
           threadId: assertMcpString(args.thread_id, 'thread_id'), from,
           body: assertMcpString(args.body, 'body', { maxLength: MCP_BODY_MAX }),
+          ...(args.summary !== undefined ? { summary: assertMcpString(args.summary, 'summary', { maxLength: 200, allowEmpty: true }) } : {}),
           ...(args.reply_to ? { replyTo: args.reply_to } : {}),
           ...(args.type === 'result' ? { type: 'result' } : {}),
           deliveryMode: 'enqueue',
@@ -558,6 +561,7 @@ export function buildAgentBusMcpServer({
         const payload = await request('/api/agent-bus/dm', { method: 'POST', body: {
           from, target: assertMcpAgentRef(args.kind, args.session_id, 'target'),
           body: assertMcpString(args.body, 'body', { maxLength: MCP_BODY_MAX }),
+          ...(args.summary !== undefined ? { summary: assertMcpString(args.summary, 'summary', { maxLength: 200, allowEmpty: true }) } : {}),
         } });
         return textResult(`DM ${payload.message?.id || 'message'} queued.`, payload);
       }
