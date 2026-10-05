@@ -286,8 +286,8 @@ describe('ordinary Dueno authority after control-plane restart', () => {
         },
       });
       assert.equal(spawned.error, undefined, spawned.error?.message);
-      assert.equal(spawned.result.structuredContent.bootstrapOk, true);
-      const thread = restarted.busStore.getThread(spawned.result.structuredContent.thread.id).thread;
+      assert.equal(spawned.result.structuredContent.participants.length, 2);
+      const thread = restarted.busStore.getThread(spawned.result.structuredContent.thread_id).thread;
       assert.deepEqual(thread.participants.map((entry) => entry.kind).sort(), ['codex', 'pi']);
       const childSessions = thread.participants.map((entry) => restarted.sessions.get(entry.sessionId));
       assert.deepEqual(childSessions.map((entry) => `${entry.provider}/${entry.model}`).sort(), [

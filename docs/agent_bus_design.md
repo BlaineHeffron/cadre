@@ -137,13 +137,15 @@ The agent-bus MCP server exposes room tools alongside DM, directory, and task to
 
 - `room_send(thread_id, body, reply_to?, type?)`: broadcast as the authenticated agent; delivery is enqueued
 - `room_context(thread_id, limit?, since?, after?, bodies?, deliveries?, summary_only?)`: read recent truncated room messages (`since` is a message id, `after` is a timestamp); deliveries omitted unless requested
-- `room_list(scope?)`: default lists owned/subscribed rooms; `scope="all"` lists all open non-DM rooms
+- `room_list(scope?, limit?, offset?)`: default lists owned/subscribed rooms; `scope="all"` lists all open non-DM rooms
 - `room_close(thread_id, cancel_pending?)`: archive without terminating sessions; any agent may close a non-DM room without subscribing; DMs require membership
 - `room_end(thread_id)`: owner or operator closes a non-DM room, cancels queued deliveries, and terminates eligible sessions
 - `room_transfer(thread_id, to: {kind, session_id})`: transfer ownership or claim for yourself after the owner session is gone
 - `room_reopen(thread_id)`: any agent may reopen an archived non-DM room without subscribing; DMs require membership
 - `agent_dm(kind, session_id, body)`: send a DM as the authenticated agent
-- `agent_directory()`: list Claude, Codex, and Pi agents with display names and canonical state
+- `agent_directory(kind?, state?, limit?, offset?)`: read recent Claude, Codex, and Pi agents with display names and canonical state; defaults to 25 rows, with `nextOffset` for more
+
+MCP actions return compact ids and status in both text and structured content. Read text with `room_context` or `monitor_get_session_output`; list reads default to 25 rows and accept `offset` for more.
 
 Non-DM room read/send/close/reopen access is open; membership controls subscriptions. DMs remain participant/owner-scoped. Ending a room requires its owner or an operator; transfer/claim follows the rules above. The authenticated principal supplies the sender for `room_send` and `agent_dm`; callers cannot impersonate another sender. `collaboration_guidance` is an MCP prompt, not a tool.
 

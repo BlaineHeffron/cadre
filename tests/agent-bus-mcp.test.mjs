@@ -160,8 +160,8 @@ test('room list pins the caller and returns only the compact participant-scoped 
   const result = await server.callTool('room_list', { kind: 'claude', session_id: 'spoof' }, context);
   assert.equal(calls[0], '/api/agent-bus/threads/by-participant?kind=codex&sessionId=c1&status=all');
   assert.deepEqual(result.structuredContent.rooms, [
-    { id: 'thr_1', title: 'Work', kind: 'room', status: 'open', participants: [{ kind: 'codex', sessionId: 'c1' }] },
-    { id: 'thr_dm', title: 'DM', kind: 'dm', status: 'closed', participants: [{ kind: 'codex', sessionId: 'c1' }] },
+    { id: 'thr_1', title: 'Work', kind: 'room', status: 'open' },
+    { id: 'thr_dm', title: 'DM', kind: 'dm', status: 'closed' },
   ]);
 });
 
@@ -186,7 +186,7 @@ test('room creator can read, address, and close without being a participant', as
   const contextResult = await server.callTool('room_context', { thread_id: 'thr_owned' }, owner);
   assert.equal(contextResult.structuredContent.thread.id, 'thr_owned');
   const sent = await server.callTool('room_send', { thread_id: 'thr_owned', body: 'status' }, owner);
-  assert.equal(sent.structuredContent.message?.id || 'msg_owned', 'msg_owned');
+  assert.equal(sent.structuredContent.message_id || 'msg_owned', 'msg_owned');
   assert.deepEqual(calls.find((item) => item.path === '/api/agent-bus/messages').options.body.from,
     { kind: 'claude', sessionId: 'coord' });
   const closed = await server.callTool('room_close', { thread_id: 'thr_owned' }, owner);
@@ -223,5 +223,5 @@ test('agent_directory unifies provider rosters with display name and canonical s
   const server = buildAgentBusMcpServer({ requestImpl: async (path) => ({ sessions: path.includes('codex')
     ? [{ id: 'c1', displayName: 'Builder', state: { status: 'ready' } }] : [] }) });
   const result = await server.callTool('agent_directory', {}, context);
-  assert.deepEqual(result.structuredContent.agents, [{ kind: 'codex', sessionId: 'c1', displayName: 'Builder', state: 'ready', canSendNow: false, canSendNowReason: null }]);
+  assert.deepEqual(result.structuredContent.agents, [{ kind: 'codex', sessionId: 'c1', displayName: 'Builder', state: 'ready' }]);
 });

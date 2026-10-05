@@ -1,3 +1,4 @@
+import { PAGE_PROPERTIES, paginate } from './mcp-pagination.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { request as httpRequest } from 'node:http';
@@ -10,7 +11,6 @@ import { TASK_TOOLS } from './task-routes.mjs';
 import {
   coordinatorAuditTarget,
   coordinatorPolicyForContext,
-  filterCoordinatorControlResult,
   isCoordinatorControlTool,
   loopRegistrationPolicyForContext,
 } from './coordinator-policy.mjs';
@@ -189,6 +189,10 @@ function compactRoomContext(payload, args = {}) {
       if (Number.isFinite(ts)) messages = messages.filter((message) => Number(message.createdAt) > ts);
     }
   }
+  if (!paging) {
+    const limit = Number.isInteger(args.limit) ? Math.max(0, Math.min(args.limit, 500)) : DEFAULT_CONTEXT_MESSAGE_LIMIT;
+    messages = args.since || args.after ? messages.slice(0, limit) : limit ? messages.slice(-limit) : [];
+  }
   const compactMessages = messages.map((message) => {
     const body = String(message.body || '');
     if (!includeBodies) {
@@ -229,20 +233,12 @@ function compactRoomContext(payload, args = {}) {
 }
 
 function compactMessageResult(payload) {
-  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
-  const deliveries = Array.isArray(payload?.deliveries) ? payload.deliveries : [];
-  const failedTargets = Array.isArray(payload?.failedTargets) ? payload.failedTargets : [];
   return {
-    message: payload?.message || null,
-    delivery: payload?.delivery || null,
-    messageCount: messages.length,
-    deliveryCount: deliveries.length,
-    failedTargets: failedTargets.map((entry) => ({
-      target: entry?.target || null,
-      error: entry?.error || null,
-      messageId: entry?.message?.id || null,
-      deliveryId: entry?.delivery?.id || null,
-    })),
+    message_id: payload?.message?.id || null,
+    delivery_count: payload?.deliveries?.length || (payload?.delivery ? 1 : 0),
+    ...(payload?.failedTargets?.length ? { failed_targets: payload.failedTargets.map((entry) => ({
+      target: entry.target, error: entry.error,
+    })) } : {}),
   };
 }
 
@@ -412,13 +408,13 @@ export function buildAgentBusMcpServer({
   const tools = [
     ...TASK_TOOLS,
     ...['watch_pr', 'unwatch_pr'].map((name) => ({ name,
-      description: name === 'watch_pr' ? 'Watch a configured repo PR for reviews, conflicts, merge or close. Ends the linked room on merge. Cadre never merges.' : 'Remove a PR watch.',
+      description: name === 'watch_pr' ? 'Watch a configured repo PR for reviews, conflicts, merge or close. Ends the linked room on merge. Cadre never merges. Returns repo, number and status.' : 'Remove a PR watch. Returns repo, number and status.',
       inputSchema: { type: 'object', properties: { repo: { type: 'string' }, number: { type: 'integer', minimum: 1 },
         ...(name === 'watch_pr' ? { thread_id: { type: 'string' } } : {}) }, required: ['repo', 'number'], additionalProperties: false },
     })),
     {
       name: 'room_send',
-      description: 'Post in any non-DM room without subscribing; DMs require membership. Participants receive messages; the owner also receives results. Set summary on type=result as <merged|ready|blocked|needs-decision> · PR #n · <one line>.',
+      description: 'Post in any non-DM room without subscribing; DMs require membership. Participants receive messages; the owner also receives results. Set summary on type=result as <merged|ready|blocked|needs-decision> · PR #n · <one line>. Returns message_id, delivery_count and failed_targets on failure.',
       inputSchema: { type: 'object', properties: {
         thread_id: { type: 'string' }, body: { type: 'string' }, summary: { type: 'string', maxLength: 200 }, reply_to: { type: 'string' },
         type: { type: 'string', enum: ['message', 'result'] },
@@ -426,7 +422,7 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_context',
-      description: 'Read recent truncated messages in any non-DM room without subscribing; DMs require membership. Continue a truncated body with message_id and body_offset=nextOffset (ignores since/after). since=message id, after=timestamp; pass deliveries=true as needed, or bodies=false or summary_only=true (summaries, no bodies) to save context.',
+      description: 'Read recent truncated messages in any non-DM room without subscribing; DMs require membership. Continue a truncated body with message_id and body_offset=nextOffset (ignores since/after). since=message id, after=timestamp return the next limit messages; pass deliveries=true as needed, or bodies=false or summary_only=true (summaries, no bodies) to save context.',
       inputSchema: { type: 'object', properties: {
         thread_id: { type: 'string' }, limit: { type: 'integer', minimum: 0, maximum: 500 },
         since: { type: 'string' }, after: { type: 'string' }, message_id: { type: 'string' },
@@ -436,30 +432,30 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_list',
-      description: 'List rooms the agent owns or subscribes to; scope=all lists all open non-DM rooms.',
-      inputSchema: { type: 'object', properties: { scope: { type: 'string', enum: ['all'] } }, additionalProperties: false },
+      description: 'List rooms the agent owns or subscribes to; scope=all lists all open non-DM rooms. Defaults to 25 compact rooms; use offset for more.',
+      inputSchema: { type: 'object', properties: { ...PAGE_PROPERTIES, scope: { type: 'string', enum: ['all'] } }, additionalProperties: false },
     },
     {
       name: 'room_close',
-      description: 'Archive a room without terminating sessions. Any agent may archive a non-DM room without subscribing; DMs require membership. Pending deliveries block closure unless cancel_pending explicitly cancels them.',
+      description: 'Archive a room without terminating sessions. Any agent may archive a non-DM room without subscribing; DMs require membership. Pending deliveries block closure unless cancel_pending explicitly cancels them. Returns thread_id, status and session results.',
       inputSchema: { type: 'object', properties: { thread_id: { type: 'string' }, cancel_pending: { type: 'boolean' } },
         required: ['thread_id'], additionalProperties: false },
     },
     {
       name: 'room_reopen',
-      description: 'Any agent may reopen an archived non-DM room without subscribing; DMs require membership. Cancelled deliveries stay terminal; legacy queued deliveries may resume.',
+      description: 'Any agent may reopen an archived non-DM room without subscribing; DMs require membership. Cancelled deliveries stay terminal; legacy queued deliveries may resume. Returns thread_id, status and session results.',
       inputSchema: { type: 'object', properties: { thread_id: { type: 'string' } },
         required: ['thread_id'], additionalProperties: false },
     },
     {
       name: 'room_end',
-      description: 'Owners may close a non-DM room and terminate participants not shared with another open room. Ending always cancels queued deliveries.',
+      description: 'Owners may close a non-DM room and terminate participants not shared with another open room. Ending always cancels queued deliveries. Returns thread_id, status and session results.',
       inputSchema: { type: 'object', properties: { thread_id: { type: 'string' } },
         required: ['thread_id'], additionalProperties: false },
     },
     {
       name: 'room_transfer',
-      description: 'Transfer room ownership as its owner, or claim it for yourself if the owner session is gone. The destination must be a live agent session. Operators may always transfer.',
+      description: 'Transfer room ownership as its owner, or claim it for yourself if the owner session is gone. The destination must be a live agent session. Operators may always transfer. Returns thread_id and status.',
       inputSchema: { type: 'object', properties: { thread_id: { type: 'string' },
         to: { type: 'object', properties: { kind: { type: 'string' }, session_id: { type: 'string' } },
           required: ['kind', 'session_id'], additionalProperties: false } },
@@ -467,15 +463,15 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'agent_dm',
-      description: 'Send a direct message to any agent, creating the deterministic pair room when needed.',
+      description: 'Send a direct message to any agent, creating the deterministic pair room when needed. Returns message_id, delivery_count and failed_targets on failure.',
       inputSchema: { type: 'object', properties: {
         kind: { type: 'string' }, session_id: { type: 'string' }, body: { type: 'string' }, summary: { type: 'string', maxLength: 200 },
       }, required: ['kind', 'session_id', 'body'], additionalProperties: false },
     },
     {
       name: 'agent_directory',
-      description: 'List agents across providers with display names and canonical session state.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      description: 'Read 25 agents by default; offset pages the roster. Rows contain ids, names and state.',
+      inputSchema: { type: 'object', properties: { ...PAGE_PROPERTIES, kind: { type: 'string' }, state: { type: 'string' } }, additionalProperties: false },
     },
   ];
 
@@ -502,8 +498,14 @@ export function buildAgentBusMcpServer({
     await authorizeTool(authContext, name, args);
     if (TASK_TOOLS.some((tool) => tool.name === name)) {
       if (!authenticatedContext(authContext)) throw authorizationError('Task operations require an authenticated credential', 'principal_missing');
-      const payload = await request(`/api/agent-bus/tasks/${name.slice(5)}`, { method: 'POST', body: args });
-      return textResult(JSON.stringify(payload), payload);
+      const payload = await request(`/api/agent-bus/tasks/${name.slice(5)}`, { method: 'POST', body: name === 'task_wait' ? { ...args, limit: args.limit || 50 } : args });
+      const result = name === 'task_send' ? { message_id: payload.id, status: payload.metadata?.state || 'queued' }
+        : ['task_spawn', 'task_cancel', 'task_resume'].includes(name)
+          ? { task_id: payload.taskId, thread_id: payload.threadId, session_id: payload.sessionId, status: payload.state || payload.startup?.state, ...(payload.startup?.error ? { error: payload.startup.error } : {}) }
+          : name === 'task_wait' ? { ...payload, states: (payload.states || []).map((state) => ({
+            task_id: state.taskId, session_id: state.sessionId, status: state.state, mailbox: state.mailbox,
+          })) } : payload;
+      return textResult(JSON.stringify(result), result);
     }
     switch (name) {
       case 'watch_pr':
@@ -513,7 +515,8 @@ export function buildAgentBusMcpServer({
         const payload = await request('/api/agents/github/watches', { method: name === 'watch_pr' ? 'POST' : 'DELETE',
           body: { repo: assertMcpString(args.repo, 'repo'), number: args.number,
             ...(name === 'watch_pr' && args.thread_id ? { thread_id: assertMcpString(args.thread_id, 'thread_id') } : {}) } });
-        return textResult(JSON.stringify(payload), payload);
+        const result = { repo: args.repo, number: args.number, status: name === 'watch_pr' ? 'watching' : 'removed' };
+        return textResult(JSON.stringify(result), result);
       }
 
       case 'room_context': {
@@ -539,7 +542,8 @@ export function buildAgentBusMcpServer({
           ...(args.type === 'result' ? { type: 'result' } : {}),
           deliveryMode: 'enqueue',
         } });
-        return textResult(`Broadcast ${payload.message?.id || 'message'} queued.`, compactMessageResult(payload));
+        const result = compactMessageResult(payload);
+        return textResult(JSON.stringify(result), result);
       }
 
       case 'room_list': {
@@ -548,8 +552,10 @@ export function buildAgentBusMcpServer({
         const payload = await request(args.scope === 'all' ? '/api/agent-bus/threads?status=open'
           : `/api/agent-bus/threads/by-participant?kind=${encodeURIComponent(actor.kind)}&sessionId=${encodeURIComponent(actor.sessionId)}&status=all`);
         const rooms = (payload?.threads || []).filter((thread) => args.scope !== 'all' || !thread.metadata?.dm).map((thread) => ({ id: thread.id, title: thread.title,
-          kind: thread.metadata?.dm ? 'dm' : 'room', status: thread.status, participants: thread.participants || [] }));
-        return textResult(`${rooms.length} room(s).`, { rooms });
+          kind: thread.metadata?.dm ? 'dm' : 'room', status: thread.status }));
+        const { items, ...page } = paginate(rooms, args);
+        const result = { rooms: items, ...page };
+        return textResult(JSON.stringify(result), result);
       }
 
       case 'room_transfer': {
@@ -557,7 +563,8 @@ export function buildAgentBusMcpServer({
         const payload = await request(`/api/agent-bus/threads/${encodeURIComponent(assertMcpString(args.thread_id, 'thread_id'))}/transfer`, {
           method: 'POST', body: { to: assertMcpAgentRef(args.to?.kind, args.to?.session_id, 'to') },
         });
-        return textResult('Room ownership transferred.', payload);
+        const result = { thread_id: payload.thread?.id || args.thread_id, status: 'transferred' };
+        return textResult(JSON.stringify(result), result);
       }
 
       case 'room_close':
@@ -567,7 +574,12 @@ export function buildAgentBusMcpServer({
         const threadId = assertMcpString(args.thread_id, 'thread_id');
         const action = name.slice('room_'.length);
         const payload = await request(`/api/agent-bus/threads/${encodeURIComponent(threadId)}/${action}`, { method: 'POST', body: name === 'room_close' && args.cancel_pending === true ? { cancelPending: true } : {} });
-        return textResult(`Room ${threadId} ${payload.status || action}.`, payload);
+        const result = { thread_id: threadId, status: payload.status || action,
+          results: (payload.results || payload.preserved || []).map((entry) => ({
+            session_id: entry.participant?.sessionId || entry.sessionId, status: entry.status || 'preserved',
+            ...(entry.reason ? { reason: entry.reason } : {}),
+          })) };
+        return textResult(JSON.stringify(result), result);
       }
 
       case 'agent_dm': {
@@ -578,34 +590,30 @@ export function buildAgentBusMcpServer({
           body: assertMcpString(args.body, 'body', { maxLength: MCP_BODY_MAX }),
           ...(args.summary !== undefined ? { summary: assertMcpString(args.summary, 'summary', { maxLength: 200, allowEmpty: true }) } : {}),
         } });
-        return textResult(`DM ${payload.message?.id || 'message'} queued.`, payload);
+        const result = compactMessageResult(payload);
+        return textResult(JSON.stringify(result), result);
       }
 
       case 'agent_directory': {
-        const kinds = ['claude', 'codex', 'pi'];
+        const kinds = ['claude', 'codex', 'pi'].filter((kind) => !args.kind || args.kind === kind);
         const payloads = await Promise.all(kinds.map((kind) => request(`/api/${kind}/sessions`).catch(() => ({ sessions: [] }))));
-        const agents = payloads.flatMap((payload, index) => (payload.sessions || []).map((session) => ({
-          kind: kinds[index], sessionId: session.id || session.sessionId,
+        const agents = payloads.flatMap((payload, index) => (payload.sessions || []).map((session) => ({ kind: kinds[index], session })))
+          .sort((a, b) => Number(b.session.created || 0) - Number(a.session.created || 0))
+          .map(({ kind, session }) => ({
+          kind, sessionId: session.id || session.sessionId,
           displayName: session.displayName || session.sessionName || session.name || '',
           state: session.state?.status || session.status || 'unknown',
-          canSendNow: session.state?.capabilities?.canSendNow === true,
-          canSendNowReason: session.state?.capabilities?.canSendNow === true ? null : (session.state?.reason || null),
-        }))).filter((agent) => agent.sessionId);
-        return textResult(agents.map((agent) => `${agent.kind}:${agent.sessionId} ${agent.displayName} [${agent.state}]`).join('\n') || 'No agents.', { agents });
+        })).filter((agent) => agent.sessionId);
+        const { items, ...page } = paginate(agents.filter((agent) => !args.state || args.state === agent.state), args);
+        const result = { agents: items, ...page };
+        return textResult(JSON.stringify(result), result);
       }
       default: {
         // Check extra tools
         const extra = extraTools.find(t => t.name === name);
         if (extra) {
           const result = await extra.handler(args, { authContext });
-          const policy = coordinatorPolicyForContext(authContext);
-          const filtered = policy && isCoordinatorControlTool(name)
-            ? filterCoordinatorControlResult(policy, name, result)
-            : result;
-          return textResult(
-            typeof filtered === 'string' ? filtered : JSON.stringify(filtered, null, 2),
-            filtered,
-          );
+          return textResult(typeof result === 'string' ? result : JSON.stringify(result), result);
         }
         throw new Error(`Unknown tool: ${name}`);
       }
@@ -751,6 +759,7 @@ export function buildAgentBusMcpServer({
               text: [
                   'Prefer the top-level spawn tools when they are available in your current MCP server: `spawn_session` for one agent, `spawn_collab_session` for a 2-agent thread, and `spawn_conference_session` for 2+ participants.',
                   'Non-DM rooms are open: any agent may read or post without subscribing. DMs remain member-only. Participants receive messages; owners also receive results. Use room_list(scope="all") for all open non-DM rooms.',
+                  'Actions return ids and status only; read text with room_context or monitor_get_session_output. List reads default to a page; pass offset for more.',
                   'Call room_list to rediscover your rooms and room_context before replying when you need room history.',
                   'room_context is truncated by default; continue with message_id and body_offset=nextOffset; set reply_to when addressing a prior claim; use type=result for a terminal outcome.',
                   'After opening a PR, the room owner may call watch_pr({repo, number, thread_id}). Cadre watches transitions and ends the linked room on merge; Cadre never merges.',

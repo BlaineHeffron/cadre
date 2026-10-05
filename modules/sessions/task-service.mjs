@@ -428,7 +428,7 @@ export class TaskService {
     }
   }
 
-  async wait(taskIds, after = null, timeout = 0, { consumerTaskId = null, consumerId = null } = {}) {
+  async wait(taskIds, after = null, timeout = 0, { consumerTaskId = null, consumerId = null, limit = Infinity } = {}) {
     if (!Array.isArray(taskIds) || !taskIds.length || taskIds.length > 100) throw fail('invalid_task_input', 'wait requires 1..100 task IDs', 400);
     taskIds = [...new Set(taskIds)];
     const supplied = decodeCursor(after);
@@ -506,7 +506,8 @@ export class TaskService {
         const { service } = await this.#binding(task.provider);
         for (const attempt of task.attempts) {
           const key = keyOf(task.taskId, attempt);
-          const page = await service.cursor(attempt.sessionId, { after: cursor[key] || 0, limit: 10_000 });
+          if (events.length >= limit) break;
+          const page = await service.cursor(attempt.sessionId, { after: cursor[key] || 0, limit: Math.min(10_000, limit - events.length) });
           events.push(...page.events.map((event) => ({ ...event, taskId: task.taskId, attemptId: attempt.attemptId })));
           cursor[key] = page.cursor;
         }

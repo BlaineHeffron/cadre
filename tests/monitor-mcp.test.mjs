@@ -41,7 +41,7 @@ describe('Monitor MCP server', () => {
 
     assert.deepEqual(await server.handleToolCall('monitor_list_human_queue', {}), {
       items: [{ id: 'ccq_1' }],
-      openCount: 1,
+      total: 1, limit: 25, offset: 0, hasMore: false,
     });
     assert.deepEqual(await server.handleToolCall('monitor_add_human_queue_item', {
       question: 'Need judgment?',
@@ -49,7 +49,7 @@ describe('Monitor MCP server', () => {
       options: [{ id: 'yes', label: 'Yes' }],
     }), {
       id: 'ccq_2',
-      question: 'Need judgment?',
+      status: 'created',
     });
     assert.deepEqual(await server.handleToolCall('monitor_answer_human_queue_item', {
       id: 'ccq_2',
@@ -227,6 +227,7 @@ describe('Monitor MCP server', () => {
       limit: 1,
       offset: 1,
       hasMore: true,
+      nextOffset: 2,
       compact: true,
       includeMessages: true,
       threads: [
@@ -276,7 +277,7 @@ describe('Monitor MCP server', () => {
 
     const result = await server.handleToolCall('monitor_list_claude_sessions', {
       limit: 1,
-      fields: ['id', 'displayName', 'state'],
+      fields: ['id', 'displayName', 'status'],
     });
 
     assert.deepEqual(requests, ['/api/claude/sessions']);
@@ -285,13 +286,13 @@ describe('Monitor MCP server', () => {
       total: 2,
       limit: 1,
       offset: 0,
-      hasMore: true,
+      hasMore: true, nextOffset: 1,
       compact: true,
       sessions: [
         {
-          id: 'claude_1',
-          displayName: 'Coordinator',
-          state: 'working',
+          id: 'claude_2',
+          displayName: 'claude-2',
+          status: 'unknown',
         },
       ],
     });
@@ -337,10 +338,7 @@ describe('Monitor MCP server', () => {
       opts: { method: 'POST', body: { text: 'Ping', enter: true, source: 'monitor_send_to_session' } },
     }]);
     assert.deepEqual(result, {
-      ok: true,
-      accepted: true,
-      transactionId: 'cmd_1',
-      state: 'queued',
+      transaction_id: 'cmd_1', status: 'queued',
     });
   });
 
@@ -349,7 +347,7 @@ describe('Monitor MCP server', () => {
     const server = buildMonitorMcpServer({
       async requestImpl(path, opts = {}) {
         requests.push({ path, opts });
-        if (path === '/api/session-deliveries?kind=codex&sessionId=codex_1&source=monitor_send_to_session&status=sent&limit=5') {
+        if (path === '/api/session-deliveries?kind=codex&sessionId=codex_1&source=monitor_send_to_session&status=sent&limit=6&offset=0') {
           return {
             deliveries: [{
               id: 'sdel_1',
@@ -372,7 +370,7 @@ describe('Monitor MCP server', () => {
     });
 
     assert.deepEqual(requests, [{
-      path: '/api/session-deliveries?kind=codex&sessionId=codex_1&source=monitor_send_to_session&status=sent&limit=5',
+      path: '/api/session-deliveries?kind=codex&sessionId=codex_1&source=monitor_send_to_session&status=sent&limit=6&offset=0',
       opts: {},
     }]);
     assert.equal(result.deliveries.length, 1);
@@ -440,16 +438,9 @@ describe('Monitor MCP server', () => {
       '/api/codex/sessions/codex_1/input',
       '/api/codex/sessions',
     ]);
-    assert.equal(result.sessions[0].pendingResponse, true);
-    assert.equal(result.sessions[0].sentAt, 1234);
-    assert.equal(result.sessions[0].needsInput, false);
     assert.equal(result.sessions[0].status, 'awaiting_response');
-    assert.equal(result.sessions[0].capabilities.sendMessage, false);
-    assert.equal(result.sessions[0].reason, 'Awaiting post-send progress');
-    assert.equal(result.sessions[0].revision, 7);
-    assert.equal(result.sessions[0].interaction.kind, 'none');
-    assert.equal(result.sessions[0].runtime.effectiveModel, 'gpt-test');
-    assert.equal(result.sessions[0].attention, null);
+    assert.equal(result.sessions[0].canSendNow, false);
+    assert.equal(result.sessions[0].capabilities, undefined);
   });
 
   it('fetches captured output for a direct backend session', async () => {
@@ -477,10 +468,7 @@ describe('Monitor MCP server', () => {
 
     assert.deepEqual(requests, ['/api/codex/sessions/codex_1?lines=120']);
     assert.deepEqual(result, {
-      id: 'codex_1',
-      sessionName: 'codex-1',
-      content: 'latest output',
-      state: { state: 'waiting_for_input', detail: null, needsInput: true },
+      session_id: 'codex_1', content: 'latest output',
     });
   });
 
@@ -535,7 +523,7 @@ describe('Monitor MCP server', () => {
         },
       },
     }]);
-    assert.deepEqual(result, { id: 'claude_9', sessionName: 'claude-9', initialPromptInjected: true, initialPromptError: null });
+    assert.deepEqual(result, { thread_id: null, participants: [{ kind: 'claude', session_id: 'claude_9', display_name: 'claude-9' }] });
   });
 
   it('passes Codex plugin opt-in through legacy and unified single-session entry points', async () => {
@@ -604,13 +592,7 @@ describe('Monitor MCP server', () => {
         },
       },
     }]);
-    assert.deepEqual(result, {
-      id: 'claude_10',
-      sessionName: 'claude-10',
-      provider: 'claude',
-      backendType: 'claude',
-      runtime: 'claude',
-    });
+    assert.deepEqual(result, { thread_id: null, participants: [{ kind: 'claude', session_id: 'claude_10', display_name: 'claude-10' }] });
   });
 
   it('accepts parentThreadId on spawn_session and attaches the participant best-effort', async () => {
@@ -668,9 +650,9 @@ describe('Monitor MCP server', () => {
         },
       },
     ]);
-    assert.equal(result.session.id, 'codex_parent');
-    assert.equal(result.session.threadId, 'thr_new');
-    assert.equal(result.parentThread.attached, true);
+    assert.equal(result.participants[0].session_id, 'codex_parent');
+    assert.equal(result.thread_id, 'thr_new');
+    assert.equal(result.warnings, undefined);
   });
 
   it('tolerates unknown parentThreadId without failing spawn_session', async () => {
@@ -699,10 +681,8 @@ describe('Monitor MCP server', () => {
       parentThreadId: 'missing',
     });
 
-    assert.equal(result.session.id, 'claude_parent');
-    assert.equal(result.parentThread.attached, false);
-    assert.equal(result.parentThread.threadId, 'missing');
-    assert.match(result.parentThread.error, /Thread not found/);
+    assert.equal(result.participants[0].session_id, 'claude_parent');
+    assert.match(result.warnings[0], /Thread not found/);
   });
 
   it('rejects removed spawn providers before calling the backend', async () => {
@@ -754,15 +734,8 @@ describe('Monitor MCP server', () => {
       { path: '/api/claude/sessions/claude_dead', opts: { method: 'DELETE' } },
       { path: '/api/agent-bus/participants', opts: {} },
     ]);
-    assert.deepEqual(terminated, {
-      ok: true,
-      status: 'terminated',
-      kind: 'claude',
-      sessionId: 'claude_dead',
-      residual: [],
-      reason: '',
-    });
-    assert.deepEqual(missing, { ok: false, status: 'not_found', sessionId: 'missing' });
+    assert.deepEqual(terminated, { session_id: 'claude_dead', status: 'terminated' });
+    assert.deepEqual(missing, { session_id: 'missing', status: 'not_found' });
   });
 
   it('reports refused and failed deletes instead of mapping them to not_found', async () => {
@@ -839,20 +812,13 @@ describe('Monitor MCP server', () => {
     });
 
     assert.deepEqual(providers, {
-      preferredProvider: 'codex',
+      total: 2, limit: 25, offset: 0, hasMore: false,
       providers: [
         { id: 'codex', enabled: true, runtime: 'codex' },
         { id: 'claude', enabled: true, runtime: 'claude' },
       ],
     });
-    assert.deepEqual(task, {
-      status: 'completed',
-      provider: 'codex',
-      backendType: 'codex',
-      runtime: 'codex',
-      executionMode: 'ephemeral_session_fallback',
-      task: { state: 'waiting_for_input', output: 'Done.' },
-    });
+    assert.deepEqual(task, { status: 'completed', session_id: null, output: 'Done.', output_length: 5 });
     assert.deepEqual(requests, [
       { path: '/api/agents/providers', opts: {} },
       {
@@ -892,7 +858,10 @@ describe('Monitor MCP server', () => {
       },
     });
 
-    assert.deepEqual(await server.handleToolCall('monitor_list_mcp_servers', {}), catalog);
+    assert.deepEqual(await server.handleToolCall('monitor_list_mcp_servers', {}), {
+      defaultProfileId: 'default', profiles: catalog.profiles,
+      servers: { total: 1, limit: 25, offset: 0, hasMore: false, items: [{ id: 'dueno', label: undefined, state: 'configured', providers: undefined, runtimes: undefined }] },
+    });
     assert.equal(server.listTools().some((tool) => tool.name === 'monitor_list_mcp_servers'), true);
     assert.equal(server.listTools().some((tool) => tool.name === 'monitor_list_prompt_profiles'), true);
     const spawnTool = server.listTools().find((tool) => tool.name === 'spawn_session');
@@ -916,7 +885,7 @@ describe('Monitor MCP server', () => {
       },
     });
 
-    assert.deepEqual(await server.handleToolCall('monitor_list_prompt_profiles', {}), catalog);
+    assert.deepEqual(await server.handleToolCall('monitor_list_prompt_profiles', {}), { profiles: [{ id: 'none', description: 'No Fleet style prompt.' }], total: 1, limit: 25, offset: 0, hasMore: false });
     assert.deepEqual(requests, [{ path: '/api/agents/prompt-profiles', opts: {} }]);
   });
 
@@ -989,10 +958,10 @@ describe('Monitor MCP server', () => {
     ]);
     assert.deepEqual(requests[1].opts.body.codexPlugins, { add: ['browser@openai-bundled'] });
     assert.equal(requests[1].opts.body.structured, true);
-    assert.equal(result.threadType, 'collab');
+    assert.equal(result.thread_id, 'thr_collab');
   });
 
-  it('rejects collab spawn when bootstrap reports failed participants', async () => {
+  it('rejects partial bootstrap with its thread id and failure detail', async () => {
     const server = buildMonitorMcpServer({
       async requestImpl(path) {
         if (path === '/api/agents/providers') {
@@ -1020,16 +989,7 @@ describe('Monitor MCP server', () => {
       },
     });
 
-    await assert.rejects(
-      () => server.handleToolCall('spawn_collab_session', {
-        title: 'Partial',
-        participants: [
-          { provider: 'codex' },
-          { provider: 'claude' },
-        ],
-      }),
-      /Bootstrap incomplete: claude:claude-new startup_injection: Agent prompt was not ready/,
-    );
+    await assert.rejects(server.handleToolCall('spawn_collab_session', { title: 'Partial', participants: [{ provider: 'codex' }, { provider: 'claude' }] }), /Bootstrap incomplete \(thread thr_partial\): claude:claude-new startup_injection: Agent prompt was not ready/);
   });
 
   it('rejects collab spawn when a participant provider is disabled', async () => {
@@ -1125,7 +1085,7 @@ describe('Monitor MCP server', () => {
     assert.equal(Object.hasOwn(requests[1].opts.body.participants[1], 'codexPlugins'), false);
     assert.deepEqual(requests[1].opts.body.participants[2].codexPlugins, { add: ['browser@openai-bundled'] });
     assert.equal(requests[1].opts.body.structured, true);
-    assert.equal(result.threadType, 'conference');
+    assert.equal(result.thread_id, 'thr_conf');
   });
 
   it('deletes legacy loop and raw bootstrap tools', async () => {

@@ -90,7 +90,7 @@ test('owner end cancels pending deliveries and preserves shared participants', a
   assert.equal(h.store.getThread(thread.id).thread.status, 'open');
   const ended = await call('room_end', { thread_id: thread.id });
   assert.equal(ended.structuredContent.status, 'ended');
-  assert.deepEqual(ended.structuredContent.skipped, [participants[1]]);
+  assert.deepEqual(ended.structuredContent.results.filter((r) => r.status === 'skipped').map((r) => r.session_id), [participants[1].sessionId]);
   assert.deepEqual(h.deletedSessions.claude, ['claude-1']);
   assert.deepEqual(h.deletedSessions.codex, []);
   assert.equal(h.store.getDelivery(record.deliveries[0].id).resolution, 'cancelled');
@@ -155,7 +155,7 @@ test('poster summaries persist through MCP room and DM calls and compact context
   const summary = 'ready · PR #42 · Summary delivery works';
   const body = 'Full report\n' + 'details '.repeat(200);
   const sent = await call('room_send', { thread_id: thread.id, body, summary, type: 'result' });
-  const stored = h.store.getMessage(sent.structuredContent.message.id);
+  const stored = h.store.getMessage(sent.structuredContent.message_id);
   assert.equal(stored.metadata.summary, summary);
   const compact = await call('room_context', { thread_id: thread.id, summary_only: true });
   assert.equal(compact.structuredContent.messages[0].summary, summary);
@@ -174,10 +174,10 @@ test('poster summaries persist through MCP room and DM calls and compact context
   assert.equal(history.structuredContent.messages[1].summary, 'f'.repeat(199) + '…');
   assert.equal((await call('room_context', { thread_id: thread.id, bodies: false })).structuredContent.messages[0].summary, undefined);
   const changed = await call('room_send', { thread_id: thread.id, body, summary: 'Updated summary', type: 'result' });
-  assert.notEqual(changed.structuredContent.message.id, stored.id);
+  assert.notEqual(changed.structuredContent.message_id, stored.id);
 
   const dm = await call('agent_dm', { kind: 'claude', session_id: 'claude-1', body, summary });
-  const dmMessage = h.store.getMessage(dm.structuredContent.message.id);
+  const dmMessage = h.store.getMessage(dm.structuredContent.message_id);
   assert.equal(dmMessage.metadata.summary, summary);
   assert.equal(dmMessage.metadata.dm, true);
   const dmEnvelope = renderBusEnvelope(dmMessage);
@@ -199,12 +199,12 @@ test('poster summaries persist through MCP room and DM calls and compact context
   }
   for (const summary of ['', '   ']) {
     const sent = await call('room_send', { thread_id: thread.id, body: 'Fallback headline\n' + 'd'.repeat(1200), summary });
-    const message = h.store.getMessage(sent.structuredContent.message.id);
+    const message = h.store.getMessage(sent.structuredContent.message_id);
     assert.match(renderBusEnvelope(message), /Summary: Fallback headline/);
     assert.equal((await call('room_context', { thread_id: thread.id, message_id: message.id, summary_only: true })).structuredContent.messages[0].summary, 'Fallback headline');
   }
   const boundary = await call('room_send', { thread_id: thread.id, body: 'Accepted', summary: 'x'.repeat(200) });
-  assert.equal(h.store.getMessage(boundary.structuredContent.message.id).metadata.summary.length, 200);
+  assert.equal(h.store.getMessage(boundary.structuredContent.message_id).metadata.summary.length, 200);
 });
 
 

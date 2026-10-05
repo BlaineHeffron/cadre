@@ -99,7 +99,7 @@ export function buildSessionDeliveryAuditStore({
     return clone(entry);
   }
 
-  function list({ kind = '', sessionId = '', source = '', status = '', transactionId = '', limit = 100 } = {}) {
+  function list({ kind = '', sessionId = '', source = '', status = '', transactionId = '', limit = 100, offset = 0 } = {}) {
     const normalizedKind = normalizeKind(kind);
     const normalizedSessionId = text(sessionId);
     const normalizedSource = text(source);
@@ -111,7 +111,7 @@ export function buildSessionDeliveryAuditStore({
       .filter((entry) => !normalizedSource || entry.source === normalizedSource)
       .filter((entry) => !normalizedStatus || entry.status === normalizedStatus)
       .filter((entry) => !normalizedTransactionId || entry.metadata?.transactionId === normalizedTransactionId)
-      .slice(0, normalizeLimit(limit))
+      .slice(Math.max(0, Number(offset) || 0), Math.max(0, Number(offset) || 0) + normalizeLimit(limit))
       .map((entry) => {
         const copy = clone(entry);
         const created = Date.parse(copy.createdAt);
@@ -166,6 +166,7 @@ export async function sessionDeliveryAuditPlugin(app, {
       status: req.query?.status,
       transactionId: req.query?.transactionId,
       limit: req.query?.limit,
+      offset: req.query?.offset,
     }),
   }));
 }

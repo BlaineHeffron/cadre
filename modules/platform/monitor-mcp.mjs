@@ -1,3 +1,4 @@
+import { DEFAULT_LIST_LIMIT, PAGE_PROPERTIES, normalizeLimit, normalizeOffset, paginate } from '../agent-bus/mcp-pagination.mjs';
 /**
  * MCP server exposing Cadre tools for the command center AI.
  * Provides: session management, thread pinging, and timed operations.
@@ -54,10 +55,8 @@ const MCP_SELECTION_SCHEMA_PROPERTIES = {
 export function buildMonitorMcpServer({ requestImpl }) {
   if (!requestImpl) throw new Error('requestImpl is required');
 
-  const DEFAULT_THREAD_LIMIT = 25;
-  const DEFAULT_SESSION_LIMIT = 50;
-  const MAX_PAGE_SIZE = 200;
   const callContext = new AsyncLocalStorage();
+
 
   async function request(path, opts) {
     const authContext = callContext.getStore()?.authContext || null;
@@ -65,18 +64,6 @@ export function buildMonitorMcpServer({ requestImpl }) {
       ...(opts || {}),
       ...(authContext ? { authContext } : {}),
     });
-  }
-
-  function normalizeLimit(value, fallback) {
-    const parsed = Number.parseInt(String(value ?? ''), 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-    return Math.min(parsed, MAX_PAGE_SIZE);
-  }
-
-  function normalizeOffset(value) {
-    const parsed = Number.parseInt(String(value ?? ''), 10);
-    if (!Number.isFinite(parsed) || parsed < 0) return 0;
-    return parsed;
   }
 
   function assertLoopSessionArgs({ kind, session_id: sessionId, prompt, interval_seconds: intervalSeconds, max_iterations: maxIterations } = {}) {
@@ -89,32 +76,6 @@ export function buildMonitorMcpServer({ requestImpl }) {
     if (!Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > 100) {
       throw new Error('max_iterations must be an integer from 1 to 100');
     }
-  }
-
-  function paginate(items, { limit, offset }) {
-    const total = Array.isArray(items) ? items.length : 0;
-    const page = total === 0 ? [] : items.slice(offset, offset + limit);
-    return {
-      total,
-      limit,
-      offset,
-      hasMore: offset + page.length < total,
-      items: page,
-    };
-  }
-
-  function assertBootstrapOk(payload = {}) {
-    if (payload.bootstrapOk !== false) return;
-    const failed = Array.isArray(payload.failedParticipants) ? payload.failedParticipants : [];
-    const details = failed
-      .map((entry) => {
-        const participant = entry?.participant || {};
-        const target = `${participant.kind || 'unknown'}:${participant.sessionId || 'unknown'}`;
-        const phase = entry?.phase ? ` ${entry.phase}` : '';
-        return `${target}${phase}: ${entry?.error || 'startup injection failed'}`;
-      })
-      .join('; ');
-    throw new Error(`Bootstrap incomplete${details ? `: ${details}` : ''}`);
   }
 
   function pickFields(item, fields) {
@@ -288,35 +249,30 @@ export function buildMonitorMcpServer({ requestImpl }) {
     }
   }
   function compactSession(session = {}) {
-    const pendingResponse = Boolean(session.pendingResponse || session.state?.pendingResponse);
-    const sentAt = session.pendingResponse?.sentAt || session.state?.sentAt || null;
     return {
-      id: session.id || '',
-      name: session.name || '',
-      displayName: session.displayName || '',
-      workDir: session.workDir || '',
-      source: session.source || '',
-      created: session.created ?? null,
-      attached: session.attached ?? null,
-      pid: session.pid ?? null,
-      state: session.state?.state || null,
-      stateDetail: session.state?.detail || null,
-      needsInput: session.state?.needsInput ?? null,
-      status: session.state?.status || null,
-      capabilities: session.state?.capabilities || null,
-      reason: session.state?.reason || null,
-      revision: session.state?.revision ?? null,
-      interaction: session.state?.interaction || null,
-      runtime: session.state?.runtime || null,
-      pendingResponse,
-      sentAt,
-      attention: !pendingResponse && session.attention?.active
-        ? {
-            kind: session.attention.kind || null,
-            label: session.attention.label || null,
-            createdAt: session.attention.createdAt || null,
-          }
-        : null,
+      id: session.id || session.sessionId || '',
+      displayName: session.displayName || session.name || '',
+      status: session.state?.status || session.status || 'unknown',
+      canSendNow: session.state?.capabilities?.canSendNow === true,
+    };
+  }
+
+  function spawnResult(payload, { kind = '', threadId = null, displayName = '' } = {}) {
+    if (payload.bootstrapOk === false) {
+      const failures = (payload.failedParticipants || []).map((entry) => `${entry.participant?.kind}:${entry.participant?.sessionId}${entry.phase ? ` ${entry.phase}` : ''}: ${entry.error}`).join('; ');
+      throw new Error(`Bootstrap incomplete (thread ${payload.thread?.id || 'unknown'}): ${failures}`);
+    }
+    return {
+      thread_id: payload.thread?.id || threadId,
+      participants: (payload.participants || [payload.session || payload]).map((entry) => ({
+        kind: entry.kind || entry.backendType || kind,
+        session_id: entry.sessionId || entry.id || sessionIdFromResult(entry),
+        display_name: entry.displayName || entry.sessionName || displayName,
+      })),
+      ...(payload.warnings?.length || payload.initialPromptError ? { warnings: [...(payload.warnings || []), ...(payload.initialPromptError ? [payload.initialPromptError] : [])] } : {}),
+      ...(payload.failedParticipants?.length ? { failed_participants: payload.failedParticipants.map((entry) => ({
+        kind: entry.participant?.kind, session_id: entry.participant?.sessionId, error: entry.error,
+      })) } : {}),
     };
   }
 
@@ -361,12 +317,6 @@ export function buildMonitorMcpServer({ requestImpl }) {
     }
     if (['claude', 'codex', 'pi'].includes(normalized)) return normalized;
     return resolveAgentProviderSelection({ provider: normalized }).backendType;
-  }
-
-  function buildSessionDetailPath(type, sessionId, { lines = 200 } = {}) {
-    const params = new URLSearchParams();
-    params.set('lines', String(normalizeLimit(lines, 200)));
-    return `/api/${encodeURIComponent(resolveSessionBackendType(type))}/sessions/${encodeURIComponent(sessionId)}?${params.toString()}`;
   }
 
   function sessionIdFromResult(result = {}) {
@@ -424,7 +374,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
   }
 
   async function listSessions(path, {
-    limit = DEFAULT_SESSION_LIMIT,
+    limit = DEFAULT_LIST_LIMIT,
     offset = 0,
     compact = true,
     fields,
@@ -433,8 +383,8 @@ export function buildMonitorMcpServer({ requestImpl }) {
     const policy = coordinatorPolicyForContext(callContext.getStore()?.authContext);
     const rawSessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
     const sessions = policy ? filterCoordinatorSessions(policy, rawSessions) : rawSessions;
-    const page = paginate(sessions, {
-      limit: normalizeLimit(limit, DEFAULT_SESSION_LIMIT),
+    const page = paginate(sessions.toSorted((a, b) => Number(b.created || 0) - Number(a.created || 0)), {
+      limit: normalizeLimit(limit, DEFAULT_LIST_LIMIT),
       offset: normalizeOffset(offset),
     });
     const items = page.items.map((session) => pickFields(compact ? compactSession(session) : session, fields));
@@ -444,6 +394,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       limit: page.limit,
       offset: page.offset,
       hasMore: page.hasMore,
+      ...(page.hasMore ? { nextOffset: page.offset + items.length } : {}),
       compact: compact !== false,
       sessions: items,
     };
@@ -457,7 +408,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       inputSchema: {
         type: 'object',
         properties: {
-          limit: { type: 'integer', description: 'Maximum sessions to return. Defaults to 50.' },
+          limit: { type: 'integer', description: 'Maximum sessions to return. Defaults to 25.' },
           offset: { type: 'integer', description: 'Session offset for pagination. Defaults to 0.' },
           compact: { type: 'boolean', description: 'Return compact summaries by default. Set false for full session objects.' },
           fields: {
@@ -476,7 +427,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       inputSchema: {
         type: 'object',
         properties: {
-          limit: { type: 'integer', description: 'Maximum sessions to return. Defaults to 50.' },
+          limit: { type: 'integer', description: 'Maximum sessions to return. Defaults to 25.' },
           offset: { type: 'integer', description: 'Session offset for pagination. Defaults to 0.' },
           compact: { type: 'boolean', description: 'Return compact summaries by default. Set false for full session objects.' },
           fields: {
@@ -495,7 +446,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       inputSchema: {
         type: 'object',
         properties: {
-          limit: { type: 'integer', description: 'Maximum sessions to return. Defaults to 50.' },
+          limit: { type: 'integer', description: 'Maximum sessions to return. Defaults to 25.' },
           offset: { type: 'integer', description: 'Session offset for pagination. Defaults to 0.' },
           compact: { type: 'boolean', description: 'Return compact summaries by default. Set false for full session objects.' },
           fields: {
@@ -510,7 +461,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_spawn_claude',
-      description: 'Legacy low-level tool. Spawn one Claude session in tmux. Prefer `spawn_session` for new agent flows.',
+      description: 'Legacy low-level tool. Spawn one Claude session in tmux. Prefer `spawn_session` for new agent flows. Returns thread_id and participant ids/names.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -524,18 +475,18 @@ export function buildMonitorMcpServer({ requestImpl }) {
       },
       handler: async ({ workDir, displayName, model, initialPrompt, mcpProfile = 'dueno', mcpServers, promptProfile, skills }) => {
         assertMcpProviderModel('claude', model);
-        return request('/api/claude/sessions', { method: 'POST', body: {
+        return spawnResult(await request('/api/claude/sessions', { method: 'POST', body: {
           workDir, displayName, model, initialPrompt,
           ...(skills !== undefined ? { skills } : {}),
           ...(mcpProfile !== undefined ? { mcpProfile } : {}),
           ...(mcpServers !== undefined ? { mcpServers } : {}),
           ...(promptProfile !== undefined ? { promptProfile } : {}),
-        } });
+        } }), { kind: 'claude', displayName });
       },
     },
     {
       name: 'monitor_spawn_codex',
-      description: 'Legacy low-level tool. Spawn one Codex session in tmux. Prefer `spawn_session` for new agent flows.',
+      description: 'Legacy low-level tool. Spawn one Codex session in tmux. Prefer `spawn_session` for new agent flows. Returns thread_id and participant ids/names.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -550,19 +501,19 @@ export function buildMonitorMcpServer({ requestImpl }) {
       },
       handler: async ({ workDir, displayName, model, initialPrompt, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills }) => {
         assertMcpProviderModel('codex', model);
-        return request('/api/codex/sessions', { method: 'POST', body: {
+        return spawnResult(await request('/api/codex/sessions', { method: 'POST', body: {
           workDir, displayName, model, initialPrompt,
           ...(skills !== undefined ? { skills } : {}),
           ...(mcpProfile !== undefined ? { mcpProfile } : {}),
           ...(mcpServers !== undefined ? { mcpServers } : {}),
           ...(codexPlugins !== undefined ? { codexPlugins } : {}),
           ...(promptProfile !== undefined ? { promptProfile } : {}),
-        } });
+        } }), { kind: 'codex', displayName });
       },
     },
     {
       name: 'spawn_session',
-      description: 'Spawn exactly one interactive session using a provider returned by monitor_list_agent_providers.',
+      description: 'Spawn exactly one interactive session using a provider returned by monitor_list_agent_providers. Returns thread_id, participant ids/names and warnings.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -597,12 +548,14 @@ export function buildMonitorMcpServer({ requestImpl }) {
         const sessionId = sessionIdFromResult(result);
         const participant = sessionId ? { kind: backendKindForSpawn(provider, result), sessionId } : null;
         const parentThread = await bestEffortAttachParticipant(parentThreadId, participant);
-        return parentThreadId ? { ...result, parentThread } : result;
+        const compact = spawnResult(result, { kind: participant?.kind, threadId: parentThreadId || null, displayName });
+        if (parentThreadId && !parentThread.attached) compact.warnings = [...(compact.warnings || []), parentThread.error || parentThread.reason];
+        return compact;
       },
     },
     {
       name: 'monitor_terminate_session',
-      description: 'Terminate and verify an existing agent session by session id. Returns terminated, already_gone, refused, failed, or not_found without laundering failures as success.',
+      description: 'Terminate and verify an existing agent session by session id. Returns session_id and status: terminated, already_gone, refused, failed, or not_found without laundering failures as success.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -613,29 +566,25 @@ export function buildMonitorMcpServer({ requestImpl }) {
       },
       handler: async ({ session_id }) => {
         const sessionId = String(session_id || '').trim();
-        if (!sessionId) return { ok: false, status: 'not_found', sessionId: '' };
+        if (!sessionId) return { session_id: '', status: 'not_found' };
         const kind = await resolveSessionBackend(sessionId);
-        if (!kind) return { ok: false, status: 'not_found', sessionId };
+        if (!kind) return { session_id: sessionId, status: 'not_found' };
         try {
           const result = await request(`/api/${kind}/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
           if (result?.ok === true && ['terminated', 'already_gone'].includes(result.status)) {
-            return { ...result, kind, sessionId };
+            return { session_id: sessionId, status: result.status };
           }
           return {
-            ok: false,
             status: 'failed',
-            kind,
-            sessionId,
+            session_id: sessionId,
             residual: Array.isArray(result?.residual) ? result.residual : [],
             reason: result?.reason || 'invalid_termination_result',
           };
         } catch (err) {
           const payload = err.payload || {};
           return {
-            ok: false,
             status: payload.status === 'refused' ? 'refused' : 'failed',
-            kind,
-            sessionId,
+            session_id: sessionId,
             residual: Array.isArray(payload.residual) ? payload.residual : [],
             reason: payload.reason || err.message || 'terminate_failed',
             error: err.message || 'terminate_failed',
@@ -648,44 +597,61 @@ export function buildMonitorMcpServer({ requestImpl }) {
       description: 'List agent providers, runtimes, and one-off execution capabilities from the unified agent layer.',
       inputSchema: {
         type: 'object',
-        properties: {},
+        properties: { ...PAGE_PROPERTIES },
         additionalProperties: false,
       },
-      handler: async () => request('/api/agents/providers'),
+      handler: async (args = {}) => {
+        const payload = await request('/api/agents/providers');
+        const { items, ...page } = paginate((payload.providers || []).map((row) => pickFields(row, ['id', 'label', 'enabled', 'runtime', 'backendType'])), args);
+        return { providers: items, ...page };
+      },
     },
     {
       name: 'monitor_list_mcp_servers',
       description: 'List server-owned MCP capability profiles, allowlisted servers, compatibility, and sanitized availability.',
       inputSchema: {
         type: 'object',
-        properties: {},
+        properties: { ...PAGE_PROPERTIES },
         additionalProperties: false,
       },
-      handler: async () => request('/api/agents/mcp-servers'),
+      handler: async (args = {}) => {
+        const payload = await request('/api/agents/mcp-servers');
+        return { defaultProfileId: payload.defaultProfileId,
+          profiles: (payload.profiles || []).map((row) => pickFields(row, ['id', 'label', 'serverIds'])),
+          servers: paginate((payload.servers || []).map((row) => ({ id: row.id, label: row.label, state: row.availability?.state, providers: row.providers, runtimes: row.runtimes })), args) };
+      },
     },
     {
       name: 'monitor_agent_bus_auth_readiness',
       description: 'Report live sessions that still lack a scoped Agent Bus MCP credential before enforce rollout.',
       inputSchema: {
         type: 'object',
-        properties: {},
+        properties: { ...PAGE_PROPERTIES },
         additionalProperties: false,
       },
-      handler: async () => request('/api/agent-bus/auth/readiness'),
+      handler: async (args = {}) => {
+        const payload = await request('/api/agent-bus/auth/readiness');
+        return { mode: payload.mode, readyForEnforce: payload.readyForEnforce, missingCredentialCount: payload.missingCredentialCount,
+          ...paginate(payload.sessions || [], args) };
+      },
     },
     {
       name: 'monitor_list_prompt_profiles',
       description: 'List style prompt profile IDs, labels, and short descriptions. Prompt bodies are omitted.',
       inputSchema: {
         type: 'object',
-        properties: {},
+        properties: { ...PAGE_PROPERTIES },
         additionalProperties: false,
       },
-      handler: async () => request('/api/agents/prompt-profiles'),
+      handler: async (args = {}) => {
+        const payload = await request('/api/agents/prompt-profiles');
+        const { items, ...page } = paginate((payload.profiles || []).map((row) => pickFields(row, ['id', 'label', 'description'])), args);
+        return { profiles: items, ...page };
+      },
     },
     {
       name: 'monitor_run_agent_task',
-      description: 'Run a one-off task through the unified agent layer without leaving a long-lived interactive session behind.',
+      description: 'Run a one-off task through the unified agent layer without leaving a long-lived interactive session behind. Returns status, session_id and final output (last 12000 characters).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -704,7 +670,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       },
       handler: async ({ provider, prompt, workDir, displayName, model, thinkingLevel, timeoutMs, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills }) => {
         assertMcpProviderModel(provider, model);
-        return request('/api/agents/tasks', {
+        const result = await request('/api/agents/tasks', {
           method: 'POST',
           body: {
             provider, prompt, workDir, displayName, model, thinkingLevel, timeoutMs,
@@ -715,11 +681,13 @@ export function buildMonitorMcpServer({ requestImpl }) {
             ...(provider === 'codex' && codexPlugins !== undefined ? { codexPlugins } : {}),
           },
         });
+        const output = String(result.task?.output || result.output || '');
+        return { status: result.status, session_id: sessionIdFromResult(result) || null, output: output.slice(-12000), output_length: output.length };
       },
     },
     {
       name: 'register_scheduled_agent',
-      description: 'Register a recurring agent task. Registration works even when the background pump is disabled.',
+      description: 'Register a recurring agent task. Registration works even when the background pump is disabled. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -770,12 +738,12 @@ export function buildMonitorMcpServer({ requestImpl }) {
       },
       handler: async (args = {}) => {
         assertMcpProviderModel(args.provider || 'codex', args.model);
-        return request('/api/agents/scheduled', { method: 'POST', body: { mcpProfile: 'dueno', ...args } });
+        return request('/api/agents/scheduled', { method: 'POST', body: { mcpProfile: 'dueno', ...args } }).then((task) => ({ id: task.id, status: task.status }));
       },
     },
     {
       name: 'spawn_loop_session',
-      description: 'Start a bounded loop that periodically injects a fixed prompt into one live agent session.',
+      description: 'Start a bounded loop that periodically injects a fixed prompt into one live agent session. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -806,7 +774,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
               ...(displayName ? { displayName } : {}),
             },
           },
-        });
+        }).then((task) => ({ id: task.id, status: task.status }));
       },
     },
     {
@@ -814,20 +782,20 @@ export function buildMonitorMcpServer({ requestImpl }) {
       description: 'List registered scheduled agent tasks.',
       inputSchema: {
         type: 'object',
-        properties: {},
+        properties: { ...PAGE_PROPERTIES, compact: { type: 'boolean', description: 'Defaults true; false reads full records in the requested page.' } },
         additionalProperties: false,
       },
-      handler: async () => {
+      handler: async (args = {}) => {
         const payload = await request('/api/agents/scheduled');
         const policy = coordinatorPolicyForContext(callContext.getStore()?.authContext);
-        if (!policy) return payload;
-        const tasks = filterCoordinatorSchedules(policy, payload?.tasks);
-        return { ...payload, tasks, taskCount: tasks.length };
+        const tasks = policy ? filterCoordinatorSchedules(policy, payload?.tasks) : (payload.tasks || []);
+        const { items, ...page } = paginate(tasks.map((row) => args.compact === false ? row : pickFields(row, ['id', 'type', 'provider', 'status', 'lastSessionId', 'parentThreadId', 'nextRunAtEpochMs'])), args);
+        return { tasks: items, ...page };
       },
     },
     {
       name: 'cancel_scheduled_agent',
-      description: 'Cancel a registered scheduled agent task.',
+      description: 'Cancel a registered scheduled agent task. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -837,18 +805,20 @@ export function buildMonitorMcpServer({ requestImpl }) {
         additionalProperties: false,
       },
       handler: async ({ id }) =>
-        request(`/api/agents/scheduled/${encodeURIComponent(String(id || ''))}/cancel`, { method: 'POST', body: {} }),
+        request(`/api/agents/scheduled/${encodeURIComponent(String(id || ''))}/cancel`, { method: 'POST', body: {} }).then((task) => ({ id: task.id, status: task.status })),
     },
     {
       name: 'monitor_step_scheduled_agents',
-      description: 'Run one manual scheduled-agent tick now, independent of the background pump.',
+      description: 'Run one manual scheduled-agent tick now, independent of the background pump. Returns schedule ids, session ids and statuses.',
       inputSchema: {
         type: 'object',
         properties: {},
         additionalProperties: false,
       },
       handler: async () =>
-        request('/api/agents/scheduled/step-now', { method: 'POST', body: {} }),
+        request('/api/agents/scheduled/step-now', { method: 'POST', body: {} }).then((payload) => ({
+          results: (payload.tasks || []).map((entry) => ({ id: entry.id, session_id: entry.sessionId, status: entry.action })),
+        })),
     },
     {
       name: 'monitor_list_human_queue',
@@ -856,6 +826,8 @@ export function buildMonitorMcpServer({ requestImpl }) {
       inputSchema: {
         type: 'object',
         properties: {
+          ...PAGE_PROPERTIES,
+          compact: { type: 'boolean', description: 'Defaults true; false reads full records in the requested page.' },
           status: {
             type: 'string',
             enum: ['open', 'answered', 'routed', 'delivery_failed', 'acknowledged', 'dismissed', 'all'],
@@ -864,15 +836,17 @@ export function buildMonitorMcpServer({ requestImpl }) {
         },
         additionalProperties: false,
       },
-      handler: async ({ status = 'open' } = {}) => {
+      handler: async ({ status = 'open', ...args } = {}) => {
         const params = new URLSearchParams();
         params.set('status', status || 'open');
-        return request(`/api/command-center/work-queue?${params.toString()}`);
+        const payload = await request(`/api/command-center/work-queue?${params.toString()}`);
+        const { items, ...page } = paginate((payload.items || []).map((row) => args.compact === false ? row : pickFields(row, ['id', 'title', 'status', 'priority', 'sessionKind', 'sessionId', 'threadId'])), args);
+        return { items, ...page };
       },
     },
     {
       name: 'monitor_add_human_queue_item',
-      description: 'Add a Command Center work-queue item when a session needs a user decision.',
+      description: 'Add a Command Center work-queue item when a session needs a user decision. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -905,11 +879,11 @@ export function buildMonitorMcpServer({ requestImpl }) {
         additionalProperties: false,
       },
       handler: async (args = {}) =>
-        request('/api/command-center/work-queue', { method: 'POST', body: args }),
+        request('/api/command-center/work-queue', { method: 'POST', body: args }).then((payload) => ({ id: payload.item?.id || payload.id, status: payload.item?.status || payload.status || 'created' })),
     },
     {
       name: 'monitor_answer_human_queue_item',
-      description: 'Answer a Command Center human-decision queue item, usually after the user provides the decision.',
+      description: 'Answer a Command Center human-decision queue item, usually after the user provides the decision. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -925,11 +899,11 @@ export function buildMonitorMcpServer({ requestImpl }) {
         request(`/api/command-center/work-queue/${encodeURIComponent(String(id || ''))}/answer`, {
           method: 'POST',
           body: { answer, optionId, optionValue },
-        }),
+        }).then((payload) => ({ id: payload.item?.id || payload.id, status: payload.item?.status || payload.status })),
     },
     {
       name: 'monitor_acknowledge_human_queue_item',
-      description: 'Mark a Command Center human queue item as acknowledged after routed session action is verified.',
+      description: 'Mark a Command Center human queue item as acknowledged after routed session action is verified. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -943,11 +917,11 @@ export function buildMonitorMcpServer({ requestImpl }) {
         request(`/api/command-center/work-queue/${encodeURIComponent(String(id || ''))}/acknowledge`, {
           method: 'POST',
           body: { note },
-        }),
+        }).then((payload) => ({ id: payload.item?.id || payload.id, status: payload.item?.status || payload.status })),
     },
     {
       name: 'monitor_dismiss_human_queue_item',
-      description: 'Withdraw a Command Center human queue item that no longer needs a decision.',
+      description: 'Withdraw a Command Center human queue item that no longer needs a decision. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -957,11 +931,11 @@ export function buildMonitorMcpServer({ requestImpl }) {
         additionalProperties: false,
       },
       handler: async ({ id }) =>
-        request(`/api/command-center/work-queue/${encodeURIComponent(String(id || ''))}/dismiss`, { method: 'POST', body: {} }),
+        request(`/api/command-center/work-queue/${encodeURIComponent(String(id || ''))}/dismiss`, { method: 'POST', body: {} }).then((payload) => ({ id: payload.item?.id || payload.id, status: payload.item?.status || payload.status })),
     },
     {
       name: 'monitor_send_to_session',
-      description: 'Queue text input for an agent session. accepted/queued is Fleet queue acceptance only; delivery status comes from monitor_list_session_deliveries(transactionId). sent means keystrokes delivered to the provider pane, not that the agent read or applied it. Results must come from the worker (room_send/agent_dm).',
+      description: 'Queue text input for an agent session. Returns transaction_id and status. queued is Fleet queue acceptance only; delivery status comes from monitor_list_session_deliveries(transactionId). sent means keystrokes delivered to the provider pane, not that the agent read or applied it. Results must come from the worker (room_send/agent_dm).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -978,16 +952,15 @@ export function buildMonitorMcpServer({ requestImpl }) {
           body: { text, enter: true, source: 'monitor_send_to_session' },
         });
         return {
-          ok: payload?.ok === true,
-          accepted: payload?.accepted === true,
-          transactionId: payload?.transactionId || '',
-          state: payload?.state || '',
+          transaction_id: payload?.transactionId || null,
+          status: payload?.state || (payload?.accepted ? 'queued' : payload?.ok ? 'sent' : 'failed'),
+          ...(payload?.error ? { error: payload.error } : {}),
         };
       },
     },
     {
       name: 'monitor_list_session_deliveries',
-      description: 'List recent direct session input delivery audit records, including monitor_send_to_session sends. Records are append-only per transition, newest first; the first record for a transactionId is its current state. metadata.confirmation holds submit evidence.',
+      description: 'Read 25 compact delivery records by default; use nextOffset for more. List recent direct session input delivery audit records, including monitor_send_to_session sends. Records are append-only per transition, newest first; the first record for a transactionId is its current state. metadata.confirmation holds submit evidence.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1000,40 +973,54 @@ export function buildMonitorMcpServer({ requestImpl }) {
             description: 'Optional delivery status filter.',
           },
           transactionId: { type: 'string', description: 'Optional command transaction ID filter.' },
-          limit: { type: 'integer', description: 'Maximum records to return. Defaults to 100 and caps at 500.' },
+          ...PAGE_PROPERTIES,
         },
         additionalProperties: false,
       },
-      handler: async ({ type, sessionId, source, status, transactionId, limit } = {}) => {
+      handler: async ({ type, sessionId, source, status, transactionId, ...args } = {}) => {
         const params = new URLSearchParams();
         if (type) params.set('kind', type);
         if (sessionId) params.set('sessionId', sessionId);
         if (source) params.set('source', source);
         if (status) params.set('status', status);
         if (transactionId) params.set('transactionId', transactionId);
-        if (limit != null) params.set('limit', String(limit));
-        return request(`/api/session-deliveries${params.size ? `?${params.toString()}` : ''}`);
+        const limit = normalizeLimit(args.limit);
+        const offset = normalizeOffset(args.offset);
+        params.set('limit', String(limit + 1));
+        params.set('offset', String(offset));
+        const payload = await request(`/api/session-deliveries?${params.toString()}`);
+        const deliveries = payload.deliveries || [];
+        return { deliveries: deliveries.slice(0, limit).map((row) => ({ ...pickFields(row, ['id', 'target', 'status', 'createdAt', 'error']), ...(row.metadata?.transactionId ? { transactionId: row.metadata.transactionId } : {}) })),
+          limit, offset, hasMore: deliveries.length > limit, ...(deliveries.length > limit ? { nextOffset: offset + limit } : {}) };
       },
     },
     {
       name: 'monitor_get_session_output',
-      description: 'Fetch the current captured output for an interactive session.',
+      description: 'Fetch the current captured output for an interactive session. Defaults to a recent tail capped at 12000 characters; use nextOffset to page back within captured lines.',
       inputSchema: {
         type: 'object',
         properties: {
           type: { type: 'string', description: 'Session backend type or provider alias.' },
           sessionId: { type: 'string', description: 'Session ID' },
-          lines: { type: 'integer', description: 'How many trailing transcript lines to capture. Defaults to 200 and is capped at 200.' },
+          lines: { type: 'integer', minimum: 1, maximum: 5000, description: 'Captured history lines; defaults to 200, maximum 5000.' },
+          offset: { type: 'integer', minimum: 0, description: 'Characters back from the captured tail; use nextOffset for older output.' },
         },
         required: ['type', 'sessionId'],
         additionalProperties: false,
       },
-      handler: async ({ type, sessionId, lines }) =>
-        request(buildSessionDetailPath(type, sessionId, { lines })),
+      handler: async ({ type, sessionId, lines = 200, offset = 0 }) => {
+        const count = Math.min(Math.max(Number(lines) || 200, 1), 5000);
+        const payload = await request(`/api/${encodeURIComponent(resolveSessionBackendType(type))}/sessions/${encodeURIComponent(sessionId)}?lines=${count}`);
+        const text = String(payload.content || payload.output || '');
+        const end = Math.max(0, text.length - normalizeOffset(offset));
+        const start = Math.max(0, end - 12000);
+        return { session_id: sessionId, content: text.slice(start, end),
+          ...(start > 0 ? { nextOffset: normalizeOffset(offset) + end - start } : {}) };
+      },
     },
     {
       name: 'monitor_scheduled_send',
-      description: 'Schedule a message to be sent to a session after a delay. Use for timed check-ins, follow-ups, or recurring pings.',
+      description: 'Schedule a message to be sent to a session after a delay. Use for timed check-ins, follow-ups, or recurring pings. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1047,7 +1034,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         additionalProperties: false,
       },
       handler: async ({ type, sessionId, text, delayMs, sendAt }) =>
-        request(`/api/${type}/sessions/${sessionId}/scheduled-send`, { method: 'POST', body: { text, delayMs, sendAt } }),
+        request(`/api/${type}/sessions/${sessionId}/scheduled-send`, { method: 'POST', body: { text, delayMs, sendAt } }).then((payload) => ({ id: payload.sendId, status: payload.status || 'scheduled' })),
     },
 
     // ── Thread management ──
@@ -1073,7 +1060,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       },
       handler: async ({
         status = 'open',
-        limit = DEFAULT_THREAD_LIMIT,
+        limit = DEFAULT_LIST_LIMIT,
         offset = 0,
         compact = true,
         include_messages = false,
@@ -1087,7 +1074,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         const rawThreads = Array.isArray(payload?.threads) ? payload.threads : [];
         const threads = policy ? filterCoordinatorThreads(policy, rawThreads) : rawThreads;
         const page = paginate(threads, {
-          limit: normalizeLimit(limit, DEFAULT_THREAD_LIMIT),
+          limit: normalizeLimit(limit, DEFAULT_LIST_LIMIT),
           offset: normalizeOffset(offset),
         });
         const details = await Promise.all(page.items.map((thread) =>
@@ -1122,6 +1109,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
           limit: page.limit,
           offset: page.offset,
           hasMore: page.hasMore,
+          ...(page.hasMore ? { nextOffset: page.offset + items.length } : {}),
           compact: compact !== false,
           includeMessages: include_messages === true,
           threads: items,
@@ -1130,7 +1118,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'spawn_collab_session',
-      description: 'Spawn exactly two participants in one collaboration thread and inject the standard Cadre collaboration onboarding prompt into both sessions.',
+      description: 'Spawn exactly two participants in one collaboration thread and inject the standard Cadre collaboration onboarding prompt into both sessions. Returns thread_id, participant ids/names and bootstrap failures.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1191,13 +1179,12 @@ export function buildMonitorMcpServer({ requestImpl }) {
             structured: true,
           },
         });
-        assertBootstrapOk(payload);
-        return { ...payload, threadType: 'collab' };
+        return spawnResult(payload);
       },
     },
     {
       name: 'spawn_conference_session',
-      description: 'Spawn a multi-participant collaboration conference thread with two or more participants. Use this when you want a shared thread across N sessions.',
+      description: 'Spawn a multi-participant collaboration conference thread with two or more participants. Use this when you want a shared thread across N sessions. Returns thread_id, participant ids/names and bootstrap failures.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1257,21 +1244,23 @@ export function buildMonitorMcpServer({ requestImpl }) {
             structured: true,
           },
         });
-        assertBootstrapOk(payload);
-        return { ...payload, threadType: 'conference' };
+        return spawnResult(payload);
       },
     },
     // ── Recording evidence ──
     {
       name: 'monitor_scan_audio_recordings',
-      description: 'Scan the configured audio recording inbox and ingest exported transcript/summary files as gated evidence packets.',
+      description: 'Scan the configured audio recording inbox and ingest exported transcript/summary files as gated evidence packets. Returns recording ids/status and skipped errors.',
       inputSchema: {
         type: 'object',
         properties: {
         },
         additionalProperties: false,
       },
-      handler: async () => request('/api/recordings/scan', { method: 'POST', body: {} }),
+      handler: async () => request('/api/recordings/scan', { method: 'POST', body: {} }).then((payload) => ({
+          results: (payload.imported || []).map((entry) => ({ id: entry.recording?.id || entry.id, status: 'imported' })),
+          ...(payload.skipped?.length ? { skipped: payload.skipped } : {}),
+        })),
     },
     {
       name: 'monitor_list_audio_recordings',
@@ -1281,7 +1270,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         properties: {
           sourceTool: { type: 'string', description: 'Optional source tool filter.' },
           tag: { type: 'string', description: 'Optional tag filter.' },
-          limit: { type: 'integer', description: 'Maximum records to return. Defaults to 50.' },
+          limit: { type: 'integer', description: 'Maximum records to return. Defaults to 25.' },
           offset: { type: 'integer', description: 'Pagination offset. Defaults to 0.' },
         },
         additionalProperties: false,
@@ -1290,9 +1279,11 @@ export function buildMonitorMcpServer({ requestImpl }) {
         const params = new URLSearchParams();
         if (sourceTool) params.set('sourceTool', sourceTool);
         if (tag) params.set('tag', tag);
-        if (limit != null) params.set('limit', String(limit));
-        if (offset != null) params.set('offset', String(offset));
-        return request(`/api/recordings${params.size ? `?${params.toString()}` : ''}`);
+        params.set('limit', String(normalizeLimit(limit)));
+        params.set('offset', String(normalizeOffset(offset)));
+        const payload = await request(`/api/recordings?${params.toString()}`);
+        return { ...payload, recordings: (payload.recordings || []).map((row) => pickFields(row, ['id', 'stem', 'sourceTool', 'status', 'actionSessionId'])),
+          ...(payload.hasMore ? { nextOffset: payload.offset + payload.recordings.length } : {}) };
       },
     },
     {
@@ -1325,7 +1316,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_act_on_audio_recording',
-      description: 'Spawn a scoped action session for one recording. The prompt contains safe counts only; evidence is staged in the workdir.',
+      description: 'Spawn a scoped action session for one recording. The prompt contains safe counts only; evidence is staged in the workdir. Returns recording id, session_id and status.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1335,7 +1326,9 @@ export function buildMonitorMcpServer({ requestImpl }) {
         additionalProperties: false,
       },
       handler: async ({ id }) =>
-        request(`/api/recordings/${encodeURIComponent(String(id || ''))}/act`, { method: 'POST', body: {} }),
+        request(`/api/recordings/${encodeURIComponent(String(id || ''))}/act`, { method: 'POST', body: {} }).then((payload) => ({
+          id, session_id: payload.sessionId, status: 'spawned',
+        })),
     },
 
     // ── System ──

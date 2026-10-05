@@ -45,7 +45,7 @@ test('task MCP crosses real HTTP auth with stable owner, consumer identity and e
   await mcp.callTool('task_send', { thread_id: 'room', task_id: 'child', message_key: 'm2', input: 'steer', mode: 'steer', expected_turn_id: 'turn1' }, context);
   assert.deepEqual(calls.at(-1).args[3], { mode: 'steer', expectedTurnId: 'turn1' });
   await mcp.callTool('task_wait', { thread_id: 'room', task_ids: ['child'], after: 'cursor', timeout_ms: 10 }, context);
-  assert.deepEqual(calls.at(-1).args, [['child'], 'cursor', 10, { consumerId: 'codex:parent' }]);
+  assert.deepEqual(calls.at(-1).args, [['child'], 'cursor', 10, { consumerId: 'codex:parent', limit: 50 }]);
 });
 
 test('task authority rejects unowned tasks, wrong rooms and missing scopes; strips caller launch authority', async (t) => {

@@ -110,7 +110,7 @@ describe('ordinary Dueno session spawn authority', () => {
       provider: 'codex', workDir, displayName: 'one-off',
     }, auth);
     assert.equal(oneOff.error, undefined, oneOff.error?.message);
-    assert.equal(oneOff.result.structuredContent.id, 'child-one-off');
+    assert.equal(oneOff.result.structuredContent.participants[0].session_id, 'child-one-off');
 
     const collab = await rpc(server, 'spawn_collab_session', {
       title: 'pair',
@@ -118,7 +118,7 @@ describe('ordinary Dueno session spawn authority', () => {
       participants: [{ provider: 'codex' }, { provider: 'xai' }],
     }, auth);
     assert.equal(collab.error, undefined, collab.error?.message);
-    assert.equal(collab.result.structuredContent.threadType, 'collab');
+    assert.ok(collab.result.structuredContent.thread_id);
 
     const conference = await rpc(server, 'spawn_conference_session', {
       title: 'room',
@@ -126,7 +126,7 @@ describe('ordinary Dueno session spawn authority', () => {
       participants: [{ provider: 'codex' }, { provider: 'xai' }, { provider: 'codex' }],
     }, auth);
     assert.equal(conference.error, undefined, conference.error?.message);
-    assert.equal(conference.result.structuredContent.threadType, 'conference');
+    assert.ok(conference.result.structuredContent.thread_id);
 
   });
 });

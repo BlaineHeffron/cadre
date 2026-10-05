@@ -231,7 +231,7 @@ describe('DeepSeek dsh-mcp-client authenticated Agent Bus E2E', () => {
         thread_id: threadId,
         body: 'DeepSeek authenticated bus E2E',
       }, exec);
-      assert.equal(sent.structuredContent.message.id, 'msg_1');
+      assert.equal(sent.structuredContent.message_id, 'msg_1');
 
       const received = await cordis.tools.get('mcp__dueno__room_context').execute({
         thread_id: threadId,
