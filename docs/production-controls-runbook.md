@@ -1,5 +1,58 @@
 # Production Controls Runbook
 
+## Logs
+
+Live server and HTTP Agent Bus MCP diagnostics have one source: journald for
+`dueno-fleet`. Fastify/Pino writes stdout; the installed user service sends both
+stdout and stderr to the journal. Journald rotates automatically. Follow the last
+N lines (50 by default) with:
+
+```bash
+bash scripts/server.sh logs [N]
+# Or directly:
+journalctl --user -u dueno-fleet --no-pager -n 50 -f
+```
+
+`logs/server.log` is a removed legacy destination; use journald. The unused
+stdio MCP script that wrote `logs/agent-bus-mcp.log` has also been removed. Operators
+may archive or delete those two stale files from existing checkouts. No current Cadre writer uses
+`logs/`. Paths in repo-quality test fixtures are sample data, not live writers.
+
+### File inventory and retention
+
+Paths below are defaults. `CADRE_STATE_DIR` (legacy `DM_STATE_DIR`) overrides
+`.dueno/state`; `AGENT_BUS_STATE_DIR` separately overrides the bus state directory.
+
+| Destination | Writer / still active | Rotation or retention |
+| --- | --- | --- |
+| `.dueno/state/agent_launch_logs/<session>.log` | Session launcher creates the file; tmux CLI stderr is appended by `tee` | No size rotation; reset for each launch, removed on failed launch or session artifact cleanup. Can grow during a long session; not the service log. |
+| `.dueno/state/agent_bus/events.ndjson` | Agent Bus store appends event mirrors | Append-only, no file rotation; the in-memory 500-event limit does not cap this file. Retained history, not disposable diagnostics. |
+| `.dueno/state/agent_bus/rooms/<thread>/messages.jsonl` | Agent Bus store appends room message mirrors | Removed with eligible closed rooms after 30 idle days by default (`AGENT_BUS_CLOSED_THREAD_RETENTION_DAYS`); durable task rooms and parents are retained. No size rotation. |
+| `<project>/.agent_bus/hooks/<provider>-<session>.jsonl` | Agent lifecycle hooks append events | No rotation or automatic retention limit; consumed as session history. |
+| `.quality/repo-quality/escaped-defects.jsonl` | Repo-quality check appends its defect ledger when recording outcomes | No rotation; development quality evidence, not a live service log. |
+
+State/audit JSON stores and provider-owned transcripts are retained application
+history, not alternative service log destinations. Do not delete them as stale
+log cleanup.
+
+### Host journal retention
+
+Retention is host configuration, not repository configuration. Recommended
+`journald.conf` drop-in (for example
+`/etc/systemd/journald.conf.d/retention.conf`):
+
+```ini
+[Journal]
+SystemMaxUse=1G
+MaxRetentionSec=14day
+```
+
+These limits apply to the host journal, including persistent user-service
+journals, not just Cadre. With volatile journal storage, also set
+`RuntimeMaxUse=256M`. Size pressure can remove entries before the age limit;
+check usage with `journalctl --disk-usage`. Host configuration and any journald
+restart require separate operator action.
+
 ## Headroom context compression
 
 Headroom is enabled by default for Fleet agent launches. Settings → Agent Providers →
