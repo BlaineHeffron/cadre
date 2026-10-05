@@ -1,0 +1,33 @@
+{
+  "extends": "default",
+  "meta": { "name": "cadre-codex", "version": "1" },
+  "groups": {
+    "include": ["user_caches_linux", "node_runtime", "git_config", "unlink_protection"],
+    "exclude": ["system_write_linux"]
+  },
+  "filesystem": {
+    "write": ["/dev/null", "/dev/zero", "/dev/full", "/dev/tty", "/dev/stdout", "/dev/stderr", "/dev/fd", "/dev/pts", "/proc/self/fd"]
+  },
+  "security": { "signal_mode": "isolated", "capability_elevation": false },
+  "network": {
+    "block": false,
+    "custom_credentials": {
+      "github": {
+        "upstream": "https://api.github.com",
+        "credential_key": "env://CADRE_SANDBOX_GH_TOKEN",
+        "env_var": "GH_TOKEN",
+        "credential_format": "token {}"
+      }
+    }
+  },
+  "workdir": { "access": "readwrite" },
+  "linux": { "af_unix_mediation": "pathname" },
+  "environment": {
+    "allow_vars": [
+      "PATH", "HOME", "USER", "SHELL", "TERM", "COLORTERM", "LANG", "LC_ALL",
+      "CODEX_HOME", "TMPDIR", "GH_CONFIG_DIR", "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
+      "CADRE_SESSION_ID", "DUENO_SESSION_ID", "CADRE_PROVIDER", "DUENO_PROVIDER",
+      "OPENAI_BASE_URL", "DUENO_AGENT_BUS_TOKEN", "CADRE_AGENT_BUS_TOKEN"
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "extends": "default",
+  "meta": { "name": "cadre-claude", "version": "1" },
+  "groups": {
+    "include": ["claude_code_linux", "claude_cache_linux", "node_runtime", "git_config", "unlink_protection"],
+    "exclude": ["system_write_linux"]
+  },
+  "filesystem": {
+    "write": ["/dev/null", "/dev/zero", "/dev/full", "/dev/tty", "/dev/stdout", "/dev/stderr", "/dev/fd", "/dev/pts", "/proc/self/fd"]
+  },
+  "security": { "signal_mode": "isolated", "capability_elevation": false },
+  "network": {
+    "block": false,
+    "custom_credentials": {
+      "github": {
+        "upstream": "https://api.github.com",
+        "credential_key": "env://CADRE_SANDBOX_GH_TOKEN",
+        "env_var": "GH_TOKEN",
+        "credential_format": "token {}"
+      }
+    }
+  },
+  "workdir": { "access": "readwrite" },
+  "linux": { "af_unix_mediation": "pathname" },
+  "environment": {
+    "allow_vars": [
+      "PATH", "HOME", "USER", "SHELL", "TERM", "COLORTERM", "LANG", "LC_ALL",
+      "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_TMPDIR", "TMPDIR", "GH_CONFIG_DIR",
+      "CADRE_SESSION_ID", "DUENO_SESSION_ID", "CADRE_PROVIDER", "DUENO_PROVIDER",
+      "ANTHROPIC_BASE_URL"
+    ]
+  }
+}

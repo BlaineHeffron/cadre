@@ -1585,7 +1585,7 @@ describe('Codex Sessions module', () => {
 
   it('passes route-supplied metadata into persisted session creation', async () => {
     const source = await readFile(resolve('modules/sessions/index.mjs'), 'utf8');
-    assert.match(source, /const \{ workDir, args, model, provider, runtime, thinkingLevel, displayName, initialPrompt, metadata, mcpProfile, mcpServers, codexPlugins, promptProfile, skills \} = body/);
+    assert.match(source, /const \{ workDir, args, model, provider, runtime, thinkingLevel, displayName, initialPrompt, metadata, mcpProfile, mcpServers, codexPlugins, promptProfile, skills, sandbox \} = body/);
     assert.match(source, /displayName,\n\s+metadata: trustedMetadata,\n\s+coordinatorPolicy: scheduledCoordinatorLaunch \? requestCoordinatorPolicy : null,\n\s+loopRegistrationPolicy,\n\s+mcpProfile,\n\s+mcpServers,\n\s+codexPlugins,\n\s+promptProfile,\n\s+skills/);
     assert.match(source, /resumeSession\(id, \{\n\s+loopRegistrationPolicy: operatorResumeLoopRegistrationPolicy\(/);
     assert.match(source, /operatorResumeLoopRegistrationPolicy/);
@@ -2229,6 +2229,13 @@ describe('Codex Sessions module', () => {
     assert.equal(result.statusCode, 400);
     assert.equal(result.body.code, 'codex_plugin_selection_invalid');
     assert.match(result.body.error, /codexPlugins\.add must be an array/);
+  });
+
+  it('forwards the per-spawn sandbox field from the session route', async () => {
+    const result = await runEmptyCreateAuditScenario({ workDir: '/nonexistent', sandbox: 'bwrap' });
+
+    assert.equal(result.statusCode, 400);
+    assert.equal(result.body.code, 'sandbox_invalid');
   });
 
   it('reloads persisted scheduled sends on plugin startup', async () => {

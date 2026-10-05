@@ -1,6 +1,7 @@
 # nono integration design: sandboxed agent launches
 
-Status: design only (2026-10-05), not implemented. Builds on `docs/research/nono-spike.md`, the evidence base.
+Status: rollout step 1 implemented (switch off); see "Phase 0 implementation notes" for corrections found while
+building it. Builds on `docs/research/nono-spike.md`, the evidence base.
 Target: nono 0.79.0 on Linux (Landlock V6). Claims I re-verified for this doc are marked **[V]**: they were run by
 hand in the session scratchpad, with one short headless `claude -p --model haiku` run. Claims marked **[A]** are
 assumptions.
@@ -179,7 +180,8 @@ unset CLAUDECODE
 How each group of flags is built:
 
 - **Git.** `<git-dir>` and `<common-dir>` come from `git -C workDir rev-parse --path-format=absolute --git-dir
-  --git-common-dir`. For a plain checkout both point inside the workdir, and the git flags are omitted.
+  --git-common-dir`. For a plain checkout both are the same dir, and the git flags are omitted (the code tests
+  `git-dir != common-dir`, not "inside the workdir"). A workdir that is not a git repo gets no git flags.
   `.git/config` and `.git/hooks` stay read-only. A linked-worktree commit with exactly these grants succeeded
   **[V]**.
 - **`node_modules`.** The read grant is added only when `node_modules` resolves outside the workdir. Landlock
@@ -258,6 +260,10 @@ through unchanged, so the exit code alone cannot tell them apart. Cadre does not
    - Sandboxed launches set a verify grace of at least 1000 ms. Pi already uses 3000 ms
      (`modules/sessions/index.mjs:351`); Claude and Codex currently check once at 250 ms.
    - A missing `nono` binary already matches `command not found`.
+   - When nono fails at once (bad profile, unreadable agent binary) the pane exits before the first check, so
+     the existing `has-session` check raises "Agent process exited during startup" with the launch-log tail
+     (`nono: Profile read error …`) **[V]**. The `/^nono: /m` pattern covers the case where `tee` keeps the pane.
+     An agent binary outside the granted paths exits 127 with **no** output under `-s` **[V]**.
 4. **After launch**, a child exit is the agent's own exit. nono applies Landlock before `exec`, so a running
    child is a sandboxed child.
 
@@ -268,6 +274,40 @@ through unchanged, so the exit code alone cannot tell them apart. Cadre does not
    - If `meta.sandbox === 'nono'` and the env switch is off, resume fails with `sandbox_required`.
    - A Codex `researchSafeRuntime` launch combined with nono is rejected with 400, because nested bwrap fails
      under nono.
+
+## Phase 0 implementation notes (corrections to the design above)
+
+- **Fresh per-session config stops both TUIs at a prompt** **[V]** (real TUIs under nono in a private tmux):
+  - Claude with an empty `CLAUDE_CONFIG_DIR` shows the onboarding theme picker, then the bypass-permissions
+    warning. `prepareNonoLaunch` writes `<sd>/claude/.claude.json` = `{"hasCompletedOnboarding":true}` (only if
+    absent; trust is merged in later) and `<sd>/claude/settings.json` = `{"skipDangerousModePermissionPrompt":true}`
+    (the host already sets this in `~/.claude/settings.json`). Claude then reaches its input prompt.
+  - Codex with an empty `CODEX_HOME` shows the folder-trust prompt, then an update prompt. It reports the
+    `-c projects."<dir>".trust_level` launch flag as ignored. `prepareNonoLaunch` writes `<sd>/codex/config.toml`
+    with `check_for_update_on_startup = false` and a `[projects."<realpath workDir>"] trust_level = "trusted"`
+    table. This was enough for both a plain repo and a linked worktree.
+- **Prompt profiles.** Claude's `--{append-,}system-prompt-file` lives at `<state>/prompt_profiles/…`, outside
+  `<sd>`, so it gets a `--read-file` grant. Codex profiles are inline `-c developer_instructions`.
+- **The child can write `<sd>`, and the workdir is agent- or PR-controlled.** Three consequences:
+  - Before writing into `<sd>`, `prepareNonoLaunch` `lstat`s the state, config, `tmp` and `gh` dirs and the
+    seeded config files. A symlink, a non-directory or a hard-linked file fails the spawn with
+    `sandbox_state_tampered` (409). Without this, a resumed session's child could swap `<sd>/claude` for a link to
+    `~/.claude`, and host-side writes would land on host config. The parent `sandbox/` dir is not granted, so
+    `<sd>` itself cannot be replaced.
+  - The git and `node_modules` grants are derived once at create time, persisted as `meta.sandboxGrants` and
+    reused on resume. Otherwise a child that rewrites the worktree's `.git` pointer (or the gitdir's `commondir`)
+    would get read-write grants on another repo at the next resume.
+  - The `node_modules` grant is added only when the resolved target is itself named `node_modules`. A PR can
+    commit a `node_modules` symlink to any host path.
+- **Structured sessions.** The hybrid session route rejects `structured: true` with any `sandbox` other than
+  `none` (400 `sandbox_unsupported`), so a sandbox request never silently becomes an unsandboxed structured launch.
+- **Startup checks** (version + `profile validate`) run inside `prepareNonoLaunch`, cached on success only.
+- **`meta.sandbox`** is written only when the session ran under nono, so unsandboxed session meta is unchanged.
+- **Resume** never carries a GitHub token (only `defaultSessionLauncher` resolves one), so a resumed sandboxed
+  reviewer runs in open mode without `GH_TOKEN`.
+- **Not in phase 0:** rejecting `codexPlugins.add` and stdio or research MCP servers for sandboxed launches is
+  left for phase 1, together with turning the switch on. Pi and the research safe runtime are rejected with 400
+  (`sandbox_unsupported`).
 
 ## Known behaviour changes for sandboxed sessions
 

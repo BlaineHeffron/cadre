@@ -106,13 +106,11 @@ function acceptTrust(projects, key) {
   return { ...existing, hasTrustDialogAccepted: true };
 }
 
-export async function seedClaudeWorkspaceTrust(workDir, { logger = console } = {}) {
+export async function seedClaudeWorkspaceTrust(workDir, { logger = console, configPath = join(process.env.HOME || homedir(), '.claude.json') } = {}) {
   const trimmed = String(workDir || '').trim();
   if (!trimmed) return;
   const resolvedWorkDir = await realpath(trimmed).catch(() => resolve(trimmed));
   const keys = [...new Set([resolvedWorkDir, trimmed].filter(Boolean))];
-  const home = process.env.HOME || homedir();
-  const configPath = join(home, '.claude.json');
   const lockPath = `${configPath}.lock`;
 
   const writeTrust = async () => {

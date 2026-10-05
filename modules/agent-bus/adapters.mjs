@@ -43,13 +43,13 @@ function buildAdapter({ kind, detailPath, inputPath }) {
       return Array.isArray(payload?.sessions) ? payload.sessions : [];
     },
 
-    async createSession(app, { sessionId, initialPrompt, workDir, args, model, provider, thinkingLevel, displayName, mcpProfile, mcpServers, codexPlugins, promptProfile, structured, authContext } = {}) {
+    async createSession(app, { sessionId, initialPrompt, workDir, args, model, provider, thinkingLevel, displayName, mcpProfile, mcpServers, codexPlugins, promptProfile, structured, sandbox, authContext } = {}) {
       if (authContext) {
         const request = buildInProcessFastifyRequest({ app, buildHeaders: authHeaders });
         try {
           return await request(`/api/${kind}/sessions`, {
             method: 'POST',
-            body: { sessionId, initialPrompt, workDir, args, model, provider, thinkingLevel, displayName, mcpProfile, mcpServers, codexPlugins, promptProfile, structured },
+            body: { sessionId, initialPrompt, workDir, args, model, provider, thinkingLevel, displayName, mcpProfile, mcpServers, codexPlugins, promptProfile, structured, sandbox },
             authContext,
           });
         } catch (error) {
@@ -60,7 +60,7 @@ function buildAdapter({ kind, detailPath, inputPath }) {
       const { res, payload } = await injectJson(app, {
         method: 'POST',
         url: `/api/${kind}/sessions`,
-        payload: { sessionId, initialPrompt, workDir, args, model, provider, thinkingLevel, displayName, mcpProfile, mcpServers, codexPlugins, promptProfile, structured },
+        payload: { sessionId, initialPrompt, workDir, args, model, provider, thinkingLevel, displayName, mcpProfile, mcpServers, codexPlugins, promptProfile, structured, sandbox },
       });
 
       if (res.statusCode >= 400) {

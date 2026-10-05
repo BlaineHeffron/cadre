@@ -2,9 +2,11 @@ import { createAgentAdapters } from '../agent-bus/adapters.mjs';
 import { config as appConfig } from '../../config.mjs';
 import { createAgentSession, enqueueAgentSessionCommand } from '../sessions/index.mjs';
 import { resolveAgentProviderSelection } from '../agent/provider-interface.mjs';
+import { resolveSandbox } from '../agent/nono-launch.mjs';
 import {
   buildGithubAgentRepoStore,
   GithubAgentPoller,
+  resolveGithubAuthToken,
 } from './github-agents.mjs';
 
 function normalizeText(value) {
@@ -75,9 +77,18 @@ export async function defaultSessionLauncher({
   model,
   thinkingLevel,
   metadata,
+  authRef = '',
+  sandbox,
+  env = process.env,
   createSession = createAgentSession,
   enqueueSessionCommand = enqueueAgentSessionCommand,
 } = {}) {
+  // Sandboxed reviewers reach GitHub only through nono's credential route, so the token must resolve.
+  const sandboxed = resolveSandbox(sandbox, { env }) === 'nono';
+  const githubToken = sandboxed ? resolveGithubAuthToken({ authRef }, env) : '';
+  if (sandboxed && !githubToken) {
+    throw Object.assign(new Error('github auth ref unresolved'), { code: 'github_auth_ref_unresolved' });
+  }
   const selection = resolveAgentProviderSelection({
     provider: provider || 'codex',
     model,
@@ -94,6 +105,7 @@ export async function defaultSessionLauncher({
     autoCloseMode: 'when_waiting_for_input',
     autoCloseAfterMs: 2 * 60 * 60 * 1000,
     metadata,
+    ...(sandbox ? { sandbox, githubToken } : {}),
   });
   await enqueueSessionCommand(selection.backendType, result.id, {
     source: 'github_agent_startup',
@@ -125,6 +137,7 @@ export async function githubAgentsPlugin(app, opts = {}) {
   });
   const sessionLauncher = opts.sessionLauncher || ((input) => defaultSessionLauncher({
     ...input,
+    env: sourceConfig.env,
     createSession: opts.createSession || createAgentSession,
     enqueueSessionCommand: opts.enqueueSessionCommand || enqueueAgentSessionCommand,
   }));

@@ -124,6 +124,7 @@ describe('GitHub agent lifecycle', () => {
       assert.deepEqual(result.deletedSessions, [{ sessionId: 'pr-3', kind: 'pr', number: 3 }]);
       assert.deepEqual(warnings.map((fields) => fields.sessionId), ['pr-1', 'pr-2']);
       assert.equal(launches.length, 1);
+      assert.equal(launches[0].authRef, 'GITHUB_TOKEN_REF');
       assert.equal(result.spawned[0].sessionId, 'pr-4');
     });
   });
