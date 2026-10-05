@@ -165,7 +165,7 @@ export async function githubAgentsPlugin(app, opts = {}) {
         return;
       }
       await (opts.enqueueSessionCommand || enqueueAgentSessionCommand)(target.kind, target.sessionId, {
-        source: 'pr_watch', operation: 'send', text, enter: true,
+        source: 'pr_watch', operation: 'message', text, enter: true,
       });
     },
     onResult: handleResult,
