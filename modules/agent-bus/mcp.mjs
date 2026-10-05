@@ -219,6 +219,8 @@ function compactRoomContext(payload, args = {}) {
   const deliveries = includeDeliveries ? (payload?.deliveries || []).map((delivery) => ({
     id: delivery.id, messageId: delivery.messageId, target: delivery.target, status: delivery.status,
     holdReason: delivery.holdReason || null, willInjectWhenIdle: delivery.willInjectWhenIdle === true,
+    held_for_s: delivery.status === 'queued' ? Math.max(0, Math.floor((Date.now() - delivery.createdAt) / 1000)) : 0,
+    hold_reason: delivery.holdDetail || delivery.holdReason || null,
     createdAt: delivery.createdAt, resolution: delivery.resolution || null, cancelledAt: delivery.cancelledAt || null,
     attempts: delivery.attempts, lastAttemptAt: delivery.lastAttemptAt, error: delivery.error || null,
   })) : undefined;

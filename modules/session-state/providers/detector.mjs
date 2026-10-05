@@ -19,7 +19,10 @@ function fingerprint(value) {
 }
 
 function freeTextStabilityFingerprint(provider, content = '') {
-  return fingerprint(normalizeProviderPane(provider, content).semanticFingerprintText);
+  // Observers capture different scrollback depths. Compare the same visible
+  // tail, including output above the composer, rather than historical output.
+  const tail = String(content).split(/\r?\n/).slice(-20).join('\n');
+  return fingerprint(normalizeProviderPane(provider, tail).semanticFingerprintText);
 }
 
 function interactionFingerprint(interaction = {}) {

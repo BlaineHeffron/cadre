@@ -684,6 +684,54 @@ describe('session state tracker', () => {
     assert.equal(tracker.observe('volatile', second).capabilities.sendMessage, true);
   });
 
+  it('stabilizes captured idle panes across viewport and scrollback reads', async () => {
+    const viewport = await fixture('panes/claude-26fb796d-idle-viewport.pane');
+    const scrollback = await fixture('panes/claude-26fb796d-idle-scrollback.pane');
+    assert.notEqual(viewport, scrollback);
+    let timestamp = 1_000;
+    const tracker = createSessionStateTracker({ now: () => timestamp });
+    for (const [index, content] of [viewport, scrollback, viewport, scrollback].entries()) {
+      const snapshot = tracker.observe('capture-depth', [
+        running(),
+        ...observeClaudePane(content, { observedAt: timestamp, requireRepeat: true }),
+      ]);
+      assert.equal(snapshot.execution, 'idle');
+      assert.equal(snapshot.capabilities.canSendNow, index > 0);
+      assert.equal(snapshot.status, index > 0 ? 'ready' : 'unknown');
+      timestamp += 2_000;
+    }
+    // New output in the visible tail must still reset repeat stability.
+    const changed = tracker.observe('capture-depth', observeClaudePane(viewport.replace('Sautéed', 'Worked'), {
+      observedAt: timestamp, requireRepeat: true,
+    }));
+    assert.equal(changed.capabilities.canSendNow, false);
+    assert.match(changed.reason, /not yet stable/);
+    tracker.remove('capture-depth');
+  });
+
+  it('keeps captured busy panes unsendable on repeated captures', async () => {
+    const cases = [
+      ['claude', observeClaudePane, 'claude-working-tool-osmosing.pane'],
+      ['claude', observeClaudePane, 'claude-thinking-moseying.pane'],
+      ['codex', observeCodexPane, 'codex-e5ea5b75-background-terminal.pane'],
+      ['pi', observePiPane, 'pi-5427de06-active.pane'],
+    ];
+    for (const [provider, observer, file] of cases) {
+      let timestamp = 1_000;
+      const tracker = createSessionStateTracker({ now: () => timestamp });
+      const busy = await fixture(`panes/${file}`);
+      for (let index = 0; index < 2; index += 1) {
+        const snapshot = tracker.observe(provider, [running(), ...observer(busy, {
+          observedAt: timestamp, requireRepeat: true,
+        })]);
+        assert.ok(['working', 'thinking'].includes(snapshot.execution), file);
+        assert.equal(snapshot.capabilities.canSendNow, false, file);
+        timestamp += 2_000;
+      }
+      tracker.remove(provider);
+    }
+  });
+
   it('sizes pane freshness and the stability window from the 15s observer cadence', () => {
     assert.equal(PANE_OBSERVER_CADENCE_MS, 15_000);
     assert.equal(PANE_FRESH_MS, 45_000);
