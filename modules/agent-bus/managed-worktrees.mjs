@@ -13,11 +13,17 @@ async function git(repo, args, input) {
   if (result.code !== 0) throw new Error(`git ${args[0]} failed`);
   return result.stdout.replace(/\n$/, '');
 }
-export async function configFor(repo) {
+// Creation reads the base commit, not the possibly stale local checkout; cleanup reads the operator's local config.
+async function configFor(repo, ref) {
   repo = await git(repo, ['rev-parse', '--show-toplevel']);
   let text;
-  try { text = await readFile(resolve(repo, '.cadre/worktree.json'), 'utf8'); }
-  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  if (ref) {
+    if (!await git(repo, ['ls-tree', '--name-only', ref, '--', '.cadre/worktree.json'])) return null;
+    text = await git(repo, ['show', `${ref}:.cadre/worktree.json`]);
+  } else {
+    try { text = await readFile(resolve(repo, '.cadre/worktree.json'), 'utf8'); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  }
   const config = JSON.parse(text);
   if (!config || !['off', 'on-merge'].includes(config.cleanup ?? 'off')
     || (config.setup !== undefined && typeof config.setup !== 'string')
@@ -37,13 +43,13 @@ const markerPath = async (path) => resolve(path, await git(path, ['rev-parse', '
 
 export async function createManagedWorktree({ repo, branch, base, roomId, baseDir = managedWorktreeBase, setupTimeoutMs = 120000 }) {
   repo = await git(repo, ['rev-parse', '--show-toplevel']);
-  const config = await configFor(repo);
-  if (!config) return null;
   if (!roomId || !branch || branch.startsWith('-') || base?.startsWith('-')) throw new Error('invalid worktree arguments');
   await git(repo, ['check-ref-format', '--branch', branch]);
   await git(repo, ['fetch', 'origin']);
   base ||= (await resolveOriginBaseRef(repo)).baseRef;
   const baseHead = await git(repo, ['rev-parse', '--verify', `${base}^{commit}`]);
+  const config = await configFor(repo, baseHead);
+  if (!config) throw new Error(`${repo} has no .cadre/worktree.json at ${base}; managed worktrees require the repo to opt in`);
   const path = resolve(baseDir, roomId, safeWorktreeName(repo));
   if (!inside(baseDir, path) || !inside(resolve(baseDir, roomId), path)) throw new Error('invalid room id');
   await mkdir(dirname(path), { recursive: true });
