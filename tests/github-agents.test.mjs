@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  buildGithubAgentPrompt,
   buildGithubAgentRepoStore,
   GithubAgentPoller,
   normalizeGithubAgentRepo,
@@ -21,6 +22,130 @@ const BASE_REPO = {
   issueEnabled: true,
   enabled: true,
 };
+
+describe('GitHub agent lifecycle', () => {
+  it('preserves poll cursors and spawn history across settings saves, allowing explicit resets', async () => {
+    await withRepoStore(async (store) => {
+      await store.upsertRepo({ ...BASE_REPO, lastSeenPrNumber: 20, lastSeenIssueNumber: 18, spawnedItemKeys: ['pr:20', 'issue:18'] });
+      const saved = await store.upsertRepo({ ...BASE_REPO, issueEnabled: false });
+      assert.equal(saved.lastSeenPrNumber, 20);
+      assert.equal(saved.lastSeenIssueNumber, 18);
+      assert.deepEqual(saved.spawnedItemKeys, ['pr:20', 'issue:18']);
+      const reset = await store.upsertRepo({ ...BASE_REPO, last_seen_pr_number: null, lastSeenIssueNumber: 0, spawned_item_keys: [] });
+      assert.equal(reset.lastSeenPrNumber, null);
+      assert.equal(reset.lastSeenIssueNumber, 0);
+      assert.deepEqual(reset.spawnedItemKeys, []);
+    });
+  });
+
+  it('does not keep baselining when a kind is disabled', async () => {
+    const first = await pollGithubRepo({ ...BASE_REPO, issueEnabled: false }, {
+      env: { GITHUB_TOKEN_REF: 'test-token' }, fetchImpl: mockGithubFetch([]),
+    });
+    const second = await pollGithubRepo(first.updatedRepo, {
+      env: { GITHUB_TOKEN_REF: 'test-token' }, fetchImpl: mockGithubFetch([]),
+    });
+    assert.equal(first.baselined, true);
+    assert.equal(second.baselined, false);
+    assert.equal(second.baselineIssue, false);
+    assert.equal(second.updatedRepo.lastSeenIssueNumber, null);
+    assert.equal(second.updatedRepo.lastEvent, 'no_new_items');
+  });
+
+  it('confirms absent items before deletion and leaves disabled issues and unrelated sessions alone', async () => {
+    await withRepoStore(async (store) => {
+      await store.upsertRepo({ ...BASE_REPO, issueEnabled: false, lastSeenPrNumber: 200 });
+      const sessions = [
+        ...[1, 101, 102, 103, 104].map((number) => ({ id: `pr-${number}`, source: 'github-agent', metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: number } })),
+        { id: 'issue-2', source: 'github-agent', metadata: { github_repo: 'octo/demo', github_kind: 'issue', github_number: 2 } },
+        { id: 'other-repo', source: 'github-agent', metadata: { github_repo: 'octo/other', github_kind: 'pr', github_number: 3 } },
+        { id: 'manual', source: 'external', metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: 3 } },
+        { id: 'legacy', source: 'github-agent', workDir: '/tmp/github-agents/worktrees/octo-demo/pr-105-old/demo' },
+      ];
+      sessions.find((session) => session.id === 'pr-103').endedAt = 1;
+      sessions.find((session) => session.id === 'pr-104').tmuxSession = 'dead';
+      const calls = [];
+      const deleted = [];
+      const logs = [];
+      const poller = new GithubAgentPoller({
+        repoStore: store, config: { enabled: true, workDir: '/tmp/github-agents', env: { GITHUB_TOKEN_REF: 'test-token' } },
+        listExistingSessions: async () => sessions, tmuxSessionExists: async () => false,
+        deleteSession: async (session) => { deleted.push(session.id); },
+        log: { info: (fields) => logs.push(fields) },
+        fetchImpl: async (url) => {
+          calls.push(url);
+          if (url.includes('/pulls?')) return response(200, [{ ...githubItem(1), author_association: 'NONE' }]);
+          if (url.endsWith('/pulls/101')) return response(200, { state: 'closed' });
+          if (url.endsWith('/pulls/102')) return response(200, { state: 'open' });
+          if (url.endsWith('/pulls/105')) return response(200, { state: 'closed' });
+          assert.fail(`unexpected request ${url}`);
+        },
+      });
+      const [suppressed] = await poller.pollOnce({ suppressSpawn: true });
+      assert.deepEqual(suppressed.deletedSessions, []);
+      assert.equal(calls.length, 1);
+      const [result] = await poller.pollOnce();
+      assert.deepEqual(deleted, ['pr-101', 'legacy']);
+      assert.deepEqual(result.deletedSessions, [
+        { sessionId: 'pr-101', kind: 'pr', number: 101 },
+        { sessionId: 'legacy', kind: 'pr', number: 105 },
+      ]);
+      assert.equal(logs.length, 2);
+      assert.equal(calls.length, 5);
+    });
+  });
+
+  it('serializes overlapping polls and deduplicates repeated items before launching', async () => {
+    await withRepoStore(async (store) => {
+      await store.upsertRepo({ ...BASE_REPO, lastSeenPrNumber: 0, lastSeenIssueNumber: 144 });
+      let release;
+      const blocked = new Promise((resolve) => { release = resolve; });
+      let launched;
+      const started = new Promise((resolve) => { launched = resolve; });
+      const launches = [];
+      const poller = new GithubAgentPoller({
+        repoStore: store, config: { enabled: true, env: { GITHUB_TOKEN_REF: 'test-token' } },
+        listExistingSessions: async () => [],
+        fetchImpl: mockGithubFetch([], { issues: [githubItem(145), githubItem(145), githubItem(146), githubItem(146)] }),
+        resolveScratchWorkDir: async () => '/tmp/unused-github-lifecycle',
+        sessionLauncher: async (input) => {
+          launches.push(input);
+          launched();
+          await blocked;
+          return { id: `issue-${input.metadata.github_number}` };
+        },
+      });
+      const first = poller.pollOnce();
+      await started;
+      const second = poller.pollOnce();
+      release();
+      const results = await Promise.all([first, second]);
+      assert.deepEqual(launches.map((input) => input.metadata.github_number), [145, 146]);
+      assert.equal(launches[0].autoCloseMode, 'when_waiting_for_input');
+      assert.equal(launches[0].autoCloseAfterMs, 7200000);
+      assert.equal(results[0][0].spawned.length, 2);
+      assert.equal(results[1][0].spawned.length, 0);
+      assert.deepEqual((await store.getRepo('octo/demo')).spawnedItemKeys, ['issue:145', 'issue:146']);
+    });
+  });
+
+  it('requires a single verdict review or triage comment and process exit', () => {
+    for (const autoReviewEnabled of [true, false]) {
+      const pr = buildGithubAgentPrompt({ repo: { ...BASE_REPO, autoReviewEnabled }, kind: 'pr' });
+      assert.match(pr, /Post exactly one GitHub pull-request review/);
+      assert.match(pr, /VERDICT: BLOCKING <n> \| NON-BLOCKING <m> \| sha <short head sha>/);
+      assert.match(pr, /- \[B\] <file:line> <one line>/);
+      assert.match(pr, /- \[N\] <file:line> <one line>/);
+      assert.match(pr, /exit the session \(end the agent process\)/);
+      assert.match(pr, /Do not push commits, merge, force-push, change branches/);
+      assert.match(pr, autoReviewEnabled ? /REQUEST_CHANGES only when BLOCKING > 0/ : /use COMMENT only/);
+    }
+    const issue = buildGithubAgentPrompt({ kind: 'issue' });
+    assert.match(issue, /exactly one issue triage comment with suspected files, likely cause and proposed fix/);
+    assert.match(issue, /No code pushed/);
+    assert.match(issue, /exit the session \(end the agent process\)/);
+  });
+});
 
 describe('GitHub agents poller', () => {
   it('baselines on the first poll without emitting sessions to spawn', async () => {
@@ -1326,4 +1451,15 @@ function response(status, payload) {
     ok: status >= 200 && status < 300,
     json: async () => payload,
   };
+}
+
+async function withRepoStore(fn) {
+  const dir = await mkdtemp(join(tmpdir(), 'github-lifecycle-'));
+  const store = buildGithubAgentRepoStore({ storeFile: join(dir, 'repos.json'), env: { APP_STATE_STORAGE: 'file' } });
+  try {
+    return await fn(store);
+  } finally {
+    await store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 }
