@@ -2,6 +2,71 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
 import { renderCollabOnboarding } from '../modules/agent-bus/protocol.mjs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { exec } from '../lib/exec.mjs';
+import { waitForStartupPane } from '../modules/agent/startup-input.mjs';
+import { sendTmuxText } from '../modules/platform/tmux-input.mjs';
+
+async function tmuxFixture(t) {
+  const dir = await mkdtemp(join(tmpdir(), 'cadre-startup-pane-'));
+  const socket = join(dir, 'tmux');
+  const run = (cmd, args, opts) => exec(cmd, ['-S', socket, ...args], opts);
+  t.after(async () => { await run('tmux', ['kill-server']); await rm(dir, { recursive: true, force: true }); });
+  return { dir, run };
+}
+
+test('startup waits for a real delayed pane before sending text', async (t) => {
+  const { run } = await tmuxFixture(t);
+  let probes = 0;
+  const observe = (cmd, args, opts) => { probes++; return run(cmd, args, opts); };
+  const pending = waitForStartupPane(observe, 'delayed', '', { attempts: 30, intervalMs: 20 });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const started = await run('tmux', ['new-session', '-d', '-s', 'delayed', 'cat']);
+  assert.equal(started.code, 0, started.stderr);
+  await pending;
+  assert.ok(probes > 1);
+  await sendTmuxText(run, { target: 'delayed', text: 'bootstrap received', delayMs: 0 });
+  const pane = await run('tmux', ['capture-pane', '-p', '-t', 'delayed']);
+  assert.match(pane.stdout, /bootstrap received/);
+});
+
+test('failed real launch closes the room, terminates created peers, and preserves attached sessions', async (t) => {
+  const { dir, run } = await tmuxFixture(t);
+  const log = join(dir, 'launch.log');
+  const h = await createAgentBusHarness(); t.after(() => h.cleanup());
+  await run('tmux', ['new-session', '-d', '-s', 'attached', 'cat']);
+  h.createResponders.codex = async () => {
+    assert.equal((await run('tmux', ['new-session', '-d', '-s', 'created', 'cat'])).code, 0);
+  };
+  h.createResponders.claude = async () => {
+    assert.equal((await run('tmux', ['new-session', '-d', '-s', 'failed', 'sh', '-c', `echo fixture-launch-error > '${log}'; exit 1`])).code, 0);
+  };
+  h.inputResponders.codex = async ({ sessionId, text }) => {
+    const target = sessionId === 'codex-1' ? 'attached' : 'created';
+    await waitForStartupPane(run, target);
+    await sendTmuxText(run, { target, text, delayMs: 0 });
+  };
+  h.inputResponders.claude = async () => {
+    try { await waitForStartupPane(run, 'failed', log, { attempts: 5, intervalMs: 20 }); }
+    catch (err) { return { statusCode: err.statusCode, error: err.message }; }
+  };
+  h.deleteResponders.codex = async () => { await run('tmux', ['kill-session', '-t', 'created']); };
+  const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
+    participants: [{ kind: 'codex', create: true }, { kind: 'codex', sessionId: 'codex-1', create: false }, { kind: 'claude', create: true }],
+  } });
+  assert.equal(response.statusCode, 400, response.body);
+  assert.match(response.json().error, /claude:claude-new-1.*failed bootstrap/);
+  assert.match(response.json().error, /fixture-launch-error/);
+  assert.equal(h.store.listThreads().length, 1);
+  assert.equal(h.store.listThreads()[0].status, 'closed');
+  assert.equal(h.store.getThread(h.store.listThreads()[0].id).deliveries.some((d) => d.status === 'queued'), false);
+  assert.deepEqual(h.deletedSessions.codex, ['codex-new-1']);
+  assert.deepEqual(h.deletedSessions.claude, ['claude-new-1']);
+  assert.notEqual((await run('tmux', ['has-session', '-t', 'created'])).code, 0);
+  assert.equal((await run('tmux', ['has-session', '-t', 'attached'])).code, 0);
+});
 
 test('onboarding without a room channel omits collab workflow and tools', () => {
   const prompt = renderCollabOnboarding({ self: { kind: 'codex', sessionId: 'solo' }, busAvailable: false });

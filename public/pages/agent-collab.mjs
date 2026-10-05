@@ -45,15 +45,6 @@ function reportBootstrapWarnings(data) {
   for (const warning of warnings) {
     addToast(warning?.message || warning?.code || 'Thread bootstrap warning', 'warning');
   }
-  if (data?.bootstrapOk === false) {
-    const failed = Array.isArray(data.failedParticipants) ? data.failedParticipants : [];
-    addToast(
-      failed.length > 0
-        ? `Bootstrap incomplete for ${failed.map((entry) => `${entry?.participant?.kind || entry?.kind || 'participant'}:${entry?.participant?.sessionId || entry?.sessionId || '?'}`).join(', ')}`
-        : 'Thread bootstrap did not complete for every participant',
-      'error'
-    );
-  }
 }
 
 

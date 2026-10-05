@@ -119,20 +119,29 @@ test('orphan sweep only removes marked closed-room worktrees', async (t) => {
   assert.equal(await exists(unmanaged), true);
 });
 
-for (const mode of ['managed', 'setup failure', 'no config']) test(`bootstrap ${mode} with real git`, async (t) => {
+for (const mode of ['managed', 'setup failure', 'injection failure', 'no config']) test(`bootstrap ${mode} with real git`, async (t) => {
   const f = await fixture(t);
   const h = await createAgentBusHarness({ beforeReady: async (app) => {
     app.get('/api/codex-app-server/sessions', async () => ({ sessions: [] }));
   } }); t.after(() => h.cleanup());
   if (mode === 'setup failure') await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ setup: 'touch failed; exit 1' }));
   if (mode === 'no config') await rm(resolve(f.repo, '.cadre/worktree.json'));
+  if (mode === 'injection failure') h.inputResponders.claude = () => ({ statusCode: 400, error: 'fixture startup failed' });
   const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
     title: 'Managed', workDir: f.repo, worktree: { repo: f.repo, branch: 'bootstrap', base: 'origin/main' },
     participants: [{ kind: 'codex', create: true, workDir: '/wrong' }, { kind: 'claude', create: true }],
   } });
-  if (mode === 'setup failure') {
+  if (mode === 'setup failure' || mode === 'injection failure') {
     assert.equal(response.statusCode, 400, response.body);
-    assert.equal(h.createdSessions.codex.length, 0); assert.equal(h.createdSessions.claude.length, 0);
+    if (mode === 'setup failure') {
+      assert.equal(h.createdSessions.codex.length, 0); assert.equal(h.createdSessions.claude.length, 0);
+    } else {
+      assert.match(response.json().error, /claude:claude-new-1.*fixture startup failed/);
+      assert.equal(response.json().worktree.removed, true, response.body);
+      assert.deepEqual(h.deletedSessions.codex, ['codex-new-1']);
+      assert.deepEqual(h.deletedSessions.claude, ['claude-new-1']);
+      assert.equal(h.store.listThreads()[0].status, 'closed');
+    }
     assert.doesNotMatch(await git(f.repo, 'worktree', 'list', '--porcelain'), /refs\/heads\/bootstrap/);
     assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/bootstrap'])).code, 128);
     return;

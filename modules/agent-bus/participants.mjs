@@ -360,10 +360,13 @@ export function createAgentBusParticipants({
   // Deletes sessions this request created so a later validation or creation failure does not
   // leave orphaned agents behind with no thread to join.
   async function discardCreatedParticipants(participants = []) {
+    const failures = [];
     for (const entry of participants) {
       if (!entry?.created || !entry.sessionId) continue;
-      await adapters[entry.kind]?.deleteSession?.(app, entry.sessionId).catch(() => {});
+      try { await adapters[entry.kind].deleteSession(app, entry.sessionId); }
+      catch (err) { failures.push(`${participantKey(entry)}: ${err.message}`); }
     }
+    return failures;
   }
 
   async function waitForSessionReady(kind, sessionId, { attempts = 90, intervalMs = 500 } = {}) {
@@ -396,6 +399,7 @@ export function createAgentBusParticipants({
   function isRetryableStartupInjectionError(error = {}) {
     const statusCode = Number(error.statusCode || error.payload?.statusCode || 0);
     const code = String(error.code || error.payload?.code || '').trim();
+    if (code === 'startup_pane_unavailable') return false;
     return statusCode === 409
       || statusCode >= 500
       || code === 'agent_prompt_not_ready'

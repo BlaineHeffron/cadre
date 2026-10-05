@@ -11,6 +11,7 @@ import { isTmuxMissingNamedSessionError, isTmuxMissingSessionError } from '../mo
 import { resolveMcpCapabilities } from '../modules/integrations/mcp-capability-resolver.mjs';
 import { buildMcpCapabilityCatalog } from '../modules/integrations/mcp-server-catalog.mjs';
 import { sanitizedMcpSnapshot } from '../modules/integrations/mcp-launch-preflight.mjs';
+import { exec } from '../lib/exec.mjs';
 
 const execFileAsync = promisify(execFile);
 const coverageEnv = process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {};
@@ -20,6 +21,48 @@ afterEach(async () => {
   while (tempDirs.length > 0) {
     await rm(tempDirs.pop(), { recursive: true, force: true });
   }
+});
+
+it('startup-input reports the launch log when a real tmux agent exits', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'cadre-startup-route-'));
+  const socket = join(dir, 'socket'), log = join(dir, 'launch.log');
+  const tmux = (args) => exec('tmux', ['-S', socket, ...args]);
+  t.after(async () => { await tmux(['kill-server']); await rm(dir, { recursive: true, force: true }); });
+  // Keep the isolated server alive while the failed agent pane disappears.
+  assert.equal((await tmux(['new-session', '-d', '-s', 'keeper', 'cat'])).code, 0);
+  assert.equal((await tmux(['new-session', '-d', '-s', 'codex-exited', 'sh', '-c', `echo route-launch-error > '${log}'; exit 1`])).code, 0);
+  await mkdir(join(dir, 'bin'));
+  const binary = (await exec('which', ['tmux'])).stdout.trim();
+  await writeFile(join(dir, 'bin/tmux'), `#!/bin/sh\nexec '${binary}' -S '${socket}' "$@"\n`);
+  await chmod(join(dir, 'bin/tmux'), 0o755);
+  await writeFile(join(dir, '.codex_sessions.json'), JSON.stringify([{
+    id: 'exited', tmuxSession: 'codex-exited', source: 'dashboard', workDir: dir, launchLogPath: log, created: Date.now(),
+  }]));
+  const fastifyUrl = pathToFileURL(resolve('node_modules/fastify/fastify.js')).href;
+  const pluginUrl = pathToFileURL(resolve('modules/sessions/codex-sessions.mjs')).href;
+  const script = `
+    import Fastify from ${JSON.stringify(fastifyUrl)};
+    const { codexSessionsPlugin } = await import(${JSON.stringify(pluginUrl)});
+    const app = Fastify();
+    await app.register(codexSessionsPlugin, { appServerEnabled: false,
+      wsManager: { broadcast() {}, onChannel() {}, channels: new Map() } });
+    await app.ready();
+    const response = await app.inject({ method: 'POST', url: '/api/codex/sessions/exited/startup-input',
+      payload: { text: 'Start work', enter: true } });
+    console.log(JSON.stringify({ statusCode: response.statusCode, body: response.json() }));
+    await app.close();
+  `;
+  const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', script], {
+    cwd: dir, timeout: 15000,
+    env: { ...coverageEnv, NODE_TEST_CONTEXT: '1', HOME: dir, PATH: `${dir}/bin:/usr/bin:/bin`,
+      CADRE_DISABLE_SIDE_EFFECTS: '1', CADRE_GITHUB_AGENT_POLLER_ENABLED: '0', CADRE_GITHUB_AGENTS_ENABLED: '0',
+      CADRE_SCHEDULED_AGENT_PUMP_ENABLED: '0', TELEGRAM_BRIDGE: '0', CADRE_AGENT_CGROUP_ISOLATION: '0',
+      APP_STATE_STORAGE: 'file', CODEX_SESSIONS_STORAGE: 'file', LOG_LEVEL: 'error', DATABASE_URL: '' },
+  });
+  const result = JSON.parse(stdout.trim());
+  assert.equal(result.statusCode, 409);
+  assert.equal(result.body.code, 'startup_pane_unavailable');
+  assert.match(result.body.error, /route-launch-error/);
 });
 
 async function runClearScenario({ paneContent, deadlineMs = 5000 }) {

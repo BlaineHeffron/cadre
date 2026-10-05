@@ -42,7 +42,7 @@ import {
 } from '../agent/runtime-args.mjs';
 import { buildLaunchEnvPrefix } from '../agent/launch-env.mjs';
 import { prepareHeadroomLaunch } from '../agent/headroom.mjs';
-import { STARTUP_INJECT_DEADLINE_MS } from '../agent/startup-input.mjs';
+import { STARTUP_INJECT_DEADLINE_MS, readLaunchLogTail, waitForStartupPane } from '../agent/startup-input.mjs';
 import { detectLaunchFailure } from '../agent/launch-failure.mjs';
 import { normalizeSessionWorkDir } from './workdir.mjs';
 import { seedClaudeWorkspaceTrust } from '../platform/mcp-seed.mjs';
@@ -112,7 +112,6 @@ import { hasResearchWorkbenchLaunchProfile } from '../integrations/research-prof
 import { cadreEnvName } from '../platform/cadre-env.mjs';
 
 const LAUNCH_LOG_DIR = runtimeStatePath('agent_launch_logs');
-const LAUNCH_LOG_TAIL_BYTES = 12000;
 const LAUNCH_VERIFY_INTERVAL_MS = 250;
 const DISCOVERY_CACHE_TTL_MS = 10000;
 const STATE_CACHE_TTL_MS = 5000;
@@ -944,15 +943,6 @@ function stripLegacyMcpMetadata(meta = {}) {
     ...sanitized
   } = meta;
   return sanitized;
-}
-
-async function readLaunchLogTail(launchLogPath) {
-  if (!launchLogPath) return '';
-  const content = await readFile(launchLogPath, 'utf8').catch(() => '');
-  if (!content.trim()) return '';
-  return content.length > LAUNCH_LOG_TAIL_BYTES
-    ? content.slice(-LAUNCH_LOG_TAIL_BYTES)
-    : content;
 }
 
 async function assertTmuxSessionExists(sessionName, launchLogPath = '') {
@@ -2919,6 +2909,7 @@ async function sessionsPlugin(app, {
     if (!requireMutableSession(id, reply)) return reply;
     const { text, enter, deadlineAt } = req.body || {};
     try {
+      await waitForStartupPane(exec, resolveSessionName(id), resolveSessionMeta(id)?.launchLogPath);
       const sourceText = text == null ? text : String(text);
       const resolvedText = text == null ? text : resolveHarnessUserText(text);
       const resolution = skillDeliveryResolution(sourceText, resolvedText);
@@ -2935,8 +2926,9 @@ async function sessionsPlugin(app, {
       reply.code(202);
       return { ...accepted, resolution };
     } catch (err) {
+      const tail = await readLaunchLogTail(resolveSessionMeta(id)?.launchLogPath);
       return reply.code(409).send({
-        error: err.message,
+        error: isTmuxMissingSessionError(err.message) && tail ? `Agent process exited during startup:\n${tail}` : err.message,
         code: err.code || 'startup_input_failed',
       });
     }

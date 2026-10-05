@@ -260,10 +260,6 @@ export function buildMonitorMcpServer({ requestImpl }) {
   }
 
   function spawnResult(payload, { kind = '', threadId = null, displayName = '' } = {}) {
-    if (payload.bootstrapOk === false) {
-      const failures = (payload.failedParticipants || []).map((entry) => `${entry.participant?.kind}:${entry.participant?.sessionId}${entry.phase ? ` ${entry.phase}` : ''}: ${entry.error}`).join('; ');
-      throw new Error(`Bootstrap incomplete (thread ${payload.thread?.id || 'unknown'}): ${failures}`);
-    }
     return {
       thread_id: payload.thread?.id || threadId,
       participants: (payload.participants || [payload.session || payload]).map((entry) => ({
@@ -272,9 +268,6 @@ export function buildMonitorMcpServer({ requestImpl }) {
         display_name: entry.displayName || entry.sessionName || displayName,
       })),
       ...(payload.warnings?.length || payload.initialPromptError ? { warnings: [...(payload.warnings || []), ...(payload.initialPromptError ? [payload.initialPromptError] : [])] } : {}),
-      ...(payload.failedParticipants?.length ? { failed_participants: payload.failedParticipants.map((entry) => ({
-        kind: entry.participant?.kind, session_id: entry.participant?.sessionId, error: entry.error,
-      })) } : {}),
     };
   }
 
