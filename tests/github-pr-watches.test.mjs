@@ -52,7 +52,8 @@ test('authenticated MCP/REST create, persist, update and remove watches', async 
   await assert.rejects(s.call('watch_pr', { repo: 'missing/repo', number: 1 }), /not configured/);
   await assert.rejects(s.call('watch_pr', { repo: 'octo/demo', number: 0 }), /positive integer/);
   const result = await s.call('watch_pr', { repo: 'octo/demo', number: 1, creator: successor });
-  assert.deepEqual(result.structuredContent.watch.creator, creator);
+  assert.deepEqual(result.structuredContent, { repo: 'octo/demo', number: 1, status: 'watching' });
+  assert.deepEqual((await s.store.listWatches())[0].creator, creator);
   await s.watch();
   assert.equal((await s.store.listWatches()).length, 1);
   await s.store.upsertRepo({ owner: 'octo', repo: 'demo', authRef: 'TEST_GITHUB_TOKEN', enabled: true, prEnabled: false, issueEnabled: false });
@@ -233,7 +234,8 @@ test('watch linking, rewatching and removal require creator or current room owne
   assert.deepEqual((await s.store.listWatches())[0], original);
   await s.call('room_transfer', { thread_id: s.thread.id, to: { kind: successor.kind, session_id: successor.sessionId } });
   s.advance(1000);
-  const updated = (await s.call('watch_pr', args, successor)).structuredContent.watch;
+  await s.call('watch_pr', args, successor);
+  const updated = (await s.store.listWatches())[0];
   assert.deepEqual(updated.creator, creator);
   assert.equal(updated.createdAtMs, original.createdAtMs);
   assert.equal(updated.lastReviewId, 42);

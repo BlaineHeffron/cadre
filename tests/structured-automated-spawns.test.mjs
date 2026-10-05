@@ -42,6 +42,7 @@ const { isStructuredAutomatedSpawnsEnabled } = await import('../modules/sessions
 const { getProtocolSessionProvider } = await import('../modules/sessions/protocol-session-registry.mjs');
 const { buildClaudeStreamJsonArgs } = await import('../modules/agent/claude-stream-json-transport.mjs');
 const { agentInterfacePlugin } = await import('../modules/agent/interface.mjs');
+const { buildAgentBusMcpServer } = await import('../modules/agent-bus/mcp.mjs');
 const { buildMonitorMcpServer } = await import('../modules/platform/monitor-mcp.mjs');
 const { buildInProcessFastifyRequest } = await import('../modules/agent-bus/in-process-mcp.mjs');
 const { createAgentAdapters } = await import('../modules/agent-bus/adapters.mjs');
@@ -264,6 +265,16 @@ describe('structured automated spawns', () => {
       // The same routes still serve tmux sessions.
       const renamed = await request('PUT', '/api/claude/sessions/tmux1', { payload: { displayName: 'Human pane' } });
       assert.equal(renamed.statusCode, 200, renamed.body);
+      const requestImpl = buildInProcessFastifyRequest({ app, buildHeaders: () => ({}) });
+      const monitor = buildMonitorMcpServer({ requestImpl });
+      const bus = buildAgentBusMcpServer({ requestImpl, extraTools: monitor.tools.map((tool) => ({ ...tool, handler: (args, context) => monitor.handleToolCall(tool.name, args, context) })) });
+      const scheduled = await bus.handleRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'monitor_scheduled_send', arguments: { type: 'claude', sessionId: 'tmux1', text: 'PRIVATE_SCHEDULE_TEXT', delayMs: 600000 } } });
+      assert.equal(scheduled.error, undefined, JSON.stringify(scheduled.error));
+      assert.deepEqual(Object.keys(scheduled.result.structuredContent).sort(), ['id', 'status']);
+      assert.ok(scheduled.result.structuredContent.id.startsWith('ss_'));
+      assert.deepEqual(JSON.parse(scheduled.result.content[0].text), scheduled.result.structuredContent);
+      assert.doesNotMatch(JSON.stringify(scheduled.result), /PRIVATE_SCHEDULE_TEXT/);
+      await request('DELETE', `/api/claude/sessions/tmux1/scheduled-send/${scheduled.result.structuredContent.id}`);
     } finally {
       await app.close();
       delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;

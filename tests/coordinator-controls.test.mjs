@@ -7,6 +7,7 @@ import {
   AGENT_BUS_AGENT_TOOL_SCOPES,
   AgentBusCredentialStore,
 } from '../modules/agent-bus/mcp-auth.mjs';
+import { buildMonitorMcpServer } from '../modules/platform/monitor-mcp.mjs';
 import { buildAgentBusMcpServer } from '../modules/agent-bus/mcp.mjs';
 import {
   COORDINATOR_CONTROL_TOOL_SCOPES,
@@ -141,11 +142,46 @@ async function fixture() {
       controlProvenance: { github: { repository: policy.repository, kind: 'pr', number: 99 } },
     },
   ];
+  const threadPayload = {
+  threads: [
+    { id: 'owned-thread', projectKey: worktree },
+    {
+      id: 'owner-provenance-thread',
+      projectKey: outside,
+      metadata: {
+        duenoCoordinatorOwner: {
+          version: 1,
+          policyId: policy.policyId,
+          scheduleId: policy.scheduleId,
+          repositories: [...policy.repositories].reverse(),
+          issuedBy: 'coordinator-control',
+        },
+      },
+    },
+    {
+      id: 'mismatched-owner-thread',
+      projectKey: outside,
+      metadata: {
+        duenoCoordinatorOwner: {
+          version: 1,
+          policyId: policy.policyId,
+          scheduleId: policy.scheduleId,
+          repositories: [policy.repository],
+          issuedBy: 'coordinator-control',
+        },
+      },
+    },
+    { id: 'foreign-thread', projectKey: outside },
+  ],
+};
   const calls = [];
   const requestImpl = async (path) => {
     calls.push(path);
-    if (path === '/api/codex/sessions?includeReadOnly=true') return { sessions: codexSessions };
-    if (path === '/api/pi/sessions?includeReadOnly=true') return { sessions: piSessions };
+    if (path.startsWith('/api/codex/sessions')) return { sessions: codexSessions };
+    if (path.startsWith('/api/pi/sessions')) return { sessions: piSessions };
+    if (path === '/api/agents/scheduled') return { tasks: [{ id: policy.scheduleId }, { id: 'sched_foreign' }] };
+    if (path.startsWith('/api/agent-bus/threads/')) return {};
+    if (path.startsWith('/api/agent-bus/threads')) return threadPayload;
     throw new Error(`Unexpected request ${path}`);
   };
   const credentialStore = memoryCredentialStore();
@@ -159,6 +195,7 @@ async function fixture() {
     'register_scheduled_agent',
     'monitor_step_scheduled_agents',
   ];
+  const monitor = buildMonitorMcpServer({ requestImpl });
   const server = buildAgentBusMcpServer({
     requestImpl,
     credentialStore,
@@ -166,46 +203,8 @@ async function fixture() {
       name,
       description: name,
       inputSchema: { type: 'object' },
-      async handler(args) {
-        if (name === 'monitor_list_codex_sessions') return { sessions: codexSessions, total: codexSessions.length };
-        if (name === 'monitor_list_pi_sessions') return { sessions: piSessions, total: piSessions.length };
-        if (name === 'list_scheduled_agents') {
-          return { tasks: [{ id: policy.scheduleId }, { id: 'sched_foreign' }], taskCount: 2 };
-        }
-        if (name === 'monitor_list_threads') {
-          return {
-            threads: [
-              { id: 'owned-thread', projectKey: worktree },
-              {
-                id: 'owner-provenance-thread',
-                projectKey: outside,
-                metadata: {
-                  duenoCoordinatorOwner: {
-                    version: 1,
-                    policyId: policy.policyId,
-                    scheduleId: policy.scheduleId,
-                    repositories: [...policy.repositories].reverse(),
-                    issuedBy: 'coordinator-control',
-                  },
-                },
-              },
-              {
-                id: 'mismatched-owner-thread',
-                projectKey: outside,
-                metadata: {
-                  duenoCoordinatorOwner: {
-                    version: 1,
-                    policyId: policy.policyId,
-                    scheduleId: policy.scheduleId,
-                    repositories: [policy.repository],
-                    issuedBy: 'coordinator-control',
-                  },
-                },
-              },
-              { id: 'foreign-thread', projectKey: outside },
-            ],
-          };
-        }
+      async handler(args, context) {
+        if (['monitor_list_codex_sessions', 'monitor_list_pi_sessions', 'monitor_list_threads', 'list_scheduled_agents'].includes(name)) return monitor.handleToolCall(name, args, context);
         return { ok: true, name, args };
       },
     })),

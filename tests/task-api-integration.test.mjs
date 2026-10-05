@@ -145,4 +145,9 @@ test('two subprocess tasks require genuine authenticated room reads, collect res
   assert.equal(binding.service.get(child.sessionId).turns.length, before);
   assert.equal(binding.service.list().length, 2);
   assert.ok(children.every((child) => store.getThread(child.taskId).messages.filter((message) => message.metadata.taskSend).length === (child.taskId === children[0].taskId ? 2 : 1)));
+  await binding.service.terminate(children[1].sessionId);
+  const resumed = await call('task_resume', { thread_id: room.id, task_id: children[1].taskId, request_key: 'replace-ended' });
+  assert.deepEqual(Object.keys(resumed).sort(), ['task_id', 'thread_id', 'session_id', 'status'].sort());
+  assert.notEqual(resumed.session_id, children[1].sessionId);
+  assert.doesNotMatch(JSON.stringify(resumed), /Complete this task|initialPrompt/);
 });

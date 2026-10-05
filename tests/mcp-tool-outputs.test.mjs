@@ -118,6 +118,13 @@ test('real MCP actions return ids only while REST retains records and reads expo
   await repos.upsertRepo({ owner: 'test', repo: 'outputs', enabled: false, authRef: 'TEST_GITHUB_TOKEN' });
   await call('watch_pr', { repo: 'test/outputs', number: 1, thread_id: pair.thread_id }, ['repo', 'number', 'status']);
   await call('unwatch_pr', { repo: 'test/outputs', number: 1 }, ['repo', 'number', 'status']);
+  const output = 'RESULT_TEXT'.repeat(1500);
+  h.sessionDetailResponders.codex = ({ sessionId }) => ({ payload: { id: sessionId, content: output, state: { state: 'ended' } } });
+  const run = await call('monitor_run_agent_task', { provider: 'codex', workDir: h.stateDir, prompt: marker }, ['status', 'session_id', 'output', 'output_length']);
+  assert.equal(run.output, output.slice(-12000));
+  assert.equal(run.output_length, output.length);
+  assert.equal(h.sessionCatalog.codex.has(run.session_id), false);
+  h.sessionDetailResponders.codex = null;
   const scan = await call('monitor_scan_audio_recordings', {}, ['results']);
   assert.ok(scan.results.length);
   await call('monitor_act_on_audio_recording', { id: scan.results[0].id }, ['id', 'session_id', 'status']);
