@@ -12,6 +12,7 @@ import { claudeSessionsPlugin } from '../modules/sessions/claude-sessions.mjs';
 import { recordHookPayload } from '../modules/agent/hook-events.mjs';
 
 const execFileAsync = promisify(execFile);
+const coverageEnv = process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {};
 const tempDirs = [];
 
 afterEach(async () => {
@@ -98,6 +99,7 @@ async function runClearScenario({ paneContent, deadlineMs = 25 }) {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -175,6 +177,7 @@ async function runStateTransitionScenario({ initialPaneContent, updatedPaneConte
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -243,6 +246,7 @@ async function runMissingPaneDetailScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -312,6 +316,7 @@ async function runMissingPaneListScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -382,6 +387,7 @@ async function runMissingTmuxDeleteScenario({
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -447,6 +453,7 @@ async function runNoTmuxServerListScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -533,6 +540,7 @@ async function runHookReconcileScenario({ sessionId = 'claude-hook-1', oldEndedS
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -585,6 +593,7 @@ async function runCreateClaudeCommandScenario({ workDir, model = 'claude-sonnet-
   await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: homeDir,
       PATH: `${binDir}:/usr/bin:/bin`,

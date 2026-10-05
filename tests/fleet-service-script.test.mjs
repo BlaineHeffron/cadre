@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+const coverageEnv = process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {};
 
 describe('install-fleet-service script', () => {
   it('renders hardened fleet and backup user units', async () => {
@@ -47,6 +48,7 @@ describe('host path defaults', () => {
     const bin = join(root, 'bin');
     const git = (...args) => execFileAsync('git', args, { env });
     const env = {
+      ...coverageEnv,
       HOME: root,
       XDG_CONFIG_HOME: join(root, 'config'),
       PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,
@@ -143,6 +145,7 @@ describe('server script', () => {
     await chmod(join(bin, 'curl'), 0o755);
     await chmod(join(bin, 'sleep'), 0o755);
     const env = {
+      ...coverageEnv,
       HOME: root,
       PATH: `${bin}:/usr/bin:/bin`,
       CADRE_FLEET_LIVE_DIR: live,

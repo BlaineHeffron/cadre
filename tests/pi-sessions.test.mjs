@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { piMcpToolName, registerPiMcpTools } from '../modules/integrations/pi-mcp-tool-name.mjs';
 
 const execFileAsync = promisify(execFile);
+const coverageEnv = process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {};
 const tempDirs = [];
 
 afterEach(async () => {
@@ -220,6 +221,7 @@ async function runPiScenario({ action, piMode = 'ready', promptProfile = '' } = 
 
   const systemPath = `/usr/bin:/bin:${dirname(process.execPath)}`;
   const env = {
+    ...coverageEnv,
     NODE_TEST_CONTEXT: '1',
     CADRE_AGENT_CGROUP_ISOLATION: '0',
     HOME: tempDir,

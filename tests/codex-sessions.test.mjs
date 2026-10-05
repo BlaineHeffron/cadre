@@ -13,6 +13,7 @@ import { buildMcpCapabilityCatalog } from '../modules/integrations/mcp-server-ca
 import { sanitizedMcpSnapshot } from '../modules/integrations/mcp-launch-preflight.mjs';
 
 const execFileAsync = promisify(execFile);
+const coverageEnv = process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {};
 const tempDirs = [];
 
 afterEach(async () => {
@@ -97,6 +98,7 @@ async function runClearScenario({ paneContent, deadlineMs = 5000 }) {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -172,6 +174,7 @@ async function runStateTransitionScenario({ initialPaneContent, updatedPaneConte
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -311,6 +314,7 @@ async function runInputPendingListScenario({
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -379,6 +383,7 @@ async function runMissingPaneDetailScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -446,6 +451,7 @@ async function runMissingPaneListScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -537,6 +543,7 @@ async function runMissingTmuxDeleteScenario({
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -602,6 +609,7 @@ async function runDeadPaneDeleteScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -666,6 +674,7 @@ async function runNoTmuxServerListScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -733,6 +742,7 @@ async function runOrphanMetadataRecoveryScenario({ liveTmux = true } = {}) {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -826,6 +836,7 @@ async function runPruneHasSessionListScenario({
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -921,6 +932,7 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -972,6 +984,7 @@ async function runStartupFailureLaunchLogScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -1017,6 +1030,7 @@ async function runEmptyCreateAuditScenario(payload = {}) {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -1072,6 +1086,7 @@ async function runScheduledSendPersistenceScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -1129,6 +1144,7 @@ async function runBareProcessPruneScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -1216,6 +1232,7 @@ async function runHookReconcileScenario({
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
@@ -1278,6 +1295,7 @@ async function runCreateCommandScenario({
   await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       PATH: `${binDir}:/usr/bin:/bin`,
@@ -1429,6 +1447,7 @@ async function runResumeScenario({
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
+      ...coverageEnv,
       NODE_TEST_CONTEXT: '1',
       HOME: tempDir,
       PATH: `${binDir}:/usr/bin:/bin`,
