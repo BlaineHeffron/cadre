@@ -66,6 +66,16 @@ test('authenticated MCP/REST create, persist, update and remove watches', async 
   await assert.rejects(s.requestImpl('/api/agents/github/watches', { method: 'POST', body: { repo: 'octo/demo', number: 2, creator } }), /Authenticated agent/);
 });
 
+test('authenticated operator can delete an agent watch linked to a room it does not own', async (t) => {
+  const s = await setup(t);
+  await s.watch();
+  const result = await s.h.app.inject({ method: 'DELETE', url: '/api/agents/github/watches',
+    headers: { authorization: `Bearer ${s.h.authToken}` }, payload: { repo: 'octo/demo', number: 1 } });
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(result.json().watch.creator, creator);
+  assert.deepEqual(await s.store.listWatches(), []);
+});
+
 test('reviews and conflicts notify once, re-arm, ignore comments, and follow room transfer', async (t) => {
   const s = await setup(t);
   await s.watch();
