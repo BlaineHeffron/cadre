@@ -116,8 +116,11 @@ test('operator actions use the real queue, auth, MCP transport and GitHub routes
   });
 
   await t.test('creation rejects unapproved methods and noncanonical paths', async () => {
+    for (const method of ['GET', 'post']) await assert.rejects(create({ ...action, method }), /allowed values/);
+    await assert.rejects(requestImpl('/api/command-center/work-queue', { method: 'POST', authContext,
+      body: { question: 'Run?', operatorAction: { ...action, method: 'GET' } },
+    }), (error) => error.statusCode === 400 && /not allowlisted/.test(error.message));
     for (const invalid of [
-      { ...action, method: 'GET' }, { ...action, method: 'post' },
       { ...action, path: '/api/command-center/stop' }, { ...action, path: '/api/agents/github?x=1' },
       { ...action, path: '/api/agents/github/../github' }, { ...action, path: '/api/agents/github\n' },
       { ...action, path: '/api/agent-bus/threads/%2e%2e/end' },
@@ -134,6 +137,7 @@ test('operator actions use the real queue, auth, MCP transport and GitHub routes
       assert.equal(result.operatorActionResult.status, 'blocked');
       assert.match(result.operatorActionResult.error, /not allowlisted/);
       assert.equal(executions.length, 1);
+      assert.match(commands.at(-1).text, /^\[OPERATOR_ACTION\] blocked/);
       assert.match(commands.at(-1).text, /not allowlisted/);
     } finally { OPERATOR_ACTION_ROUTES.unshift(removed); }
   });

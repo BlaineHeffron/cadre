@@ -468,7 +468,7 @@ export async function answerHumanQueueItem(id, input = {}, {
       }
     }
     item.operatorActionResult = result;
-    answerText = `[OPERATOR_ACTION] ${approved ? 'approved' : 'rejected'} · ${item.operatorAction.method} ${item.operatorAction.path}${result.statusCode ? ` → ${result.statusCode}` : ''}${result.response || result.error ? ` · ${result.response || result.error}` : ''}`;
+    answerText = `[OPERATOR_ACTION] ${result.status === 'blocked' ? 'blocked' : approved ? 'approved' : 'rejected'} · ${item.operatorAction.method} ${item.operatorAction.path}${result.statusCode ? ` → ${result.statusCode}` : ''}${result.response || result.error ? ` · ${result.response || result.error}` : ''}`;
     item.answer.text = answerText;
     if (persist) await persistHumanWorkQueue();
   }
