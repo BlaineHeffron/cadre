@@ -115,7 +115,8 @@ describe('GitHub agents routes', () => {
   });
 
   it('preserves poll state when repo settings are posted again', async () => {
-    const app = await buildApp();
+    const repoStore = buildGithubAgentRepoStore({ stateStore: memoryStateStore() });
+    const app = await buildApp({ repoStore });
     const payload = { owner: 'octo', repo: 'demo', authRef: 'GITHUB_TOKEN_REF' };
     await app.inject({ method: 'POST', url: '/api/agents/github', payload: {
       ...payload, lastSeenPrNumber: 20, lastSeenIssueNumber: 19, spawnedItemKeys: ['pr:20', 'issue:19'],
@@ -124,6 +125,7 @@ describe('GitHub agents routes', () => {
     assert.equal(saved.statusCode, 200);
     assert.equal(saved.json().repo.lastSeenPrNumber, 20);
     assert.equal(saved.json().repo.lastSeenIssueNumber, 19);
+    assert.deepEqual((await repoStore.getRepo('octo/demo')).spawnedItemKeys, ['pr:20', 'issue:19']);
     const reset = await app.inject({ method: 'POST', url: '/api/agents/github', payload: { ...payload, lastSeenPrNumber: null } });
     assert.equal(reset.json().repo.lastSeenPrNumber, null);
     await app.close();
@@ -313,6 +315,7 @@ async function buildApp({
   createIssueWorktree = null,
   poller = null,
   requireAuth = false,
+  repoStore = buildGithubAgentRepoStore({ stateStore: memoryStateStore(), defaultAutoReviewEnabled: true }),
 } = {}) {
   process.env.AUTH_TOKEN = TEST_TOKEN;
   process.env.INTERNAL_BYPASS_TOKEN = TEST_TOKEN;
@@ -322,10 +325,7 @@ async function buildApp({
     await app.register(authPlugin);
   }
   await app.register(githubAgentsPlugin, {
-    repoStore: buildGithubAgentRepoStore({
-      stateStore: memoryStateStore(),
-      defaultAutoReviewEnabled: true,
-    }),
+    repoStore,
     config: {
       enabled: false,
       pollIntervalSec: 15,

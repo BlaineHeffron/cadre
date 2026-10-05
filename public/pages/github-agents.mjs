@@ -1,7 +1,7 @@
 import { h } from 'preact';
 import { html } from 'htm/preact';
 import { signal } from '@preact/signals';
-import { useEffect, useMemo } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { api } from '../app/api.mjs';
 import { subscribe } from '../app/ws-client.mjs';
 import { addToast } from '../app/state.mjs';
@@ -46,6 +46,32 @@ async function loadRepos(state) {
     addToast(`GitHub agents load failed: ${error.message}`, 'error');
   } finally {
     state.loading.value = false;
+  }
+}
+
+async function loadWatches(state) {
+  state.watchesError.value = '';
+  try {
+    const payload = await api.get('/agents/github/watches');
+    state.watches.value = payload.watches || [];
+  } catch (error) {
+    state.watchesError.value = error.message || 'Unable to load PR watches.';
+  } finally {
+    state.watchesLoading.value = false;
+  }
+}
+
+async function removeWatch(state, watch) {
+  if (!confirm(`Remove PR watch ${watch.repo}#${watch.number}?`)) return;
+  state.watchBusy.value = `${watch.repo}#${watch.number}`;
+  try {
+    await api.delete('/agents/github/watches', { repo: watch.repo, number: watch.number });
+    await loadWatches(state);
+    addToast('PR watch removed', 'success');
+  } catch (error) {
+    addToast(`Remove failed: ${error.message}`, 'error');
+  } finally {
+    state.watchBusy.value = '';
   }
 }
 
@@ -104,14 +130,17 @@ async function pollNow(state, id = '') {
     addToast(`Poll failed: ${error.message}`, 'error');
   } finally {
     state.pollBusy.value = '';
+    await loadWatches(state);
   }
 }
 
 async function deleteRepo(state, repo) {
+  if (!confirm(`Delete watched repo ${repoLabel(repo)}?`)) return;
   state.deleteBusy.value = repo.id;
   try {
     await api.delete(`/agents/github/${encodeURIComponent(repo.id)}`);
     state.repos.value = state.repos.value.filter((item) => item.id !== repo.id);
+    await loadWatches(state);
     addToast('GitHub repo removed', 'success');
   } catch (error) {
     addToast(`Delete failed: ${error.message}`, 'error');
@@ -130,6 +159,25 @@ function Toggle({ checked, label, onChange }) {
 }
 
 function GitHubRepoCard({ repo, state }) {
+  const [draft, setDraft] = useState(null);
+  const [busy, setBusy] = useState(false);
+  async function save(event) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const { owner, repo: name, authRef, enabled, prEnabled, issueEnabled, autoReviewEnabled } = draft;
+      const result = await api.post('/agents/github', {
+        owner, repo: name, authRef: safeAuthRef(authRef), enabled, prEnabled, issueEnabled, autoReviewEnabled,
+      });
+      upsertRepoState(state, result.repo);
+      setDraft(null);
+      addToast('GitHub repo saved', 'success');
+    } catch (error) {
+      addToast(`Save failed: ${error.message}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
   const sessionHref = repo.lastSpawnSessionId ? `/agents` : '';
   return html`
     <article class="card fleet-card" data-github-repo=${repo.id}>
@@ -140,11 +188,19 @@ function GitHubRepoCard({ repo, state }) {
         </div>
         <span class="badge ${repo.enabled ? 'badge-success' : 'badge-low'}">${repo.enabled ? 'enabled' : 'disabled'}</span>
       </div>
-      <div class="fleet-chip-row">
+      ${draft ? html`
+        <form onsubmit=${save}>
+          <${RepoFields} form=${draft} setForm=${(patch) => setDraft({ ...draft, ...patch })} readOnly=${true} />
+          <div class="fleet-incident-actions" style="margin-top:12px">
+            <button class="btn" disabled=${busy}>${busy ? 'Saving...' : 'Save'}</button>
+            <button type="button" class="btn btn-subtle" disabled=${busy} onclick=${() => setDraft(null)}>Cancel</button>
+          </div>
+        </form>
+      ` : html`<div class="fleet-chip-row">
         <span class="badge ${repo.prEnabled ? 'badge-info' : 'badge-low'}">PRs ${repo.prEnabled ? 'on' : 'off'}</span>
         <span class="badge ${repo.issueEnabled ? 'badge-info' : 'badge-low'}">Issues ${repo.issueEnabled ? 'on' : 'off'}</span>
         <span class="badge ${repo.autoReviewEnabled ? 'badge-warning' : 'badge-low'}">Auto review ${repo.autoReviewEnabled ? 'on' : 'off'}</span>
-      </div>
+      </div>`}
       <div class="fleet-status-row">
         <span class="badge ${badgeClass(repo.lastEvent)}">${repo.lastEvent || 'idle'}</span>
         ${repo.lastError ? html`<span class="badge badge-critical">${repo.lastError}</span>` : null}
@@ -159,12 +215,38 @@ function GitHubRepoCard({ repo, state }) {
         <button class="btn" disabled=${state.pollBusy.value === repo.id || !state.enabled.value} onclick=${() => pollNow(state, repo.id)}>
           ${state.pollBusy.value === repo.id ? 'Polling...' : 'Poll now'}
         </button>
-        <button class="btn btn-subtle" disabled=${state.deleteBusy.value === repo.id} onclick=${() => deleteRepo(state, repo)}>
+        ${!draft ? html`<button class="btn btn-subtle" onclick=${() => setDraft({ ...repo })}>Edit</button>` : null}
+        <button class="btn btn-subtle" disabled=${busy || state.deleteBusy.value === repo.id} onclick=${() => deleteRepo(state, repo)}>
           ${state.deleteBusy.value === repo.id ? 'Deleting...' : 'Delete'}
         </button>
       </div>
     </article>
   `;
+}
+
+function RepoFields({ form, setForm, readOnly = false }) {
+  return html`<div>
+      <div class="grid grid-3" style="gap:12px">
+        <label>
+          <span class="fleet-meta">Owner</span>
+          <input class="input" readOnly=${readOnly} value=${form.owner} oninput=${(event) => setForm({ owner: event.currentTarget.value })} required />
+        </label>
+        <label>
+          <span class="fleet-meta">Repo</span>
+          <input class="input" readOnly=${readOnly} value=${form.repo} oninput=${(event) => setForm({ repo: event.currentTarget.value })} required />
+        </label>
+        <label>
+          <span class="fleet-meta">Auth ref</span>
+          <input class="input" value=${form.authRef} oninput=${(event) => setForm({ authRef: safeAuthRef(event.currentTarget.value) })} placeholder="GITHUB_AGENT_TOKEN_REF" required />
+        </label>
+      </div>
+      <div class="fleet-chip-row" style="margin-top:12px">
+        <${Toggle} checked=${form.enabled} label="Enabled" onChange=${(value) => setForm({ enabled: value })} />
+        <${Toggle} checked=${form.prEnabled} label="PRs" onChange=${(value) => setForm({ prEnabled: value })} />
+        <${Toggle} checked=${form.issueEnabled} label="Issues" onChange=${(value) => setForm({ issueEnabled: value })} />
+        <${Toggle} checked=${form.autoReviewEnabled} label="Auto review" onChange=${(value) => setForm({ autoReviewEnabled: value })} />
+      </div>
+  </div>`;
 }
 
 function AddRepoForm({ state }) {
@@ -183,31 +265,16 @@ function AddRepoForm({ state }) {
           ${state.formBusy.value ? 'Saving...' : 'Save'}
         </button>
       </div>
-      <div class="grid grid-3" style="gap:12px">
-        <label>
-          <span class="fleet-meta">Owner</span>
-          <input class="input" value=${form.owner} oninput=${(event) => setForm({ owner: event.currentTarget.value })} required />
-        </label>
-        <label>
-          <span class="fleet-meta">Repo</span>
-          <input class="input" value=${form.repo} oninput=${(event) => setForm({ repo: event.currentTarget.value })} required />
-        </label>
-        <label>
-          <span class="fleet-meta">Auth ref</span>
-          <input class="input" value=${form.authRef} oninput=${(event) => setForm({ authRef: safeAuthRef(event.currentTarget.value) })} placeholder="GITHUB_AGENT_TOKEN_REF" required />
-        </label>
-      </div>
-      <div class="fleet-chip-row" style="margin-top:12px">
-        <${Toggle} checked=${form.enabled} label="Enabled" onChange=${(value) => setForm({ enabled: value })} />
-        <${Toggle} checked=${form.prEnabled} label="PRs" onChange=${(value) => setForm({ prEnabled: value })} />
-        <${Toggle} checked=${form.issueEnabled} label="Issues" onChange=${(value) => setForm({ issueEnabled: value })} />
-        <${Toggle} checked=${form.autoReviewEnabled} label="Auto review" onChange=${(value) => setForm({ autoReviewEnabled: value })} />
-      </div>
+      <${RepoFields} form=${form} setForm=${setForm} />
     </form>
   `;
 }
 
 export function GitHubAgentsPage() {
+  const watches = useMemo(() => signal([]), []);
+  const watchesError = useMemo(() => signal(''), []);
+  const watchesLoading = useMemo(() => signal(true), []);
+  const watchBusy = useMemo(() => signal(''), []);
   const repos = useMemo(() => signal([]), []);
   const enabled = useMemo(() => signal(false), []);
   const loading = useMemo(() => signal(false), []);
@@ -224,12 +291,14 @@ export function GitHubAgentsPage() {
     issueEnabled: true,
     autoReviewEnabled: true,
   }), []);
-  const state = { repos, enabled, loading, error, formBusy, pollBusy, deleteBusy, form };
+  const state = { watches, watchesError, watchesLoading, watchBusy, repos, enabled, loading, error, formBusy, pollBusy, deleteBusy, form };
 
   useEffect(() => {
     loadRepos(state);
+    loadWatches(state);
     const unsub = subscribe('github:agents', (type, data) => {
       if (type === 'snapshot') applySnapshot(state, data);
+      loadWatches(state);
     });
     return unsub;
   }, []);
@@ -245,7 +314,7 @@ export function GitHubAgentsPage() {
           <button class="btn" disabled=${pollBusy.value === '__all__' || !enabled.value} onclick=${() => pollNow(state)}>
             ${pollBusy.value === '__all__' ? 'Polling...' : 'Poll all'}
           </button>
-          <button class="btn" onclick=${() => loadRepos(state)}>Refresh</button>
+          <button class="btn" onclick=${() => { loadRepos(state); loadWatches(state); }}>Refresh</button>
         </div>
       </div>
 
@@ -266,9 +335,28 @@ export function GitHubAgentsPage() {
           <${EmptyState} message="No GitHub repos watched yet." />
         ` : html`
           <div class="grid grid-2">
-            ${repos.value.map((repo) => html`<${GitHubRepoCard} repo=${repo} state=${state} />`)}
+            ${repos.value.map((repo) => html`<${GitHubRepoCard} key=${repo.id} repo=${repo} state=${state} />`)}
           </div>
         `}
+      </section>
+      <section class="fleet-section">
+        <h2 class="fleet-section-title">PR watches</h2>
+        <p class="fleet-meta">Only agents can create PR watches with watch_pr.</p>
+        ${watchesLoading.value ? html`<${LoadingState} message="Loading PR watches..." />` :
+          watchesError.value ? html`<${ErrorState} message=${watchesError.value} onAction=${() => loadWatches(state)} />` :
+          watches.value.length === 0 ? html`<${EmptyState} message="No PR watches." />` :
+          watches.value.map((watch) => html`
+            <article class="card" key=${`${watch.repo}#${watch.number}`} data-pr-watch=${`${watch.repo}#${watch.number}`}>
+              <div class="card-header">
+                <a href=${`https://github.com/${watch.repo}/pull/${watch.number}`} target="_blank" rel="noopener noreferrer">${watch.repo}#${watch.number}</a>
+                <button class="btn btn-subtle" disabled=${state.watchBusy.value === `${watch.repo}#${watch.number}`} onclick=${() => removeWatch(state, watch)}>Remove</button>
+              </div>
+              <div class="fleet-meta">
+                ${watch.thread_id ? html`room <a href=${`/collab/${encodeURIComponent(watch.thread_id)}`}>${watch.thread_id}</a> · ` : null}
+                creator ${watch.creator?.kind}:${watch.creator?.sessionId} · created ${formatTime(watch.createdAtMs)} · mergeable ${watch.mergeableState || 'unknown'}
+              </div>
+            </article>
+          `)}
       </section>
     </div>
   `;
