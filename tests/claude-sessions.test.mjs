@@ -23,6 +23,7 @@ afterEach(async () => {
 async function runClearScenario({ paneContent, deadlineMs = 25 }) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-claude-clear-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const paneFile = join(tempDir, 'pane.txt');
   const bufferFile = join(tempDir, 'buffer.txt');
@@ -97,8 +98,10 @@ async function runClearScenario({ paneContent, deadlineMs = 25 }) {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX_TEST_PANE: paneFile,
       TMUX_TEST_BUFFER: bufferFile,
       LOG_LEVEL: 'error',
@@ -113,6 +116,7 @@ async function runClearScenario({ paneContent, deadlineMs = 25 }) {
 async function runStateTransitionScenario({ initialPaneContent, updatedPaneContent }) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-claude-state-hooks-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const paneFile = join(tempDir, 'pane.txt');
   await mkdir(binDir, { recursive: true });
@@ -171,8 +175,10 @@ async function runStateTransitionScenario({ initialPaneContent, updatedPaneConte
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX_TEST_PANE: paneFile,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
@@ -186,6 +192,7 @@ async function runStateTransitionScenario({ initialPaneContent, updatedPaneConte
 async function runMissingPaneDetailScenario() {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-claude-ended-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   await mkdir(binDir, { recursive: true });
   await writeFile(join(binDir, 'tmux'), [
@@ -236,8 +243,10 @@ async function runMissingPaneDetailScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX: '/tmp/tmux-1000/dm-agent,123,0',
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
@@ -251,6 +260,7 @@ async function runMissingPaneDetailScenario() {
 async function runMissingPaneListScenario() {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-claude-ended-list-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   await mkdir(binDir, { recursive: true });
   await writeFile(join(binDir, 'tmux'), [
@@ -302,8 +312,10 @@ async function runMissingPaneListScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX: '/tmp/tmux-1000/dm-agent,123,0',
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
@@ -321,6 +333,7 @@ async function runMissingTmuxDeleteScenario({
 } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-claude-stale-delete-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const storeFile = join(tempDir, '.claude_sessions.json');
   const migratedStoreFile = join(tempDir, '.dueno', 'state', 'claude_sessions.json');
@@ -369,8 +382,10 @@ async function runMissingTmuxDeleteScenario({
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
       CLAUDE_SESSIONS_STORAGE: 'file',
@@ -383,6 +398,7 @@ async function runMissingTmuxDeleteScenario({
 async function runNoTmuxServerListScenario() {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-claude-no-tmux-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const storeFile = join(tempDir, '.claude_sessions.json');
   const migratedStoreFile = join(tempDir, '.dueno', 'state', 'claude_sessions.json');
@@ -431,8 +447,10 @@ async function runNoTmuxServerListScenario() {
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
       CLAUDE_SESSIONS_STORAGE: 'file',
@@ -445,6 +463,7 @@ async function runNoTmuxServerListScenario() {
 async function runHookReconcileScenario({ sessionId = 'claude-hook-1', oldEndedSessionId = '' } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-claude-hook-reconcile-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const paneFile = join(tempDir, 'pane.txt');
   await mkdir(binDir, { recursive: true });
@@ -514,8 +533,10 @@ async function runHookReconcileScenario({ sessionId = 'claude-hook-1', oldEndedS
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      NODE_TEST_CONTEXT: '1',
+      HOME: tempDir,
+      CADRE_AGENT_CGROUP_ISOLATION: '0',
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX_TEST_PANE: paneFile,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
@@ -529,6 +550,7 @@ async function runHookReconcileScenario({ sessionId = 'claude-hook-1', oldEndedS
 async function runCreateClaudeCommandScenario({ workDir, model = 'claude-sonnet-4-6', promptProfile = '' } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-claude-create-'));
   tempDirs.push(tempDir);
+  await mkdir(join(tempDir, '.git'));
   const binDir = join(tempDir, 'bin');
   const homeDir = join(tempDir, 'home');
   const tmuxArgsFile = join(tempDir, 'tmux-args.txt');
@@ -563,9 +585,9 @@ async function runCreateClaudeCommandScenario({ workDir, model = 'claude-sonnet-
   await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
     env: {
-      ...process.env,
+      NODE_TEST_CONTEXT: '1',
       HOME: homeDir,
-      PATH: `${binDir}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+      PATH: `${binDir}:/usr/bin:/bin`,
       TMUX_TEST_ARGS: tmuxArgsFile,
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
