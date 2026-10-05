@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { piMcpToolName, registerPiMcpTools } from '../modules/integrations/pi-mcp-tool-name.mjs';
 
 const execFileAsync = promisify(execFile);
+const coverageEnv = process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {};
 const tempDirs = [];
 
 afterEach(async () => {
@@ -148,6 +149,7 @@ async function runPiScenario({ action, piMode = 'ready', promptProfile = '' } = 
   const piBin = join(binDir, 'pi');
   await mkdir(binDir, { recursive: true });
   await mkdir(workDir, { recursive: true });
+  await mkdir(join(workDir, '.git'));
   await writeFakeTmux(binDir);
   if (piMode !== 'missing') await writeFakePi(piBin, piMode);
 
@@ -219,7 +221,9 @@ async function runPiScenario({ action, piMode = 'ready', promptProfile = '' } = 
 
   const systemPath = `/usr/bin:/bin:${dirname(process.execPath)}`;
   const env = {
-    ...process.env,
+    ...coverageEnv,
+    NODE_TEST_CONTEXT: '1',
+    CADRE_AGENT_CGROUP_ISOLATION: '0',
     HOME: tempDir,
     PATH: `${binDir}:${systemPath}`,
     LOG_LEVEL: 'error',
@@ -228,6 +232,9 @@ async function runPiScenario({ action, piMode = 'ready', promptProfile = '' } = 
     PI_MODEL_CATALOG_STORAGE: 'file',
     PI_MODEL_CATALOG_CACHE_FILE: join(tempDir, 'pi-model-cache.json'),
     DATABASE_URL: '',
+    BUSINESSOS_MCP_URL: 'https://businessos.example.test/api/agent-mcp',
+    BUSINESSOS_MCP_OPERATOR_TOKEN: 'bos-test-token',
+    BUSINESSOS_MCP_STATE_FILE: join(tempDir, 'businessos-mcp-state.json'),
     TMUX_TEST_ARGS: tmuxArgsFile,
     TMUX_SESSION_MARKER: sessionMarker,
   };

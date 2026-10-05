@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+const coverageEnv = process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {};
 
 describe('install-fleet-service script', () => {
   it('renders hardened fleet and backup user units', async () => {
@@ -45,23 +46,27 @@ describe('host path defaults', () => {
     const dev = join(root, 'dev');
     const live = `${dev}-live`;
     const bin = join(root, 'bin');
-    const git = (...args) => execFileAsync('git', args);
+    const git = (...args) => execFileAsync('git', args, { env });
     const env = {
-      ...process.env,
+      ...coverageEnv,
       HOME: root,
       XDG_CONFIG_HOME: join(root, 'config'),
-      PATH: `${bin}:${dirname(process.execPath)}:${process.env.PATH || '/usr/bin:/bin'}`,
+      PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,
       GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CEILING_DIRECTORIES: root,
+      CLAUDE_TEST_PLUGIN: join(live, 'scripts', 'agent-hooks', 'claude-fleet'),
       GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t',
       CADRE_FLEET_NO_INSTALL: '1',
     };
-    for (const key of Object.keys(env)) if (/^(CADRE|DUENO)_FLEET_(LIVE_DIR|DEV_DIR|STATE_SRC)$/.test(key)) delete env[key];
     const scripts = ['install-fleet-service.sh', 'sync-main.sh', 'resolve-node-bin.sh', 'check-node-runtime.mjs', 'check-syntax.mjs', 'install-agent-slice.sh'];
     try {
       await mkdir(join(dev, 'scripts'), { recursive: true });
       await mkdir(bin);
       await writeFile(join(bin, 'systemctl'), '#!/bin/bash\nexit 0\n');
       await chmod(join(bin, 'systemctl'), 0o755);
+      await writeFile(join(bin, 'claude'), '#!/bin/sh\n[ "$#" = 3 ] && [ "$1" = plugin ] && [ "$2" = validate ] && [ "$3" = "$CLAUDE_TEST_PLUGIN" ]\n');
+      await chmod(join(bin, 'claude'), 0o755);
       for (const name of scripts) await copyFile(resolve('scripts', name), join(dev, 'scripts', name));
       await writeFile(join(dev, '.gitignore'), '.env\n');
       await git('init', '-q', '-b', 'main', dev);
@@ -140,8 +145,9 @@ describe('server script', () => {
     await chmod(join(bin, 'curl'), 0o755);
     await chmod(join(bin, 'sleep'), 0o755);
     const env = {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH || '/usr/bin:/bin'}`,
+      ...coverageEnv,
+      HOME: root,
+      PATH: `${bin}:/usr/bin:/bin`,
       CADRE_FLEET_LIVE_DIR: live,
       ORDER_LOG: orderLog,
     };
