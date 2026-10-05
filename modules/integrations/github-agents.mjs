@@ -441,7 +441,7 @@ export function buildGithubAgentRepoStore({
     if (!creator?.kind || !creator.sessionId) throw new Error('Authenticated agent identity required');
     const prior = repo.watches.find((watch) => watch.number === input.number);
     const watch = { ...(prior || { createdAtMs: now(), lastReviewId: 0 }), repo: repo.id,
-      number: input.number, creator: clone(creator), thread_id: normalizeText(input.thread_id) || null };
+      number: input.number, creator: clone(prior?.creator || creator), thread_id: normalizeText(input.thread_id) || null };
     if (prior) repo.watches[repo.watches.indexOf(prior)] = watch;
     else repo.watches.push(watch);
     await save();
@@ -685,7 +685,7 @@ export class GithubAgentPoller {
         const url = `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${watch.number}`;
         const options = { token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs };
         const pr = await fetchGithubJson(this.fetchImpl, url, options);
-        const reviews = await fetchGithubJson(this.fetchImpl, `${url}/reviews?per_page=100&page=${watch.reviewPage || 1}`, options);
+        const reviews = await fetchGithubList(this.fetchImpl, `${url}/reviews?per_page=100&page=${watch.reviewPage || 1}`, options);
         for (const review of reviews.filter((item) => item.id > watch.lastReviewId).sort((a, b) => a.id - b.id)) {
           const lines = String(review.body || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
           const verdict = lines.find((line) => /^VERDICT\b/.test(line)) || (lines[0] || '').slice(0, 200);
@@ -701,6 +701,7 @@ export class GithubAgentPoller {
               const result = await this.endThread(watch.thread_id, { cancelPending: true, reason: 'PR merged' });
               suffix = ` · ended room ${watch.thread_id}: ${result.results.filter((item) => item.status === 'terminated').length} sessions terminated`;
             } catch (error) {
+              if (error.statusCode === 409 && ['delivery_in_flight', 'room_ending'].includes(error.code)) throw error;
               this.log?.warn?.({ threadId: watch.thread_id, code: sanitizedError(error) }, 'PR watch room end failed');
               suffix = ` · room ${watch.thread_id} not ended: ${error.code || error.statusCode || 'error'}`;
             }

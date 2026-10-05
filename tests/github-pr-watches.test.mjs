@@ -31,8 +31,8 @@ async function setup(t) {
   const { AGENT_BUS_AGENT_TOOL_SCOPES } = await import('../modules/agent-bus/mcp-auth.mjs');
   const requestImpl = buildInProcessFastifyRequest({ app: h.app, buildHeaders: () => buildInternalBypassHeaders({ authToken: h.authToken, bypassToken: 'pr-watch-test' }) });
   const mcp = buildAgentBusMcpServer({ requestImpl });
-  const context = { authenticated: true, principal: { type: 'agent', ...creator }, toolScopes: [...AGENT_BUS_AGENT_TOOL_SCOPES], threadAllowlist: ['@member'] };
-  const call = (name, args) => mcp.callTool(name, args, context);
+  const context = (ref) => ({ authenticated: true, principal: { type: 'agent', ...ref }, toolScopes: [...AGENT_BUS_AGENT_TOOL_SCOPES], threadAllowlist: ['@member'] });
+  const call = (name, args, ref = creator) => mcp.callTool(name, args, context(ref));
   // Use the plugin's production notification/lifecycle wiring with an injected GitHub boundary.
   poller = h.app.githubAgents.poller;
   poller.config = { enabled: true, env: { TEST_GITHUB_TOKEN: 'test-only' } };
@@ -114,8 +114,9 @@ test('merge ends room, preserves shared participants, reports counts and removes
 
 test('close leaves room open; no room owner falls back to creator; missing sessions drop', async (t) => {
   const s = await setup(t);
-  const unowned = await s.h.store.createThread({ title: 'Unowned', participants });
+  const unowned = await s.h.store.createThread({ title: 'Unowned', participants, createdBy: creator });
   await s.watch(1, unowned.id);
+  await s.h.store.transferThread(unowned.id, { kind: 'user', sessionId: 'operator' });
   s.setPr({ state: 'closed' });
   await s.poller.pollOnce();
   await s.poller.pollOnce();
@@ -164,11 +165,14 @@ test('one watch fetch error does not abort other watches', async (t) => {
 
 test('merge still notifies and deletes watch when linked room is missing, closed, or a DM', async (t) => {
   const s = await setup(t);
-  const dm = await s.h.store.createThread({ title: 'DM', participants, createdBy: creator, metadata: { dm: true } });
+  const dm = await s.h.store.createThread({ title: 'DM', participants, createdBy: creator });
+  const missing = await s.h.store.createThread({ title: 'Deleted later', participants, createdBy: creator });
   await s.h.store.closeThread(s.thread.id);
-  await s.watch(1, 'thr_missing');
+  await s.watch(1, missing.id);
+  await s.h.store.deleteThread(missing.id);
   await s.watch(2, s.thread.id);
   await s.watch(3, dm.id);
+  await s.h.store.updateThreadMetadata(dm.id, { dm: true });
   s.setPr({ merged: true, state: 'closed' });
   await s.poller.pollOnce();
   await s.poller.pollOnce();
@@ -201,4 +205,57 @@ test('reviews advance one page per tick so reviews beyond the first 100 are seen
   assert.equal(s.commands.length, 101);
   assert.match(s.commands[100].text, /Review 101$/);
   assert.equal(s.calls.length, 6);
+});
+
+
+test('watch linking, rewatching and removal require creator or current room ownership', async (t) => {
+  const s = await setup(t);
+  const args = { repo: 'octo/demo', number: 1, thread_id: s.thread.id };
+  await assert.rejects(s.call('watch_pr', args, successor), (error) => error.statusCode === 403);
+  await assert.rejects(s.call('watch_pr', { ...args, thread_id: 'thr_missing' }), (error) => error.statusCode === 404);
+  const dm = await s.h.store.createThread({ title: 'DM', participants, createdBy: creator, metadata: { dm: true } });
+  await assert.rejects(s.call('watch_pr', { ...args, thread_id: dm.id }), (error) => error.statusCode === 403);
+  await s.watch();
+  await s.store.updateWatch('octo/demo', 1, { lastReviewId: 42 });
+  const original = (await s.store.listWatches())[0];
+  await assert.rejects(s.call('watch_pr', { repo: 'octo/demo', number: 1 }, successor), (error) => error.statusCode === 403);
+  await assert.rejects(s.call('unwatch_pr', { repo: 'octo/demo', number: 1 }, successor), (error) => error.statusCode === 403);
+  assert.deepEqual((await s.store.listWatches())[0], original);
+  await s.call('room_transfer', { thread_id: s.thread.id, to: { kind: successor.kind, session_id: successor.sessionId } });
+  s.advance(1000);
+  const updated = (await s.call('watch_pr', args, successor)).structuredContent.watch;
+  assert.deepEqual(updated.creator, creator);
+  assert.equal(updated.createdAtMs, original.createdAtMs);
+  assert.equal(updated.lastReviewId, 42);
+  await s.call('unwatch_pr', { repo: 'octo/demo', number: 1 }, successor);
+  assert.deepEqual(await s.store.listWatches(), []);
+  await s.watch(2, null);
+  await s.requestImpl('/api/agents/github/watches', { method: 'DELETE', body: { repo: 'octo/demo', number: 2 } });
+  assert.deepEqual(await s.store.listWatches(), []);
+});
+
+test('merge waits for an in-flight room delivery and retries cleanup on the next tick', { timeout: 5000 }, async (t) => {
+  const s = await setup(t);
+  await s.watch();
+  s.setPr({ merged: true, state: 'closed' });
+  let release, entered;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const started = new Promise((resolve) => { entered = resolve; });
+  s.h.inputResponders.claude = async () => { entered(); await gate; return { statusCode: 200, payload: { ok: true } }; };
+  const sending = s.requestImpl('/api/agent-bus/messages', { method: 'POST', body: {
+    threadId: s.thread.id, from: participants[1], body: 'Delivery in flight', deliveryMode: 'wait',
+  } });
+  await started;
+  try {
+    await s.poller.pollOnce();
+    assert.equal(s.commands.length, 0);
+    assert.equal((await s.store.listWatches()).length, 1);
+    assert.equal(s.h.store.getThread(s.thread.id).thread.status, 'open');
+  } finally { release(); }
+  await sending;
+  await s.poller.pollOnce();
+  assert.equal(s.commands.length, 1);
+  assert.match(s.commands[0].text, /merged .*2 sessions terminated$/);
+  assert.equal(s.h.store.getThread(s.thread.id).thread.status, 'closed');
+  assert.deepEqual(await s.store.listWatches(), []);
 });
