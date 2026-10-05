@@ -33,6 +33,7 @@ export const AGENT_BUS_AGENT_TOOL_SCOPES = Object.freeze([
   'room_close',
   'room_reopen',
   'room_end',
+  'room_transfer',
   'agent_dm',
   'agent_directory',
   'task_spawn', 'task_send', 'task_wait', 'task_status', 'task_cancel', 'task_resume',

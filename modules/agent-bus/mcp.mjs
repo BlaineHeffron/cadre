@@ -286,10 +286,6 @@ function sameAgentRef(left, right) {
   return left?.kind === right?.kind && left?.sessionId === right?.sessionId;
 }
 
-function agentDeniedTool(name, _context = null) {
-  return name === 'room_end';
-}
-
 function actorInThread(thread, actor) {
   return sameAgentRef(thread?.createdBy, actor)
     || (thread?.participants || []).some((entry) => sameAgentRef(entry, actor));
@@ -376,9 +372,6 @@ export function buildAgentBusMcpServer({
     if (!scopes.includes('*') && !scopes.includes(tool)) {
       await rejectAuthorization(context, tool, 'scope_missing', `Credential does not grant ${tool}`);
     }
-    if (context.principal?.type === 'agent' && agentDeniedTool(tool, context)) {
-      await rejectAuthorization(context, tool, 'principal_type_denied', 'Agent principal is not authorized for this operator, creation, schedule, or session-control tool');
-    }
   }
 
   async function authorizeCoordinatorControl(_context, _name, _args = {}) {
@@ -395,6 +388,7 @@ export function buildAgentBusMcpServer({
     const explicitlyAllowlisted = allowlist.includes('*') || allowlist.includes(resolvedId);
     if (explicitlyAllowlisted) return payload;
     if (allowlist.includes('@member')) {
+      if (['room_context', 'room_send', 'room_close', 'room_end', 'room_transfer'].includes(tool)) return payload;
       if (!actorInThread(payload?.thread, principalAgentRef(context))) {
         await rejectAuthorization(context, tool, 'thread_membership_required', `Actor is not a participant in thread ${resolvedId}`);
       }
@@ -408,7 +402,7 @@ export function buildAgentBusMcpServer({
     await assertToolScope(context, name);
     if (!authenticatedContext(context)) return;
     await authorizeCoordinatorControl(context, name, args);
-    if (['room_context', 'room_send', 'room_close', 'room_end', 'room_reopen', ...TASK_TOOLS.map((tool) => tool.name)].includes(name)) {
+    if (['room_context', 'room_send', 'room_close', 'room_end', 'room_transfer', 'room_reopen', ...TASK_TOOLS.map((tool) => tool.name)].includes(name)) {
       await assertThreadAccess(context, args.thread_id, name);
     }
   }
@@ -417,7 +411,7 @@ export function buildAgentBusMcpServer({
     ...TASK_TOOLS,
     {
       name: 'room_send',
-      description: 'Broadcast a message to every other participant in a collaboration room.',
+      description: 'Post in any room without subscribing. Participants receive messages; the owner also receives results.',
       inputSchema: { type: 'object', properties: {
         thread_id: { type: 'string' }, body: { type: 'string' }, reply_to: { type: 'string' },
         type: { type: 'string', enum: ['message', 'result'] },
@@ -425,7 +419,7 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_context',
-      description: 'Read recent truncated room messages. Continue a truncated body with message_id and body_offset=nextOffset (ignores since/after). since=message id, after=timestamp; pass deliveries=true or bodies=false as needed.',
+      description: 'Read recent truncated messages in any room without subscribing. Continue a truncated body with message_id and body_offset=nextOffset (ignores since/after). since=message id, after=timestamp; pass deliveries=true or bodies=false as needed.',
       inputSchema: { type: 'object', properties: {
         thread_id: { type: 'string' }, limit: { type: 'integer', minimum: 0, maximum: 500 },
         since: { type: 'string' }, after: { type: 'string' }, message_id: { type: 'string' },
@@ -435,12 +429,12 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_list',
-      description: 'List collaboration rooms the authenticated agent created or participates in.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      description: 'List rooms the agent owns or subscribes to; scope=all lists all open rooms.',
+      inputSchema: { type: 'object', properties: { scope: { type: 'string', enum: ['all'] } }, additionalProperties: false },
     },
     {
       name: 'room_close',
-      description: 'Archive a room without terminating sessions. Pending deliveries block closure unless cancel_pending explicitly cancels them.',
+      description: 'Archive a room without terminating sessions. Agents must own the room or all participants must be gone. Pending deliveries block closure unless cancel_pending explicitly cancels them.',
       inputSchema: { type: 'object', properties: { thread_id: { type: 'string' }, cancel_pending: { type: 'boolean' } },
         required: ['thread_id'], additionalProperties: false },
     },
@@ -452,9 +446,17 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_end',
-      description: 'Close a non-DM room and terminate participants not shared with another open room.',
-      inputSchema: { type: 'object', properties: { thread_id: { type: 'string' } },
+      description: 'Owners may close a non-DM room and terminate participants not shared with another open room. Pending deliveries require cancel_pending.',
+      inputSchema: { type: 'object', properties: { thread_id: { type: 'string' }, cancel_pending: { type: 'boolean' } },
         required: ['thread_id'], additionalProperties: false },
+    },
+    {
+      name: 'room_transfer',
+      description: 'Transfer room ownership as its owner, or claim it if the owner session is gone. Operators may always transfer.',
+      inputSchema: { type: 'object', properties: { thread_id: { type: 'string' },
+        to: { type: 'object', properties: { kind: { type: 'string' }, session_id: { type: 'string' } },
+          required: ['kind', 'session_id'], additionalProperties: false } },
+        required: ['thread_id', 'to'], additionalProperties: false },
     },
     {
       name: 'agent_dm',
@@ -525,10 +527,19 @@ export function buildAgentBusMcpServer({
       case 'room_list': {
         if (!authenticatedContext(authContext)) throw authorizationError('Room listing requires an authenticated agent credential', 'principal_missing');
         const actor = principalAgentRef(authContext);
-        const payload = await request(`/api/agent-bus/threads/by-participant?kind=${encodeURIComponent(actor.kind)}&sessionId=${encodeURIComponent(actor.sessionId)}&status=all`);
+        const payload = await request(args.scope === 'all' ? '/api/agent-bus/threads?status=open'
+          : `/api/agent-bus/threads/by-participant?kind=${encodeURIComponent(actor.kind)}&sessionId=${encodeURIComponent(actor.sessionId)}&status=all`);
         const rooms = (payload?.threads || []).map((thread) => ({ id: thread.id, title: thread.title,
           kind: thread.metadata?.dm ? 'dm' : 'room', status: thread.status, participants: thread.participants || [] }));
         return textResult(`${rooms.length} room(s).`, { rooms });
+      }
+
+      case 'room_transfer': {
+        if (!authenticatedContext(authContext)) throw authorizationError('Room transfer requires an authenticated credential', 'principal_missing');
+        const payload = await request(`/api/agent-bus/threads/${encodeURIComponent(assertMcpString(args.thread_id, 'thread_id'))}/transfer`, {
+          method: 'POST', body: { to: assertMcpAgentRef(args.to?.kind, args.to?.session_id, 'to') },
+        });
+        return textResult('Room ownership transferred.', payload);
       }
 
       case 'room_close':
@@ -537,7 +548,7 @@ export function buildAgentBusMcpServer({
         if (!authenticatedContext(authContext)) throw authorizationError('Room lifecycle actions require an authenticated agent credential', 'principal_missing');
         const threadId = assertMcpString(args.thread_id, 'thread_id');
         const action = name.slice('room_'.length);
-        const payload = await request(`/api/agent-bus/threads/${encodeURIComponent(threadId)}/${action}`, { method: 'POST', body: name === 'room_close' && args.cancel_pending === true ? { cancelPending: true } : {} });
+        const payload = await request(`/api/agent-bus/threads/${encodeURIComponent(threadId)}/${action}`, { method: 'POST', body: ['room_close', 'room_end'].includes(name) && args.cancel_pending === true ? { cancelPending: true } : {} });
         return textResult(`Room ${threadId} ${payload.status || action}.`, payload);
       }
 
@@ -720,9 +731,10 @@ export function buildAgentBusMcpServer({
               type: 'text',
               text: [
                   'Prefer the top-level spawn tools when they are available in your current MCP server: `spawn_session` for one agent, `spawn_collab_session` for a 2-agent thread, and `spawn_conference_session` for 2+ participants.',
+                  'Rooms are open: any agent may read or post without subscribing. Participants receive messages; owners also receive results. Use room_list(scope="all") for all open rooms.',
                   'Call room_list to rediscover your rooms and room_context before replying when you need room history.',
                   'room_context is truncated by default; continue with message_id and body_offset=nextOffset; set reply_to when addressing a prior claim; use type=result for a terminal outcome.',
-                  'Call room_send to broadcast, room_close to archive after deliveries settle, or room_reopen to recover an archived room. Dashboard operators use room_end to terminate unshared participants.',
+                  'Call room_send to broadcast. Owners use room_close to archive after deliveries settle; any agent may close once all participants are gone. Other participants post type=result and stop. Use room_reopen to recover an archived room. Room owners and operators use room_end to terminate unshared participants; room_transfer hands ownership to a successor or claims a room whose owner is gone.',
                   'Call agent_dm for a direct message and agent_directory for the unified roster.',
               ].join('\n'),
             },
