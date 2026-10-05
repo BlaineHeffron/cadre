@@ -11,6 +11,7 @@ Ship the feature with the fewest lines. Do not add parallel scopes, policy layer
 - Agent-started smoke servers must not run side-effect loops.
 - Set `CADRE_DISABLE_SIDE_EFFECTS=1 CADRE_GITHUB_AGENT_POLLER_ENABLED=0 CADRE_GITHUB_AGENTS_ENABLED=0 CADRE_SCHEDULED_AGENT_PUMP_ENABLED=0 TELEGRAM_BRIDGE=0` for smoke/dev starts.
 - Side-effect loops are code-disabled unless `PORT=4310` or `CADRE_ALLOW_SIDE_EFFECTS=1`. On alternate ports, set both `PORT` and `AGENT_BUS_MCP_HTTP_PORT` to unused values.
+- Logs: see `docs/production-controls-runbook.md#logs`.
 - Operational controls and production behavior: `docs/production-controls-runbook.md` and `docs/production-slos.md`.
 
 ## Merge and deployment invariants
