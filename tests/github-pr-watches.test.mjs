@@ -244,7 +244,7 @@ test('watch linking, rewatching and removal require creator or current room owne
   assert.deepEqual(await s.store.listWatches(), []);
 });
 
-test('merge waits for an in-flight room delivery and retries cleanup on the next tick', { timeout: 5000 }, async (t) => {
+test('merge ends the room while a delivery is in flight', { timeout: 5000 }, async (t) => {
   const s = await setup(t);
   await s.watch();
   s.setPr({ merged: true, state: 'closed' });
@@ -258,9 +258,9 @@ test('merge waits for an in-flight room delivery and retries cleanup on the next
   await started;
   try {
     await s.poller.pollOnce();
-    assert.equal(s.commands.length, 0);
-    assert.equal((await s.store.listWatches()).length, 1);
-    assert.equal(s.h.store.getThread(s.thread.id).thread.status, 'open');
+    assert.equal(s.commands.length, 1);
+    assert.equal((await s.store.listWatches()).length, 0);
+    assert.equal(s.h.store.getThread(s.thread.id).thread.status, 'closed');
   } finally { release(); }
   await sending;
   await s.poller.pollOnce();

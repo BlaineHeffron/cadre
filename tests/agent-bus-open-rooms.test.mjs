@@ -76,14 +76,13 @@ test('owner transfers; live owners block claims; gone owners permit claims; oper
   assert.deepEqual(h.store.getThread(thread.id).thread.createdBy, outsider);
 });
 
-test('owner end requires cancellation for pending deliveries and preserves shared participants', async (t) => {
+test('owner end cancels pending deliveries and preserves shared participants', async (t) => {
   const { h, thread, call } = await setup(t);
   await h.store.createThread({ title: 'Shared', participants: [participants[1]], createdBy: owner });
   const record = await h.store.createMessage({ threadId: thread.id, from: outsider, targets: [participants[0]], body: 'Pending' });
   await assert.rejects(call('room_end', { thread_id: thread.id }, outsider), (err) => err.statusCode === 403);
-  await assert.rejects(call('room_end', { thread_id: thread.id }), (err) => err.code === 'pending_deliveries');
   assert.equal(h.store.getThread(thread.id).thread.status, 'open');
-  const ended = await call('room_end', { thread_id: thread.id, cancel_pending: true });
+  const ended = await call('room_end', { thread_id: thread.id });
   assert.equal(ended.structuredContent.status, 'ended');
   assert.deepEqual(ended.structuredContent.skipped, [participants[1]]);
   assert.deepEqual(h.deletedSessions.claude, ['claude-1']);
@@ -194,4 +193,53 @@ test('poster summaries persist through MCP room and DM calls and compact context
   }
   const boundary = await call('room_send', { thread_id: thread.id, body: 'Accepted', summary: 'x'.repeat(200) });
   assert.equal(h.store.getMessage(boundary.structuredContent.message.id).metadata.summary.length, 200);
+});
+
+
+test('room end starts both participant deletes before either resolves', async (t) => {
+  const { h, thread, call } = await setup(t);
+  let release;
+  const latch = new Promise((resolve) => { release = resolve; });
+  t.after(release);
+  const started = [];
+  let bothStarted;
+  const both = new Promise((resolve) => { bothStarted = resolve; });
+  for (const participant of participants) {
+    h.deleteResponders[participant.kind] = async (id) => {
+      started.push(id);
+      if (started.length === 2) bothStarted();
+      await latch;
+    };
+  }
+  const ending = call('room_end', { thread_id: thread.id });
+  await Promise.race([both, new Promise((_, reject) => {
+    const timer = setTimeout(() => reject(new Error('Deletes did not start concurrently')), 2000);
+    timer.unref();
+  })]);
+  assert.deepEqual(started.sort(), participants.map((p) => p.sessionId).sort());
+  release();
+  assert.deepEqual((await ending).structuredContent.results.map((r) => r.status), ['terminated', 'terminated']);
+});
+
+test('room end ignores the late outcome of an in-flight delivery', { timeout: 5000 }, async (t) => {
+  const { h, thread, call, requestImpl } = await setup(t);
+  let release;
+  const latch = new Promise((resolve) => { release = resolve; });
+  t.after(release);
+  let started;
+  const writing = new Promise((resolve) => { started = resolve; });
+  h.inputResponders.claude = async () => { started(); await latch; };
+  const sending = requestImpl('/api/agent-bus/messages', { method: 'POST', body: {
+    threadId: thread.id, from: participants[1], body: 'In flight', deliveryMode: 'wait',
+  } });
+  await writing;
+  const ended = await call('room_end', { thread_id: thread.id });
+  assert.equal(ended.structuredContent.status, 'ended');
+  const snapshot = h.store.getThread(thread.id);
+  const delivery = snapshot.deliveries.find((d) => d.target.kind === 'claude');
+  assert.equal(delivery.resolution, 'cancelled');
+  release();
+  await sending;
+  assert.equal(h.store.getDelivery(delivery.id).resolution, 'cancelled');
+  assert.equal(h.store.getDelivery(delivery.id).status, 'failed');
 });

@@ -377,6 +377,7 @@ describe('git worktree helper', () => {
       force: true,
     });
 
+    await assert.rejects(stat(dirname(worktreePath)), { code: 'ENOENT' });
     assert.equal(result.removed, true);
     assert.equal(result.pruned, true);
     const list = await git(repo, ['worktree', 'list', '--porcelain']);
@@ -384,4 +385,18 @@ describe('git worktree helper', () => {
     const branches = await git(repo, ['branch', '--list', 'dueno-fleet/session-1']);
     assert.equal(String(branches.stdout || '').trim(), '');
   });
+
+  it('keeps a non-empty worktree parent', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dueno-worktree-parent-'));
+    tempDirs.push(root);
+    const repo = await initRepo(root);
+    const worktreePath = join(root, 'worktrees', 'pr-26-run', 'repo');
+    await addWorktree(repo, 'dueno-fleet/parent-test', worktreePath);
+    const sibling = join(dirname(worktreePath), 'keep.txt');
+    await writeFile(sibling, 'keep');
+    await removeAgentSessionWorktree({ repoPath: repo, worktreePath, branch: 'dueno-fleet/parent-test' });
+    assert.equal(await readFile(sibling, 'utf8'), 'keep');
+    await assert.rejects(stat(worktreePath), { code: 'ENOENT' });
+  });
+
 });

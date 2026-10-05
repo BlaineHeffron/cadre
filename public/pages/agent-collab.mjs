@@ -498,7 +498,7 @@ export function AgentCollabPage({ id }) {
     if (!id || !confirm('Close this room, cancel queued deliveries, and terminate participant sessions that are not active in another room?')) return;
     try {
       const data = await api.post(`/agent-bus/threads/${encodeURIComponent(id)}/end`, {
-        reason: 'ended from collab ui', cancelPending: true,
+        reason: 'ended from collab ui',
       });
       const skipped = (data.skipped || []).map(agentLabel);
       const failed = (data.results || []).filter((item) => item.status === 'failed');

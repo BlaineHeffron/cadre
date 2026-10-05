@@ -698,10 +698,10 @@ export class GithubAgentPoller {
           let suffix = '';
           if (pr.merged && watch.thread_id && this.endThread && this.getThread(watch.thread_id)?.thread?.status === 'open') {
             try {
-              const result = await this.endThread(watch.thread_id, { cancelPending: true, reason: 'PR merged' });
+              const result = await this.endThread(watch.thread_id, { reason: 'PR merged' });
               suffix = ` · ended room ${watch.thread_id}: ${result.results.filter((item) => item.status === 'terminated').length} sessions terminated`;
             } catch (error) {
-              if (error.statusCode === 409 && ['delivery_in_flight', 'room_ending'].includes(error.code)) throw error;
+              if (error.statusCode === 409 && error.code === 'room_ending') throw error;
               this.log?.warn?.({ threadId: watch.thread_id, code: sanitizedError(error) }, 'PR watch room end failed');
               suffix = ` · room ${watch.thread_id} not ended: ${error.code || error.statusCode || 'error'}`;
             }

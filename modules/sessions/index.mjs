@@ -57,6 +57,7 @@ import {
   buildPromptLaunchArgs,
   cleanupPromptProfileLaunch,
   preparePromptProfileLaunch,
+  promptProfilePath,
   sanitizedPromptSnapshot,
 } from '../integrations/prompt-profile-launch.mjs';
 import {
@@ -1579,26 +1580,20 @@ function forgetSession(id) {
   sessionStateTracker.remove(trackerId);
 }
 
-async function cleanupSessionArtifacts(id, meta = {}) {
-  await cleanupMcpCapabilityLaunch({
-    backendType: config.id,
-    sessionId: id,
-    credentialProfile: meta.mcpCredentialProfile || 'agent',
-    reason: 'session_terminated',
-    ...credentialStoreOptions(),
+async function cleanupSessionArtifacts(id, meta, logger) {
+  const cleanup = (path, operation) => operation.catch((error) => {
+    logger.warn({ id, path, err: error.message }, 'Session artifact cleanup failed');
   });
-  await cleanupPromptProfileLaunch({ backendType: config.id, sessionId: id });
-  if (meta?.launchLogPath) {
-    await rm(meta.launchLogPath, { force: true }).catch(() => {});
-  }
-  if (meta?.managedWorktree && meta?.worktreePath) {
-    await removeAgentSessionWorktree({
+  await Promise.all([
+    cleanup(promptProfilePath(config.id, id), rm(promptProfilePath(config.id, id), { force: true })),
+    ...(meta.launchLogPath ? [cleanup(meta.launchLogPath, rm(meta.launchLogPath, { force: true }))] : []),
+    ...(meta.managedWorktree && meta.worktreePath ? [cleanup(meta.worktreePath, removeAgentSessionWorktree({
       repoPath: meta.worktreeRepoPath || meta.workDir || '',
       worktreePath: meta.worktreePath,
       branch: meta.worktreeBranch || '',
       force: true,
-    });
-  }
+    }))] : []),
+  ]);
 }
 
 async function pruneMissingTmuxSessions(liveSessionNames, targetSessions = sessions) {
@@ -2344,7 +2339,6 @@ async function sessionsPlugin(app, {
 
     const sessionName = String(meta?.tmuxSession || tmuxNameFromExternalSessionId(id) || '').trim();
     const exists = sessionName ? await exec('tmux', ['has-session', '-t', sessionName]) : { code: 1, stderr: 'session not found' };
-    const stamped = await stampedSessionProcesses(id);
     if (exists.code !== 0 && !isTmuxMissingSessionError(exists.stderr)) {
       return {
         ok: false,
@@ -2355,6 +2349,14 @@ async function sessionsPlugin(app, {
       };
     }
 
+    const scopeResult = recordedScope ? await stopAgentScope(recordedScope) : null;
+    if (scopeResult?.ok) {
+      const tmuxResult = await killTmuxSessionVerified(sessionName);
+      return tmuxResult.ok
+        ? { ok: true, status: 'terminated', reason: '', residual: [] }
+        : { ...tmuxResult, status: 'failed' };
+    }
+    const stamped = await stampedSessionProcesses(id);
     let paneRoots = [];
     let allPanesDead = false;
     if (exists.code === 0) {
@@ -2383,8 +2385,6 @@ async function sessionsPlugin(app, {
     }
     const tmuxResult = await killTmuxSessionVerified(sessionName);
     if (!tmuxResult.ok) return { ...tmuxResult, status: 'failed' };
-    const scopeResult = recordedScope ? await stopAgentScope(recordedScope) : { ok: true };
-    if (!scopeResult.ok) return { ...scopeResult, status: 'failed' };
     if (initial.length > 0) {
       const result = await terminateOwnedProcesses(initial, async (survivors) => mergeProcessIdentities(
         await snapshotProcessRoots(survivors.map((entry) => entry.pid)),
@@ -2402,6 +2402,7 @@ async function sessionsPlugin(app, {
         residual: residualProcesses(finalStamped),
       };
     }
+    if (scopeResult && !scopeResult.ok) return { ...scopeResult, status: 'failed' };
     return {
       ok: true,
       status: exists.code === 0 || initial.length > 0 || recordedScope ? 'terminated' : 'already_gone',
@@ -2432,12 +2433,22 @@ async function sessionsPlugin(app, {
       }
     }
     if (scheduledChanged) await persistScheduledSends();
+    await cleanupMcpCapabilityLaunch({
+      backendType: config.id,
+      sessionId: id,
+      credentialProfile: meta.mcpCredentialProfile || 'agent',
+      reason: 'session_terminated',
+      ...credentialStoreOptions(),
+    }).catch((error) => {
+      app.log.warn({ id, credentialProfile: meta.mcpCredentialProfile || 'agent', err: error.message }, 'Session credential cleanup failed');
+      throw error;
+    });
     forgetSession(id);
     invalidateSessionCaches();
     await persistSessions();
     broadcastSessionList(wsManager);
-    await cleanupSessionArtifacts(id, meta).catch((error) => {
-      app.log.warn({ id, err: error.message }, 'Session artifact cleanup failed');
+    void cleanupSessionArtifacts(id, meta, app.log).catch((error) => {
+      app.log.warn({ id, path: meta.worktreePath || meta.launchLogPath, err: error.message }, 'Session artifact cleanup failed');
     });
   });
 

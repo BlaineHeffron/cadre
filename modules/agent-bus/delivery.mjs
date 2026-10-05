@@ -70,6 +70,8 @@ export function createAgentBusDelivery({ app, store, wsManager, observedSessions
         : await adapter.injectEnvelope(app, target.sessionId, renderBusEnvelope(message, parent), { deliveryId: delivery.id });
       observedSessions.add(targetKey);
       const latest = store.getDelivery(delivery.id) || delivery;
+      // DM auto-close on sender deletion still records an accepted write to the surviving recipient.
+      if (latest.status !== 'queued' && !store.getThread(message.threadId)?.thread.metadata?.dm) return latest;
       const updated = await store.updateDelivery(delivery.id, {
         status: 'injected', error: null, cancelledAt: null, attempts: Number(latest.attempts || 0) + 1,
         lastAttemptAt: Date.now(), resolution: injection?.resolution || (alreadyReceived ? 'already_present' : null),
