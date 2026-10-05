@@ -12,6 +12,9 @@ describe('launch failure detection', () => {
       detectLaunchFailure('Error: Session ID abc is already in use', 'claude').length > 0,
       true,
     );
+    const nonoLog = 'nono: Profile read error at /missing.json: profile file not found';
+    assert.equal(detectLaunchFailure(`banner\n${nonoLog}\n`, 'codex'), `banner\n${nonoLog}`);
+    assert.equal(detectLaunchFailure('the nono: prefix mid-line is agent output', 'claude'), '');
   });
 
   it('ignores benign startup output', () => {

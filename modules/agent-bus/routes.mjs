@@ -226,6 +226,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
         model: req.body.model, thinkingLevel: req.body.thinkingLevel, mcpProfile: req.body.mcpProfile,
         mcpServers: req.body.mcpServers, codexPlugins: req.body.codexPlugins,
         promptProfile: req.body.promptProfile, requireDueno: true, structured: req.body.structured === true,
+        ...(req.body.sandbox !== undefined ? { sandbox: req.body.sandbox } : {}),
       }));
       if (req.body.worktree) worktree = await createManagedWorktree({ ...req.body.worktree, roomId, baseDir: managedWorktreeBaseDir });
       const roster = plans.map((plan) => plan.mode === 'attach' ? plan.participant : {

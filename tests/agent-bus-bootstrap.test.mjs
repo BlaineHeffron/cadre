@@ -149,6 +149,22 @@ test('bootstrap applies Codex plugin selection only to created Codex participant
   assert.equal(Object.hasOwn(h.createdSessions.claude[0], 'codexPlugins'), false);
 });
 
+test('bootstrap forwards an explicit sandbox only to Claude and Codex participants and omits it by default', async (t) => {
+  const h = await createAgentBusHarness(); t.after(() => h.cleanup());
+  await h.setProviderPreferences({ claudeEnabled: true, codexEnabled: true, xaiEnabled: true });
+  const bootstrap = (payload) => h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload });
+  const pair = [{ kind: 'codex', create: true }, { kind: 'claude', create: true }];
+
+  assert.equal((await bootstrap({ title: 'Default', participants: pair })).statusCode, 200);
+  assert.equal(Object.hasOwn(h.createdSessions.codex[0], 'sandbox'), false);
+  assert.equal((await bootstrap({ title: 'Sandboxed', sandbox: 'nono', participants: pair })).statusCode, 200);
+  assert.deepEqual([h.createdSessions.codex[1].sandbox, h.createdSessions.claude[1].sandbox], ['nono', 'nono']);
+
+  const pi = await bootstrap({ title: 'Pi', sandbox: 'nono', participants: [...pair, { kind: 'xai', model: 'grok-4.3', create: true }] });
+  assert.deepEqual([pi.statusCode, pi.json().code], [400, 'sandbox_unsupported']);
+  assert.equal(h.createdSessions.codex.length, 2);
+});
+
 test('bootstrap failure cleans sessions created by the request', async (t) => {
   const h = await createAgentBusHarness(); t.after(() => h.cleanup());
   h.createResponders.claude = () => { throw new Error('create failed'); };

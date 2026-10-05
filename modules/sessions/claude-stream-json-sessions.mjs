@@ -476,6 +476,9 @@ export async function hybridSessionsPlugin(app, { tmuxPlugin, ...options }) {
       route.handler = (req, reply) => {
         const structured = req.params?.id ? owned(req.params.id)
           : req.body?.structured === true && !req.duenoAuth?.coordinatorPolicy && req.duenoAuth?.principal?.type !== 'ui';
+        if (structured && !req.params?.id && (req.body?.sandbox ?? 'none') !== 'none') {
+          return reply.code(400).send({ error: 'Structured sessions do not support a sandbox', code: 'sandbox_unsupported' });
+        }
         return (structured ? own : tmux)(req, reply);
       };
     } else if (route.url.startsWith(`/api/${kind}/sessions/:id`)) {

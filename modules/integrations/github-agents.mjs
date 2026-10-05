@@ -1027,6 +1027,7 @@ export async function spawnGithubAgentForItem({
       model: config.model,
       thinkingLevel: config.thinkingLevel,
       metadata,
+      authRef: repo.authRef,
     });
     const sessionId = normalizeText(session?.id || session?.sessionId || '');
     if (!sessionId && managedWorktree) {
@@ -1114,7 +1115,7 @@ function safePollResult(repo, nowMs, overrides = {}) {
   };
 }
 
-function resolveGithubAuthToken(repo, env) {
+export function resolveGithubAuthToken(repo, env) {
   if (!repo.authRef) return '';
   const token = normalizeText(env?.[repo.authRef]);
   if (!token) {

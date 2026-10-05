@@ -3,7 +3,7 @@ import { exec } from '../../lib/exec.mjs';
 import { config as appConfig } from '../../config.mjs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { stripCodexIndent } from '../session-state/providers/patterns.mjs';
 import { normalizeProviderPane } from '../session-state/providers/pane-view.mjs';
 import { assertValidCodexModel } from './codex-models.mjs';
@@ -106,6 +106,8 @@ import {
   tmuxNameFromExternalSessionId,
 } from '../agent/tmux-classifier.mjs';
 import { shellQuote } from '../platform/shell-quote.mjs';
+import { nonoStatePaths, prepareNonoLaunch, resolveSandbox } from '../agent/nono-launch.mjs';
+import { remoteMcpServer } from '../integrations/mcp-remote-servers.mjs';
 import { permissionAuthorityForRequest } from '../platform/auth.mjs';
 import { assertPiProviderModel, normalizePiProvider } from './pi-model-catalog.mjs';
 import { hasResearchWorkbenchLaunchProfile } from '../integrations/research-profile.mjs';
@@ -414,6 +416,7 @@ export function renderAgentSessionLaunch({
   sessionId = '',
   provider = '',
   headroom = { env: {}, args: [] },
+  sandbox = null,
 } = {}) {
   const providerConfig = PROVIDER_CONFIGS[backendType];
   if (!providerConfig) throw new TypeError(`Unsupported session backend: ${backendType}`);
@@ -422,12 +425,13 @@ export function renderAgentSessionLaunch({
     ? providerConfig.buildResumeArgs(buildOptions)
     : providerConfig.buildArgs(buildOptions);
   allArgs.unshift(...headroom.args);
-  const envPrefix = Object.entries(headroom.env).map(([key, value]) => `export ${key}=${shellQuote(value)}`).join('; ');
+  const envPrefix = Object.entries({ ...headroom.env, ...sandbox?.env }).map(([key, value]) => `export ${key}=${shellQuote(value)}`).join('; ');
+  const tokenExport = sandbox?.tokenFile ? `export CADRE_SANDBOX_GH_TOKEN="$(< ${shellQuote(sandbox.tokenFile)})"` : '';
   return {
     allArgs,
-    paneCommand: [envPrefix, providerConfig.shellCommand({
-      sessionBinary,
-      allArgs,
+    paneCommand: [envPrefix, tokenExport, providerConfig.shellCommand({
+      sessionBinary: sandbox ? 'nono' : sessionBinary,
+      allArgs: sandbox ? [...sandbox.args, '--', sessionBinary, ...allArgs] : allArgs,
       launchLogPath,
       sessionId,
       provider,
@@ -967,8 +971,7 @@ async function assertTmuxSessionExists(sessionName, launchLogPath = '') {
  * exits. Poll both the pane and the launch log for the harness-specific startup grace window so
  * a failed launch surfaces as a 500 instead of a blank session.
  */
-async function verifyLaunchedSession(sessionName, launchLogPath = '') {
-  const graceMs = Number(config.launchVerifyMs || 0);
+async function verifyLaunchedSession(sessionName, launchLogPath, graceMs) {
   const deadline = Date.now() + Math.max(graceMs, 0);
   for (;;) {
     await assertTmuxSessionExists(sessionName, launchLogPath);
@@ -988,7 +991,7 @@ async function verifyLaunchedSession(sessionName, launchLogPath = '') {
   }
 }
 
-async function launchTmuxSession({ sessionName, workDir = '', sessionBinary = '', allArgs = [], paneCommand = '', launchLogPath = '', sessionId = '', provider = '', mcpLaunch = {} } = {}) {
+async function launchTmuxSession({ sessionName, workDir = '', sessionBinary = '', allArgs = [], paneCommand = '', launchLogPath = '', sessionId = '', provider = '', mcpLaunch = {}, sandboxed = false } = {}) {
   const tmuxArgs = ['new-session', '-d', '-s', sessionName];
   if (workDir) tmuxArgs.push('-c', workDir);
   tmuxArgs.push('bash', '-lc', paneCommand || config.shellCommand({
@@ -1005,11 +1008,14 @@ async function launchTmuxSession({ sessionName, workDir = '', sessionBinary = ''
     throw new Error(`Failed to create session: ${stderr}`);
   }
   await sleep(250);
-  await verifyLaunchedSession(sessionName, launchLogPath);
+  // nono reports its own startup errors on stderr; give them time to reach the launch log.
+  await verifyLaunchedSession(sessionName, launchLogPath, Math.max(Number(config.launchVerifyMs || 0), sandboxed ? 1000 : 0));
 }
 
-async function createSession({ sessionId, initialPrompt = '', workDir, args, model = '', provider = config.id, runtime = '', thinkingLevel = '', source = 'external', displayName = '', autoCloseMode = 'never', autoCloseAfterMs = 0, metadata = {}, coordinatorPolicy = null, loopRegistrationPolicy = null, mcpProfile, mcpServers, mcpCredentialProfile = 'agent', codexPlugins, promptProfile, skills } = {}) {
+async function createSession({ sessionId, initialPrompt = '', workDir, args, model = '', provider = config.id, runtime = '', thinkingLevel = '', source = 'external', displayName = '', autoCloseMode = 'never', autoCloseAfterMs = 0, metadata = {}, coordinatorPolicy = null, loopRegistrationPolicy = null, mcpProfile, mcpServers, mcpCredentialProfile = 'agent', codexPlugins, promptProfile, skills, sandbox, githubToken = '' } = {}) {
   const sessionRuntime = config.normalizeRuntime(provider, runtime);
+  const sandboxMode = resolveSandbox(sandbox);
+  const researchSafeRuntime = config.id === 'codex' && hasResearchWorkbenchLaunchProfile(metadata);
   if (config.id !== 'codex' && codexPlugins !== undefined) {
     throw Object.assign(new Error('codexPlugins is only supported for Codex sessions'), {
       statusCode: 400, code: 'codex_plugin_selection_unsupported',
@@ -1018,6 +1024,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
   const selectedCodexPlugins = config.id === 'codex'
     ? normalizeCodexPluginSelection(codexPlugins)
     : undefined;
+  if (sandboxMode === 'nono') assertNonoSupported({ researchSafeRuntime, codexPlugins: selectedCodexPlugins, serverIds: [] });
   assertNoCallerMcpOverrides(args);
   assertNoCallerPromptOverrides(args);
   let sessionBinary = config.strictBinary ? await findCompatibleBinary() : '';
@@ -1033,6 +1040,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     runtime: sessionRuntime.runtime,
     catalog: buildMcpCapabilityCatalog(),
   });
+  if (sandboxMode === 'nono') assertNonoSupported({ researchSafeRuntime, codexPlugins: selectedCodexPlugins, serverIds: resolvedMcp.serverIds });
   const selectedSkills = sanitizedSkillSnapshot(skills);
   resolveLaunchSkills({ skillIds: selectedSkills });
   resolvePromptProfile({ promptProfile });
@@ -1061,6 +1069,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
   let promptPreparation = null;
   let launchLogPath = '';
   let scopeLaunch = null;
+  let sandboxLaunch = null;
   // Fresh per launch: claude rejects a session id that already has a transcript.
   const cliSessionId = config.assignsCliSessionId ? randomUUID() : '';
 
@@ -1075,8 +1084,14 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
       await writeFile(initialPromptFile, launchPrompt, { mode: 0o600 });
     }
     launchLogPath = await prepareLaunchLog(sessionName);
+    const headroom = await prepareHeadroomLaunch(sessionRuntime.provider);
+    sandboxLaunch = sandboxMode === 'nono' ? await prepareNonoLaunch({
+      provider: config.id, sessionId: id, workDir: normalizedWorkDir, mcpLaunch: mcpPreparation.prepared,
+      promptLaunch: promptPreparation.prepared, headroom, githubToken,
+    }) : null;
     const renderedLaunch = renderAgentSessionLaunch({
-      headroom: await prepareHeadroomLaunch(sessionRuntime.provider),
+      headroom,
+      sandbox: sandboxLaunch,
       backendType: config.id,
       sessionBinary,
       launchLogPath,
@@ -1093,13 +1108,13 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
         promptLaunch: promptPreparation.prepared,
         cliSessionId,
         initialPromptFile,
-        researchSafeRuntime: config.id === 'codex' && hasResearchWorkbenchLaunchProfile(metadata),
+        researchSafeRuntime,
         codexPlugins: selectedCodexPlugins,
       },
     });
     const { allArgs, paneCommand } = renderedLaunch;
     scopeLaunch = buildAgentScopeLaunch(paneCommand, { kind: config.id, sessionId: id });
-    if (config.id === 'claude') await seedClaudeWorkspaceTrust(normalizedWorkDir);
+    if (config.id === 'claude') await seedClaudeWorkspaceTrust(normalizedWorkDir, claudeTrustOptions(sandboxLaunch));
 
     await launchTmuxSession({
       sessionName,
@@ -1111,10 +1126,12 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
       sessionId: id,
       provider: sessionRuntime.provider,
       mcpLaunch: mcpPreparation.prepared,
+      sandboxed: Boolean(sandboxLaunch),
     });
   } catch (error) {
     if (scopeLaunch?.unit) await stopAgentScope(scopeLaunch.unit).catch(() => {});
     if (launchLogPath) await rm(launchLogPath, { force: true }).catch(() => {});
+    if (sandboxMode === 'nono') await removeSandboxState(id);
     await cleanupMcpCapabilityLaunch({
       backendType: config.id, sessionId: id, credentialProfile: mcpCredentialProfile, ...credentialStoreOptions(),
     });
@@ -1151,6 +1168,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     } : {}),
     ...(cliSessionId ? { cliSessionId } : {}),
     launchLogPath,
+    ...(sandboxLaunch ? { sandbox: 'nono', sandboxGrants: sandboxLaunch.grants } : {}),
     ...deriveManagedWorktreeMetadata(metadata),
   };
 
@@ -1248,6 +1266,7 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
     }
   }
 
+  const sandboxMode = resolveSandbox(refreshed.sandbox, { resume: true });
   const sessionBinary = await findCompatibleBinary();
   const normalizedWorkDir = await normalizeSessionWorkDir(refreshed.workDir || process.cwd());
   const sessionRuntime = config.normalizeRuntime(refreshed.provider || config.defaultProvider, refreshed.runtime || config.defaultRuntime);
@@ -1262,6 +1281,10 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
     catalog: buildMcpCapabilityCatalog(),
   });
   assertResumeDigest(storedMcp, resolvedMcp);
+  if (sandboxMode === 'nono') {
+    assertNonoSupported({ researchSafeRuntime: config.id === 'codex' && hasResearchWorkbenchLaunchProfile(refreshed.metadata),
+      codexPlugins: refreshed.codexPlugins, serverIds: resolvedMcp.serverIds });
+  }
   const resumedModel = config.revalidateModelOnResume
     ? await config.assertModel(refreshed.model || '', {
         provider: sessionRuntime.provider,
@@ -1301,8 +1324,14 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
       sessionId: id,
     });
     launchLogPath = await prepareLaunchLog(sessionName);
+    const headroom = await prepareHeadroomLaunch(sessionRuntime.provider);
+    const sandboxLaunch = sandboxMode === 'nono' ? await prepareNonoLaunch({
+      provider: config.id, sessionId: id, workDir: normalizedWorkDir, grants: refreshed.sandboxGrants || {},
+      mcpLaunch: mcpPreparation.prepared, promptLaunch: promptPreparation.prepared, headroom,
+    }) : null;
     const { allArgs, paneCommand } = renderAgentSessionLaunch({
-      headroom: await prepareHeadroomLaunch(sessionRuntime.provider),
+      headroom,
+      sandbox: sandboxLaunch,
       backendType: config.id,
       resume: true,
       sessionBinary,
@@ -1323,7 +1352,7 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
       },
     });
     scopeLaunch = buildAgentScopeLaunch(paneCommand, { kind: config.id, sessionId: id });
-    if (config.id === 'claude') await seedClaudeWorkspaceTrust(normalizedWorkDir);
+    if (config.id === 'claude') await seedClaudeWorkspaceTrust(normalizedWorkDir, claudeTrustOptions(sandboxLaunch));
     await launchTmuxSession({
       sessionName,
       workDir: normalizedWorkDir,
@@ -1334,6 +1363,7 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
       sessionId: id,
       provider: sessionRuntime.provider,
       mcpLaunch: mcpPreparation.prepared,
+      sandboxed: Boolean(sandboxLaunch),
     });
   } catch (error) {
     if (scopeLaunch?.unit) await stopAgentScope(scopeLaunch.unit).catch(() => {});
@@ -1345,6 +1375,8 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
     });
     await cleanupPromptProfileLaunch({ backendType: config.id, sessionId: id });
     if (launchLogPath) await rm(launchLogPath, { force: true }).catch(() => {});
+    // Keep <sd> (transcripts); the reviewer token does not outlive a failed launch.
+    if (sandboxMode === 'nono') await rm(nonoStatePaths(config.id, id).tokenFile, { force: true }).catch(() => {});
     throw error;
   }
 
@@ -1384,6 +1416,26 @@ function resolveHarnessUserText(value = '') {
 
 function initialPromptPath(id) {
   return runtimeStatePath(`initial_prompts/${config.id}-${id}.txt`);
+}
+
+// Plugin and stdio/research MCP binaries would run inside the sandbox without grants.
+function assertNonoSupported({ researchSafeRuntime, codexPlugins, serverIds }) {
+  if (!['claude', 'codex'].includes(config.id) || researchSafeRuntime || codexPlugins?.add?.length
+    || serverIds.some((id) => !['dueno', 'businessos'].includes(id) && remoteMcpServer(id)?.transport !== 'http')) {
+    throw Object.assign(new Error('nono sandbox supports Claude and Codex sessions with HTTP MCP servers only, no added Codex plugins and no research safe runtime'), {
+      statusCode: 400, code: 'sandbox_unsupported',
+    });
+  }
+}
+
+// Claude reads .claude.json from CLAUDE_CONFIG_DIR, so sandboxed trust goes to the private config dir.
+function claudeTrustOptions(sandboxLaunch) {
+  return sandboxLaunch ? { configPath: join(sandboxLaunch.env.CLAUDE_CONFIG_DIR, '.claude.json') } : {};
+}
+
+async function removeSandboxState(id) {
+  const { stateDir, tokenFile } = nonoStatePaths(config.id, id);
+  await Promise.all([rm(stateDir, { recursive: true, force: true }), rm(tokenFile, { force: true })]).catch(() => {});
 }
 
 function generateId() {
@@ -1562,6 +1614,7 @@ async function cleanupSessionArtifacts(id, meta, logger) {
     cleanup(promptProfilePath(config.id, id), rm(promptProfilePath(config.id, id), { force: true })),
     cleanup(initialPromptPath(id), rm(initialPromptPath(id), { force: true })),
     ...(meta.launchLogPath ? [cleanup(meta.launchLogPath, rm(meta.launchLogPath, { force: true }))] : []),
+    ...(meta.sandbox === 'nono' ? [removeSandboxState(id)] : []),
     ...(meta.managedWorktree && meta.worktreePath ? [cleanup(meta.worktreePath, removeAgentSessionWorktree({
       repoPath: meta.worktreeRepoPath || meta.workDir || '',
       worktreePath: meta.worktreePath,
@@ -2440,7 +2493,7 @@ async function sessionsPlugin(app, {
 
   app.post(`/api/${config.id}/sessions`, async (req, reply) => {
     const body = req.body || {};
-    const { workDir, args, model, provider, runtime, thinkingLevel, displayName, initialPrompt, metadata, mcpProfile, mcpServers, codexPlugins, promptProfile, skills } = body;
+    const { workDir, args, model, provider, runtime, thinkingLevel, displayName, initialPrompt, metadata, mcpProfile, mcpServers, codexPlugins, promptProfile, skills, sandbox } = body;
     const requestCoordinatorPolicy = normalizeCredentialCoordinatorPolicy(req.duenoAuth?.coordinatorPolicy);
     const principal = req.duenoAuth?.principal || null;
     const scheduledCoordinatorLaunch = principal?.type === 'service'
@@ -2497,6 +2550,7 @@ async function sessionsPlugin(app, {
         codexPlugins,
         promptProfile,
         skills,
+        sandbox,
       });
       const injection = { injected: Boolean(launchSourcePrompt), error: null,
         resolution: { ...skillDeliveryResolution(launchSourcePrompt, resolveHarnessUserText(launchSourcePrompt)), channel: 'launch' } };

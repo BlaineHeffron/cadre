@@ -15,7 +15,8 @@ async function git(path, ...args) {
 }
 async function fixture(t, setup = '') {
   const root = await mkdtemp(resolve(tmpdir(), 'cadre-managed-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  // Runs before later-registered harness cleanup, which may still be writing hook state under the repo.
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const repo = resolve(root, 'repo'), remote = resolve(root, 'remote'), baseDir = resolve(root, 'managed');
   await mkdir(repo); await mkdir(remote);
   await git(remote, 'init', '--bare', '--initial-branch=main');

@@ -8,6 +8,7 @@ const SHARED_LAUNCH_FAILURE_PATTERNS = Object.freeze([
   /\bCannot find module\b/i,
   /\bcommand not found\b/i,
   /^\s*Error: Failed to load extension\b/im,
+  /^nono: /m,
 ]);
 
 const RUNTIME_LAUNCH_FAILURE_PATTERNS = Object.freeze({

@@ -56,6 +56,26 @@ describe('GitHub agents routes', () => {
     }]);
   });
 
+  it('resolves the reviewer token only for sandboxed launches and fails without it', async () => {
+    const creates = [];
+    const launch = (overrides) => defaultSessionLauncher({
+      prompt: 'Review', workDir: '/repo/demo', provider: 'claude', authRef: 'GH_REF',
+      createSession: async (backendType, input) => { creates.push(input); return { id: 'abcd1234' }; },
+      enqueueSessionCommand: async () => ({ ok: true }),
+      ...overrides,
+    });
+    const on = { CADRE_SANDBOX: 'nono', GH_REF: 'ghp_value' };
+    await launch({ env: on });
+    await launch({ env: { GH_REF: 'ghp_value' }, sandbox: 'nono' });
+    await launch({ env: on, sandbox: 'nono' });
+    assert.equal('sandbox' in creates[0], false);
+    assert.deepEqual([creates[1].sandbox, creates[1].githubToken], ['nono', '']);
+    assert.deepEqual([creates[2].sandbox, creates[2].githubToken], ['nono', 'ghp_value']);
+    await assert.rejects(launch({ env: { CADRE_SANDBOX: 'nono' }, sandbox: 'nono' }), { code: 'github_auth_ref_unresolved' });
+    await assert.rejects(launch({ env: on, sandbox: 'nono', authRef: '' }), { code: 'github_auth_ref_unresolved' });
+    assert.equal(creates.length, 3);
+  });
+
   it('requires auth for GitHub agent routes', async () => {
     const app = await buildApp({ requireAuth: true });
     const res = await app.inject({ method: 'GET', url: '/api/agents/github' });

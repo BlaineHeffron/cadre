@@ -165,6 +165,8 @@ describe('structured automated spawns', () => {
       }
       const unknownSkill = await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, skills: ['missing-skill'] } });
       assert.equal(unknownSkill.json().code, 'launch_skill_unknown');
+      const sandboxed = await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, sandbox: 'nono' } });
+      assert.deepEqual([sandboxed.statusCode, sandboxed.json().code], [400, 'sandbox_unsupported']);
       assert.equal(transports.length, 0);
 
       const created = await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, initialPrompt: 'hello' } });

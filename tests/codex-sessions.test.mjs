@@ -1406,6 +1406,7 @@ async function runResumeScenario({
   storedMcpCapabilities = null,
   mcpCredentialProfile = 'agent',
   codexPlugins,
+  sandbox = '',
 } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-resume-'));
   tempDirs.push(tempDir);
@@ -1454,6 +1455,7 @@ async function runResumeScenario({
     cliSessionId,
     mcpCredentialProfile,
     ...(codexPlugins ? { codexPlugins } : {}),
+    ...(sandbox ? { sandbox, sandboxGrants: { gitDir: '', commonDir: '', nodeModules: '', credential: false } } : {}),
     ...(storedMcpCapabilities ? { mcpCapabilities: storedMcpCapabilities } : {}),
     selectedMcpServers: businessOsMcp ? ['businessos'] : [],
     businessOsMcp: businessOsMcp ? {
@@ -1553,6 +1555,7 @@ async function runResumeScenario({
       AGENT_BUS_MCP_HTTP_HOST: '127.0.0.1',
       AGENT_BUS_MCP_HTTP_PORT: '9876',
       CADRE_AGENT_CGROUP_ISOLATION: '0',
+      ...(sandbox ? { CADRE_SANDBOX: 'nono' } : {}),
       ...(researchWorkbench ? {
         RESEARCH_WORKBENCH_PLUGIN_REF: 'research-workbench@personal',
         RESEARCH_WORKBENCH_ZOTERO_MCP_PATH: process.execPath,
@@ -1585,7 +1588,7 @@ describe('Codex Sessions module', () => {
 
   it('passes route-supplied metadata into persisted session creation', async () => {
     const source = await readFile(resolve('modules/sessions/index.mjs'), 'utf8');
-    assert.match(source, /const \{ workDir, args, model, provider, runtime, thinkingLevel, displayName, initialPrompt, metadata, mcpProfile, mcpServers, codexPlugins, promptProfile, skills \} = body/);
+    assert.match(source, /const \{ workDir, args, model, provider, runtime, thinkingLevel, displayName, initialPrompt, metadata, mcpProfile, mcpServers, codexPlugins, promptProfile, skills, sandbox \} = body/);
     assert.match(source, /displayName,\n\s+metadata: trustedMetadata,\n\s+coordinatorPolicy: scheduledCoordinatorLaunch \? requestCoordinatorPolicy : null,\n\s+loopRegistrationPolicy,\n\s+mcpProfile,\n\s+mcpServers,\n\s+codexPlugins,\n\s+promptProfile,\n\s+skills/);
     assert.match(source, /resumeSession\(id, \{\n\s+loopRegistrationPolicy: operatorResumeLoopRegistrationPolicy\(/);
     assert.match(source, /operatorResumeLoopRegistrationPolicy/);
@@ -1788,6 +1791,14 @@ describe('Codex Sessions module', () => {
     assert.equal(result.statusCode, 200);
     assert.deepEqual(result.stored.codexPlugins, codexPlugins);
     assert.match(result.tmuxArgs, /plugins\."browser@openai-bundled"\.enabled=true/);
+  });
+
+  it('refuses to resume a sandboxed session whose stored plugin selection nono cannot run', async () => {
+    const result = await runResumeScenario({ codexPlugins: { add: ['browser@openai-bundled'], remove: [] }, sandbox: 'nono' });
+
+    assert.equal(result.statusCode, 400);
+    assert.equal(result.body.code, 'sandbox_unsupported');
+    assert.equal(result.tmuxArgs, '');
   });
 
   it('resumes a Dueno-only snapshot after unrelated BusinessOS availability changes', async () => {
@@ -2229,6 +2240,13 @@ describe('Codex Sessions module', () => {
     assert.equal(result.statusCode, 400);
     assert.equal(result.body.code, 'codex_plugin_selection_invalid');
     assert.match(result.body.error, /codexPlugins\.add must be an array/);
+  });
+
+  it('forwards the per-spawn sandbox field from the session route', async () => {
+    const result = await runEmptyCreateAuditScenario({ workDir: '/nonexistent', sandbox: 'bwrap' });
+
+    assert.equal(result.statusCode, 400);
+    assert.equal(result.body.code, 'sandbox_invalid');
   });
 
   it('reloads persisted scheduled sends on plugin startup', async () => {

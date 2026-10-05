@@ -34,6 +34,21 @@ describe('Agent bus adapters', () => {
     );
   });
 
+  it('forwards the per-spawn sandbox field to the session route', async () => {
+    const adapters = createAgentAdapters();
+    const requests = [];
+    const app = {
+      async inject(request) {
+        requests.push(request);
+        return { statusCode: 200, body: JSON.stringify({ id: 'abcd1234' }) };
+      },
+    };
+
+    await adapters.codex.createSession(app, { workDir: '/repo', sandbox: 'nono' });
+    assert.equal(requests[0].url, '/api/codex/sessions');
+    assert.equal(requests[0].payload.sandbox, 'nono');
+  });
+
   it('rejects a 2xx delete response without a verified terminal status', async () => {
     const adapters = createAgentAdapters();
     const app = {
