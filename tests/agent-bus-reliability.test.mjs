@@ -119,7 +119,7 @@ test('DM preserves backend 503 and distinguishes ended sessions from absent sess
   assert.equal(missing.statusCode, 404); assert.equal(missing.json().code, 'session_not_found');
 });
 
-test('MCP owner close cancellation and reopen reach real routes with scope and membership checks', async (t) => {
+test('MCP close cancellation and outsider reopen reach real routes with scope checks', async (t) => {
   const { h, thread, send } = await setup(t);
   await h.store.transferThread(thread.id, refs[0]);
   h.sessionStates.claude.set('claude-1', { state: 'working', needsInput: false });
@@ -143,7 +143,7 @@ test('MCP owner close cancellation and reopen reach real routes with scope and m
   await assert.rejects(close(args), /pending deliveries/);
   await close({ ...args, cancel_pending: true });
   await assert.rejects(server.callTool('room_reopen', args, { ...context, toolScopes: ['room_context'] }), /does not grant/);
-  await assert.rejects(server.callTool('room_reopen', args, { ...context, principal: { type: 'agent', kind: 'codex', sessionId: 'other' } }), /not a participant/);
+  await server.callTool('room_reopen', args, { ...context, principal: { type: 'agent', kind: 'codex', sessionId: 'other' } });
   await server.callTool('room_reopen', args, context);
   const snapshot = await server.callTool('room_context', { ...args, deliveries: true }, context);
   assert.equal(snapshot.structuredContent.thread.status, 'open');

@@ -390,7 +390,7 @@ export function buildAgentBusMcpServer({
     const explicitlyAllowlisted = allowlist.includes('*') || allowlist.includes(resolvedId);
     if (explicitlyAllowlisted) return payload;
     if (allowlist.includes('@member')) {
-      if (!payload?.thread?.metadata?.dm && ['room_context', 'room_send', 'room_close', 'room_end', 'room_transfer'].includes(tool)) return payload;
+      if (!payload?.thread?.metadata?.dm && ['room_context', 'room_send', 'room_close', 'room_reopen', 'room_end', 'room_transfer'].includes(tool)) return payload;
       if (!actorInThread(payload?.thread, principalAgentRef(context))) {
         await rejectAuthorization(context, tool, 'thread_membership_required', `Actor is not a participant in thread ${resolvedId}`);
       }
@@ -441,13 +441,13 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_close',
-      description: 'Archive a room without terminating sessions. Agents must own the room, be a DM participant, or all participants must be gone. Pending deliveries block closure unless cancel_pending explicitly cancels them.',
+      description: 'Archive a room without terminating sessions. Any agent may archive a non-DM room without subscribing; DMs require membership. Pending deliveries block closure unless cancel_pending explicitly cancels them.',
       inputSchema: { type: 'object', properties: { thread_id: { type: 'string' }, cancel_pending: { type: 'boolean' } },
         required: ['thread_id'], additionalProperties: false },
     },
     {
       name: 'room_reopen',
-      description: 'Explicitly reopen an archived room. Cancelled deliveries stay terminal; legacy queued deliveries may resume.',
+      description: 'Any agent may reopen an archived non-DM room without subscribing; DMs require membership. Cancelled deliveries stay terminal; legacy queued deliveries may resume.',
       inputSchema: { type: 'object', properties: { thread_id: { type: 'string' } },
         required: ['thread_id'], additionalProperties: false },
     },
@@ -754,7 +754,7 @@ export function buildAgentBusMcpServer({
                   'Call room_list to rediscover your rooms and room_context before replying when you need room history.',
                   'room_context is truncated by default; continue with message_id and body_offset=nextOffset; set reply_to when addressing a prior claim; use type=result for a terminal outcome.',
                   'After opening a PR, the room owner may call watch_pr({repo, number, thread_id}). Cadre watches transitions and ends the linked room on merge; Cadre never merges.',
-                  'Call room_send to broadcast. Owners use room_close to archive after deliveries settle; any agent may close once all participants are gone. Other participants post type=result and stop. Use room_reopen to recover an archived room. Room owners and operators use room_end to terminate unshared participants; room_transfer hands ownership to a successor or claims a room whose owner is gone.',
+                  'Call room_send to broadcast. Any agent may use room_close to archive a non-DM room after deliveries settle, or room_reopen to recover it; DMs require membership. Other participants post type=result and stop. Room owners and operators use room_end to terminate unshared participants; room_transfer hands ownership to a successor or claims a room whose owner is gone.',
                   'Call agent_dm for a direct message and agent_directory for the unified roster.',
               ].join('\n'),
             },

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { renderBusEnvelope } from '../modules/agent-bus/envelope.mjs';
 import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
 
@@ -10,17 +11,22 @@ const participants = [{ kind: 'claude', sessionId: 'claude-1' }, { kind: 'codex'
 async function setup(t) {
   process.env.INTERNAL_BYPASS_TOKEN = 'open-rooms-test-bypass';
   const h = await createAgentBusHarness({ pollMs: 60000 });
-  t.after(async () => { await h.cleanup(); delete process.env.INTERNAL_BYPASS_TOKEN; });
+  t.after(async () => { await credentials.close(); await h.cleanup(); delete process.env.INTERNAL_BYPASS_TOKEN; });
   const { buildAgentBusMcpServer } = await import('../modules/agent-bus/mcp.mjs');
   const { buildInProcessFastifyRequest } = await import('../modules/agent-bus/in-process-mcp.mjs');
   const { buildInternalBypassHeaders } = await import('../modules/platform/auth.mjs');
-  const { AGENT_BUS_AGENT_TOOL_SCOPES } = await import('../modules/agent-bus/mcp-auth.mjs');
-  const context = (ref) => ({ authenticated: true, principal: { type: 'agent', ...ref },
-    toolScopes: [...AGENT_BUS_AGENT_TOOL_SCOPES], threadAllowlist: ['@member'] });
+  const { AgentBusCredentialStore, AGENT_BUS_AGENT_TOOL_SCOPES } = await import('../modules/agent-bus/mcp-auth.mjs');
+  const credentials = new AgentBusCredentialStore({ stateFile: join(h.stateDir, 'test-credentials.json') });
+  const tokens = new Map();
+  for (const ref of [owner, outsider, ...participants]) {
+    const issued = await credentials.issue({ principal: { type: 'agent', ...ref }, attemptGeneration: 1,
+      toolScopes: [...AGENT_BUS_AGENT_TOOL_SCOPES] });
+    tokens.set(ref, issued.token);
+  }
   const requestImpl = buildInProcessFastifyRequest({ app: h.app, buildHeaders: () => buildInternalBypassHeaders({ authToken: h.authToken, bypassToken: 'open-rooms-test-bypass' }) });
-  const mcp = buildAgentBusMcpServer({ requestImpl });
+  const mcp = buildAgentBusMcpServer({ requestImpl, credentialStore: credentials });
   const thread = await h.store.createThread({ title: 'Open room', participants, createdBy: owner });
-  return { h, thread, call: (name, args, ref = owner) => mcp.callTool(name, args, context(ref)), requestImpl };
+  return { h, thread, call: async (name, args, ref = owner) => mcp.callTool(name, args, await credentials.authenticate(tokens.get(ref))), requestImpl };
 }
 
 test('nonmembers read and post without subscribing; all scope lists only open rooms', async (t) => {
@@ -98,17 +104,18 @@ test('owner end refuses DM rooms', async (t) => {
   assert.deepEqual(h.deletedSessions.claude, []);
 });
 
-test('close requires ownership while any participant lives; any agent closes once all are gone', async (t) => {
+test('outsiders close and reopen non-DM rooms while participants live without terminating them', async (t) => {
   const { h, thread, call } = await setup(t);
-  await assert.rejects(call('room_close', { thread_id: thread.id }, outsider), (err) => err.statusCode === 403);
-  h.sessionCatalog.claude.delete('claude-1');
-  await assert.rejects(call('room_close', { thread_id: thread.id }, participants[0]), (err) => err.statusCode === 403);
-  h.sessionCatalog.codex.delete('codex-1');
   assert.equal((await call('room_close', { thread_id: thread.id }, outsider)).structuredContent.status, 'closed');
-  assert.deepEqual(h.deletedSessions.codex, []);
+  assert.equal((await call('room_reopen', { thread_id: thread.id }, outsider)).structuredContent.status, 'open');
+  assert.deepEqual(h.store.getThread(thread.id).thread.participants, participants);
+  for (const { kind, sessionId } of participants) {
+    assert.equal(h.sessionCatalog[kind].has(sessionId), true);
+    assert.deepEqual(h.deletedSessions[kind], []);
+  }
 });
 
-test('outsiders cannot read or send in DMs or discover them in all-open listing', async (t) => {
+test('outsiders cannot read, send, close or reopen DMs or discover them in all-open listing', async (t) => {
   const { h, thread, call, requestImpl } = await setup(t);
   const dm = await h.store.createThread({ participants, metadata: { dm: true } });
   await call('room_send', { thread_id: dm.id, body: 'Private history' }, participants[0]);
@@ -121,6 +128,11 @@ test('outsiders cannot read or send in DMs or discover them in all-open listing'
   assert.deepEqual((await call('room_list', { scope: 'all' }, participants[0])).structuredContent.rooms.map((room) => room.id), [thread.id]);
   assert.equal((await call('room_context', { thread_id: dm.id }, participants[1])).structuredContent.messages[0].body, 'Private history');
   assert.equal((await call('room_list', {}, participants[1])).structuredContent.rooms.some((room) => room.id === dm.id), true);
+  await assert.rejects(call('room_close', { thread_id: dm.id }, outsider), (err) => err.statusCode === 403);
+  await call('room_close', { thread_id: dm.id, cancel_pending: true }, participants[0]);
+  await assert.rejects(call('room_reopen', { thread_id: dm.id }, outsider), (err) => err.statusCode === 403);
+  await call('room_reopen', { thread_id: dm.id }, participants[1]);
+  assert.equal(h.store.getThread(dm.id).thread.status, 'open');
   assert.equal(h.store.getThread(dm.id).messages.length, 1);
 });
 
