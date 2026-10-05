@@ -7,8 +7,8 @@ mattpocock/skills (MIT)
 Copyright (c) 2026 Matt Pocock
 Skills: adr-format, agent-brief, codebase-deepening, codebase-design, debug-hard, design-it-twice, domain-modeling, glossary-format, grilling, hitl-loop, implement-spec, out-of-scope, pr, retro, skill-mechanics, tdd, tdd-mocking, tdd-tests, to-questionnaire, to-tickets, triage, wizard, wizard-template, writing-for-agents.
 
-humanlayer/skills (MIT)
-Copyright (c) 2026 HumanLayer
+humanlayer/humanlayer (Apache-2.0)
+Copyright (c) 2024, humanlayer Authors
 Skills: pr (Summary visuals adapted from Dex Horthy's show-me, via mattpocock/skills).
 
 obra/superpowers (MIT)
