@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { configFor, createManagedWorktree, linkManagedWorktreePr, cleanupManagedWorktree, sweepManagedWorktrees } from './managed-worktrees.mjs';
+import { createManagedWorktree, linkManagedWorktreePr, cleanupManagedWorktree, sweepManagedWorktrees } from './managed-worktrees.mjs';
 import { listCodexModels } from '../sessions/codex-models.mjs';
 import { listProviderModels } from '../sessions/model-catalog.mjs';
 import { listPiModels, PI_FALLBACK_MODELS, PI_PROVIDER_DEFINITIONS } from '../sessions/pi-model-catalog.mjs';
@@ -220,7 +220,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     let thread = null;
     const roomId = `thr_${randomUUID().replaceAll('-', '')}`;
     try {
-      if (req.body.worktree && requested.some((p) => p.sessionId || p.create === false) && await configFor(req.body.worktree.repo)) throw new Error('managed worktrees require newly created participants');
+      if (req.body.worktree && requested.some((p) => p.sessionId || p.create === false)) throw new Error('managed worktrees require newly created participants');
       const plans = [];
       for (const participant of requested) plans.push(await planParticipant(participant, req.body.workDir || '', {
         model: req.body.model, thinkingLevel: req.body.thinkingLevel, mcpProfile: req.body.mcpProfile,

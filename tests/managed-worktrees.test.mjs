@@ -40,6 +40,11 @@ async function fixture(t, setup = '') {
   const options = { baseDir, getPr: (value) => poller.getWorktreePr(value) };
   return { root, repo, metadata, head, options, setPr: (value) => { pr = value; } };
 }
+async function pushConfig(f, text) {
+  if (text === undefined) await git(f.repo, 'rm', '-q', '.cadre/worktree.json');
+  else { await writeFile(resolve(f.repo, '.cadre/worktree.json'), text); await git(f.repo, 'add', '.cadre/worktree.json'); }
+  await git(f.repo, 'commit', '-m', 'config'); await git(f.repo, 'push', 'origin', 'main');
+}
 const exists = async (path) => !!await stat(path).catch(() => null);
 
 for (const [name, change, reason] of [
@@ -95,15 +100,15 @@ test('baseline external node_modules symlink is unlinked without touching target
 
 test('setup failure removes fresh worktree and branch', async (t) => {
   const f = await fixture(t);
-  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ setup: 'touch leftover; exit 1' }));
+  await pushConfig(f, JSON.stringify({ setup: 'touch leftover; exit 1' }));
   await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'failed', base: 'origin/main', roomId: 'thr_failed', baseDir: f.options.baseDir }), /setup failed/);
   assert.equal(await exists(resolve(f.options.baseDir, 'thr_failed/repo')), false);
   assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/failed'])).code, 128);
 });
 
-test('no config creates no worktree', async (t) => {
-  const f = await fixture(t); await rm(resolve(f.repo, '.cadre/worktree.json'));
-  assert.equal(await createManagedWorktree({ repo: f.repo, branch: 'unused', roomId: 'thr_none', baseDir: f.options.baseDir }), null);
+test('no config at the base ref rejects the worktree request', async (t) => {
+  const f = await fixture(t); await pushConfig(f);
+  await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'unused', roomId: 'thr_none', baseDir: f.options.baseDir }), /no \.cadre\/worktree\.json at origin\/main/);
   assert.equal(await exists(resolve(f.options.baseDir, 'thr_none')), false);
 });
 
@@ -119,21 +124,24 @@ test('orphan sweep only removes marked closed-room worktrees', async (t) => {
   assert.equal(await exists(unmanaged), true);
 });
 
-for (const mode of ['managed', 'setup failure', 'launch failure', 'no config']) test(`bootstrap ${mode} with real git`, async (t) => {
+for (const mode of ['managed', 'stale local config', 'setup failure', 'launch failure', 'no config']) test(`bootstrap ${mode} with real git`, async (t) => {
   const f = await fixture(t);
   const h = await createAgentBusHarness({ beforeReady: async (app) => {
     app.get('/api/codex-app-server/sessions', async () => ({ sessions: [] }));
   } }); t.after(() => h.cleanup());
-  if (mode === 'setup failure') await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ setup: 'touch failed; exit 1' }));
-  if (mode === 'no config') await rm(resolve(f.repo, '.cadre/worktree.json'));
+  if (mode === 'setup failure') await pushConfig(f, JSON.stringify({ setup: 'touch failed; exit 1' }));
+  if (mode === 'no config') await pushConfig(f);
+  if (mode === 'stale local config') await rm(resolve(f.repo, '.cadre/worktree.json'));
   if (mode === 'launch failure') h.createResponders.claude = () => ({ statusCode: 400, body: { error: 'fixture startup failed' } });
   const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
     title: 'Managed', workDir: f.repo, worktree: { repo: f.repo, branch: 'bootstrap', base: 'origin/main' },
     participants: [{ kind: 'codex', create: true, workDir: '/wrong' }, { kind: 'claude', create: true }],
   } });
-  if (mode === 'setup failure' || mode === 'launch failure') {
+  if (!['managed', 'stale local config'].includes(mode)) {
     assert.equal(response.statusCode, 400, response.body);
-    if (mode === 'setup failure') {
+    if (mode === 'no config') assert.equal(response.json().error, `${f.repo} has no .cadre/worktree.json at origin/main; managed worktrees require the repo to opt in`);
+    if (mode !== 'launch failure') {
+      assert.equal(h.store.listThreads().length, 0);
       assert.equal(h.createdSessions.codex.length, 0); assert.equal(h.createdSessions.claude.length, 0);
     } else {
       assert.match(response.json().error, /Participant claude:.*fixture startup failed/);
@@ -149,9 +157,6 @@ for (const mode of ['managed', 'setup failure', 'launch failure', 'no config']) 
   }
   assert.equal(response.statusCode, 200, response.body);
   const metadata = h.store.getThread(response.json().thread.id).thread.metadata.worktree;
-  if (mode === 'no config') {
-    assert.equal(metadata, undefined); assert.equal(h.createdSessions.codex[0].workDir, '/wrong'); return;
-  }
   assert.equal(metadata.roomId, response.json().thread.id);
   assert.equal(h.createdSessions.codex[0].workDir, metadata.path);
   assert.equal(h.createdSessions.claude[0].workDir, metadata.path);
@@ -225,7 +230,7 @@ for (const touched of [false, true]) test(`partial spawn failure ${touched ? 'ke
 
 test('setup copies gitignored files and defaults cleanup to off', async (t) => {
   const f = await fixture(t);
-  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ copy: ['cache/settings'], setup: 'test -f cache/settings' }));
+  await pushConfig(f, JSON.stringify({ copy: ['cache/settings'], setup: 'test -f cache/settings' }));
   await mkdir(resolve(f.repo, 'cache')); await writeFile(resolve(f.repo, 'cache/settings'), 'local');
   const metadata = await createManagedWorktree({ repo: f.repo, branch: 'copy', roomId: 'thr_copy', baseDir: f.options.baseDir });
   assert.equal(await readFile(resolve(metadata.path, 'cache/settings'), 'utf8'), 'local');
@@ -236,7 +241,7 @@ test('setup copies gitignored files and defaults cleanup to off', async (t) => {
 test('setup timeout terminates child writers before rollback', async (t) => {
   const f = await fixture(t);
   const escaped = resolve(f.root, 'late-write');
-  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ setup: `(sleep 0.4; touch '${escaped}') & wait` }));
+  await pushConfig(f, JSON.stringify({ setup: `(sleep 0.4; touch '${escaped}') & wait` }));
   await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'timeout', base: 'origin/main', roomId: 'thr_timeout', baseDir: f.options.baseDir, setupTimeoutMs: 50 }), /setup failed/);
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.equal(await exists(escaped), false);
@@ -246,9 +251,7 @@ test('setup timeout terminates child writers before rollback', async (t) => {
 test('invalid config and missing metadata fail closed', async (t) => {
   const f = await fixture(t);
   assert.equal((await cleanupManagedWorktree({ ...f.metadata, ignoredBaseline: undefined }, f.options)).reason, 'missing or invalid metadata');
-  await writeFile(resolve(f.repo, '.cadre/worktree.json'), '{');
-  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, false);
-  assert.equal(await exists(f.metadata.path), true);
+  await pushConfig(f, '{');
   await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'invalid', roomId: 'thr_invalid', baseDir: f.options.baseDir }));
   assert.equal(await exists(resolve(f.options.baseDir, 'thr_invalid')), false);
 });
@@ -295,7 +298,7 @@ test('managed attach from repo subdirectory is rejected before worktree creation
 
 test('setup failure preserves original error when rollback branch CAS refuses', async (t) => {
   const f = await fixture(t);
-  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ setup: 'echo setup-change >> file; git commit -am setup-change; exit 1' }));
+  await pushConfig(f, JSON.stringify({ setup: 'echo setup-change >> file; git commit -am setup-change; exit 1' }));
   await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'setup-commit', roomId: 'thr_setup_commit', baseDir: f.options.baseDir }), (error) => {
     assert.equal(error.message, 'worktree setup failed'); assert.equal(error.rollbackError, 'git update-ref failed'); return true;
   });

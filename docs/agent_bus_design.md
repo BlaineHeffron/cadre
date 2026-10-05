@@ -175,7 +175,9 @@ Repositories opt in with a checked-in `.cadre/worktree.json`:
 { "setup": "npm ci", "copy": ["local-settings.json"], "cleanup": "on-merge" }
 ```
 
-`cleanup` defaults to `off`. Without this config, spawning behaves as before.
+`cleanup` defaults to `off`. Cadre reads the config from the base commit after
+fetching, not from the local checkout. A `worktree` request for a base without
+this config fails with a 400 before any room or session is created.
 `spawn_collab_session` and `spawn_conference_session` accept
 `worktree: { repo: "/local/repo", branch: "feat/task", base: "origin/main" }`;
 `base` defaults to origin's default branch. Managed spawns require newly created
