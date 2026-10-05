@@ -4,6 +4,7 @@ description: Write PR bodies with a small visual, before/after evidence, and mer
 
 <!--
 Copyright (c) 2026 Matt Pocock
+Copyright (c) 2026 HumanLayer
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,23 +23,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
--->
-
-<!--
-Summary visuals and placement guidance: Apache Software License 2.0
-Copyright (c) 2024, humanlayer Authors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 -->
 
 # PR Body
@@ -203,6 +187,6 @@ Describe whether it's a one-way or two-way door. You can walk back through two-w
 
 The blast radius is the potential impact or scope of the changes introduced by this PR. Consider all possibilities. Examples are layout shift, breakages for consumers, mobile responsiveness, etc.
 
-Summary visuals and placement guidance adapted from [Dex Horthy](https://github.com/dexhorthy) (Humanlayer), [show-me](https://github.com/humanlayer/humanlayer).
+Summary visuals and placement guidance adapted from [Dex Horthy](https://github.com/dexhorthy) (Humanlayer), [show-me](https://github.com/humanlayer/skills/blob/main/plugins/show-me/skills/show-me/SKILL.md).
 
 <!-- upstream: mattpocock/skills@24fe0ef skills/engineering/pr/SKILL.md -->
