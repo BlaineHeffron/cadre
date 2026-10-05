@@ -188,8 +188,8 @@ test('poster summaries persist through MCP room and DM calls and compact context
 
   for (const tool of ['room_send', 'agent_dm']) {
     const args = tool === 'room_send' ? { thread_id: thread.id } : { kind: 'claude', session_id: 'claude-1' };
-    await assert.rejects(call(tool, { ...args, body: 'Rejected', summary: 'x'.repeat(201) }), /summary must be at most 200 characters/);
-    await assert.rejects(call(tool, { ...args, body: 'Rejected', summary: 42 }), /summary must be a string/);
+    await assert.rejects(call(tool, { ...args, body: 'Rejected', summary: 'x'.repeat(201) }), /argument "summary" must NOT have more than 200 characters/);
+    await assert.rejects(call(tool, { ...args, body: 'Rejected', summary: 42 }), /argument "summary" must be string/);
   }
   for (const [path, args] of [
     ['/api/agent-bus/messages', { threadId: thread.id, from: owner }],

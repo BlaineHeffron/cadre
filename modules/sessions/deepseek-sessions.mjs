@@ -354,6 +354,7 @@ export async function deepseekSessionsPlugin(app, {
       let session = await service.start({
         sessionId: id,
         provider: 'deepseek',
+        metadata: req.body?.metadata,
         displayName: text(req.body?.displayName),
         workDir,
         model,

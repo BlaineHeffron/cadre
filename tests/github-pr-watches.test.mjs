@@ -50,8 +50,9 @@ async function setup(t) {
 test('authenticated MCP/REST create, persist, update and remove watches', async (t) => {
   const s = await setup(t);
   await assert.rejects(s.call('watch_pr', { repo: 'missing/repo', number: 1 }), /not configured/);
-  await assert.rejects(s.call('watch_pr', { repo: 'octo/demo', number: 0 }), /positive integer/);
-  const result = await s.call('watch_pr', { repo: 'octo/demo', number: 1, creator: successor });
+  await assert.rejects(s.call('watch_pr', { repo: 'octo/demo', number: 0 }), /watch_pr: argument "number" must be >= 1/);
+  await assert.rejects(s.call('watch_pr', { repo: 'octo/demo', number: 1, creator: successor }), /watch_pr: unknown argument "creator"/);
+  const result = await s.call('watch_pr', { repo: 'octo/demo', number: 1 });
   assert.deepEqual(result.structuredContent, { repo: 'octo/demo', number: 1, status: 'watching' });
   assert.deepEqual((await s.store.listWatches())[0].creator, creator);
   await s.watch();
