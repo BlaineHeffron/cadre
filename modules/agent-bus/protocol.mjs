@@ -19,6 +19,7 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
     'Workflow: if you are assigned implementer or reviewer, the implementer writes code and tests; the reviewer blocks on correctness or unnecessary code. Iterate until the reviewer approves.',
     'Coordinator findings go through the reviewer, who forwards accepted findings or rebuts them with evidence. The implementer acts only on forwarded findings.',
     'Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges.',
+    'Wait on background jobs by exact PID (`wait <pid>`, `kill -0 <pid>`) or your harness\'s background-task tool; never poll `pgrep -f`/`pkill -f` with a pattern that also appears in your own command line.',
     'Use the `dueno-agent-bus` MCP server for room communication.',
     `Context: room_context(thread_id="${threadId}")`,
     `Send: room_send(thread_id="${threadId}", body="...", reply_to="<message id of the claim you address>")`,
