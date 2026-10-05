@@ -6,7 +6,7 @@ import { renderCollabOnboarding } from '../modules/agent-bus/protocol.mjs';
 test('onboarding without a room channel omits collab workflow and tools', () => {
   const prompt = renderCollabOnboarding({ self: { kind: 'codex', sessionId: 'solo' }, busAvailable: false });
   assert.match(prompt, /This session has no shared room channel/);
-  assert.doesNotMatch(prompt, /Workflow:|Coordinator findings|Do not merge|room_send|DIRECTOR REPORT/);
+  assert.doesNotMatch(prompt, /Workflow:|Coordinator findings|Unless your task says otherwise|room_send|DIRECTOR REPORT/);
 });
 
 test('bootstrap injects simplified room prompts without loop startup metadata', async (t) => {
@@ -44,7 +44,7 @@ test('bootstrap injects simplified room prompts without loop startup metadata', 
     assert.match(prompt, /if you are assigned implementer or reviewer, the implementer writes code and tests; the reviewer blocks on correctness or unnecessary code\. Iterate until the reviewer approves/);
     assert.match(prompt, /Coordinator findings go through the reviewer/);
     assert.match(prompt, /implementer acts only on forwarded findings/);
-    assert.match(prompt, /Do not merge or delete the remote branch; the coordinator or operator merges/);
+    assert.match(prompt, /Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges/);
     assert.match(prompt, /type="result".*reviewer starts the body with "DIRECTOR REPORT": PR number, head SHA, changes, test results, and deferred items/);
     assert.match(prompt, /<merged\|ready\|blocked\|needs-decision> · PR #n · <one line>/);
     assert.match(prompt, /any agent may read, post, close or reopen without subscribing/);

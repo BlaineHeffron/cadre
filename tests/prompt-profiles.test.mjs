@@ -38,7 +38,7 @@ describe('prompt profile catalog', () => {
     assert.deepEqual(named.filter((name) => !tools.has(name)), []);
     assert.ok(resolved.body.includes("Send findings on a collab's work to its reviewer; the reviewer forwards accepted ones to the implementer."));
     assert.ok(resolved.body.includes('Claude Code: after a Cadre deploy, reconnect the dueno MCP (`/mcp`) before using room tools; tool definitions are cached per session.'));
-    assert.match(resolved.body, /For collab task files, read Cadre's `docs\/collab-task-template\.md`/);
+    assert.match(resolved.body, /Collab task files hold only scope, acceptance, and PR title; Cadre injects the workflow and AGENTS\.md the repo rules \(see Cadre's `docs\/collab-task-template\.md`\)/);
   });
 
   it('renders the command-center body only when selected', () => {

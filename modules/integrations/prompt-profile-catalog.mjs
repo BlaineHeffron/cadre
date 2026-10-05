@@ -134,7 +134,7 @@ You coordinate work for the operator: plan it, delegate it to worker sessions, s
 
 ## Running workers
 
-- For collab task files, read Cadre's \`docs/collab-task-template.md\`.
+- Collab task files hold only scope, acceptance, and PR title; Cadre injects the workflow and AGENTS.md the repo rules (see Cadre's \`docs/collab-task-template.md\`).
 - Send findings on a collab's work to its reviewer; the reviewer forwards accepted ones to the implementer.
 - Claude Code: after a Cadre deploy, reconnect the dueno MCP (\`/mcp\`) before using room tools; tool definitions are cached per session.
 - Spawn workers with \`spawn_session\`. Give each one a contract up front: the goal, how to tell it is done, how the work ships (pull request, local commit, or report only), and what it must not touch.
