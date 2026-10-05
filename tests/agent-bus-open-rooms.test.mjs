@@ -61,12 +61,16 @@ test('owner transfers; live owners block claims; gone owners permit claims; oper
   h.sessionDetailResponders.pi = null;
   await assert.rejects(call('room_transfer', { ...args, to: { kind: 'typo', session_id: 'missing' } }), (err) => err.statusCode === 400);
   assert.deepEqual(h.store.getThread(thread.id).thread.createdBy, owner);
+  await assert.rejects(call('room_transfer', { ...args, to: { kind: 'codex', session_id: 'missing' } }), (err) => err.statusCode === 400);
   await call('room_transfer', args);
   assert.deepEqual(h.store.getThread(thread.id).thread.createdBy, outsider);
   assert.deepEqual(h.store.getThread(thread.id).thread.participants, participants);
   h.sessionCatalog.deepseek.delete(outsider.sessionId);
-  await call('room_transfer', { thread_id: thread.id, to: { kind: owner.kind, session_id: owner.sessionId } }, participants[0]);
-  assert.deepEqual(h.store.getThread(thread.id).thread.createdBy, owner);
+  await assert.rejects(call('room_transfer', { thread_id: thread.id, to: { kind: owner.kind, session_id: owner.sessionId } }, participants[0]), (err) => err.statusCode === 403);
+  assert.deepEqual(h.store.getThread(thread.id).thread.createdBy, outsider);
+  await call('room_transfer', { thread_id: thread.id, to: { kind: participants[0].kind, session_id: participants[0].sessionId } }, participants[0]);
+  assert.deepEqual(h.store.getThread(thread.id).thread.createdBy, participants[0]);
+  h.sessionCatalog.deepseek.add(outsider.sessionId);
   await requestImpl(`/api/agent-bus/threads/${thread.id}/transfer`, { method: 'POST', body: { to: outsider } });
   assert.deepEqual(h.store.getThread(thread.id).thread.createdBy, outsider);
 });
@@ -102,4 +106,20 @@ test('close requires ownership while any participant lives; any agent closes onc
   h.sessionCatalog.codex.delete('codex-1');
   assert.equal((await call('room_close', { thread_id: thread.id }, outsider)).structuredContent.status, 'closed');
   assert.deepEqual(h.deletedSessions.codex, []);
+});
+
+test('outsiders cannot read or send in DMs or discover them in all-open listing', async (t) => {
+  const { h, thread, call, requestImpl } = await setup(t);
+  const dm = await h.store.createThread({ participants, metadata: { dm: true } });
+  await call('room_send', { thread_id: dm.id, body: 'Private history' }, participants[0]);
+  await assert.rejects(call('room_context', { thread_id: dm.id }, outsider), (err) => err.statusCode === 403);
+  await assert.rejects(call('room_send', { thread_id: dm.id, body: 'Intrusion' }, outsider), (err) => err.statusCode === 403);
+  await assert.rejects(requestImpl('/api/agent-bus/messages', { method: 'POST', body: {
+    threadId: dm.id, from: outsider, body: 'Route intrusion', deliveryMode: 'enqueue',
+  } }), (err) => err.statusCode === 403);
+  assert.deepEqual((await call('room_list', { scope: 'all' }, outsider)).structuredContent.rooms.map((room) => room.id), [thread.id]);
+  assert.deepEqual((await call('room_list', { scope: 'all' }, participants[0])).structuredContent.rooms.map((room) => room.id), [thread.id]);
+  assert.equal((await call('room_context', { thread_id: dm.id }, participants[1])).structuredContent.messages[0].body, 'Private history');
+  assert.equal((await call('room_list', {}, participants[1])).structuredContent.rooms.some((room) => room.id === dm.id), true);
+  assert.equal(h.store.getThread(dm.id).messages.length, 1);
 });

@@ -388,7 +388,7 @@ export function buildAgentBusMcpServer({
     const explicitlyAllowlisted = allowlist.includes('*') || allowlist.includes(resolvedId);
     if (explicitlyAllowlisted) return payload;
     if (allowlist.includes('@member')) {
-      if (['room_context', 'room_send', 'room_close', 'room_end', 'room_transfer'].includes(tool)) return payload;
+      if (!payload?.thread?.metadata?.dm && ['room_context', 'room_send', 'room_close', 'room_end', 'room_transfer'].includes(tool)) return payload;
       if (!actorInThread(payload?.thread, principalAgentRef(context))) {
         await rejectAuthorization(context, tool, 'thread_membership_required', `Actor is not a participant in thread ${resolvedId}`);
       }
@@ -411,7 +411,7 @@ export function buildAgentBusMcpServer({
     ...TASK_TOOLS,
     {
       name: 'room_send',
-      description: 'Post in any room without subscribing. Participants receive messages; the owner also receives results.',
+      description: 'Post in any non-DM room without subscribing; DMs require membership. Participants receive messages; the owner also receives results.',
       inputSchema: { type: 'object', properties: {
         thread_id: { type: 'string' }, body: { type: 'string' }, reply_to: { type: 'string' },
         type: { type: 'string', enum: ['message', 'result'] },
@@ -419,7 +419,7 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_context',
-      description: 'Read recent truncated messages in any room without subscribing. Continue a truncated body with message_id and body_offset=nextOffset (ignores since/after). since=message id, after=timestamp; pass deliveries=true or bodies=false as needed.',
+      description: 'Read recent truncated messages in any non-DM room without subscribing; DMs require membership. Continue a truncated body with message_id and body_offset=nextOffset (ignores since/after). since=message id, after=timestamp; pass deliveries=true or bodies=false as needed.',
       inputSchema: { type: 'object', properties: {
         thread_id: { type: 'string' }, limit: { type: 'integer', minimum: 0, maximum: 500 },
         since: { type: 'string' }, after: { type: 'string' }, message_id: { type: 'string' },
@@ -429,7 +429,7 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_list',
-      description: 'List rooms the agent owns or subscribes to; scope=all lists all open rooms.',
+      description: 'List rooms the agent owns or subscribes to; scope=all lists all open non-DM rooms.',
       inputSchema: { type: 'object', properties: { scope: { type: 'string', enum: ['all'] } }, additionalProperties: false },
     },
     {
@@ -452,7 +452,7 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_transfer',
-      description: 'Transfer room ownership as its owner, or claim it if the owner session is gone. Operators may always transfer.',
+      description: 'Transfer room ownership as its owner, or claim it for yourself if the owner session is gone. The destination must be a live agent session. Operators may always transfer.',
       inputSchema: { type: 'object', properties: { thread_id: { type: 'string' },
         to: { type: 'object', properties: { kind: { type: 'string' }, session_id: { type: 'string' } },
           required: ['kind', 'session_id'], additionalProperties: false } },
@@ -529,7 +529,7 @@ export function buildAgentBusMcpServer({
         const actor = principalAgentRef(authContext);
         const payload = await request(args.scope === 'all' ? '/api/agent-bus/threads?status=open'
           : `/api/agent-bus/threads/by-participant?kind=${encodeURIComponent(actor.kind)}&sessionId=${encodeURIComponent(actor.sessionId)}&status=all`);
-        const rooms = (payload?.threads || []).map((thread) => ({ id: thread.id, title: thread.title,
+        const rooms = (payload?.threads || []).filter((thread) => args.scope !== 'all' || !thread.metadata?.dm).map((thread) => ({ id: thread.id, title: thread.title,
           kind: thread.metadata?.dm ? 'dm' : 'room', status: thread.status, participants: thread.participants || [] }));
         return textResult(`${rooms.length} room(s).`, { rooms });
       }
@@ -731,7 +731,7 @@ export function buildAgentBusMcpServer({
               type: 'text',
               text: [
                   'Prefer the top-level spawn tools when they are available in your current MCP server: `spawn_session` for one agent, `spawn_collab_session` for a 2-agent thread, and `spawn_conference_session` for 2+ participants.',
-                  'Rooms are open: any agent may read or post without subscribing. Participants receive messages; owners also receive results. Use room_list(scope="all") for all open rooms.',
+                  'Non-DM rooms are open: any agent may read or post without subscribing. DMs remain member-only. Participants receive messages; owners also receive results. Use room_list(scope="all") for all open non-DM rooms.',
                   'Call room_list to rediscover your rooms and room_context before replying when you need room history.',
                   'room_context is truncated by default; continue with message_id and body_offset=nextOffset; set reply_to when addressing a prior claim; use type=result for a terminal outcome.',
                   'Call room_send to broadcast. Owners use room_close to archive after deliveries settle; any agent may close once all participants are gone. Other participants post type=result and stop. Use room_reopen to recover an archived room. Room owners and operators use room_end to terminate unshared participants; room_transfer hands ownership to a successor or claims a room whose owner is gone.',

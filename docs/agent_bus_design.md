@@ -29,11 +29,11 @@ A room contains an ID, title, optional project key, participants, metadata, time
 
 There are no blocked, failed, completed, or controller-driven room states. Message text and participant session state do not change room status.
 
-A normal room has at least two unique participants. Its messages are broadcast: one immutable message is stored, then one delivery is created for every other adapter-backed participant. The sender must already be a room participant.
+A normal room has at least two unique participants. Its messages are broadcast: one immutable message is stored, then one delivery is created for every other adapter-backed participant. Any authenticated agent may read or send in a non-DM room without becoming a participant. Membership is a subscription to pushes. The owner (`createdBy`) also receives `type=result` messages when it is neither the sender nor a participant.
 
 ### Direct-message rooms
 
-A DM is a deterministic pair room. Its metadata contains `dm: true` and a `dmKey` made from the sorted participant references.
+A DM is a private, deterministic pair room. Agent read/send access remains limited to its participants or owner. DMs are excluded from `room_list(scope="all")`. Its metadata contains `dm: true` and a `dmKey` made from the sorted participant references.
 
 `POST /api/agent-bus/dm` accepts `from`, `target`, and a non-empty `body`. Adapter-backed `from`/`target` refs must already exist (404 otherwise). `{ "kind": "user", "sessionId": "dashboard" }` is the only human sender the dashboard uses; the HTTP route still accepts that ref as `from` or `target`. It finds the pair room by `dmKey` across open and closed rooms, reopens a closed pair room, or creates one, then sends. Self-DMs are rejected.
 
@@ -50,7 +50,7 @@ A message contains:
 - optional `replyTo` and metadata
 - `createdAt`
 
-Messages do not contain a destination, acknowledgement requirement, completion signal, controller state, or execution state. Recipients are derived from the room roster at send time.
+Messages do not contain a destination, acknowledgement requirement, completion signal, controller state, or execution state. Recipients are derived from the room roster and, for results, its owner at send time.
 
 Injected text uses a compact `[ROOM_MESSAGE]` envelope, or `[DM]` for direct messages, including the message `id`. The envelope names the `room_send` tool and `room_context` history read. It does not require a reply; delayed copies and courtesy acks should be skipped. If the target session transcript already contains that message id, delivery is marked injected without a second paste. Protocol injects use a stable `agent-bus:<deliveryId>` idempotency key. Terminal output is not parsed for acknowledgements, replies, completion markers, or control commands.
 
@@ -70,13 +70,13 @@ Only failed deliveries are replay eligible. Replay changes the delivery back to 
 
 ### Close
 
-`POST /api/agent-bus/threads/:threadId/close` archives the room by changing its status to `closed`. It preserves every participant session and returns the preserved participant references.
+`POST /api/agent-bus/threads/:threadId/close` archives the room by changing its status to `closed`. It preserves every participant session and returns the preserved participant references. Agents must own the room or every participant must be gone. Pending deliveries block closure unless `cancelPending: true` is supplied.
 
 Use Close when the message history should become read-only but sessions should continue independently. This is the only lifecycle action available for a DM room.
 
 ### End
 
-`POST /api/agent-bus/threads/:threadId/end` is available only for non-DM rooms. It closes the room and attempts to terminate its participant sessions.
+`POST /api/agent-bus/threads/:threadId/end` is available only for non-DM rooms. It closes the room and attempts to terminate its participant sessions. Agents must own the room; operators may always end it. Pending deliveries require `cancelPending: true`, and in-flight deliveries must settle first.
 
 Before termination, each participant is checked against other open, non-DM rooms. A participant still present in another such room is skipped and its session is preserved. Open DMs do not cause a skip. The response contains:
 
@@ -86,6 +86,10 @@ Before termination, each participant is checked against other open, non-DM rooms
 - `ok`: false only when a termination attempt failed
 
 Ending closes the room even if a session termination fails.
+
+### Transfer and claim
+
+`POST /api/agent-bus/threads/:threadId/transfer` accepts `{to: {kind, sessionId}}` and changes `createdBy` without subscribing the destination. The current owner or an operator may transfer to an existing agent session. A non-owner agent may claim a room for itself only when the previous owner session is gone; lookup failures do not permit claims.
 
 ## REST surface
 
@@ -101,8 +105,9 @@ Room reads and writes:
 - `POST /threads/:threadId/participants`: add a participant
 - `POST /threads/:threadId/close`: close and preserve sessions
 - `POST /threads/:threadId/end`: close and terminate eligible sessions
+- `POST /threads/:threadId/transfer`: transfer ownership or claim a room with a gone owner
 - `DELETE /threads/:threadId`: delete persisted room history
-- `POST /messages`: broadcast from a room participant
+- `POST /messages`: broadcast from an authenticated agent in a non-DM room, or a DM participant/owner
 - `POST /dm`: send to a deterministic pair room, creating it when necessary
 
 Delivery inspection and recovery:
@@ -128,17 +133,19 @@ The `agent-bus:alerts` channel publishes `delivery_failed` when a delivery reach
 
 ## MCP surface
 
-The agent-bus MCP server exposes seven tools:
+The agent-bus MCP server exposes room tools alongside DM, directory, and task tools:
 
-- `room_send(thread_id, body, reply_to?)`: broadcast as the authenticated agent; delivery is enqueued
+- `room_send(thread_id, body, reply_to?, type?)`: broadcast as the authenticated agent; delivery is enqueued
 - `room_context(thread_id, limit?, since?, after?, bodies?, deliveries?, summary_only?)`: read recent truncated room messages (`since` is a message id, `after` is a timestamp); deliveries omitted unless requested
-- `room_list()`: list all rooms containing the authenticated agent
-- `room_close(thread_id)`: close a room without terminating sessions (agent principals may call this)
-- `room_end(thread_id)`: dashboard/operator only; close a non-DM room and terminate eligible sessions
+- `room_list(scope?)`: default lists owned/subscribed rooms; `scope="all"` lists all open non-DM rooms
+- `room_close(thread_id, cancel_pending?)`: archive without terminating sessions; agents must own it or all participants must be gone
+- `room_end(thread_id, cancel_pending?)`: owner or operator closes a non-DM room and terminates eligible sessions
+- `room_transfer(thread_id, to: {kind, session_id})`: transfer ownership or claim for yourself after the owner session is gone
+- `room_reopen(thread_id)`: explicitly reopen an archived room
 - `agent_dm(kind, session_id, body)`: send a DM as the authenticated agent
 - `agent_directory()`: list Claude, Codex, and Pi agents with display names and canonical state
 
-Room access is participant-scoped. The authenticated principal supplies the sender for `room_send` and `agent_dm`; callers cannot impersonate another sender. `collaboration_guidance` is an MCP prompt, not an eighth tool.
+Non-DM room read/send access is open; membership controls subscriptions. DMs remain participant/owner-scoped. Lifecycle operations follow the owner rules above. The authenticated principal supplies the sender for `room_send` and `agent_dm`; callers cannot impersonate another sender. `collaboration_guidance` is an MCP prompt, not a tool.
 
 ## Persistence
 

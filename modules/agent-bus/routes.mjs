@@ -81,7 +81,8 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
 
   async function authorizeLifecycle(req, thread, action) {
     if (req.duenoAuth?.principal?.type !== 'agent' || threadHasOwner(thread, createdByFromRequest(req))) return;
-    if (action === 'transfer' && thread.createdBy && !await sessionExists(thread.createdBy)) return;
+    if (action === 'transfer' && participantKey(req.body.to) === participantKey(createdByFromRequest(req))
+      && thread.createdBy && !await sessionExists(thread.createdBy)) return;
     if (action === 'close') {
       let alive = false;
       for (const participant of thread.participants || []) {
@@ -97,7 +98,9 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     const snapshot = store.getThread(req.params.threadId);
     if (!snapshot) return reply.code(404).send({ error: 'Thread not found' });
     await authorizeLifecycle(req, snapshot.thread, 'transfer');
-    if (!adapters[req.body.to.kind]) return reply.code(400).send({ error: 'Unknown owner agent kind' });
+    if (!adapters[req.body.to.kind] || !await sessionExists(req.body.to)) {
+      return reply.code(400).send({ error: 'Owner must be an existing agent session' });
+    }
     const thread = await store.transferThread(snapshot.thread.id, req.body.to);
     await broadcastThreadSummary(thread.id);
     return { thread: normalizeThreadSummary(await enrichThread(thread)) };
@@ -333,6 +336,9 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     const managed = snapshot.thread.metadata?.task;
     if (isDurableTaskRecord(managed) && (from?.kind !== managed.provider || from?.sessionId !== managed.attempts?.at(-1)?.sessionId)) {
       return { statusCode: 409, payload: { error: 'Managed task input requires task_send', code: 'task_input_required' } };
+    }
+    if (snapshot.thread.metadata?.dm && !threadHasParticipant(snapshot.thread, from) && !threadHasOwner(snapshot.thread, from)) {
+      return { statusCode: 403, payload: { error: 'Sender is not a participant in this DM' } };
     }
     const resolvedType = type === 'result' ? 'result' : (type || 'message');
     const duplicate = [...(snapshot.messages || [])].reverse().find((item) => (
