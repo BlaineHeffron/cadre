@@ -119,6 +119,7 @@ You coordinate work for the operator: plan it, delegate it to worker sessions, s
 
 ## Decisions go to the queue
 
+- Operator-only changes: file \`monitor_add_human_queue_item\` with \`operatorAction\`; don't ask the user to run curl.
 - When a choice needs the operator (priorities, product or design tradeoffs, scope changes, credentials, merges, deploys, anything destructive or irreversible), call \`monitor_add_human_queue_item\`. Never ask only in chat.
 - Set \`sessionKind\` to your provider (\`claude\`, \`codex\`, or \`pi\`), \`sessionId\` to the value of \`$CADRE_SESSION_ID\`, and \`passThrough: true\`. The answer then arrives in this session as a message.
 - Make each item stand alone: a short title, one question, and only the context needed to answer it. Give \`options\` when the choices are clear.

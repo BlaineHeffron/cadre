@@ -6,6 +6,7 @@ import { listClaudeModels } from '../sessions/claude-models.mjs';
 import { listCodexModels } from '../sessions/codex-models.mjs';
 import { createAgentSession, enqueueAgentSessionCommand } from '../sessions/index.mjs';
 import { config } from '../../config.mjs';
+import { BROWSER_SESSION_COOKIE, createBrowserSessionCookieValue } from '../platform/auth.mjs';
 import { DEFAULT_CLAUDE_MODEL, DEFAULT_CODEX_MODEL, getPreferredModelForProvider } from '../sessions/provider-models.mjs';
 import {
   getAgentProviderPreferencesSync,
@@ -16,6 +17,21 @@ import {
   resolvePromptProfile,
 } from './prompt-profile-catalog.mjs';
 import { FLEET_SUPERVISOR_MCP_CREDENTIAL_PROFILE } from './mcp-launch-preflight.mjs';
+
+export const OPERATOR_ACTION_ROUTES = [
+  { method: 'POST', path: /^\/api\/agents\/github$/ },
+  { method: 'DELETE', path: /^\/api\/agents\/github\/watches$/ },
+  { method: 'POST', path: /^\/api\/agent-bus\/threads\/[A-Za-z0-9_-]+\/end$/ },
+];
+
+function validateOperatorAction(action) {
+  if (!action || typeof action.path !== 'string' || action.path.trim() !== action.path || !OPERATOR_ACTION_ROUTES.some(({ method, path }) => method === action.method && path.test(action.path))) {
+    const error = new Error('Operator action method/path is not allowlisted');
+    error.statusCode = 400;
+    throw error;
+  }
+  return { method: action.method, path: action.path, ...(action.body !== undefined ? { body: structuredClone(action.body) } : {}) };
+}
 
 // ── State ──
 
@@ -314,8 +330,14 @@ function broadcastWorkQueue(wsManager, type = 'updated') {
   wsManager?.broadcast?.('command-center:work-queue', type, serializeWorkQueueSync({ status: 'all' }));
 }
 
-export async function addHumanQueueItem(input = {}, { wsManager, persist = true } = {}) {
+export async function addHumanQueueItem(input = {}, { wsManager, persist = true, principal } = {}) {
   await ensureHumanWorkQueueLoaded();
+  const operatorAction = input.operatorAction === undefined ? null : validateOperatorAction(input.operatorAction);
+  if (operatorAction && (principal?.type !== 'agent' || !['claude', 'codex', 'pi'].includes(principal?.kind) || !principal?.sessionId)) {
+    const error = new Error('Operator actions require an authenticated requesting session');
+    error.statusCode = 403;
+    throw error;
+  }
   const title = String(input.title || input.question || 'Decision needed').trim();
   const question = String(input.question || title).trim();
   if (!question) {
@@ -339,8 +361,17 @@ export async function addHumanQueueItem(input = {}, { wsManager, persist = true 
     sessionId: String(input.sessionId || input.session_id || '').trim(),
     threadId: String(input.threadId || input.thread_id || '').trim(),
     passThrough: input.passThrough === true || input.pass_through === true,
-    options,
-    allowFreeform: input.allowFreeform !== false && input.allow_freeform !== false,
+    ...(operatorAction ? {
+      operatorAction,
+      sessionKind: principal.kind,
+      sessionId: principal.sessionId,
+      passThrough: true,
+    } : {}),
+    options: operatorAction ? [
+      { id: 'approve', label: 'Approve and run', value: 'approved' },
+      { id: 'reject', label: 'Reject', value: 'rejected' },
+    ] : options,
+    allowFreeform: !operatorAction && input.allowFreeform !== false && input.allow_freeform !== false,
     deliveryStatus: 'none',
     events: [queueEvent('created')],
     createdAt: now,
@@ -361,7 +392,7 @@ async function maybeRouteQueueAnswer(item, answerText, { sendSessionInput } = {}
   if (!['claude', 'codex', 'pi'].includes(kind) || !sessionId || typeof sendSessionInput !== 'function') {
     return { mode: 'pass_through', routed: false, error: 'missing_target_session' };
   }
-  const text = [
+  const text = item.operatorAction ? answerText : [
     `Answer for Command Center queue item ${item.id}:`,
     answerText,
   ].join('\n');
@@ -377,6 +408,8 @@ export async function answerHumanQueueItem(id, input = {}, {
   wsManager,
   sendSessionInput,
   enqueueSessionCommand = enqueueAgentSessionCommand,
+  principal,
+  executeOperatorAction,
   persist = true,
 } = {}) {
   await ensureHumanWorkQueueLoaded();
@@ -386,13 +419,23 @@ export async function answerHumanQueueItem(id, input = {}, {
     error.statusCode = 404;
     throw error;
   }
+  if (item.operatorAction && principal?.type !== 'ui') {
+    const error = new Error('Operator action answers require an authenticated operator');
+    error.statusCode = 403;
+    throw error;
+  }
   if (item.status !== 'open') {
     const error = new Error(`Queue item is already ${item.status}`);
     error.statusCode = 409;
     throw error;
   }
   const selectedOption = item.options.find((option) => option.id === input.optionId || option.value === input.optionValue) || null;
-  const answerText = String(input.answer || selectedOption?.value || selectedOption?.label || '').trim();
+  if (item.operatorAction && !['approve', 'reject'].includes(selectedOption?.id)) {
+    const error = new Error('Choose Approve and run or Reject');
+    error.statusCode = 400;
+    throw error;
+  }
+  let answerText = String(input.answer || selectedOption?.value || selectedOption?.label || '').trim();
   if (!answerText) {
     const error = new Error('answer or optionId is required');
     error.statusCode = 400;
@@ -408,6 +451,27 @@ export async function answerHumanQueueItem(id, input = {}, {
     answeredAt,
   };
   item.events.push(queueEvent('answered', { optionId: item.answer.optionId || '' }));
+  if (item.operatorAction) {
+    // Claim durably before injection: a crash may lose the result, but cannot rerun the action.
+    if (persist) await persistHumanWorkQueue();
+    const approved = selectedOption.id === 'approve';
+    let result = { status: approved ? 'approved' : 'rejected' };
+    if (approved) {
+      try {
+        const action = validateOperatorAction(item.operatorAction);
+        const response = await executeOperatorAction(action);
+        let compact = response.body;
+        try { compact = JSON.stringify(JSON.parse(compact)); } catch { /* Plain-text response. */ }
+        result = { status: 'executed', statusCode: response.statusCode, response: String(compact || '').replace(/\s+/g, ' ').slice(0, 300) };
+      } catch (error) {
+        result = { status: 'blocked', error: String(error.message || error).replace(/\s+/g, ' ').slice(0, 300) };
+      }
+    }
+    item.operatorActionResult = result;
+    answerText = `[OPERATOR_ACTION] ${approved ? 'approved' : 'rejected'} · ${item.operatorAction.method} ${item.operatorAction.path}${result.statusCode ? ` → ${result.statusCode}` : ''}${result.response || result.error ? ` · ${result.response || result.error}` : ''}`;
+    item.answer.text = answerText;
+    if (persist) await persistHumanWorkQueue();
+  }
   item.answer.delivery = await maybeRouteQueueAnswer(item, answerText, { sendSessionInput });
   if (item.passThrough) {
     if (item.answer.delivery?.routed === true) {
@@ -731,7 +795,7 @@ export async function commandCenterAIPlugin(app, {
 
   app.post('/api/command-center/work-queue', async (req, reply) => {
     try {
-      return await addHumanQueueItem(req.body || {}, { wsManager });
+      return await addHumanQueueItem(req.body || {}, { wsManager, principal: req.duenoAuth?.principal });
     } catch (err) {
       return reply.code(err.statusCode || 500).send({ error: err.message || 'Failed to add queue item' });
     }
@@ -743,6 +807,13 @@ export async function commandCenterAIPlugin(app, {
         wsManager,
         sendSessionInput,
         enqueueSessionCommand,
+        principal: req.duenoAuth?.principal,
+        executeOperatorAction: (action) => app.inject({
+          method: action.method,
+          url: action.path,
+          payload: action.body,
+          headers: { cookie: `${BROWSER_SESSION_COOKIE}=${createBrowserSessionCookieValue()}` },
+        }),
       });
     } catch (err) {
       return reply.code(err.statusCode || 500).send({ error: err.message || 'Failed to answer queue item' });

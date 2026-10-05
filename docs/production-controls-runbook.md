@@ -276,3 +276,18 @@ rollout mode or authorizes an automatic production restart.
 The optional authenticated systemd bridge and approved tunnel activation, token
 rotation, ACLs and rollback are documented in [Service-out bridge](service-out-bridge.md).
 It is installed separately; Fleet restart/install does not publish network ingress.
+
+## Operator actions through the human queue
+
+Agents request operator-only changes with `monitor_add_human_queue_item` and
+`operatorAction: {method, path, body}`. The server binds the requester to the authenticated
+session and shows the exact request alongside the question and details in Command Queue.
+Choose **Approve and run** to execute it or **Reject** to decline. The requester receives
+an `[OPERATOR_ACTION]` line with the HTTP status and up to 300 characters of response/error.
+
+The server allowlist currently permits `POST /api/agents/github`,
+`DELETE /api/agents/github/watches`, and `POST /api/agent-bus/threads/:id/end`.
+It is checked at creation and approval; restart and deploy routes are excluded.
+Only an authenticated operator can answer an action item. The answer is persisted before
+execution, so duplicate answers or a restart cannot run the item again. If a crash interrupts
+execution, inspect the target state before requesting a new item; the original is not retried.
