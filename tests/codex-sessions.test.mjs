@@ -256,7 +256,7 @@ async function runInputPendingListScenario({
   const pluginModuleUrl = pathToFileURL(resolve('modules/sessions/codex-sessions.mjs')).href;
   const wrapped = `
     import Fastify from ${JSON.stringify(fastifyModuleUrl)};
-    import { readFile, writeFile } from 'node:fs/promises';
+    import { readFile, writeFile, rename } from 'node:fs/promises';
     process.chdir(${JSON.stringify(tempDir)});
     const pluginRef = await import(${JSON.stringify(pluginModuleUrl)});
     const broadcasts = [];
@@ -274,7 +274,9 @@ async function runInputPendingListScenario({
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
       await new Promise((resolve) => setTimeout(resolve, 350));
-      await writeFile(${JSON.stringify(paneFile)}, ${JSON.stringify(afterSendPaneContent)});
+      // Publish a complete pane snapshot while the command gate polls fake tmux.
+      await writeFile(${JSON.stringify(paneFile + '.tmp')}, ${JSON.stringify(afterSendPaneContent)});
+      await rename(${JSON.stringify(paneFile + '.tmp')}, ${JSON.stringify(paneFile)});
       await app.inject({ method: 'GET', url: '/api/codex/sessions/pending-1' });
       await new Promise((resolve) => setTimeout(resolve, 50));
       await app.inject({ method: 'GET', url: '/api/codex/sessions/pending-1' });
