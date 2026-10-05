@@ -132,6 +132,30 @@ test('real MCP actions return ids only while REST retains records and reads expo
   await call('monitor_act_on_audio_recording', { id: scan.results[0].id }, ['id', 'session_id', 'status']);
 });
 
+test('real MCP session output strips terminal controls before paging while REST stays raw', async (t) => {
+  const { h, call, requestImpl } = await setup(t);
+  const raw = '\x1b]0;BEL title\x07\x1b]2;ST title\x1b\\'
+    + '\x1b[31mred\x1b[0m\x1b[2J\x1b[?25l\x1b[1;2H\x1b[>0c\x1b(B\x1b7\x1b8\x1bc\r\n'
+    + 'progress 10%\rprogress 50%\rcomplete\nplain\ttext\r\r\nlast\x1b\r';
+  for (const field of ['content', 'output']) {
+    h.sessionDetailResponders.codex = () => ({ payload: { [field]: raw } });
+    assert.equal((await requestImpl('/api/codex/sessions/codex-1?lines=200'))[field], raw);
+    assert.deepEqual(await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1' }), {
+      session_id: 'codex-1', content: 'red\ncomplete\nplain\ttext\nlast',
+    });
+  }
+  h.sessionDetailResponders.codex = null;
+  h.content.codex = '\x1b]0;title\x07' + 'old'.repeat(5000) + '\x1b[32m' + 'recent'.repeat(2000) + '\x1b[0m';
+  const tail = await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1' });
+  assert.equal(tail.content, 'recent'.repeat(2000));
+  assert.equal(tail.nextOffset, 12000);
+  const older = await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1', offset: tail.nextOffset });
+  assert.equal(older.content, 'old'.repeat(4000));
+  assert.equal(older.nextOffset, 24000);
+  const oldest = await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1', offset: older.nextOffset });
+  assert.deepEqual(oldest, { session_id: 'codex-1', content: 'old'.repeat(1000) });
+});
+
 test('real MCP reads honor default limits, filters, paging, and recent output tails', async (t) => {
   const { h, call, mcp, context, schedules, audit } = await setup(t);
   for (let i = 0; i < 56; i++) {

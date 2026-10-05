@@ -9,6 +9,11 @@ test('onboarding without a room channel omits collab workflow and tools', () => 
   assert.doesNotMatch(prompt, /Workflow:|Coordinator findings|Unless your task says otherwise|room_send|DIRECTOR REPORT/);
 });
 
+test('collab onboarding includes the safe-wait rule on one line', () => {
+  const prompt = renderCollabOnboarding({ self: { kind: 'codex', sessionId: 'implementer' } });
+  assert.ok(prompt.split('\n').includes('Wait on background jobs by exact PID (`wait <pid>`, `kill -0 <pid>`) or your harness\'s background-task tool; never poll `pgrep -f`/`pkill -f` with a pattern that also appears in your own command line.'));
+});
+
 test('bootstrap injects simplified room prompts without loop startup metadata', async (t) => {
   const h = await createAgentBusHarness(); t.after(() => h.cleanup());
   const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
@@ -39,7 +44,7 @@ test('bootstrap injects simplified room prompts without loop startup metadata', 
   assert.equal(sent.statusCode, 200, sent.body);
   assert.match(h.injected.codex[0], /room_send/);
   assert.match(h.injected.codex[0], /Begin working now/);
-  assert.doesNotMatch(h.injected.codex[0], /ack|manager.loop|wait for/i);
+  assert.doesNotMatch(h.injected.codex[0], /\back\b|manager.loop|wait for/i);
   for (const prompt of [h.injected.codex[0], h.injected.claude[0]]) {
     assert.match(prompt, /if you are assigned implementer or reviewer, the implementer writes code and tests; the reviewer blocks on correctness or unnecessary code\. Iterate until the reviewer approves/);
     assert.match(prompt, /Coordinator findings go through the reviewer/);

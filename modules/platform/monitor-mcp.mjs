@@ -1019,7 +1019,11 @@ export function buildMonitorMcpServer({ requestImpl }) {
       handler: async ({ type, sessionId, lines = 200, offset = 0 }) => {
         const count = Math.min(Math.max(Number(lines) || 200, 1), 5000);
         const payload = await request(`/api/${encodeURIComponent(resolveSessionBackendType(type))}/sessions/${encodeURIComponent(sessionId)}?lines=${count}`);
-        const text = String(payload.content || payload.output || '');
+        const text = String(payload.content || payload.output || '')
+          .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+          .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+          .replace(/\x1b(?:[ -/]*[0-~])?/g, '')
+          .replace(/\r+(\n|$)/g, '$1').replace(/[^\n]*\r/g, '');
         const end = Math.max(0, text.length - normalizeOffset(offset));
         const start = Math.max(0, end - 12000);
         return { session_id: sessionId, content: text.slice(start, end),
