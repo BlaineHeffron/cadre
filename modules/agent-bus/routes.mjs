@@ -331,7 +331,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     broadcast(wsManager, 'agent-bus:threads', 'thread_deleted', { threadId: req.params.threadId }); return { ok: true };
   });
 
-  async function send({ threadId, from, body, type = 'message', replyTo = null, metadata = null, deliveryMode = 'wait' }) {
+  async function send({ threadId, from, body, summary, type = 'message', replyTo = null, metadata = null, deliveryMode = 'wait' }) {
     const snapshot = store.getThread(threadId); if (!snapshot) return { statusCode: 404, payload: { error: 'Thread not found' } };
     if (snapshot.thread.status !== 'open') return { statusCode: 409, payload: { error: 'Thread is closed' } };
     const managed = snapshot.thread.metadata?.task;
@@ -345,6 +345,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     const duplicate = [...(snapshot.messages || [])].reverse().find((item) => (
       participantKey(item.from) === participantKey(from)
       && item.body === body
+      && item.metadata?.summary === summary
       && (item.replyTo || null) === (replyTo || null)
       && (item.type || 'message') === resolvedType
       && Date.now() - Number(item.createdAt || 0) < 180000
@@ -358,7 +359,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (resolvedType === 'result' && adapters[owner?.kind] && !threadHasParticipant(snapshot.thread, owner)
       && participantKey(owner) !== participantKey(from)) targets.push(participantRef(owner));
     const record = await store.createMessage({ threadId, from: participantRef(from), targets, type: resolvedType, body,
-      replyTo, metadata: { ...(metadata || {}), ...(snapshot.thread.metadata?.dm ? { dm: true } : {}) } });
+      replyTo, metadata: { ...(metadata || {}), ...(summary !== undefined ? { summary } : {}), ...(snapshot.thread.metadata?.dm ? { dm: true } : {}) } });
     broadcast(wsManager, `agent-bus:thread:${threadId}`, 'message_created', { message: record.message, deliveries: record.deliveries });
     if (deliveryMode === 'wait') await Promise.all(record.deliveries.map(async (delivery) => {
       try { return await deliverMessage(record.message, delivery); }
@@ -369,7 +370,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
   }
 
   app.post('/api/agent-bus/messages', { schema: { body: bodySchema({ threadId: string(ID_MAX, 1), from: agentRef,
-    type: string(512), body: string(BODY_MAX, 1), replyTo: string(ID_MAX), deliveryMode: { enum: ['wait', 'enqueue'] } },
+    type: string(512), body: string(BODY_MAX, 1), summary: string(200), replyTo: string(ID_MAX), deliveryMode: { enum: ['wait', 'enqueue'] } },
   ['threadId', 'from', 'body']) } }, async (req, reply) => {
     const result = await send(req.body);
     const task = store.getThread(req.body.threadId)?.thread?.metadata?.task;
@@ -403,7 +404,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
   }
 
   app.post('/api/agent-bus/dm', { schema: { body: bodySchema({ from: agentRef, target: agentRef,
-    body: string(BODY_MAX, 1), replyTo: string(ID_MAX) }, ['from', 'target', 'body']) } }, async (req, reply) => {
+    body: string(BODY_MAX, 1), summary: string(200), replyTo: string(ID_MAX) }, ['from', 'target', 'body']) } }, async (req, reply) => {
     if (participantKey(req.body.from) === participantKey(req.body.target)) {
       return reply.code(400).send({ error: 'Cannot create a DM with yourself' });
     }
@@ -418,7 +419,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
       thread = await store.reopenThread(thread.id);
     }
     thread.participants.forEach((participant) => observedSessions.add(participantKey(participant)));
-    const result = await send({ threadId: thread.id, from: req.body.from, body: req.body.body, replyTo: req.body.replyTo,
+    const result = await send({ threadId: thread.id, from: req.body.from, body: req.body.body, summary: req.body.summary, replyTo: req.body.replyTo,
       metadata: { dm: true } });
     return reply.code(result.statusCode).send({ thread: normalizeThreadSummary(await enrichThread(thread)), ...result.payload });
   });

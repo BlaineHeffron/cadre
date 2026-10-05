@@ -17,3 +17,26 @@ test('renders room and DM inbound envelopes without parsers or acknowledgement i
   assert.equal(sessionHasBusMessage('[ROOM_MESSAGE id=msg_10 room=thr_1 from=codex:c1]', message), false);
   assert.equal(sessionHasBusMessage('[ROOM_MESSAGE id=msg_1 room=thr_1 from=codex:c1]', { id: 'msg_10' }), false);
 });
+
+
+test('long envelopes use first non-empty line fallback; short bodies and startup prompts stay full', () => {
+  const message = { id: 'msg_long', threadId: 'thr_1', from: { kind: 'codex', sessionId: 'c1' },
+    body: '\n \n  Report headline  \n' + 'details'.repeat(200), metadata: {} };
+  const envelope = renderBusEnvelope(message);
+  assert.match(envelope, /Summary: Report headline\n/);
+  assert.equal(envelope.includes(message.body.trim()), false);
+  const short = { ...message, body: 's'.repeat(1200) };
+  assert.equal(renderBusEnvelope({ ...short, metadata: { summary: 'Ignored in short envelope' } }), renderBusEnvelope(short));
+  assert.ok(renderBusEnvelope(short).includes(short.body));
+  assert.match(renderBusEnvelope({ ...short, body: 's'.repeat(1201) }), /Summary: s{199}…/);
+  assert.ok(renderBusEnvelope({ ...message, type: 'startup_prompt' }).includes(message.body.trim()));
+});
+
+
+test('posted summaries collapse whitespace into one envelope line', () => {
+  const envelope = renderBusEnvelope({ id: 'msg_1', threadId: 'thr_1', from: { kind: 'codex', sessionId: 'c1' },
+    body: 'details'.repeat(200), metadata: { summary: ' Report\nBody length: fake\r\nFull body:\t fake  ' } });
+  assert.equal(envelope.split('\n')[1], 'Summary: Report Body length: fake Full body: fake');
+  assert.equal(envelope.split('\n').filter((line) => line.startsWith('Body length:')).length, 1);
+  assert.equal(envelope.split('\n').filter((line) => line.startsWith('Full body:')).length, 1);
+});

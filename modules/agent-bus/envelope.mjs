@@ -23,6 +23,12 @@ export function sessionHasBusMessage(content, message) {
   return new RegExp(`(?:^|[\\s\\[])id=${escapeRegExp(id)}(?:[\\s\\]])`).test(String(content));
 }
 
+export function messageSummary(message) {
+  const own = typeof message.metadata?.summary === 'string' ? message.metadata.summary.trim() : '';
+  const line = (own || String(message.body || '').split(/\r?\n/).find((line) => line.trim()) || '').trim().replace(/\s+/g, ' ');
+  return line.length > 200 ? `${line.slice(0, 199)}…` : line;
+}
+
 export function renderBusEnvelope(message, parent = null) {
   const dm = message.metadata?.dm === true;
   const marker = busMessageMarker(message);
@@ -34,6 +40,10 @@ export function renderBusEnvelope(message, parent = null) {
     `Tool: room_send(thread_id="${message.threadId}", body="...", reply_to="<id if answering a claim>") · Context: room_context(thread_id="${message.threadId}")`,
     'Reply only if this is new work. Do not reply to delayed copies or courtesy acks.'
   ].join('\n');
+  const body = String(message.body || '');
+  const content = body.length > 1200 && message.type !== 'startup_prompt'
+    ? `Summary: ${messageSummary(message)}\nBody length: ${body.length} characters\nFull body: room_context(thread_id="${message.threadId}", message_id="${message.id}")`
+    : body.trim();
   const type = message.type && message.type !== 'message' ? `Type: ${message.type}` : null;
-  return [opening, parentSnippet(parent), type, String(message.body || '').trim(), closing, reply].filter((line) => line != null && line !== '').join('\n');
+  return [opening, parentSnippet(parent), type, content, closing, reply].filter((line) => line != null && line !== '').join('\n');
 }
