@@ -99,6 +99,34 @@ test('baseline external node_modules symlink is unlinked without touching target
   assert.equal(await readFile(resolve(target, 'precious'), 'utf8'), 'keep');
 });
 
+test('cleanup uses the base ref policy recorded at creation, not the local checkout', async (t) => {
+  const f = await fixture(t); await git(f.repo, 'merge', '--ff-only', 'topic');
+  assert.equal(f.metadata.cleanup, 'on-merge');
+  await rm(resolve(f.repo, '.cadre'), { recursive: true });
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, true);
+  assert.equal(await exists(f.metadata.path), false);
+});
+
+test('base ref cleanup off keeps the worktree despite local on-merge config', async (t) => {
+  const f = await fixture(t); await pushConfig(f, JSON.stringify({ cleanup: 'off' }));
+  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ cleanup: 'on-merge' }));
+  const metadata = await createManagedWorktree({ repo: f.repo, branch: 'off', roomId: 'thr_off', baseDir: f.options.baseDir });
+  assert.equal(metadata.cleanup, 'off');
+  assert.equal((await cleanupManagedWorktree(metadata, f.options)).reason, 'cleanup off');
+  assert.equal(await exists(metadata.path), true);
+});
+
+test('legacy metadata without a recorded cleanup policy is kept', async (t) => {
+  const f = await fixture(t); await git(f.repo, 'merge', '--ff-only', 'topic');
+  const { cleanup, ...legacy } = f.metadata;
+  const marker = resolve(f.repo, '.git/worktrees/repo/cadre-room.json');
+  const { cleanup: recorded, ...legacyMarker } = JSON.parse(await readFile(marker, 'utf8'));
+  assert.equal(cleanup, recorded);
+  await writeFile(marker, JSON.stringify(legacyMarker));
+  assert.equal((await cleanupManagedWorktree(legacy, f.options)).reason, 'cleanup policy not recorded');
+  assert.equal(await exists(f.metadata.path), true);
+});
+
 test('setup failure removes fresh worktree and branch', async (t) => {
   const f = await fixture(t);
   await pushConfig(f, JSON.stringify({ setup: 'touch leftover; exit 1' }));
@@ -237,6 +265,7 @@ test('setup copies gitignored files and defaults cleanup to off', async (t) => {
   const metadata = await createManagedWorktree({ repo: f.repo, branch: 'copy', roomId: 'thr_copy', baseDir: f.options.baseDir });
   assert.equal(await readFile(resolve(metadata.path, 'cache/settings'), 'utf8'), 'local');
   assert.deepEqual(metadata.ignoredBaseline, ['cache/settings']);
+  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ cleanup: 'on-merge' }));
   assert.equal((await cleanupManagedWorktree(metadata, f.options)).reason, 'cleanup off');
 });
 
@@ -262,8 +291,6 @@ test('invalid config and missing metadata fail closed', async (t) => {
   const f = await fixture(t);
   assert.equal((await cleanupManagedWorktree({ ...f.metadata, ignoredBaseline: undefined }, f.options)).reason, 'missing or invalid metadata');
   await pushConfig(f, '{');
-  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, false);
-  assert.equal(await exists(f.metadata.path), true);
   await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'invalid', roomId: 'thr_invalid', baseDir: f.options.baseDir }));
   assert.equal(await exists(resolve(f.options.baseDir, 'thr_invalid')), false);
 });
