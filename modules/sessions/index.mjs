@@ -107,6 +107,7 @@ import {
 } from '../agent/tmux-classifier.mjs';
 import { shellQuote } from '../platform/shell-quote.mjs';
 import { nonoStatePaths, prepareNonoLaunch, resolveSandbox } from '../agent/nono-launch.mjs';
+import { remoteMcpServer } from '../integrations/mcp-remote-servers.mjs';
 import { permissionAuthorityForRequest } from '../platform/auth.mjs';
 import { assertPiProviderModel, normalizePiProvider } from './pi-model-catalog.mjs';
 import { hasResearchWorkbenchLaunchProfile } from '../integrations/research-profile.mjs';
@@ -1043,6 +1044,13 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     runtime: sessionRuntime.runtime,
     catalog: buildMcpCapabilityCatalog(),
   });
+  // Plugin and stdio/research MCP binaries would run inside the sandbox without grants.
+  if (sandboxMode === 'nono' && (selectedCodexPlugins?.add.length
+    || resolvedMcp.serverIds.some((id) => !['dueno', 'businessos'].includes(id) && remoteMcpServer(id)?.transport !== 'http'))) {
+    throw Object.assign(new Error('nono sandbox supports only HTTP MCP servers and no added Codex plugins'), {
+      statusCode: 400, code: 'sandbox_unsupported',
+    });
+  }
   const selectedSkills = sanitizedSkillSnapshot(skills);
   resolveLaunchSkills({ skillIds: selectedSkills });
   resolvePromptProfile({ promptProfile });

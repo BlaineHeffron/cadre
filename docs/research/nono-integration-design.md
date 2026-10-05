@@ -303,11 +303,15 @@ through unchanged, so the exit code alone cannot tell them apart. Cadre does not
   `none` (400 `sandbox_unsupported`), so a sandbox request never silently becomes an unsandboxed structured launch.
 - **Startup checks** (version + `profile validate`) run inside `prepareNonoLaunch`, cached on success only.
 - **`meta.sandbox`** is written only when the session ran under nono, so unsandboxed session meta is unchanged.
-- **Resume** never carries a GitHub token (only `defaultSessionLauncher` resolves one), so a resumed sandboxed
-  reviewer runs in open mode without `GH_TOKEN`.
-- **Not in phase 0:** rejecting `codexPlugins.add` and stdio or research MCP servers for sandboxed launches is
-  left for phase 1, together with turning the switch on. Pi and the research safe runtime are rejected with 400
-  (`sandbox_unsupported`).
+- **Resume and the GitHub route.** `sandboxGrants.credential` records whether the session was created with the
+  route. Resume reuses the token file, which lives until the session is deleted. If the file is gone, resume
+  fails with `sandbox_credential_missing` (409) instead of running without the route.
+- **Git failures.** A workdir with a `.git` entry where `git rev-parse` fails throws `sandbox_git_unresolved`.
+  A workdir with no `.git` (reviewer scratch fallback) gets no git grants.
+- **Rejected with 400 `sandbox_unsupported`:** Pi; the Codex research safe runtime; `codexPlugins.add`; any MCP
+  server other than `dueno`, `businessos` or an HTTP remote server (stdio and research servers).
+- **Collab bootstrap.** The bootstrap adapter forwards `sandbox`; the bootstrap route itself starts passing it in
+  phase 2.
 
 ## Known behaviour changes for sandboxed sessions
 

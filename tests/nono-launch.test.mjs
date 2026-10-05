@@ -112,6 +112,21 @@ test('prepareNonoLaunch writes the reviewer token outside the state dir and open
   assert.equal(await readFile(launch.tokenFile, 'utf8'), 'ghp_secret');
   assert.deepEqual(launch.args.slice(launch.args.indexOf('--credential')), ['--credential', 'github', '--sandbox-policy', 'landlock',
     '--allow-connect-port', '8765', '--allow-connect-port', '8787']);
+
+  // Resume keeps the credential route from the persisted grants, and fails closed once the token is gone.
+  const resumed = await prepareNonoLaunch({ provider: 'codex', sessionId: 'dddd4444', workDir: wt, env: { HOME: home }, grants: launch.grants });
+  assert.deepEqual([resumed.tokenFile, resumed.args.includes('--credential')], [launch.tokenFile, true]);
+  await rm(launch.tokenFile);
+  await assert.rejects(prepareNonoLaunch({ provider: 'codex', sessionId: 'dddd4444', workDir: wt, env: { HOME: home }, grants: launch.grants }),
+    { code: 'sandbox_credential_missing' });
+
+  // A scratch dir is not a repo; a worktree whose gitdir is gone must fail instead of losing its git grants.
+  const scratch = join(state, 'scratch');
+  await mkdir(scratch);
+  assert.equal((await prepareNonoLaunch({ provider: 'codex', sessionId: 'dddd5555', workDir: scratch, env: { HOME: home } })).grants.gitDir, '');
+  await writeFile(join(scratch, '.git'), `gitdir: ${join(state, 'missing')}\n`);
+  await assert.rejects(prepareNonoLaunch({ provider: 'codex', sessionId: 'dddd5555', workDir: scratch, env: { HOME: home } }),
+    { code: 'sandbox_git_unresolved' });
 });
 
 test('prepareNonoLaunch refuses an unpinned nono version and rechecks on the next spawn', async (t) => {
@@ -157,7 +172,7 @@ test('seedClaudeWorkspaceTrust writes to an explicit config path', async (t) => 
   assert.deepEqual(JSON.parse(await readFile(configPath, 'utf8')), { hasCompletedOnboarding: true, projects: { [wt]: { hasTrustDialogAccepted: true } } });
 });
 
-test('createSession rejects nono for Pi and for the Codex research safe runtime before any launch work', async (t) => {
+test('createSession rejects nono for Pi, the Codex research safe runtime, added plugins and stdio/research MCP before launch', async (t) => {
   process.env.CADRE_SANDBOX = 'nono';
   t.after(() => delete process.env.CADRE_SANDBOX);
   const research = { researchWorkbench: { profileId: RESEARCH_PROFILE_ID } };
@@ -165,6 +180,10 @@ test('createSession rejects nono for Pi and for the Codex research safe runtime 
     { code: 'sandbox_unsupported', statusCode: 400 });
   await assert.rejects(createAgentSessionsProvider('pi').createSession({ workDir: '/nonexistent', sandbox: 'nono' }),
     { code: 'sandbox_unsupported', statusCode: 400 });
+  await assert.rejects(createAgentSessionsProvider('codex').createSession({ workDir: tmpdir(), sandbox: 'nono',
+    codexPlugins: { add: ['browser@openai-bundled'] } }), { code: 'sandbox_unsupported', statusCode: 400 });
+  await assert.rejects(createAgentSessionsProvider('claude').createSession({ workDir: tmpdir(), sandbox: 'nono',
+    mcpServers: { add: ['playwright'] } }), { code: 'sandbox_unsupported', statusCode: 400 });
 });
 
 test('resume reuses create-time grants and refuses state the child could have swapped for host links', async (t) => {
@@ -172,7 +191,7 @@ test('resume reuses create-time grants and refuses state the child could have sw
   const env = { HOME: home };
   const created = await prepareNonoLaunch({ provider: 'claude', sessionId: 'abab1212', workDir: wt, env,
     promptLaunch: { filePath: '/state/prompt_profiles/claude-abab1212.txt' } });
-  assert.deepEqual(created.grants, { gitDir: join(main, '.git/worktrees/wt'), commonDir: join(main, '.git'), nodeModules: '' });
+  assert.deepEqual(created.grants, { gitDir: join(main, '.git/worktrees/wt'), commonDir: join(main, '.git'), nodeModules: '', credential: false });
   assert.equal(created.args[created.args.indexOf('/state/prompt_profiles/claude-abab1212.txt') - 1], '--read-file');
 
   // The child rewrites the worktree's gitdir pointer; resume keeps the persisted grants.

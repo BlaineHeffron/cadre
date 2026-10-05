@@ -79,6 +79,10 @@ async function assertOwnedEntry(path, directory) {
 // derived at create time back in on resume instead of re-deriving them.
 async function deriveGrants(root) {
   const git = await exec('git', ['-C', root, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir']);
+  // Scratch dirs are not repos; a broken worktree must not silently lose its git grants.
+  if (git.code !== 0 && await lstat(join(root, '.git')).then(() => true, () => false)) {
+    throw sandboxError(`git rev-parse failed in ${root}: ${git.stderr.trim()}`, 'sandbox_git_unresolved', 500);
+  }
   const [gitDir = '', commonDir = ''] = git.code === 0 ? git.stdout.trim().split('\n') : [];
   const nodeModules = await realpath(join(root, 'node_modules')).catch(() => '');
   return {
@@ -111,17 +115,22 @@ export async function prepareNonoLaunch({ provider, sessionId, workDir, grants, 
     await writeFile(join(configDir, 'config.toml'),
       `check_for_update_on_startup = false\n\n[projects.${tomlQuotedKeySegment(root)}]\ntrust_level = "trusted"\n`);
   }
-  const resolvedGrants = grants || await deriveGrants(root);
+  // Resume has no token of its own: a session created with the credential route keeps it or fails.
+  const credential = Boolean(githubToken || grants?.credential);
+  const resolvedGrants = { ...(grants || await deriveGrants(root)), credential };
   if (resolvedGrants.gitDir) {
     for (const name of ['objects', 'refs', 'logs']) await mkdir(join(resolvedGrants.commonDir, name), { recursive: true });
   }
 
   if (githubToken) await writeFile(tokenFile, githubToken, { mode: 0o600 });
+  else if (credential && !await lstat(tokenFile).then((info) => info.isFile(), () => false)) {
+    throw sandboxError('Sandboxed session has no GitHub token to resume with', 'sandbox_credential_missing', 409);
+  }
   const ports = [config.agentBusMcpHttp.port, ...['ANTHROPIC_BASE_URL', 'OPENAI_BASE_URL']
     .filter((key) => headroom.env?.[key]).map((key) => new URL(headroom.env[key]).port)];
   return {
     stateDir,
-    tokenFile: githubToken ? tokenFile : '',
+    tokenFile: credential ? tokenFile : '',
     grants: resolvedGrants,
     env: {
       [CONFIG_ENV[provider]]: configDir,
@@ -134,7 +143,6 @@ export async function prepareNonoLaunch({ provider, sessionId, workDir, grants, 
       stateDir,
       ...resolvedGrants,
       readFiles: [mcpLaunch.claudeConfigPath, promptLaunch.filePath, authFile].filter(Boolean),
-      credential: Boolean(githubToken),
       ports,
     }),
   };
