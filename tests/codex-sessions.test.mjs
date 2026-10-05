@@ -862,6 +862,7 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
   const sessionsStoreFile = join(tempDir, '.codex_sessions.json');
   await mkdir(binDir, { recursive: true });
   await writeFile(launchLog, 'startup failed once');
+  const { paths: hookPaths } = await recordHookPayload({ session_id: 'native-clean-1', cwd: join(tempDir, 'worktree'), hook_event_name: 'Stop' }, { provider: 'codex', duenoSessionId: 'codex-clean-1' });
   await writeFile(join(binDir, 'tmux'), [
     '#!/bin/sh',
     `printf "%s\\n" "$*" >> ${JSON.stringify(tmuxLog)}`,
@@ -918,7 +919,8 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
     for (let i = 0; i < 100; i++) {
       const log = await readFile(${JSON.stringify(gitLog)}, 'utf8').catch(() => '');
       const logGone = await readFile(${JSON.stringify(launchLog)}, 'utf8').then(() => false, () => true);
-      if (logGone && log.includes(${JSON.stringify(failWorktreeRemove ? 'worktree remove' : 'worktree prune')})) break;
+      const hookGone = await readFile(${JSON.stringify(hookPaths.statePath)}, 'utf8').then(() => false, () => true);
+      if (logGone && hookGone && log.includes(${JSON.stringify(failWorktreeRemove ? 'worktree remove' : 'worktree prune')})) break;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     const launchLogGone = await readFile(${JSON.stringify(launchLog)}, 'utf8').then(() => false, () => true);
@@ -927,7 +929,8 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
     const scheduled = JSON.parse(await readFile(${JSON.stringify(scheduledStoreFile)}, 'utf8'));
     const stored = JSON.parse(await readFile(${JSON.stringify(join(tempDir, '.dueno', 'state', 'codex_sessions.json'))}, 'utf8').catch(() => '[]'));
     await app.close();
-    console.log(JSON.stringify({ statusCode: response.statusCode, body: response.json(), launchLogGone, gitCommands, tmuxCommands, scheduled, stored }));
+    const hooksGone = await Promise.all([${JSON.stringify(hookPaths.eventsPath)}, ${JSON.stringify(hookPaths.statePath)}].map((path) => readFile(path, 'utf8').then(() => false, () => true)));
+    console.log(JSON.stringify({ statusCode: response.statusCode, body: response.json(), launchLogGone, hooksGone, gitCommands, tmuxCommands, scheduled, stored }));
   `;
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
@@ -1366,6 +1369,7 @@ async function runResumeScenario({
     source: 'dashboard',
     workDir: tempDir,
     created: Date.now(),
+    endedAt: Date.now() - 1000,
     provider: 'codex',
     runtime: 'codex',
     model: 'gpt-5.5',
@@ -1385,6 +1389,7 @@ async function runResumeScenario({
     } : {},
   }], null, 2));
 
+  const { paths: hookPaths } = await recordHookPayload({ session_id: cliSessionId, cwd: tempDir, hook_event_name: 'Stop' }, { provider: 'codex', duenoSessionId: 'codex-resume-1' });
   const fastifyModuleUrl = pathToFileURL(resolve('node_modules/fastify/fastify.js')).href;
   const pluginModuleUrl = pathToFileURL(resolve('modules/sessions/codex-sessions.mjs')).href;
   const authModuleUrl = pathToFileURL(resolve('modules/agent-bus/mcp-auth.mjs')).href;
@@ -1418,6 +1423,12 @@ async function runResumeScenario({
     });
     await app.ready();
     const response = await app.inject({ method: 'POST', url: '/api/codex/sessions/codex-resume-1/resume' });
+    const { createHookEventRetention } = await import(${JSON.stringify(pathToFileURL(resolve('modules/agent/hook-events.mjs')).href)});
+    const { buildPostgresJsonStore } = await import(${JSON.stringify(pathToFileURL(resolve('modules/ops/postgres-json-store.mjs')).href)});
+    const retention = createHookEventRetention({ retentionDays: 0, store: buildPostgresJsonStore({ namespace: 'hook_roots', filePath: ${JSON.stringify(join(tempDir, 'hook-roots.json'))} }) });
+    await retention.sweep();
+    await retention.close();
+    const hooksKept = await Promise.all([${JSON.stringify(hookPaths.eventsPath)}, ${JSON.stringify(hookPaths.statePath)}].map((path) => readFile(path, 'utf8').then(() => true, () => false)));
     const tmuxArgs = await readFile(${JSON.stringify(tmuxArgsFile)}, 'utf8').catch(() => '');
     const stored = JSON.parse(await readFile(${JSON.stringify(join(tempDir, '.dueno', 'state', 'codex_sessions.json'))}, 'utf8'));
     const newToken = await readFile(${JSON.stringify(join(tempDir, '.dueno', 'state', 'mcp_client_configs', 'codex-codex-resume-1.token'))}, 'utf8').catch(() => '');
@@ -1429,6 +1440,7 @@ async function runResumeScenario({
       statusCode: response.statusCode,
       body: response.json(),
       tmuxArgs,
+      hooksKept,
       stored: stored[0],
       newCredential: newAuth ? {
         principal: newAuth.principal,
@@ -1682,6 +1694,8 @@ describe('Codex Sessions module', () => {
     assert.equal(result.statusCode, 200, JSON.stringify(result.body));
     assert.equal(result.body.id, 'codex-resume-1');
     assert.equal(result.body.resumed, true);
+    assert.ok(result.stored.resumedAt > result.stored.endedAt);
+    assert.deepEqual(result.hooksKept, [true, true]);
     assert.match(result.tmuxArgs, /export DUENO_SESSION_ID='codex-resume-1'/);
     assert.match(result.tmuxArgs, /'resume' '11111111-2222-3333-4444-555555555555'/);
     assert.match(result.tmuxArgs, /'--cd'/);
@@ -2081,6 +2095,7 @@ describe('Codex Sessions module', () => {
     assert.equal(result.statusCode, 200);
     assert.equal(result.body.ok, true);
     assert.equal(result.launchLogGone, true);
+    assert.deepEqual(result.hooksGone, [true, true]);
     assert.match(result.gitCommands, /worktree remove --force/);
     assert.match(result.gitCommands, /branch -D dueno-fleet\/agent\/cleanup-test/);
     assert.match(result.tmuxCommands, /^has-session -t codex-clean-session/);

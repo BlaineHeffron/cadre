@@ -28,8 +28,21 @@ Paths below are defaults. `CADRE_STATE_DIR` (legacy `DM_STATE_DIR`) overrides
 | `.dueno/state/agent_launch_logs/<session>.log` | Session launcher creates the file; tmux CLI stderr is appended by `tee` | No size rotation; reset for each launch, removed on failed launch or session artifact cleanup. Can grow during a long session; not the service log. |
 | `.dueno/state/agent_bus/events.ndjson` | Agent Bus store appends event mirrors | Append-only, no file rotation; the in-memory 500-event limit does not cap this file. Retained history, not disposable diagnostics. |
 | `.dueno/state/agent_bus/rooms/<thread>/messages.jsonl` | Agent Bus store appends room message mirrors | Removed with eligible closed rooms after 30 idle days by default (`AGENT_BUS_CLOSED_THREAD_RETENTION_DAYS`); durable task rooms and parents are retained. No size rotation. |
-| `<project>/.agent_bus/hooks/<provider>-<session>.jsonl` | Agent lifecycle hooks append events | No rotation or automatic retention limit; consumed as session history. |
+| `<project>/.agent_bus/hooks/<provider>-<session>.jsonl` and `hooks/state/<provider>-<session>.json` | Agent lifecycle hooks append events and derive session state | Removed in background on session deletion. Otherwise, the Agent Bus observer removes event/state pairs after 7 days without event-file modifications when the session is absent from every registry or marked ended (`CADRE_HOOK_EVENTS_RETENTION_DAYS`). Live sessions are retained regardless of age; hooks from outside Cadre count as absent. No size rotation. |
 | `.quality/repo-quality/escaped-defects.jsonl` | Repo-quality check appends its defect ledger when recording outcomes | No rotation; development quality evidence, not a live service log. |
+
+`CADRE_HOOK_EVENTS_RETENTION_DAYS` defaults to `7`; `0` removes eligible files on
+the next sweep, and a negative value disables age-based pruning. Sweeps run at
+most once an hour, starting one hour after observer startup, and follow the
+production side-effect gate. Each sweep
+resolves at most 16 registry workDirs and reads at most 128 directory entries
+across at most 4 hook directories. It never searches for projects: up to 256 known
+roots are remembered in `.dueno/state/hook_event_roots.json` (or the configured
+JSON store), including roots from earlier sweeps; missing hook directories are
+dropped. Additional roots wait until a remembered root disappears. Only exact
+provider/session event filenames and their paired state files are removed.
+Tmux registries mark finished sessions with `endedAt`; structured registries use
+`lifecycle: ended`. Interrupted sessions are conservatively retained.
 
 State/audit JSON stores and provider-owned transcripts are retained application
 history, not alternative service log destinations. Do not delete them as stale
