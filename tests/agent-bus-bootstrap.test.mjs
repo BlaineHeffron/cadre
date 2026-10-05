@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
+import { renderCollabOnboarding } from '../modules/agent-bus/protocol.mjs';
+
+test('onboarding without a room channel omits collab workflow and tools', () => {
+  const prompt = renderCollabOnboarding({ self: { kind: 'codex', sessionId: 'solo' }, busAvailable: false });
+  assert.match(prompt, /This session has no shared room channel/);
+  assert.doesNotMatch(prompt, /Workflow:|Coordinator findings|Unless your task says otherwise|room_send|DIRECTOR REPORT/);
+});
 
 test('bootstrap injects simplified room prompts without loop startup metadata', async (t) => {
   const h = await createAgentBusHarness(); t.after(() => h.cleanup());
@@ -33,6 +40,18 @@ test('bootstrap injects simplified room prompts without loop startup metadata', 
   assert.match(h.injected.codex[0], /room_send/);
   assert.match(h.injected.codex[0], /Begin working now/);
   assert.doesNotMatch(h.injected.codex[0], /ack|manager.loop|wait for/i);
+  for (const prompt of [h.injected.codex[0], h.injected.claude[0]]) {
+    assert.match(prompt, /if you are assigned implementer or reviewer, the implementer writes code and tests; the reviewer blocks on correctness or unnecessary code\. Iterate until the reviewer approves/);
+    assert.match(prompt, /Coordinator findings go through the reviewer/);
+    assert.match(prompt, /implementer acts only on forwarded findings/);
+    assert.match(prompt, /Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges/);
+    assert.match(prompt, /type="result".*reviewer starts the body with "DIRECTOR REPORT": PR number, head SHA, changes, test results, and deferred items/);
+    assert.match(prompt, /<merged\|ready\|blocked\|needs-decision> · PR #n · <one line>/);
+    assert.match(prompt, /any agent may read, post, close or reopen without subscribing/);
+    assert.match(prompt, /Action tools return ids and status only/);
+  }
+  assert.match(h.injected.codex[0], /your assigned role is implementer/);
+  assert.match(h.injected.claude[0], /your assigned role is reviewer/);
 });
 
 test('bootstrap plans all participants before creating any session', async (t) => {

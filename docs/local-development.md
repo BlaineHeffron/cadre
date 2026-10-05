@@ -9,29 +9,19 @@
 ## Checks
 
 Tests must be hermetic: use temporary directories and explicit environment/configuration fixtures, never personal setup or real services.
+Never call the real GitHub API from tests. Run browsers headless.
 
-```
-npm run check:node
-npm run check
-npm test
-node --test tests/<file>.test.mjs
-```
+Follow the verification ladder in `AGENTS.md`. Run `npm run check:node` when checking runtime prerequisites.
 
 `npm test` runs `scripts/run-tests.mjs`, which forces `CADRE_AGENT_CGROUP_ISOLATION=0` so host/agent isolation env does not wrap fixture launches.
 
 ## Smoke server
 
-Do not start side-effect loops. Use unused ports:
+Follow `AGENTS.md#safe-local-execution` for smoke-server flags and unused ports. Stop smoke servers you start after checking them.
 
-```
-CADRE_DISABLE_SIDE_EFFECTS=1 \
-CADRE_GITHUB_AGENT_POLLER_ENABLED=0 \
-CADRE_GITHUB_AGENTS_ENABLED=0 \
-CADRE_SCHEDULED_AGENT_PUMP_ENABLED=0 \
-TELEGRAM_BRIDGE=0 \
-PORT=<unused> \
-AGENT_BUS_MCP_HTTP_PORT=<unused> \
-npm start
-```
+## Pull requests
 
-See `AGENTS.md` for production restart rules. Do not treat a feature checkout as live.
+- Target `main`; publish only the PR unless the task authorizes another deliverable.
+- End commits with a `Co-Authored-By` trailer naming your model.
+- Write the PR body per `config/skills/pr.md` and end it with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
+- Address blocking findings from automatic Grok PR review if it posts; wait at most about 20 minutes.
