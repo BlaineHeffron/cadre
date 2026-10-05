@@ -78,13 +78,15 @@ test('real MCP actions return ids only while REST retains records and reads expo
   const { h, call, requestImpl, context, repos } = await setup(t);
   const spawnKeys = ['thread_id', 'participants'];
   for (const name of ['monitor_spawn_claude', 'monitor_spawn_codex', 'spawn_session']) {
-    const spawned = await call(name, { provider: 'codex', initialPrompt: marker, workDir: h.stateDir }, spawnKeys);
+    const spawned = await call(name, { ...(name === 'spawn_session' ? { provider: 'codex' } : {}), initialPrompt: marker, workDir: h.stateDir }, spawnKeys);
     assert.ok(spawned.participants[0].session_id);
     assert.deepEqual(Object.keys(spawned.participants[0]).sort(), ['kind', 'session_id', 'display_name'].sort());
   }
-  const pairArgs = { title: 'Pair', workDir: h.stateDir, initialTask: marker, participants: [{ provider: 'claude' }, { provider: 'codex' }] };
+  const pairArgs = { title: 'Pair', workDir: h.stateDir, initialTask: marker, participants: [{ provider: 'claude', display_name: 'Reviewer' }, { provider: 'codex', display_name: 'Implementer' }] };
   const pair = await call('spawn_collab_session', pairArgs, spawnKeys);
   const conference = await call('spawn_conference_session', { ...pairArgs, title: 'Conference' }, spawnKeys);
+  assert.deepEqual(pair.participants.map((entry) => entry.display_name), ['Reviewer', 'Implementer']);
+  assert.deepEqual(conference.participants.map((entry) => entry.display_name), ['Reviewer', 'Implementer']);
   const read = await call('room_context', { thread_id: pair.thread_id });
   assert.match(read.messages[0].body, /Thread ID/);
   assert.ok(h.store.getThread(pair.thread_id).messages[0].body.includes(marker));
@@ -182,4 +184,29 @@ test('real MCP reads honor default limits, filters, paging, and recent output ta
   assert.equal(tail.nextOffset, 12000);
   const older = await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1', offset: tail.nextOffset });
   assert.equal(older.content, 'old'.repeat(4000));
+});
+
+
+test('real MCP dispatcher rejects unknown, missing, wrong-type and enum arguments before handlers', async (t) => {
+  const { mcp, context } = await setup(t);
+  for (const [name, args, message] of [
+    ['room_context', { threadId: 'bad' }, /room_context: unknown argument "threadId"; expected: thread_id/],
+    ['room_context', {}, /room_context: missing required argument "thread_id"/],
+    ['room_context', { thread_id: 12 }, /room_context: argument "thread_id" must be string/],
+    ['monitor_terminate_session', { type: 'codex', sessionId: 'bad' }, /monitor_terminate_session: unknown argument "type"; expected: session_id/],
+    ['monitor_terminate_session', {}, /monitor_terminate_session: missing required argument "session_id"/],
+    ['monitor_terminate_session', { session_id: '' }, /monitor_terminate_session: argument "session_id" must NOT have fewer than 1 characters/],
+    ['monitor_terminate_session', { session_id: '   ' }, /monitor_terminate_session: argument "session_id" must match pattern/],
+    ['monitor_terminate_session', { session_id: 12 }, /monitor_terminate_session: argument "session_id" must be string/],
+    ['room_list', { scope: 'bogus' }, /room_list: argument "scope" must be equal to one of the allowed values: all/],
+    ['monitor_list_human_queue', { status: 'bogus' }, /monitor_list_human_queue: argument "status" must be equal to one of the allowed values/],
+    ['task_status', {}, /task_status: missing required argument "thread_id"/],
+    ['room_transfer', { thread_id: 'bad', to: { kind: 'codex', sessionId: 'bad' } }, /room_transfer: unknown argument "to.sessionId"; expected: kind, session_id/],
+    ['room_context', null, /room_context: argument "arguments" must be object/],
+    ['monitor_terminate_session', false, /monitor_terminate_session: argument "arguments" must be object/],
+  ]) {
+    const response = await mcp.handleRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, { authContext: context });
+    assert.equal(response.error?.code, -32602, JSON.stringify(response));
+    assert.match(response.error.message, message);
+  }
 });

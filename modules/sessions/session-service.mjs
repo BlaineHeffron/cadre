@@ -1,3 +1,4 @@
+import { removeGithubAgentScratch } from '../integrations/github-agent-scratch.mjs';
 import { randomUUID } from 'node:crypto';
 import { assertAgentTransport } from '../agent/agent-transport.mjs';
 import {
@@ -45,13 +46,14 @@ function transportErrorKind(value) {
   return allowed.has(normalized) ? normalized : 'other';
 }
 
-function newSession({ sessionId, provider, displayName, workDir, permissionMode, model, thinkingLevel = '', codexPlugins = null, mcpCapabilities, createdAt, taskId = null }) {
+function newSession({ sessionId, provider, displayName, workDir, permissionMode, model, thinkingLevel = '', codexPlugins = null, mcpCapabilities, createdAt, taskId = null, metadata = {} }) {
   return {
     id: sessionId,
     taskId,
     provider,
     displayName,
     workDir,
+    metadata: clone(metadata),
     permissionMode,
     model,
     thinkingLevel,
@@ -130,6 +132,7 @@ function reduceSessionEvent(session, event) {
       provider: data.provider,
       displayName: data.displayName,
       workDir: data.workDir,
+      metadata: data.metadata,
       permissionMode: data.permissionMode,
       model: data.model,
       thinkingLevel: data.thinkingLevel,
@@ -391,6 +394,7 @@ export class SessionService {
       provider: text(spec.provider) || this.provider,
       displayName: text(spec.displayName),
       workDir: text(spec.workDir),
+      metadata: spec.metadata,
       permissionMode,
       model: text(spec.model),
       thinkingLevel: text(spec.thinkingLevel),
@@ -404,6 +408,7 @@ export class SessionService {
       provider: session.provider,
       displayName: session.displayName,
       workDir: session.workDir,
+      metadata: session.metadata,
       permissionMode,
       model: session.model,
       thinkingLevel: session.thinkingLevel,
@@ -822,7 +827,10 @@ export class SessionService {
       await this.attachmentStore?.releaseSession?.(id);
       this.sessions.delete(id);
       this.stateTracker.remove(canonicalSessionStateId(existing.provider, id));
-      void removeSessionHookFiles({ workDir: existing.workDir, provider: this.provider, sessionId: id })
+      void Promise.all([
+        removeGithubAgentScratch(existing),
+        removeSessionHookFiles({ workDir: existing.workDir, provider: this.provider, sessionId: id }),
+      ])
         .catch((error) => this.#log('warn', 'Session artifact cleanup failed', { id, path: existing.workDir, err: error.message }));
       return { ...verdict, status: 'deleted' };
     });

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { config } from '../config.mjs';
+import { mkdtemp, mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, it } from 'node:test';
@@ -585,6 +586,27 @@ describe('SessionService', () => {
     }), /cannot accept commands/);
     transport.queue.close();
     await harness.service.close({ interrupt: false });
+  });
+
+  it('removes GitHub scratch artifacts after deleting a restored structured session', async () => {
+    const harness = await fixture({ factory: () => new FakeTransport() });
+    const previous = config.githubAgents.workDir;
+    config.githubAgents.workDir = harness.root;
+    try {
+      const parent = join(harness.root, 'scratch', 'octo-demo');
+      const workDir = join(parent, 'pr-14-10000');
+      await mkdir(workDir, { recursive: true });
+      const created = await harness.service.start({ workDir, permissionMode: 'workspace-write',
+        metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: 14 } });
+      await harness.service.close();
+      const restored = new SessionService({ journal: harness.journal, transportFactory: () => new FakeTransport() });
+      await restored.init();
+      assert.equal((await restored.delete(created.id)).status, 'deleted');
+      await waitFor(() => stat(parent).then(() => false, (error) => error.code === 'ENOENT'));
+      await restored.close({ interrupt: false });
+    } finally {
+      config.githubAgents.workDir = previous;
+    }
   });
 
   it('preserves attachment refs on terminate and releases them only on true delete', async () => {

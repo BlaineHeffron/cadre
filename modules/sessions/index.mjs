@@ -1,3 +1,4 @@
+import { removeGithubAgentScratch } from '../integrations/github-agent-scratch.mjs';
 import { exec } from '../../lib/exec.mjs';
 import { config as appConfig } from '../../config.mjs';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -1585,6 +1586,7 @@ async function cleanupSessionArtifacts(id, meta, logger) {
     logger.warn({ id, path, err: error.message }, 'Session artifact cleanup failed');
   });
   await Promise.all([
+    cleanup(meta.workDir, removeGithubAgentScratch(meta)),
     cleanup(meta.workDir, removeSessionHookFiles({ workDir: meta.workDir, provider: config.id, sessionId: id })),
     cleanup(promptProfilePath(config.id, id), rm(promptProfilePath(config.id, id), { force: true })),
     ...(meta.launchLogPath ? [cleanup(meta.launchLogPath, rm(meta.launchLogPath, { force: true }))] : []),

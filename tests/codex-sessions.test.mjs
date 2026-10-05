@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -850,10 +850,30 @@ async function runPruneHasSessionListScenario({
   return JSON.parse(stdout.trim());
 }
 
-async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) {
+async function runLifecycleCleanupScenario({ failWorktreeRemove = false, scratch = null } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-lifecycle-'));
   tempDirs.push(tempDir);
   await mkdir(join(tempDir, '.git'));
+  const scratchRoot = join(tempDir, 'github', 'scratch');
+  const scratchParent = join(scratchRoot, 'octo-demo');
+  const scratchPath = join(scratchParent, 'issue-14-10000');
+  const outside = join(tempDir, 'outside', 'octo-demo', 'issue-14-10000');
+  const workDir = scratch === 'escape' ? join(tempDir, 'github', 'issue-14-10000')
+    : scratch === 'invalid-name' ? join(scratchParent, 'issue-14-bad')
+    : scratch ? (scratch === 'outside' ? outside : scratchPath) : join(tempDir, 'worktree');
+  await mkdir(outside, { recursive: true });
+  if (scratch === 'parent-symlink') {
+    await mkdir(scratchRoot, { recursive: true });
+    await symlink(join(tempDir, 'outside', 'octo-demo'), scratchParent);
+  } else {
+    await mkdir(scratchParent, { recursive: true });
+    if (scratch === 'symlink') await symlink(outside, scratchPath);
+    else await mkdir(scratchPath);
+  }
+  await writeFile(join(outside, 'keep'), 'keep');
+  if (scratch === 'nonempty') await writeFile(join(scratchParent, 'keep'), 'keep');
+  if (['invalid-name', 'escape'].includes(scratch)) await mkdir(workDir);
+
   const binDir = join(tempDir, 'bin');
   const launchLog = join(tempDir, 'agent.log');
   const gitLog = join(tempDir, 'git.log');
@@ -862,7 +882,7 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
   const sessionsStoreFile = join(tempDir, '.codex_sessions.json');
   await mkdir(binDir, { recursive: true });
   await writeFile(launchLog, 'startup failed once');
-  const { paths: hookPaths } = await recordHookPayload({ session_id: 'native-clean-1', cwd: join(tempDir, 'worktree'), hook_event_name: 'Stop' }, { provider: 'codex', duenoSessionId: 'codex-clean-1' });
+  const { paths: hookPaths } = await recordHookPayload({ session_id: 'native-clean-1', cwd: workDir, hook_event_name: 'Stop' }, { provider: 'codex', duenoSessionId: 'codex-clean-1' });
   await writeFile(join(binDir, 'tmux'), [
     '#!/bin/sh',
     `printf "%s\\n" "$*" >> ${JSON.stringify(tmuxLog)}`,
@@ -886,10 +906,11 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
     id: 'codex-clean-1',
     tmuxSession: 'codex-clean-session',
     source: 'dashboard',
-    workDir: join(tempDir, 'worktree'),
+    workDir,
+    metadata: scratch ? { github_repo: scratch === 'escape' ? '..' : 'octo/demo', github_kind: 'issue', github_number: 14 } : {},
     created: Date.now(),
     launchLogPath: launchLog,
-    managedWorktree: true,
+    managedWorktree: !scratch,
     worktreeRepoPath: '/repo/source',
     worktreePath: join(tempDir, 'worktree'),
     worktreeBranch: 'dueno-fleet/agent/cleanup-test',
@@ -907,7 +928,7 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
   const pluginModuleUrl = pathToFileURL(resolve('modules/sessions/codex-sessions.mjs')).href;
   const wrapped = `
     import Fastify from ${JSON.stringify(fastifyModuleUrl)};
-    import { readFile } from 'node:fs/promises';
+    import { readFile, stat, lstat } from 'node:fs/promises';
     process.chdir(${JSON.stringify(tempDir)});
     const pluginRef = await import(${JSON.stringify(pluginModuleUrl)});
     const app = Fastify({ logger: false });
@@ -920,7 +941,11 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
       const log = await readFile(${JSON.stringify(gitLog)}, 'utf8').catch(() => '');
       const logGone = await readFile(${JSON.stringify(launchLog)}, 'utf8').then(() => false, () => true);
       const hookGone = await readFile(${JSON.stringify(hookPaths.statePath)}, 'utf8').then(() => false, () => true);
-      if (logGone && hookGone && log.includes(${JSON.stringify(failWorktreeRemove ? 'worktree remove' : 'worktree prune')})) break;
+      const artifactsDone = ${JSON.stringify(scratch)}
+        ? ${JSON.stringify(scratch === 'valid' || scratch === 'nonempty')}
+          ? !(await lstat(${JSON.stringify(scratchPath)}).then(() => true, () => false)) : i > 10
+        : log.includes(${JSON.stringify(failWorktreeRemove ? 'worktree remove' : 'worktree prune')});
+      if (logGone && hookGone && artifactsDone) break;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     const launchLogGone = await readFile(${JSON.stringify(launchLog)}, 'utf8').then(() => false, () => true);
@@ -930,7 +955,11 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
     const stored = JSON.parse(await readFile(${JSON.stringify(join(tempDir, '.dueno', 'state', 'codex_sessions.json'))}, 'utf8').catch(() => '[]'));
     await app.close();
     const hooksGone = await Promise.all([${JSON.stringify(hookPaths.eventsPath)}, ${JSON.stringify(hookPaths.statePath)}].map((path) => readFile(path, 'utf8').then(() => false, () => true)));
-    console.log(JSON.stringify({ statusCode: response.statusCode, body: response.json(), launchLogGone, hooksGone, gitCommands, tmuxCommands, scheduled, stored }));
+    const scratchExists = await lstat(${JSON.stringify(scratchPath)}).then(() => true, () => false);
+    const parentExists = await lstat(${JSON.stringify(scratchParent)}).then(() => true, () => false);
+    const outsideKept = await readFile(${JSON.stringify(join(outside, 'keep'))}, 'utf8');
+    const workDirExists = await lstat(${JSON.stringify(workDir)}).then(() => true, () => false);
+    console.log(JSON.stringify({ scratchExists, parentExists, outsideKept, workDirExists, statusCode: response.statusCode, body: response.json(), launchLogGone, hooksGone, gitCommands, tmuxCommands, scheduled, stored }));
   `;
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
@@ -940,6 +969,7 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
       HOME: tempDir,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
       PATH: `${binDir}:/usr/bin:/bin`,
+      DM_GITHUB_AGENT_WORKDIR: join(tempDir, 'github'),
       LOG_LEVEL: 'error',
       APP_STATE_STORAGE: 'file',
       CODEX_SESSIONS_STORAGE: 'file',
@@ -2100,6 +2130,17 @@ describe('Codex Sessions module', () => {
     assert.match(result.gitCommands, /branch -D dueno-fleet\/agent\/cleanup-test/);
     assert.match(result.tmuxCommands, /^has-session -t codex-clean-session/);
     assert.deepEqual(result.scheduled, []);
+  });
+
+  it('cleans up only exact GitHub scratch directories without following symlinks', async () => {
+    for (const scratch of ['valid', 'nonempty', 'outside', 'symlink', 'parent-symlink', 'invalid-name', 'escape']) {
+      const result = await runLifecycleCleanupScenario({ scratch });
+      assert.equal(result.statusCode, 200, scratch);
+      assert.equal(result.outsideKept, 'keep', scratch);
+      assert.equal(result.scratchExists, !['valid', 'nonempty'].includes(scratch), scratch);
+      assert.equal(result.parentExists, scratch !== 'valid', scratch);
+      assert.equal(result.workDirExists, !['valid', 'nonempty'].includes(scratch), scratch);
+    }
   });
 
   it('removes session metadata when managed worktree cleanup fails', async () => {

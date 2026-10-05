@@ -347,6 +347,7 @@ export function createAgentBusParticipants({
       created: true,
       provider: plan.resolvedSelection.provider,
       sessionName: created.sessionName,
+      displayName: created.displayName || plan.createArgs.displayName,
       mcpCapabilities: created.mcpCapabilities || null,
       mcpWarnings: plan.mcpWarnings.map((warning) => ({ ...warning })),
     };

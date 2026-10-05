@@ -36,7 +36,9 @@ test('room sends and DMs pin the authenticated sender server-side', async () => 
     if (path === '/api/agent-bus/dm') return { message: { id: 'msg_2' }, deliveries: [] };
     throw new Error(`Unexpected ${path}`);
   } });
-  await server.callTool('room_send', { thread_id: 'thr_1', body: 'hi', from_kind: 'pi', from_session_id: 'spoof' }, context);
+  await assert.rejects(server.callTool('room_send', { thread_id: 'thr_1', body: 'hi', from_kind: 'pi', from_session_id: 'spoof' }, context), /room_send: unknown argument/);
+  assert.equal(calls.length, 0);
+  await server.callTool('room_send', { thread_id: 'thr_1', body: 'hi' }, context);
   await server.callTool('agent_dm', { kind: 'claude', session_id: 'a1', body: 'dm' }, context);
   assert.deepEqual(calls.find((item) => item.path === '/api/agent-bus/messages').options.body.from,
     { kind: 'codex', sessionId: 'c1' });
@@ -157,7 +159,9 @@ test('room list pins the caller and returns only the compact participant-scoped 
       metadata: {} }, { id: 'thr_dm', title: 'DM', status: 'closed', participants: [{ kind: 'codex', sessionId: 'c1' }],
       metadata: { dm: true }, projectKey: 'hidden' }] };
   } });
-  const result = await server.callTool('room_list', { kind: 'claude', session_id: 'spoof' }, context);
+  await assert.rejects(server.callTool('room_list', { kind: 'claude', session_id: 'spoof' }, context), /room_list: unknown argument/);
+  assert.equal(calls.length, 0);
+  const result = await server.callTool('room_list', {}, context);
   assert.equal(calls[0], '/api/agent-bus/threads/by-participant?kind=codex&sessionId=c1&status=all');
   assert.deepEqual(result.structuredContent.rooms, [
     { id: 'thr_1', title: 'Work', kind: 'room', status: 'open' },

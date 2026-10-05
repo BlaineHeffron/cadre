@@ -269,7 +269,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       const codexPlugins = claude ? null : req.body?.codexPlugins;
       const { preflight, ...launch } = await prepareAttempt({ id, workDir, body: req.body || {}, resolvedMcp, permissionMode, codexPlugins });
       let session = await service.start({
-        ...launch, sessionId: id, displayName: text(req.body?.displayName), workDir, model, thinkingLevel, codexPlugins, permissionMode,
+        ...launch, metadata: req.body?.metadata, sessionId: id, displayName: text(req.body?.displayName), workDir, model, thinkingLevel, codexPlugins, permissionMode,
         mcpCapabilities: sanitizedMcpSnapshot(resolvedMcp, preflight),
       });
       if (initialPrompt) {

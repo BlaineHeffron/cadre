@@ -1,3 +1,4 @@
+import { compileToolArguments } from '../agent-bus/mcp-validation.mjs';
 import { DEFAULT_LIST_LIMIT, PAGE_PROPERTIES, normalizeLimit, normalizeOffset, paginate } from '../agent-bus/mcp-pagination.mjs';
 /**
  * MCP server exposing Cadre tools for the command center AI.
@@ -559,7 +560,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       inputSchema: {
         type: 'object',
         properties: {
-          session_id: { type: 'string', description: 'Session id to terminate.' },
+          session_id: { type: 'string', minLength: 1, pattern: '\\S', description: 'Session id to terminate.' },
         },
         required: ['session_id'],
         additionalProperties: false,
@@ -1403,6 +1404,8 @@ export function buildMonitorMcpServer({ requestImpl }) {
     DISCOVERABLE_TOOL_NAMES.has(t.name)
   ));
 
+  const validateArguments = compileToolArguments(tools);
+
   // MCP protocol handler
   return {
     tools: discoverableTools,
@@ -1410,6 +1413,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     async handleToolCall(name, args, context = null) {
       const tool = tools.find(t => t.name === name);
       if (!tool) throw new Error(`Unknown tool: ${name}`);
+      validateArguments(name, args === undefined ? {} : args);
       return callContext.run({ authContext: context?.authContext || null }, () => tool.handler(args || {}, context));
     },
     listTools() {
