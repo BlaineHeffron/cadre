@@ -12,7 +12,7 @@ import { notifyPush } from '../platform/push.mjs';
 import { saveImageToWorkspace, buildAgentImagePrompt, buildImageAttachmentResult } from './image-handoff.mjs';
 import { AttachmentStore } from '../agent/attachment-store.mjs';
 import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
-import { recordRuntimeHookEvent } from '../agent/hook-events.mjs';
+import { recordRuntimeHookEvent, registerHookSessionRegistry, removeSessionHookFiles } from '../agent/hook-events.mjs';
 import { readHookDerivedState, readHookSessionMetadata } from '../session-state/providers/hook.mjs';
 import { canonicalSessionStateId, projectCompatibility } from '../session-state/contract.mjs';
 import { isFinishedWorkEdge, nextRememberedStatus } from '../session-state/attention-edge.mjs';
@@ -1585,6 +1585,7 @@ async function cleanupSessionArtifacts(id, meta, logger) {
     logger.warn({ id, path, err: error.message }, 'Session artifact cleanup failed');
   });
   await Promise.all([
+    cleanup(meta.workDir, removeSessionHookFiles({ workDir: meta.workDir, provider: config.id, sessionId: id })),
     cleanup(promptProfilePath(config.id, id), rm(promptProfilePath(config.id, id), { force: true })),
     ...(meta.launchLogPath ? [cleanup(meta.launchLogPath, rm(meta.launchLogPath, { force: true }))] : []),
     ...(meta.managedWorktree && meta.worktreePath ? [cleanup(meta.worktreePath, removeAgentSessionWorktree({
@@ -2085,6 +2086,7 @@ async function sessionsPlugin(app, {
   });
   await fleetAttachmentStore.init();
   await loadPersistedSessions();
+  const unregisterHookSessions = registerHookSessionRegistry(config.id, () => sessions);
   await sessionDeliveryAuditStore?.init?.();
   const interruptedTransactions = new Set();
   const recoveryEntries = sessionDeliveryAuditStore?.listAll?.({ kind: config.id })
@@ -3378,6 +3380,7 @@ async function sessionsPlugin(app, {
   };
 
   app.addHook('onClose', async () => {
+    unregisterHookSessions();
     clearInterval(discoverInterval);
     for (const interval of streamIntervals.values()) {
       clearInterval(interval);

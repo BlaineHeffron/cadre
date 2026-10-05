@@ -1,3 +1,8 @@
+import { createHookEventRetention } from '../agent/hook-events.mjs';
+import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
+import { runtimeStatePath } from '../ops/runtime-state.mjs';
+import { shouldSuppressSideEffectLoops } from '../platform/side-effect-loops.mjs';
+
 const RECOVERY_GRACE_MS = 2000;
 
 function terminalLookupError(err = {}) {
@@ -9,7 +14,12 @@ function terminalLookupError(err = {}) {
 export function createAgentBusObserver({ app, store, adapters, wsManager, observedSessions, deliveryInFlight,
   observerInFlightByRef, observerIntervalMs, observerSessionTimeoutMs, broadcast, broadcastAlert,
   broadcastThreadSnapshot, broadcastThreadSummary, threadSnapshot, enrichThread, normalizeThreadSummary,
-  pruneObservedParticipant, deliverMessage, failDelivery }) {
+  pruneObservedParticipant, deliverMessage, failDelivery, hookEventsRetentionDays = 7 }) {
+  const hookRetention = createHookEventRetention({
+    retentionDays: hookEventsRetentionDays,
+    store: buildPostgresJsonStore({ namespace: 'hook_event_roots', filePath: runtimeStatePath('hook_event_roots.json') }),
+  });
+  let lastHookSweep = Date.now();
   async function recoverQueuedDeliveries() {
     const messages = new Map(store.listMessages().map((message) => [message.id, message]));
     const groups = new Map();
@@ -88,7 +98,13 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
   const interval = setInterval(async () => {
     if (running) return;
     running = true;
-    try { await observeSessions(); }
+    try {
+      await observeSessions();
+      if (!shouldSuppressSideEffectLoops() && Date.now() - lastHookSweep >= 3_600_000) {
+        lastHookSweep = Date.now();
+        void hookRetention.sweep().catch((err) => app.log.warn({ err: err.message }, 'Hook event retention failed'));
+      }
+    }
     catch (err) { broadcastAlert('observer_error', { error: err.message }, 'error'); }
     finally { running = false; }
   }, observerIntervalMs);
@@ -96,6 +112,7 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
 
   app.addHook('onClose', async () => {
     clearInterval(interval);
+    await hookRetention.close();
     if (typeof store.close === 'function') await store.close();
   });
 }
