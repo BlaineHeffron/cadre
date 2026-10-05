@@ -10,7 +10,7 @@ test('MCP exposes the clean room/DM/directory surface and no old bus or manager-
   const server = buildAgentBusMcpServer({ requestImpl: async () => ({ sessions: [] }) });
   const listed = await server.handleRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, { authContext: context });
   const names = listed.result.tools.map((tool) => tool.name);
-  for (const name of ['room_send', 'room_context', 'room_list', 'room_close', 'room_end', 'agent_dm', 'agent_directory']) {
+  for (const name of ['room_send', 'room_context', 'room_list', 'room_close', 'room_end', 'room_transfer', 'agent_dm', 'agent_directory']) {
     assert.ok(names.includes(name));
   }
   assert.equal(names.some((name) => name.startsWith('agent_bus_')), false);
@@ -20,7 +20,7 @@ test('MCP exposes the clean room/DM/directory surface and no old bus or manager-
   const guidance = await server.handleRequest({ jsonrpc: '2.0', id: 3, method: 'prompts/get',
     params: { name: 'collaboration_guidance' } }, { authContext: context });
   const text = guidance.result.messages[0].content.text;
-  for (const name of ['room_send', 'room_context', 'room_list', 'room_close', 'room_end', 'agent_dm', 'agent_directory']) {
+  for (const name of ['room_send', 'room_context', 'room_list', 'room_close', 'room_end', 'room_transfer', 'agent_dm', 'agent_directory']) {
     assert.match(text, new RegExp(name));
   }
   assert.doesNotMatch(text, /agent_bus_|ack/);
@@ -142,11 +142,11 @@ test('room context since/after counts only filtered messages', async () => {
   assert.equal(result.structuredContent.totalMessageCount, 3);
 });
 
-test('room context is participant-only', async () => {
+test('room context is open to nonparticipants', async () => {
   const server = buildAgentBusMcpServer({ requestImpl: async () => ({ thread: { id: 'thr_other', participants: [
     { kind: 'claude', sessionId: 'a1' }, { kind: 'pi', sessionId: 'p1' },
   ] } }) });
-  await assert.rejects(server.callTool('room_context', { thread_id: 'thr_other' }, context), /not a participant/);
+  assert.equal((await server.callTool('room_context', { thread_id: 'thr_other' }, context)).structuredContent.thread.id, 'thr_other');
 });
 
 test('room list pins the caller and returns only the compact participant-scoped room shape', async () => {
@@ -179,6 +179,7 @@ test('room creator can read, address, and close without being a participant', as
     if (path.startsWith('/api/agent-bus/threads/thr_owned?')) return { thread, messages: [], deliveries: [] };
     if (path === '/api/agent-bus/messages') return { message: { id: 'msg_owned' }, deliveries: [] };
     if (path.endsWith('/close')) return { status: 'closed', preserved: thread.participants };
+    if (path.endsWith('/end')) return { status: 'ended' };
     if (path.includes('/threads/by-participant')) return { threads: [thread] };
     throw new Error(`Unexpected ${path}`);
   } });
@@ -190,12 +191,13 @@ test('room creator can read, address, and close without being a participant', as
     { kind: 'claude', sessionId: 'coord' });
   const closed = await server.callTool('room_close', { thread_id: 'thr_owned' }, owner);
   assert.equal(closed.structuredContent.status, 'closed');
-  await assert.rejects(server.callTool('room_end', { thread_id: 'thr_owned' }, owner), /not authorized/);
+  assert.equal((await server.callTool('room_end', { thread_id: 'thr_owned', cancel_pending: true }, owner)).structuredContent.status, 'ended');
+  assert.deepEqual(calls.find((item) => item.path.endsWith('/end')).options.body, { cancelPending: true });
   const listed = await server.callTool('room_list', {}, owner);
   assert.equal(listed.structuredContent.rooms.some((room) => room.id === 'thr_owned'), true);
 });
 
-test('room close requires membership; agents cannot end rooms', async () => {
+test('room lifecycle dispatch preserves actor context for route ownership checks', async () => {
   const calls = [];
   const memberThread = { id: 'thr_1', participants: [{ kind: 'codex', sessionId: 'c1' }, { kind: 'claude', sessionId: 'a1' }] };
   const server = buildAgentBusMcpServer({ requestImpl: async (path, options = {}) => {
@@ -208,8 +210,9 @@ test('room close requires membership; agents cannot end rooms', async () => {
   } });
   const closed = await server.callTool('room_close', { thread_id: 'thr_1' }, context);
   assert.equal(closed.structuredContent.status, 'closed');
-  await assert.rejects(server.callTool('room_end', { thread_id: 'thr_1' }, context), /not authorized/);
-  await assert.rejects(server.callTool('room_close', { thread_id: 'thr_other' }, context), /not a participant/);
+  assert.equal((await server.callTool('room_end', { thread_id: 'thr_1' }, context)).structuredContent.status, 'ended');
+  assert.equal((await server.callTool('room_close', { thread_id: 'thr_other' }, context)).structuredContent.status, 'closed');
+  assert.equal(calls.find((item) => item.path.endsWith('/close')).options.authContext.principal.sessionId, 'c1');
   const ui = { authenticated: true, principal: { type: 'ui', kind: 'dashboard', sessionId: 'local' },
     toolScopes: ['room_end'], threadAllowlist: ['*'] };
   const ended = await server.callTool('room_end', { thread_id: 'thr_1' }, ui);

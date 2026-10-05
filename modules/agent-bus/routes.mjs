@@ -73,6 +73,40 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
   discardCreatedParticipants, waitForSessionReady, injectBootstrapStartupText, createBootstrapMessage,
   deliverMessage, failDelivery, replayDelivery, taskService = null }) {
   const endingThreads = new Set();
+  async function sessionExists(ref) {
+    if (!adapters[ref?.kind]) return true;
+    try { await adapters[ref.kind].getSession(app, ref.sessionId); return true; }
+    catch (err) { if (err.statusCode === 404) return false; throw err; }
+  }
+
+  async function authorizeLifecycle(req, thread, action) {
+    if (req.duenoAuth?.principal?.type !== 'agent' || threadHasOwner(thread, createdByFromRequest(req))) return;
+    if (action === 'transfer' && participantKey(req.body.to) === participantKey(createdByFromRequest(req))
+      && thread.createdBy && !await sessionExists(thread.createdBy)) return;
+    if (action === 'close') {
+      if (thread.metadata?.dm && threadHasParticipant(thread, createdByFromRequest(req))) return;
+      let alive = false;
+      for (const participant of thread.participants || []) {
+        if (await sessionExists(participant)) { alive = true; break; }
+      }
+      if (!alive) return;
+    }
+    throw Object.assign(new Error('Room ownership required'), { statusCode: 403, code: 'room_owner_required' });
+  }
+
+  app.post('/api/agent-bus/threads/:threadId/transfer', { schema: { params: params({ threadId: string(ID_MAX, 1) }),
+    body: bodySchema({ to: agentRef }, ['to']) } }, async (req, reply) => {
+    const snapshot = store.getThread(req.params.threadId);
+    if (!snapshot) return reply.code(404).send({ error: 'Thread not found' });
+    await authorizeLifecycle(req, snapshot.thread, 'transfer');
+    if (!adapters[req.body.to.kind] || !await sessionExists(req.body.to)) {
+      return reply.code(400).send({ error: 'Owner must be an existing agent session' });
+    }
+    const thread = await store.transferThread(snapshot.thread.id, req.body.to);
+    await broadcastThreadSummary(thread.id);
+    return { thread: normalizeThreadSummary(await enrichThread(thread)) };
+  });
+
   app.get('/api/agent-bus/participants', async (_req, reply) => {
     const supportedKinds = Object.keys(adapters);
     const sessions = {};
@@ -226,6 +260,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     body: bodySchema({ reason: string(512), cancelPending: { type: 'boolean' } }) } }, async (req, reply) => {
     const snapshot = store.getThread(req.params.threadId);
     if (!snapshot) return reply.code(404).send({ error: 'Thread not found' });
+    await authorizeLifecycle(req, snapshot.thread, 'close');
     const pending = snapshot.deliveries.filter((item) => item.status === 'queued');
     if (pending.length && req.body?.cancelPending !== true) {
       return reply.code(409).send({ error: 'Room has pending deliveries; drain them or explicitly cancelPending',
@@ -251,11 +286,17 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
   });
 
   app.post('/api/agent-bus/threads/:threadId/end', { schema: { params: params({ threadId: string(ID_MAX, 1) }),
-    body: bodySchema({ reason: string(512) }) } }, async (req, reply) => {
+    body: bodySchema({ reason: string(512), cancelPending: { type: 'boolean' } }) } }, async (req, reply) => {
     const snapshot = store.getThread(req.params.threadId); if (!snapshot) return reply.code(404).send({ error: 'Thread not found' });
+    await authorizeLifecycle(req, snapshot.thread, 'end');
     if (snapshot.thread.metadata?.dm) return reply.code(400).send({ error: 'DM rooms may only be closed' });
     if (snapshot.deliveries.some((item) => deliveryInFlight.has(item.id))) {
       return reply.code(409).send({ error: 'Room has delivery in flight; retry after it settles', code: 'delivery_in_flight' });
+    }
+    const pending = snapshot.deliveries.filter((item) => item.status === 'queued');
+    if (pending.length && req.body?.cancelPending !== true) {
+      return reply.code(409).send({ error: 'Room has pending deliveries; drain them or explicitly cancelPending',
+        code: 'pending_deliveries', pending: pending.length });
     }
     if (endingThreads.has(snapshot.thread.id)) return reply.code(409).send({ error: 'Room is ending', code: 'room_ending' });
     endingThreads.add(snapshot.thread.id);
@@ -297,8 +338,8 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (isDurableTaskRecord(managed) && (from?.kind !== managed.provider || from?.sessionId !== managed.attempts?.at(-1)?.sessionId)) {
       return { statusCode: 409, payload: { error: 'Managed task input requires task_send', code: 'task_input_required' } };
     }
-    if (!threadHasParticipant(snapshot.thread, from) && !threadHasOwner(snapshot.thread, from)) {
-      return { statusCode: 403, payload: { error: 'Sender is not a participant' } };
+    if (snapshot.thread.metadata?.dm && !threadHasParticipant(snapshot.thread, from) && !threadHasOwner(snapshot.thread, from)) {
+      return { statusCode: 403, payload: { error: 'Sender is not a participant in this DM' } };
     }
     const resolvedType = type === 'result' ? 'result' : (type || 'message');
     const duplicate = [...(snapshot.messages || [])].reverse().find((item) => (
@@ -313,6 +354,9 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     }
     const targets = snapshot.thread.participants.filter((item) => adapters[item.kind]
       && participantKey(item) !== participantKey(from)).map(participantRef);
+    const owner = snapshot.thread.createdBy;
+    if (resolvedType === 'result' && adapters[owner?.kind] && !threadHasParticipant(snapshot.thread, owner)
+      && participantKey(owner) !== participantKey(from)) targets.push(participantRef(owner));
     const record = await store.createMessage({ threadId, from: participantRef(from), targets, type: resolvedType, body,
       replyTo, metadata: { ...(metadata || {}), ...(snapshot.thread.metadata?.dm ? { dm: true } : {}) } });
     broadcast(wsManager, `agent-bus:thread:${threadId}`, 'message_created', { message: record.message, deliveries: record.deliveries });

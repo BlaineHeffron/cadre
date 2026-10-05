@@ -337,6 +337,16 @@ export class AgentBusStore {
     return doomed.size;
   }
 
+  async transferThread(threadId, to) {
+    const thread = this.state.threads.find((item) => item.id === this.resolveThreadId(threadId));
+    if (!thread) return null;
+    thread.createdBy = { kind: to.kind, sessionId: to.sessionId };
+    thread.updatedAt = Date.now();
+    await this.persist();
+    await this.appendEvent('thread.updated', { threadId: thread.id });
+    return clone(thread);
+  }
+
   async updateThreadMetadata(threadId, patch) {
     const resolvedThreadId = this.resolveThreadId(threadId);
     const thread = this.state.threads.find((item) => item.id === resolvedThreadId);

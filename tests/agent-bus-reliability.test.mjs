@@ -119,8 +119,9 @@ test('DM preserves backend 503 and distinguishes ended sessions from absent sess
   assert.equal(missing.statusCode, 404); assert.equal(missing.json().code, 'session_not_found');
 });
 
-test('MCP close cancellation and reopen reach real routes with scope and membership checks', async (t) => {
+test('MCP owner close cancellation and reopen reach real routes with scope and membership checks', async (t) => {
   const { h, thread, send } = await setup(t);
+  await h.store.transferThread(thread.id, refs[0]);
   h.sessionStates.claude.set('claude-1', { state: 'working', needsInput: false });
   await send('pending');
   const { buildAgentBusMcpServer } = await import('../modules/agent-bus/mcp.mjs');

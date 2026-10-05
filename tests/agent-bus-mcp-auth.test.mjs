@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { AgentBusCredentialStore, AGENT_BUS_AGENT_TOOL_SCOPES } from '../modules/agent-bus/mcp-auth.mjs';
 
 test('agent credentials grant only the new room, DM, directory, and spawn scopes', () => {
-  for (const name of ['room_send', 'room_context', 'room_list', 'room_close', 'room_end', 'agent_dm', 'agent_directory']) {
+  for (const name of ['room_send', 'room_context', 'room_list', 'room_close', 'room_end', 'room_transfer', 'agent_dm', 'agent_directory']) {
     assert.ok(AGENT_BUS_AGENT_TOOL_SCOPES.includes(name));
   }
   assert.equal(AGENT_BUS_AGENT_TOOL_SCOPES.some((name) => name.startsWith('agent_bus_')), false);

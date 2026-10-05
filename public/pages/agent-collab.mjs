@@ -495,10 +495,10 @@ export function AgentCollabPage({ id }) {
   }
 
   async function endThread() {
-    if (!id || !confirm('Close this room and terminate participant sessions that are not active in another room?')) return;
+    if (!id || !confirm('Close this room, cancel queued deliveries, and terminate participant sessions that are not active in another room?')) return;
     try {
       const data = await api.post(`/agent-bus/threads/${encodeURIComponent(id)}/end`, {
-        reason: 'ended from collab ui',
+        reason: 'ended from collab ui', cancelPending: true,
       });
       const skipped = (data.skipped || []).map(agentLabel);
       const failed = (data.results || []).filter((item) => item.status === 'failed');
