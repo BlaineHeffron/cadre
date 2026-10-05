@@ -961,7 +961,7 @@ describe('Monitor MCP server', () => {
     assert.equal(result.thread_id, 'thr_collab');
   });
 
-  it('rejects partial bootstrap with its thread id and failure detail', async () => {
+  it('propagates the named bootstrap failure', async () => {
     const server = buildMonitorMcpServer({
       async requestImpl(path) {
         if (path === '/api/agents/providers') {
@@ -973,23 +973,13 @@ describe('Monitor MCP server', () => {
           };
         }
         if (path === '/api/agent-bus/bootstrap') {
-          return {
-            thread: { id: 'thr_partial', title: 'Partial', status: 'open' },
-            participants: [{ kind: 'claude', sessionId: 'claude-new' }],
-            bootstrapOk: false,
-            failedParticipants: [{
-              participant: { kind: 'claude', sessionId: 'claude-new' },
-              phase: 'startup_injection',
-              attempts: 4,
-              error: 'Agent prompt was not ready',
-            }],
-          };
+          throw new Error('Participant claude:claude-new failed bootstrap: Agent startup pane unavailable after retry');
         }
         throw new Error(`Unexpected path: ${path}`);
       },
     });
 
-    await assert.rejects(server.handleToolCall('spawn_collab_session', { title: 'Partial', participants: [{ provider: 'codex' }, { provider: 'claude' }] }), /Bootstrap incomplete \(thread thr_partial\): claude:claude-new startup_injection: Agent prompt was not ready/);
+    await assert.rejects(server.handleToolCall('spawn_collab_session', { title: 'Failed', participants: [{ provider: 'codex' }, { provider: 'claude' }] }), /Participant claude:claude-new failed bootstrap: Agent startup pane unavailable/);
   });
 
   it('rejects collab spawn when a participant provider is disabled', async () => {

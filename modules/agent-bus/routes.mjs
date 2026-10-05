@@ -217,6 +217,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (requested.length < 2) return reply.code(400).send({ error: 'At least two participants are required' });
     const created = [];
     let worktree = null;
+    let thread = null;
     const roomId = `thr_${randomUUID().replaceAll('-', '')}`;
     try {
       if (req.body.worktree && requested.some((p) => p.sessionId || p.create === false) && await configFor(req.body.worktree.repo)) throw new Error('managed worktrees require newly created participants');
@@ -229,13 +230,16 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
       if (req.body.worktree) worktree = await createManagedWorktree({ ...req.body.worktree, roomId, baseDir: managedWorktreeBaseDir });
       for (const plan of plans) {
         if (worktree) plan.createArgs.workDir = worktree.path;
-        const participant = await executeParticipantPlan(plan);
+        const participant = await executeParticipantPlan(plan).catch((err) => {
+          err.message = `Participant ${plan.resolvedSelection?.backendType || plan.participant?.kind}: ${err.message}`;
+          throw err;
+        });
         created.push(participant);
       }
-      const thread = await store.createThread({ id: worktree ? roomId : undefined, title: req.body.title, projectKey: req.body.projectKey,
+      thread = await store.createThread({ id: worktree ? roomId : undefined, title: req.body.title, projectKey: req.body.projectKey,
         participants: created.map(participantRef), metadata: { source: 'bootstrap', ...(worktree ? { worktree } : {}) },
         createdBy: createdByFromRequest(req) });
-      const messages = []; const deliveries = []; const failedParticipants = [];
+      const messages = []; const deliveries = [];
       for (let index = 0; index < created.length; index += 1) {
         const participant = created[index];
         const prompt = renderCollabStartupPrompt({ self: { ...participant, role: requested[index]?.role },
@@ -251,15 +255,21 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
         } catch (err) {
           delivery = await store.updateDelivery(delivery.id, { status: 'failed', attempts: Number(err.bootstrapStartupAttempts || 1),
             lastAttemptAt: Date.now(), error: err.message });
-          failedParticipants.push({ participant: participantRef(participant), error: err.message });
+          throw new Error(`Participant ${participantKey(participant)} failed bootstrap: ${err.message}`);
         }
         observedSessions.add(participantKey(participant)); messages.push(record.message); deliveries.push(delivery);
       }
       return { thread: normalizeThreadSummary(await enrichThread(thread, store.getThread(thread.id))), participants: created,
-        messages, deliveries, bootstrapOk: failedParticipants.length === 0, failedParticipants, warnings: [] };
+        messages, deliveries, bootstrapOk: true, warnings: [] };
     } catch (err) {
-      await discardCreatedParticipants(created);
+      if (thread) {
+        await store.closeThread(thread.id, err.message);
+        thread.participants.forEach(pruneObservedParticipant);
+      }
+      const cleanupFailures = await discardCreatedParticipants(created);
+      if (cleanupFailures?.length) err.message += `; session rollback failed: ${cleanupFailures.join('; ')}`;
       const result = worktree ? await cleanupWorktree(worktree, true) : undefined;
+      if (thread) await broadcastThreadSummary(thread.id);
       return reply.code(400).send({ ...(result ? { worktree: result } : {}), error: err.message, ...(err.rollbackError ? { rollbackError: err.rollbackError, worktree: { removed: false, report: `worktree: kept (${err.rollbackError})` } } : {}), ...(err.code ? { code: err.code } : {}) });
     }
   });
