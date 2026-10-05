@@ -39,7 +39,7 @@ async function setup(t) {
   poller.now = () => now;
   poller.fetchImpl = async (url) => {
     calls.push(url);
-    return new Response(JSON.stringify(url.endsWith('/reviews') ? reviews : pr), { status: 200 });
+    return new Response(JSON.stringify(new URL(url).pathname.endsWith('/reviews') ? reviews : pr), { status: 200 });
   };
   const thread = await h.store.createThread({ title: 'PR room', participants, createdBy: creator });
   const watch = (number = 1, thread_id = thread.id) => call('watch_pr', { repo: 'octo/demo', number, ...(thread_id ? { thread_id } : {}) });
@@ -100,7 +100,7 @@ test('merge ends room, preserves shared participants, reports counts and removes
   await s.h.store.createThread({ title: 'Shared', participants: [participants[1]], createdBy: creator });
   await s.h.store.createMessage({ threadId: s.thread.id, from: creator, targets: [participants[0]], body: 'queued' });
   await s.watch();
-  s.setPr({ merged: true, state: 'closed' });
+  s.setPr({ merged: true, state: 'closed', merge_commit_sha: '123456789' });
   await s.poller.pollOnce();
   await s.poller.pollOnce();
   assert.equal(s.h.store.getThread(s.thread.id).thread.status, 'closed');
@@ -108,7 +108,7 @@ test('merge ends room, preserves shared participants, reports counts and removes
   assert.deepEqual(s.h.deletedSessions.codex, []);
   assert.equal(s.commands.length, 1);
   assert.equal(s.commands[0].sessionId, creator.sessionId);
-  assert.equal(s.commands[0].text, `[PR_WATCH] PR octo/demo#1 merged (abcdef1) · ended room ${s.thread.id}: 1 sessions terminated`);
+  assert.equal(s.commands[0].text, `[PR_WATCH] PR octo/demo#1 merged (1234567) · ended room ${s.thread.id}: 1 sessions terminated`);
   assert.deepEqual(await s.store.listWatches(), []);
 });
 
@@ -159,4 +159,46 @@ test('one watch fetch error does not abort other watches', async (t) => {
   assert.equal(s.commands.length, 1);
   assert.match(s.commands[0].text, /#2 closed/);
   assert.equal((await s.store.listWatches())[0].number, 1);
+});
+
+
+test('merge still notifies and deletes watch when linked room is missing, closed, or a DM', async (t) => {
+  const s = await setup(t);
+  const dm = await s.h.store.createThread({ title: 'DM', participants, createdBy: creator, metadata: { dm: true } });
+  await s.h.store.closeThread(s.thread.id);
+  await s.watch(1, 'thr_missing');
+  await s.watch(2, s.thread.id);
+  await s.watch(3, dm.id);
+  s.setPr({ merged: true, state: 'closed' });
+  await s.poller.pollOnce();
+  await s.poller.pollOnce();
+  assert.equal(s.commands.length, 3);
+  assert.match(s.commands[0].text, /#1 merged/);
+  assert.match(s.commands[1].text, /#2 merged/);
+  assert.match(s.commands[2].text, /not ended: 400$/);
+  assert.equal(s.h.store.getThread(dm.id).thread.status, 'open');
+  assert.deepEqual(s.h.deletedSessions.claude, []);
+  assert.deepEqual(await s.store.listWatches(), []);
+});
+
+test('reviews advance one page per tick so reviews beyond the first 100 are seen', async (t) => {
+  const s = await setup(t);
+  await s.watch();
+  const reviews = Array.from({ length: 101 }, (_, index) => ({ id: index + 1, state: 'COMMENTED', body: `Review ${index + 1}` }));
+  const fetch = s.poller.fetchImpl;
+  s.poller.fetchImpl = async (url) => {
+    const parsed = new URL(url);
+    if (!parsed.pathname.endsWith('/reviews')) return fetch(url);
+    s.calls.push(url);
+    assert.equal(parsed.searchParams.get('per_page'), '100');
+    const page = Number(parsed.searchParams.get('page'));
+    return new Response(JSON.stringify(reviews.slice((page - 1) * 100, page * 100)), { status: 200 });
+  };
+  await s.poller.pollOnce();
+  assert.equal(s.commands.length, 100);
+  await s.poller.pollOnce();
+  await s.poller.pollOnce();
+  assert.equal(s.commands.length, 101);
+  assert.match(s.commands[100].text, /Review 101$/);
+  assert.equal(s.calls.length, 6);
 });

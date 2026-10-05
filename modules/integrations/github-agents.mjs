@@ -685,25 +685,31 @@ export class GithubAgentPoller {
         const url = `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${watch.number}`;
         const options = { token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs };
         const pr = await fetchGithubJson(this.fetchImpl, url, options);
-        const reviews = await fetchGithubJson(this.fetchImpl, `${url}/reviews`, options);
+        const reviews = await fetchGithubJson(this.fetchImpl, `${url}/reviews?per_page=100&page=${watch.reviewPage || 1}`, options);
         for (const review of reviews.filter((item) => item.id > watch.lastReviewId).sort((a, b) => a.id - b.id)) {
           const lines = String(review.body || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
           const verdict = lines.find((line) => /^VERDICT\b/.test(line)) || (lines[0] || '').slice(0, 200);
           await notify(`review by ${review.user?.login || 'unknown'} (${review.state}): ${verdict}${lines.filter((line) => /^- \[B\]/.test(line)).slice(0, 5).map((line) => `\n${line}`).join('')}`);
           await this.repoStore.updateWatch(repo.id, watch.number, { lastReviewId: review.id });
         }
+        if (reviews.length === 100) await this.repoStore.updateWatch(repo.id, watch.number, { reviewPage: (watch.reviewPage || 1) + 1 });
         if (pr.merged || pr.state === 'closed') {
           const recipient = target();
           let suffix = '';
-          if (pr.merged && watch.thread_id && this.endThread) {
-            const result = await this.endThread(watch.thread_id, { cancelPending: true, reason: 'PR merged' });
-            suffix = ` · ended room ${watch.thread_id}: ${result.results.filter((item) => item.status === 'terminated').length} sessions terminated`;
+          if (pr.merged && watch.thread_id && this.endThread && this.getThread(watch.thread_id)?.thread?.status === 'open') {
+            try {
+              const result = await this.endThread(watch.thread_id, { cancelPending: true, reason: 'PR merged' });
+              suffix = ` · ended room ${watch.thread_id}: ${result.results.filter((item) => item.status === 'terminated').length} sessions terminated`;
+            } catch (error) {
+              this.log?.warn?.({ threadId: watch.thread_id, code: sanitizedError(error) }, 'PR watch room end failed');
+              suffix = ` · room ${watch.thread_id} not ended: ${error.code || error.statusCode || 'error'}`;
+            }
           }
-          await notify(pr.merged ? `merged (${String(pr.head?.sha || '').slice(0, 7)})${suffix}` : 'closed without merge', recipient);
+          await notify(pr.merged ? `merged (${String(pr.merge_commit_sha || pr.head?.sha || '').slice(0, 7)})${suffix}` : 'closed without merge', recipient);
           await this.repoStore.updateWatch(repo.id, watch.number);
         } else {
           if (pr.mergeable_state === 'dirty' && watch.mergeableState !== 'dirty') await notify('has merge conflict');
-          await this.repoStore.updateWatch(repo.id, watch.number, { state: pr.state, mergeableState: pr.mergeable_state });
+          await this.repoStore.updateWatch(repo.id, watch.number, { mergeableState: pr.mergeable_state });
         }
       } catch (error) {
         this.log?.warn?.({ repoId: repo.id, number: watch.number, code: sanitizedError(error) }, 'PR watch poll failed');

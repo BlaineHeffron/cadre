@@ -287,7 +287,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
 
   async function endRoom(req, reply) {
     const snapshot = store.getThread(req.params.threadId); if (!snapshot) return reply.code(404).send({ error: 'Thread not found' });
-    if (req.duenoAuth) await authorizeLifecycle(req, snapshot.thread, 'end');
+    await authorizeLifecycle(req, snapshot.thread, 'end');
     if (snapshot.thread.metadata?.dm) return reply.code(400).send({ error: 'DM rooms may only be closed' });
     if (snapshot.deliveries.some((item) => deliveryInFlight.has(item.id))) {
       return reply.code(409).send({ error: 'Room has delivery in flight; retry after it settles', code: 'delivery_in_flight' });
