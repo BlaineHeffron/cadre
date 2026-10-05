@@ -191,6 +191,8 @@ export async function githubAgentsPlugin(app, opts = {}) {
     if (typeof repoStore.close === 'function') await repoStore.close();
   });
 
+  if (app.agentBusLifecycle) app.agentBusLifecycle.getWorktreePr = (metadata) => poller.getWorktreePr(metadata);
+
   app.get('/api/agents/github/watches', async () => ({ watches: await repoStore.listWatches() }));
   app.route({ method: ['POST', 'DELETE'], url: '/api/agents/github/watches', handler: async (req, reply) => {
     const principal = req.duenoAuth?.principal;
@@ -212,9 +214,11 @@ export async function githubAgentsPlugin(app, opts = {}) {
       }
     }
     try {
-      return { watch: req.method === 'POST'
+      const watch = req.method === 'POST'
         ? await repoStore.putWatch(input, { kind: principal.kind, sessionId: principal.sessionId })
-        : await repoStore.updateWatch(input.repo, input.number) };
+        : await repoStore.updateWatch(input.repo, input.number);
+      if (req.method === 'POST' && input.thread_id) await app.agentBusLifecycle?.linkWorktreePr?.(input.thread_id, { repo: input.repo, number: input.number });
+      return { watch };
     } catch (error) { return reply.code(400).send({ error: error.message }); }
   } });
 

@@ -586,6 +586,15 @@ export class GithubAgentPoller {
     this.timer = null;
   }
 
+  async getWorktreePr(metadata) {
+    if (!metadata.pr) return null;
+    const repo = await this.repoStore.getRepo(metadata.pr.repo);
+    if (!repo) return null;
+    return fetchGithubJson(this.fetchImpl,
+      `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${metadata.pr.number}`,
+      { token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs });
+  }
+
   async listRepos() {
     return this.repoStore?.listRepos ? await this.repoStore.listRepos() : [];
   }
@@ -699,7 +708,7 @@ export class GithubAgentPoller {
           if (pr.merged && watch.thread_id && this.endThread && this.getThread(watch.thread_id)?.thread?.status === 'open') {
             try {
               const result = await this.endThread(watch.thread_id, { reason: 'PR merged' });
-              suffix = ` · ended room ${watch.thread_id}: ${result.results.filter((item) => item.status === 'terminated').length} sessions terminated`;
+              suffix = ` · ended room ${watch.thread_id}: ${result.results.filter((item) => item.status === 'terminated').length} sessions terminated${result.worktree ? ` · ${result.worktree.report}` : ''}`;
             } catch (error) {
               if (error.statusCode === 409 && error.code === 'room_ending') throw error;
               this.log?.warn?.({ threadId: watch.thread_id, code: sanitizedError(error) }, 'PR watch room end failed');

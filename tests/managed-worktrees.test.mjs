@@ -1,0 +1,298 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile, stat, symlink, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
+import { exec } from '../lib/exec.mjs';
+import { createManagedWorktree, cleanupManagedWorktree, sweepManagedWorktrees, linkManagedWorktreePr } from '../modules/agent-bus/managed-worktrees.mjs';
+import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
+import { GithubAgentPoller } from '../modules/integrations/github-agents.mjs';
+
+async function git(path, ...args) {
+  const result = await exec('git', ['-C', path, ...args], { env: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+  assert.equal(result.code, 0, result.stderr);
+  return result.stdout.trim();
+}
+async function fixture(t, setup = '') {
+  const root = await mkdtemp(resolve(tmpdir(), 'cadre-managed-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repo = resolve(root, 'repo'), remote = resolve(root, 'remote'), baseDir = resolve(root, 'managed');
+  await mkdir(repo); await mkdir(remote);
+  await git(remote, 'init', '--bare', '--initial-branch=main');
+  await git(repo, 'init', '--initial-branch=main');
+  await git(repo, 'config', 'user.name', 'Test'); await git(repo, 'config', 'user.email', 'test@example.invalid');
+  await mkdir(resolve(repo, '.cadre'));
+  await writeFile(resolve(repo, '.cadre/worktree.json'), JSON.stringify({ cleanup: 'on-merge', setup }));
+  await writeFile(resolve(repo, '.gitignore'), 'node_modules/\ncache/\n');
+  await writeFile(resolve(repo, 'file'), 'base\n');
+  await git(repo, 'add', '.'); await git(repo, 'commit', '-m', 'base');
+  await git(repo, 'remote', 'add', 'origin', remote); await git(repo, 'push', '-u', 'origin', 'main');
+  const metadata = await createManagedWorktree({ repo, branch: 'topic', base: 'origin/main', roomId: 'thr_test', baseDir });
+  await writeFile(resolve(metadata.path, 'file'), 'changed\n');
+  await git(metadata.path, 'commit', '-am', 'change');
+  const head = await git(metadata.path, 'rev-parse', 'HEAD');
+  await git(repo, 'push', 'origin', `${head}:refs/pull/1/head`);
+  let pr = { merged: true, number: 1, head: { sha: head } };
+  const poller = new GithubAgentPoller({ repoStore: { getRepo: async () => ({ owner: 'test', repo: 'repo' }) },
+    config: { env: {} }, fetchImpl: async () => ({ ok: true, status: 200, json: async () => pr }) });
+  await linkManagedWorktreePr(metadata, { repo: 'test/repo', number: 1 });
+  metadata.pr = { repo: 'test/repo', number: 1 };
+  const options = { baseDir, getPr: (value) => poller.getWorktreePr(value) };
+  return { root, repo, metadata, head, options, setPr: (value) => { pr = value; } };
+}
+const exists = async (path) => !!await stat(path).catch(() => null);
+
+for (const [name, change, reason] of [
+  ['dirty', async (f) => writeFile(resolve(f.metadata.path, 'file'), 'dirty'), 'dirty or untracked files'],
+  ['untracked with hidden user configuration', async (f) => { await git(f.repo, 'config', 'status.showUntrackedFiles', 'no'); await writeFile(resolve(f.metadata.path, 'untracked'), 'data'); }, 'dirty or untracked files'],
+  ['unpushed', async (f) => { await writeFile(resolve(f.metadata.path, 'file'), 'extra'); await git(f.metadata.path, 'commit', '-am', 'extra'); }, 'unpushed commits not in PR'],
+  ['not merged', async (f) => f.setPr({ merged: false, number: 1, head: { sha: f.head } }), 'PR not merged'],
+  ['new ignored', async (f) => { await mkdir(resolve(f.metadata.path, 'cache')); await writeFile(resolve(f.metadata.path, 'cache/new'), 'data'); }, 'new ignored files'],
+  ['shared room', async (f) => { f.options.rooms = [{ id: 'other', status: 'open', metadata: { worktree: { path: resolve(f.metadata.path, 'subdir') } } }]; }, 'shared with another room or live session'],
+  ['interrupted session', async (f) => { f.options.sessions = [{ lifecycle: 'interrupted', workDir: f.metadata.path }]; }, 'shared with another room or live session'],
+  ['shared session', async (f) => { f.options.sessions = [{ workDir: resolve(f.metadata.path, 'subdir') }]; }, 'shared with another room or live session'],
+  ['missing PR head', async (f) => f.setPr({ merged: true, number: 1 }), 'PR not merged'],
+  ['GitHub failure', async (f) => { f.options.getPr = async () => { throw new Error('GitHub unavailable'); }; }, 'GitHub unavailable'],
+]) test(`managed worktree keeps ${name}`, async (t) => {
+  const f = await fixture(t); await change(f);
+  const result = await cleanupManagedWorktree(f.metadata, f.options);
+  assert.equal(result.reason, reason); assert.equal(result.removed, false);
+  assert.equal(await exists(f.metadata.path), true);
+  assert.equal(await git(f.repo, 'rev-parse', 'topic'), await git(f.metadata.path, 'rev-parse', 'HEAD'));
+});
+
+test('merged and clean removes worktree and branch', async (t) => {
+  const f = await fixture(t);
+  await git(f.repo, 'merge', '--ff-only', 'topic');
+  const result = await cleanupManagedWorktree(f.metadata, f.options);
+  assert.equal(result.removed, true); assert.equal(result.branchKept, false);
+  assert.equal(await exists(f.metadata.path), false);
+  assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/topic'])).code, 128);
+});
+
+test('patch-id containment removes worktree but retains unmerged branch tip', async (t) => {
+  const f = await fixture(t);
+  await git(f.repo, 'merge', '--squash', 'topic'); await git(f.repo, 'commit', '-m', 'squashed');
+  const squash = await git(f.repo, 'rev-parse', 'HEAD');
+  await git(f.repo, 'push', 'origin', `+${squash}:refs/pull/1/head`);
+  f.setPr({ merged: true, number: 1, head: { sha: squash } });
+  const result = await cleanupManagedWorktree(f.metadata, f.options);
+  assert.equal(result.removed, true); assert.equal(result.branchKept, true);
+  assert.match(result.report, /branch kept/); assert.equal(await exists(f.metadata.path), false);
+  assert.equal(await git(f.repo, 'rev-parse', 'topic'), f.head);
+});
+
+test('baseline external node_modules symlink is unlinked without touching target', async (t) => {
+  const f = await fixture(t, 'mkdir -p "$CADRE_REPO_ROOT/../shared"; ln -s "$CADRE_REPO_ROOT/../shared" node_modules');
+  const target = resolve(f.root, 'shared'); await writeFile(resolve(target, 'precious'), 'keep');
+  // The baseline was recorded while the link was dangling; git still lists the ignored symlink.
+  assert.ok(f.metadata.ignoredBaseline.includes('node_modules'));
+  await git(f.repo, 'merge', '--ff-only', 'topic');
+  const result = await cleanupManagedWorktree(f.metadata, f.options);
+  assert.equal(result.removed, true); assert.equal(await exists(f.metadata.path), false);
+  assert.equal(await readFile(resolve(target, 'precious'), 'utf8'), 'keep');
+});
+
+test('setup failure removes fresh worktree and branch', async (t) => {
+  const f = await fixture(t);
+  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ setup: 'touch leftover; exit 1' }));
+  await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'failed', base: 'origin/main', roomId: 'thr_failed', baseDir: f.options.baseDir }), /setup failed/);
+  assert.equal(await exists(resolve(f.options.baseDir, 'thr_failed/repo')), false);
+  assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/failed'])).code, 128);
+});
+
+test('no config creates no worktree', async (t) => {
+  const f = await fixture(t); await rm(resolve(f.repo, '.cadre/worktree.json'));
+  assert.equal(await createManagedWorktree({ repo: f.repo, branch: 'unused', roomId: 'thr_none', baseDir: f.options.baseDir }), null);
+  assert.equal(await exists(resolve(f.options.baseDir, 'thr_none')), false);
+});
+
+test('orphan sweep only removes marked closed-room worktrees', async (t) => {
+  const f = await fixture(t); await git(f.repo, 'merge', '--ff-only', 'topic');
+  const unmanaged = resolve(f.options.baseDir, 'thr_unmanaged/repo');
+  await mkdir(resolve(f.options.baseDir, 'thr_unmanaged'));
+  await git(f.repo, 'worktree', 'add', '-b', 'unmanaged', unmanaged);
+  const sweep = (status) => sweepManagedWorktrees({ baseDir: f.options.baseDir, getRoom: () => ({ status, metadata: { worktree: f.metadata } }),
+    cleanup: (metadata) => cleanupManagedWorktree(metadata, f.options) });
+  await sweep('open'); assert.equal(await exists(f.metadata.path), true);
+  await sweep('closed'); assert.equal(await exists(f.metadata.path), false);
+  assert.equal(await exists(unmanaged), true);
+});
+
+for (const mode of ['managed', 'setup failure', 'no config']) test(`bootstrap ${mode} with real git`, async (t) => {
+  const f = await fixture(t);
+  const h = await createAgentBusHarness({ beforeReady: async (app) => {
+    app.get('/api/codex-app-server/sessions', async () => ({ sessions: [] }));
+  } }); t.after(() => h.cleanup());
+  if (mode === 'setup failure') await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ setup: 'touch failed; exit 1' }));
+  if (mode === 'no config') await rm(resolve(f.repo, '.cadre/worktree.json'));
+  const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
+    title: 'Managed', workDir: f.repo, worktree: { repo: f.repo, branch: 'bootstrap', base: 'origin/main' },
+    participants: [{ kind: 'codex', create: true, workDir: '/wrong' }, { kind: 'claude', create: true }],
+  } });
+  if (mode === 'setup failure') {
+    assert.equal(response.statusCode, 400, response.body);
+    assert.equal(h.createdSessions.codex.length, 0); assert.equal(h.createdSessions.claude.length, 0);
+    assert.doesNotMatch(await git(f.repo, 'worktree', 'list', '--porcelain'), /refs\/heads\/bootstrap/);
+    assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/bootstrap'])).code, 128);
+    return;
+  }
+  assert.equal(response.statusCode, 200, response.body);
+  const metadata = h.store.getThread(response.json().thread.id).thread.metadata.worktree;
+  if (mode === 'no config') {
+    assert.equal(metadata, undefined); assert.equal(h.createdSessions.codex[0].workDir, '/wrong'); return;
+  }
+  assert.equal(metadata.roomId, response.json().thread.id);
+  assert.equal(h.createdSessions.codex[0].workDir, metadata.path);
+  assert.equal(h.createdSessions.claude[0].workDir, metadata.path);
+  await h.app.agentBusLifecycle.linkWorktreePr(metadata.roomId, { repo: 'test/repo', number: 1 });
+  await git(metadata.path, 'merge', '--ff-only', f.head);
+  await git(f.repo, 'merge', '--ff-only', f.head);
+  h.app.agentBusLifecycle.getWorktreePr = f.options.getPr;
+  const ended = await h.app.inject({ method: 'POST', url: `/api/agent-bus/threads/${metadata.roomId}/end`, headers: h.authHeaders, payload: {} });
+  assert.equal(ended.statusCode, 200, ended.body);
+  assert.equal(ended.json().worktree.reason, 'dirty or untracked files', ended.body);
+  // The harness records real runtime hook artifacts; remove them to exercise clean shutdown.
+  await rm(resolve(metadata.path, '.agent_bus'), { recursive: true, force: true });
+  const retried = await h.app.agentBusLifecycle.endThread(metadata.roomId);
+  assert.equal(retried.worktree.removed, true, JSON.stringify(retried));
+  assert.equal(await exists(metadata.path), false);
+});
+
+test('ended sessions do not block removal', async (t) => {
+  const f = await fixture(t); await git(f.repo, 'merge', '--ff-only', 'topic');
+  f.options.sessions = [{ lifecycle: 'ended', workDir: f.metadata.path }];
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, true);
+});
+
+test('new ignored file inside an existing ignored directory blocks removal', async (t) => {
+  const f = await fixture(t, 'mkdir cache; touch cache/baseline');
+  assert.ok(f.metadata.ignoredBaseline.includes('cache/baseline'));
+  await writeFile(resolve(f.metadata.path, 'cache/new'), 'precious');
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'new ignored files');
+  assert.equal(await readFile(resolve(f.metadata.path, 'cache/new'), 'utf8'), 'precious');
+});
+
+test('new external node_modules link blocks removal', async (t) => {
+  const f = await fixture(t); const target = resolve(f.root, 'shared'); await mkdir(target);
+  await symlink(target, resolve(f.metadata.path, 'node_modules'));
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'dirty or untracked files');
+  assert.equal(await exists(f.metadata.path), true);
+});
+
+test('tracked external symlink is safely removed by git without modifying its target', async (t) => {
+  const f = await fixture(t); const target = resolve(f.root, 'shared'); await mkdir(target);
+  await writeFile(resolve(target, 'precious'), 'keep');
+  await symlink(target, resolve(f.metadata.path, 'docs'));
+  await git(f.metadata.path, 'add', 'docs'); await git(f.metadata.path, 'commit', '-m', 'tracked link');
+  const head = await git(f.metadata.path, 'rev-parse', 'HEAD');
+  await git(f.repo, 'push', 'origin', `+${head}:refs/pull/1/head`);
+  f.setPr({ merged: true, number: 1, head: { sha: head } }); await git(f.repo, 'merge', '--ff-only', 'topic');
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, true);
+  assert.equal(await readFile(resolve(target, 'precious'), 'utf8'), 'keep');
+});
+
+for (const touched of [false, true]) test(`partial spawn failure ${touched ? 'keeps written files' : 'removes untouched worktree'}`, async (t) => {
+  const f = await fixture(t);
+  const h = await createAgentBusHarness({ beforeReady: async (app) => {
+    app.get('/api/codex-app-server/sessions', async () => ({ sessions: [] }));
+  } }); t.after(() => h.cleanup());
+  h.createResponders.claude = async ({ workDir }) => {
+    if (touched) await writeFile(resolve(workDir, 'precious'), 'keep');
+    throw new Error('launch failed');
+  };
+  const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
+    title: 'Fail', worktree: { repo: f.repo, branch: 'partial', base: 'origin/main' },
+    participants: [{ kind: 'codex', create: true }, { kind: 'claude', create: true }],
+  } });
+  assert.equal(response.statusCode, 400, response.body);
+  assert.deepEqual(h.deletedSessions.codex, ['codex-new-1']);
+  assert.equal(response.json().worktree.removed, !touched, response.body);
+  const entry = (await git(f.repo, 'worktree', 'list', '--porcelain')).split('\n\n').find((entry) => entry.includes('refs/heads/partial'));
+  if (touched) {
+    assert.match(response.json().worktree.report, /kept/);
+    const path = entry.split('\n')[0].slice('worktree '.length);
+    assert.equal(await readFile(resolve(path, 'precious'), 'utf8'), 'keep');
+    assert.match(entry, /locked cadre room/);
+  } else assert.equal(entry, undefined);
+});
+
+test('setup copies gitignored files and defaults cleanup to off', async (t) => {
+  const f = await fixture(t);
+  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ copy: ['cache/settings'], setup: 'test -f cache/settings' }));
+  await mkdir(resolve(f.repo, 'cache')); await writeFile(resolve(f.repo, 'cache/settings'), 'local');
+  const metadata = await createManagedWorktree({ repo: f.repo, branch: 'copy', roomId: 'thr_copy', baseDir: f.options.baseDir });
+  assert.equal(await readFile(resolve(metadata.path, 'cache/settings'), 'utf8'), 'local');
+  assert.deepEqual(metadata.ignoredBaseline, ['cache/settings']);
+  assert.equal((await cleanupManagedWorktree(metadata, f.options)).reason, 'cleanup off');
+});
+
+test('setup timeout terminates child writers before rollback', async (t) => {
+  const f = await fixture(t);
+  const escaped = resolve(f.root, 'late-write');
+  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ setup: `(sleep 0.4; touch '${escaped}') & wait` }));
+  await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'timeout', base: 'origin/main', roomId: 'thr_timeout', baseDir: f.options.baseDir, setupTimeoutMs: 50 }), /setup failed/);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal(await exists(escaped), false);
+  assert.equal(await exists(resolve(f.options.baseDir, 'thr_timeout/repo')), false);
+});
+
+test('invalid config and missing metadata fail closed', async (t) => {
+  const f = await fixture(t);
+  assert.equal((await cleanupManagedWorktree({ ...f.metadata, ignoredBaseline: undefined }, f.options)).reason, 'missing or invalid metadata');
+  await writeFile(resolve(f.repo, '.cadre/worktree.json'), '{');
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, false);
+  assert.equal(await exists(f.metadata.path), true);
+  await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'invalid', roomId: 'thr_invalid', baseDir: f.options.baseDir }));
+  assert.equal(await exists(resolve(f.options.baseDir, 'thr_invalid')), false);
+});
+
+test('failed PR fetch keeps worktree even when head object exists', async (t) => {
+  const f = await fixture(t); await git(f.repo, 'push', 'origin', ':refs/pull/1/head');
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'git fetch failed');
+  assert.equal(await exists(f.metadata.path), true);
+});
+
+test('pushed local commits outside PR remain kept', async (t) => {
+  const f = await fixture(t); await writeFile(resolve(f.metadata.path, 'file'), 'extra');
+  await git(f.metadata.path, 'commit', '-am', 'extra'); await git(f.metadata.path, 'push', 'origin', 'topic');
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'local commits not in PR');
+  assert.equal(await exists(f.metadata.path), true);
+});
+
+test('shared working directory through a symlink blocks removal', async (t) => {
+  const f = await fixture(t); const alias = resolve(f.root, 'alias'); await symlink(f.metadata.path, alias);
+  f.options.sessions = [{ workDir: alias }];
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'shared with another room or live session');
+});
+
+test('sweep ignores marked worktrees outside the managed base', async (t) => {
+  const f = await fixture(t); await git(f.repo, 'merge', '--ff-only', 'topic');
+  const outsideBase = resolve(f.root, 'outside');
+  const metadata = await createManagedWorktree({ repo: f.repo, branch: 'outside', base: 'origin/main', roomId: 'thr_outside', baseDir: outsideBase });
+  await sweepManagedWorktrees({ baseDir: f.options.baseDir, getRoom: () => null, cleanup: (m) => cleanupManagedWorktree(m, f.options) });
+  assert.equal(await exists(f.metadata.path), false);
+  assert.equal(await exists(metadata.path), true);
+});
+
+test('managed attach from repo subdirectory is rejected before worktree creation', async (t) => {
+  const f = await fixture(t); await mkdir(resolve(f.repo, 'subdirectory'));
+  const h = await createAgentBusHarness(); t.after(() => h.cleanup());
+  const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
+    worktree: { repo: resolve(f.repo, 'subdirectory'), branch: 'attached' },
+    participants: [{ kind: 'codex', sessionId: 'codex-1' }, { kind: 'claude', sessionId: 'claude-1' }],
+  } });
+  assert.equal(response.statusCode, 400, response.body); assert.match(response.json().error, /newly created/);
+  assert.doesNotMatch(await git(f.repo, 'worktree', 'list', '--porcelain'), /refs\/heads\/attached/);
+  assert.equal(h.createdSessions.codex.length, 0);
+});
+
+test('setup failure preserves original error when rollback branch CAS refuses', async (t) => {
+  const f = await fixture(t);
+  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ setup: 'echo setup-change >> file; git commit -am setup-change; exit 1' }));
+  await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'setup-commit', roomId: 'thr_setup_commit', baseDir: f.options.baseDir }), (error) => {
+    assert.equal(error.message, 'worktree setup failed'); assert.equal(error.rollbackError, 'git update-ref failed'); return true;
+  });
+  assert.equal(await exists(resolve(f.options.baseDir, 'thr_setup_commit/repo')), false);
+  assert.notEqual(await git(f.repo, 'rev-parse', 'setup-commit'), f.metadata.baseHead);
+});

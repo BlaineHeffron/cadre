@@ -578,6 +578,7 @@ export function buildAgentBusMcpServer({
         const action = name.slice('room_'.length);
         const payload = await request(`/api/agent-bus/threads/${encodeURIComponent(threadId)}/${action}`, { method: 'POST', body: name === 'room_close' && args.cancel_pending === true ? { cancelPending: true } : {} });
         const result = { thread_id: threadId, status: payload.status || action,
+          ...(payload.worktree ? { worktree: payload.worktree.report } : {}),
           results: (payload.results || payload.preserved || []).map((entry) => ({
             session_id: entry.participant?.sessionId || entry.sessionId, status: entry.status || 'preserved',
             ...(entry.reason ? { reason: entry.reason } : {}),

@@ -511,6 +511,7 @@ export async function createAgentBusHarness({
   }
 
   await app.register(agentBusPlugin, {
+    managedWorktreeBaseDir: join(stateDir, "managed-worktrees"),
     store,
     ...(credentialStore ? { credentialStore } : {}),
     wsManager: {

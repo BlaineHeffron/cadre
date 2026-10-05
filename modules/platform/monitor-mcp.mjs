@@ -1,3 +1,4 @@
+import { worktreeSchema } from '../agent-bus/managed-worktrees.mjs';
 import { compileToolArguments } from '../agent-bus/mcp-validation.mjs';
 import { DEFAULT_LIST_LIMIT, PAGE_PROPERTIES, normalizeLimit, normalizeOffset, paginate } from '../agent-bus/mcp-pagination.mjs';
 /**
@@ -1125,6 +1126,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         properties: {
           title: { type: 'string', description: 'Thread title' },
           projectKey: { type: 'string', description: 'Project path/key for the collaboration thread' },
+          worktree: worktreeSchema,
           workDir: { type: 'string', description: 'Default working directory for newly created sessions' },
           initialTask: { type: 'string', description: 'Shared task for both participants' },
           model: MCP_AGENT_MODEL_SCHEMA,
@@ -1157,7 +1159,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         required: ['title', 'participants'],
         additionalProperties: false,
       },
-      handler: async ({ title, projectKey, workDir, initialTask, model, thinkingLevel, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, participants }) => {
+      handler: async ({ title, projectKey, workDir, worktree, initialTask, model, thinkingLevel, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, participants }) => {
         const normalizedParticipants = participants.map((participant) =>
           normalizeParticipant(participant, { model, thinkingLevel, displayName: title, workDir, mcpProfile, mcpServers, codexPlugins, promptProfile })
         );
@@ -1169,6 +1171,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
             title,
             projectKey: projectKey || '',
             workDir: workDir || '',
+            ...(worktree ? { worktree } : {}),
             initialTask: initialTask || '',
             skills: skills || [],
             thinkingLevel: thinkingLevel || '',
@@ -1191,6 +1194,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         properties: {
           title: { type: 'string', description: 'Conference thread title' },
           projectKey: { type: 'string', description: 'Project path/key for the conference thread' },
+          worktree: worktreeSchema,
           workDir: { type: 'string', description: 'Default working directory for newly created sessions' },
           initialTask: { type: 'string', description: 'Shared task for the full conference' },
           model: MCP_AGENT_MODEL_SCHEMA,
@@ -1222,7 +1226,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         required: ['title', 'participants'],
         additionalProperties: false,
       },
-      handler: async ({ title, projectKey, workDir, initialTask, model, thinkingLevel, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, participants }) => {
+      handler: async ({ title, projectKey, workDir, worktree, initialTask, model, thinkingLevel, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, participants }) => {
         const normalizedParticipants = participants.map((participant) =>
           normalizeParticipant(participant, { model, thinkingLevel, displayName: title, workDir, mcpProfile, mcpServers, codexPlugins, promptProfile })
         );
@@ -1234,6 +1238,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
             title,
             projectKey: projectKey || '',
             workDir: workDir || '',
+            ...(worktree ? { worktree } : {}),
             initialTask: initialTask || '',
             skills: skills || [],
             thinkingLevel: thinkingLevel || '',

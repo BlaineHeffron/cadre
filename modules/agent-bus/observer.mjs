@@ -102,6 +102,7 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
       await observeSessions();
       if (!shouldSuppressSideEffectLoops() && Date.now() - lastHookSweep >= 3_600_000) {
         lastHookSweep = Date.now();
+        void app.agentBusLifecycle?.sweepWorktrees?.().catch((err) => app.log.warn({ err: err.message }, 'Managed worktree sweep failed'));
         void hookRetention.sweep().catch((err) => app.log.warn({ err: err.message }, 'Hook event retention failed'));
       }
     }
