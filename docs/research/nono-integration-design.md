@@ -304,14 +304,18 @@ through unchanged, so the exit code alone cannot tell them apart. Cadre does not
 - **Startup checks** (version + `profile validate`) run inside `prepareNonoLaunch`, cached on success only.
 - **`meta.sandbox`** is written only when the session ran under nono, so unsandboxed session meta is unchanged.
 - **Resume and the GitHub route.** `sandboxGrants.credential` records whether the session was created with the
-  route. Resume reuses the token file, which lives until the session is deleted. If the file is gone, resume
-  fails with `sandbox_credential_missing` (409) instead of running without the route.
+  route. Resume reuses the token file. A failed create or resume removes it (the transcripts in `<sd>` stay), as
+  does delete. If the file is gone, resume fails with `sandbox_credential_missing` (409) instead of running
+  without the route.
 - **Git failures.** A workdir with a `.git` entry where `git rev-parse` fails throws `sandbox_git_unresolved`.
   A workdir with no `.git` (reviewer scratch fallback) gets no git grants.
-- **Rejected with 400 `sandbox_unsupported`:** Pi; the Codex research safe runtime; `codexPlugins.add`; any MCP
-  server other than `dueno`, `businessos` or an HTTP remote server (stdio and research servers).
-- **Collab bootstrap.** The bootstrap adapter forwards `sandbox`; the bootstrap route itself starts passing it in
-  phase 2.
+- **Rejected with 400 `sandbox_unsupported`**, on create and again on resume: Pi; the Codex research safe runtime;
+  `codexPlugins.add`; any MCP server other than `dueno`, `businessos` or an HTTP remote server (stdio and
+  research servers).
+- **Collab bootstrap.** The route forwards a caller-supplied `sandbox` to each created participant and omits it
+  when absent. A sandboxed bootstrap with a participant other than Claude or Codex fails with 400 before any
+  session starts. Codex app-server has no HTTP create route, so it can only be reached this way. Phase 2 makes
+  the bootstrap pass `sandbox: 'nono'` itself.
 
 ## Known behaviour changes for sandboxed sessions
 

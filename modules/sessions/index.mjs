@@ -1016,11 +1016,6 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
   const sessionRuntime = config.normalizeRuntime(provider, runtime);
   const sandboxMode = resolveSandbox(sandbox);
   const researchSafeRuntime = config.id === 'codex' && hasResearchWorkbenchLaunchProfile(metadata);
-  if (sandboxMode === 'nono' && (researchSafeRuntime || !['claude', 'codex'].includes(config.id))) {
-    throw Object.assign(new Error('nono sandbox supports Claude and Codex sessions without the research safe runtime'), {
-      statusCode: 400, code: 'sandbox_unsupported',
-    });
-  }
   if (config.id !== 'codex' && codexPlugins !== undefined) {
     throw Object.assign(new Error('codexPlugins is only supported for Codex sessions'), {
       statusCode: 400, code: 'codex_plugin_selection_unsupported',
@@ -1029,6 +1024,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
   const selectedCodexPlugins = config.id === 'codex'
     ? normalizeCodexPluginSelection(codexPlugins)
     : undefined;
+  if (sandboxMode === 'nono') assertNonoSupported({ researchSafeRuntime, codexPlugins: selectedCodexPlugins, serverIds: [] });
   assertNoCallerMcpOverrides(args);
   assertNoCallerPromptOverrides(args);
   let sessionBinary = config.strictBinary ? await findCompatibleBinary() : '';
@@ -1044,13 +1040,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     runtime: sessionRuntime.runtime,
     catalog: buildMcpCapabilityCatalog(),
   });
-  // Plugin and stdio/research MCP binaries would run inside the sandbox without grants.
-  if (sandboxMode === 'nono' && (selectedCodexPlugins?.add.length
-    || resolvedMcp.serverIds.some((id) => !['dueno', 'businessos'].includes(id) && remoteMcpServer(id)?.transport !== 'http'))) {
-    throw Object.assign(new Error('nono sandbox supports only HTTP MCP servers and no added Codex plugins'), {
-      statusCode: 400, code: 'sandbox_unsupported',
-    });
-  }
+  if (sandboxMode === 'nono') assertNonoSupported({ researchSafeRuntime, codexPlugins: selectedCodexPlugins, serverIds: resolvedMcp.serverIds });
   const selectedSkills = sanitizedSkillSnapshot(skills);
   resolveLaunchSkills({ skillIds: selectedSkills });
   resolvePromptProfile({ promptProfile });
@@ -1291,6 +1281,10 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
     catalog: buildMcpCapabilityCatalog(),
   });
   assertResumeDigest(storedMcp, resolvedMcp);
+  if (sandboxMode === 'nono') {
+    assertNonoSupported({ researchSafeRuntime: config.id === 'codex' && hasResearchWorkbenchLaunchProfile(refreshed.metadata),
+      codexPlugins: refreshed.codexPlugins, serverIds: resolvedMcp.serverIds });
+  }
   const resumedModel = config.revalidateModelOnResume
     ? await config.assertModel(refreshed.model || '', {
         provider: sessionRuntime.provider,
@@ -1381,6 +1375,8 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
     });
     await cleanupPromptProfileLaunch({ backendType: config.id, sessionId: id });
     if (launchLogPath) await rm(launchLogPath, { force: true }).catch(() => {});
+    // Keep <sd> (transcripts); the reviewer token does not outlive a failed launch.
+    if (sandboxMode === 'nono') await rm(nonoStatePaths(config.id, id).tokenFile, { force: true }).catch(() => {});
     throw error;
   }
 
@@ -1420,6 +1416,16 @@ function resolveHarnessUserText(value = '') {
 
 function initialPromptPath(id) {
   return runtimeStatePath(`initial_prompts/${config.id}-${id}.txt`);
+}
+
+// Plugin and stdio/research MCP binaries would run inside the sandbox without grants.
+function assertNonoSupported({ researchSafeRuntime, codexPlugins, serverIds }) {
+  if (!['claude', 'codex'].includes(config.id) || researchSafeRuntime || codexPlugins?.add?.length
+    || serverIds.some((id) => !['dueno', 'businessos'].includes(id) && remoteMcpServer(id)?.transport !== 'http')) {
+    throw Object.assign(new Error('nono sandbox supports Claude and Codex sessions with HTTP MCP servers only, no added Codex plugins and no research safe runtime'), {
+      statusCode: 400, code: 'sandbox_unsupported',
+    });
+  }
 }
 
 // Claude reads .claude.json from CLAUDE_CONFIG_DIR, so sandboxed trust goes to the private config dir.

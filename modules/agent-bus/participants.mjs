@@ -301,6 +301,11 @@ export function createAgentBusParticipants({
       throw error;
     }
     const effectiveMcpRequest = mcpRequestForResolvedSelection(participantMcp, mcpCatalog);
+    if ((createDefaults.sandbox ?? 'none') !== 'none' && !['claude', 'codex'].includes(resolvedSelection.backendType)) {
+      throw Object.assign(new Error(`Participant ${participant.kind}: nono sandbox supports Claude and Codex sessions only`), {
+        statusCode: 400, code: 'sandbox_unsupported',
+      });
+    }
 
     return {
       mode: 'create',
@@ -333,6 +338,7 @@ export function createAgentBusParticipants({
           ? { promptProfile: participant.promptProfile }
           : (createDefaults.promptProfile !== undefined ? { promptProfile: createDefaults.promptProfile } : {})),
         ...(createDefaults.structured === true ? { structured: true } : {}),
+        ...(createDefaults.sandbox !== undefined ? { sandbox: createDefaults.sandbox } : {}),
       },
     };
   }

@@ -176,9 +176,9 @@ test('createSession rejects nono for Pi, the Codex research safe runtime, added 
   process.env.CADRE_SANDBOX = 'nono';
   t.after(() => delete process.env.CADRE_SANDBOX);
   const research = { researchWorkbench: { profileId: RESEARCH_PROFILE_ID } };
-  await assert.rejects(createAgentSessionsProvider('codex').createSession({ workDir: '/nonexistent', sandbox: 'nono', metadata: research }),
+  await assert.rejects(createAgentSessionsProvider('codex').createSession({ workDir: tmpdir(), sandbox: 'nono', metadata: research }),
     { code: 'sandbox_unsupported', statusCode: 400 });
-  await assert.rejects(createAgentSessionsProvider('pi').createSession({ workDir: '/nonexistent', sandbox: 'nono' }),
+  await assert.rejects(createAgentSessionsProvider('pi').createSession({ workDir: tmpdir(), sandbox: 'nono', provider: 'xai', model: 'grok-4.3' }),
     { code: 'sandbox_unsupported', statusCode: 400 });
   await assert.rejects(createAgentSessionsProvider('codex').createSession({ workDir: tmpdir(), sandbox: 'nono',
     codexPlugins: { add: ['browser@openai-bundled'] } }), { code: 'sandbox_unsupported', statusCode: 400 });
