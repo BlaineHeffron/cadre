@@ -6,7 +6,7 @@ import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
 import { legacyRootStatePath, runtimeStatePath } from '../ops/runtime-state.mjs';
 import { getPublicMcpCapabilityCatalog } from '../integrations/mcp-server-catalog.mjs';
 import { getPublicPromptProfileCatalog } from '../integrations/prompt-profile-catalog.mjs';
-import { composeLaunchUserPrompt, publicLaunchSkills } from '../integrations/launch-skills.mjs';
+import { publicLaunchSkills } from '../integrations/launch-skills.mjs';
 import { createAgentSessionWorktree } from '../fleet/git-worktree.mjs';
 import { expandHomePath } from '../sessions/workdir.mjs';
 import { buildInProcessFastifyRequest } from '../agent-bus/in-process-mcp.mjs';
@@ -21,13 +21,6 @@ const LEGACY_IDEMPOTENCY_STORE_FILE = legacyRootStatePath('agent_session_idempot
 
 function compactBody(value = {}) {
   return Object.fromEntries(Object.entries(value || {}).filter(([, entry]) => entry !== undefined));
-}
-
-function buildSingleSessionStartupPrompt(input = {}) {
-  return composeLaunchUserPrompt({
-    skillIds: input.skills,
-    initialPrompt: input.initialPrompt,
-  });
 }
 
 function normalizeTimeoutMs(value, fallback = DEFAULT_TASK_TIMEOUT_MS) {
@@ -251,56 +244,6 @@ export function buildAgentInterface({
     }
   }
 
-  async function waitForInteractiveSessionReady(selection, sessionId, {
-    attempts = 90,
-    intervalMs = 500,
-  } = {}) {
-    let lastError = null;
-    for (let i = 0; i < attempts; i += 1) {
-      try {
-        const session = await request(`${sessionBasePath(selection.backendType)}/${encodeURIComponent(sessionId)}?lines=200`);
-        const status = String(session?.state?.status || '').trim();
-        if (session?.state?.revision > 0 && status !== 'starting' && status !== 'unknown') return session;
-      } catch (error) {
-        lastError = error;
-      }
-
-      await sleep(intervalMs);
-    }
-
-    if (lastError) throw lastError;
-    throw new Error(`Session ${selection.backendType}:${sessionId} did not become ready in time`);
-  }
-
-  async function injectInteractiveSessionPrompt(selection, sessionId, text) {
-    const prompt = typeof text === 'string' ? text.trim() : '';
-    if (!prompt) {
-      return { injected: false, error: null };
-    }
-
-    await waitForInteractiveSessionReady(selection, sessionId);
-
-    let lastError = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (attempt > 0) await sleep(selection.backendType === 'codex' ? 350 : 500);
-
-      try {
-        await request(`${sessionBasePath(selection.backendType)}/${encodeURIComponent(sessionId)}/startup-input`, {
-          method: 'POST',
-          body: { text: prompt, enter: true },
-        });
-        return { injected: true, error: null };
-      } catch (error) {
-        lastError = error;
-      }
-    }
-
-    return {
-      injected: false,
-      error: lastError?.message || 'Initial prompt injection failed',
-    };
-  }
-
   async function listProviders() {
     const preferences = await getPreferences();
     const providers = buildAgentProviderCatalog(preferences);
@@ -375,21 +318,10 @@ export function buildAgentInterface({
     });
 
     try {
-      const startupPrompt = buildSingleSessionStartupPrompt(input);
-      let injection = {
+      const injection = {
         injected: result.initialPromptInjected === true,
         error: result.initialPromptError || null,
       };
-      const unconfirmed = result.initialPromptDelivery?.submission === 'unconfirmed'
-        || /submission was not confirmed/i.test(result.initialPromptError || '');
-      if (startupPrompt && result.initialPromptInjected !== true && !unconfirmed) {
-        injection = await injectInteractiveSessionPrompt(selection, result.id, startupPrompt);
-        if (!injection.injected) {
-          const error = new Error(injection.error || 'Initial prompt injection failed');
-          error.statusCode = 500;
-          throw error;
-        }
-      }
 
       return addDmrCompatSessionShape({
         // Flat snapshot fields kept for Fleet-native consumers (read result.id).

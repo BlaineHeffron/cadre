@@ -399,7 +399,7 @@ export class AgentBusStore {
     return clone(thread);
   }
 
-  async createMessage({ threadId, from, targets = [], type = 'message', body, artifacts, createdBy, replyTo = null, metadata = null, idempotencyKey = null }) {
+  async createMessage({ threadId, from, targets = [], type = 'message', body, artifacts, createdBy, replyTo = null, metadata = null, idempotencyKey = null, deliveryStatus = 'queued' }) {
     const resolvedThreadId = this.resolveThreadId(threadId);
     const thread = this.state.threads.find((item) => item.id === resolvedThreadId);
     if (!thread) {
@@ -433,7 +433,7 @@ export class AgentBusStore {
 
     const deliveries = targets.map((target) => ({
       id: makeId('del'), threadId: resolvedThreadId, messageId: message.id, target,
-      status: 'queued', attempts: 0, replayAttempts: 0, replayHistory: [],
+      status: deliveryStatus, attempts: 0, replayAttempts: 0, replayHistory: [],
       createdAt: now, lastAttemptAt: null, error: null,
     }));
 

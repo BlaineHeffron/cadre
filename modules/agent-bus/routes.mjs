@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { configFor, createManagedWorktree, linkManagedWorktreePr, cleanupManagedWorktree, sweepManagedWorktrees } from './managed-worktrees.mjs';
 import { listCodexModels } from '../sessions/codex-models.mjs';
 import { listProviderModels } from '../sessions/model-catalog.mjs';
@@ -228,28 +228,51 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
         promptProfile: req.body.promptProfile, requireDueno: true, structured: req.body.structured === true,
       }));
       if (req.body.worktree) worktree = await createManagedWorktree({ ...req.body.worktree, roomId, baseDir: managedWorktreeBaseDir });
-      for (const plan of plans) {
-        if (worktree) plan.createArgs.workDir = worktree.path;
-        const participant = await executeParticipantPlan(plan).catch((err) => {
+      const roster = plans.map((plan) => plan.mode === 'attach' ? plan.participant : {
+        kind: plan.resolvedSelection.backendType, sessionId: randomBytes(4).toString('hex'),
+        displayName: plan.createArgs.displayName,
+      });
+      const prompts = roster.map((participant, index) => renderCollabStartupPrompt({
+        self: { ...participant, role: requested[index]?.role }, participants: roster,
+        threadId: roomId, title: req.body.title, initialTask: req.body.initialTask,
+        participantTask: requested[index]?.initialTask,
+      }));
+      thread = await store.createThread({ id: roomId, title: req.body.title, projectKey: req.body.projectKey,
+        participants: roster.map(participantRef), metadata: { source: 'bootstrap', ...(worktree ? { worktree } : {}) },
+        createdBy: createdByFromRequest(req) });
+      const records = [];
+      for (let index = 0; index < plans.length; index += 1) {
+        if (plans[index].mode === 'create') records[index] = await createBootstrapMessage({
+          threadId: thread.id, participant: roster[index], body: prompts[index], deliveryStatus: 'injected',
+        });
+      }
+      for (let index = 0; index < plans.length; index += 1) {
+        const plan = plans[index];
+        if (worktree && plan.mode === 'create') plan.createArgs.workDir = worktree.path;
+        if (plan.mode === 'create') {
+          plan.createArgs.sessionId = roster[index].sessionId;
+          plan.createArgs.initialPrompt = prompts[index];
+        }
+        created.push(await executeParticipantPlan(plan).catch((err) => {
           err.message = `Participant ${plan.resolvedSelection?.backendType || plan.participant?.kind}: ${err.message}`;
           throw err;
-        });
-        created.push(participant);
+        }));
+        if (plan.mode === 'create' && created.at(-1).sessionId !== roster[index].sessionId) throw new Error(`Participant ${roster[index].kind}: create ignored reserved sessionId`);
       }
-      thread = await store.createThread({ id: worktree ? roomId : undefined, title: req.body.title, projectKey: req.body.projectKey,
-        participants: created.map(participantRef), metadata: { source: 'bootstrap', ...(worktree ? { worktree } : {}) },
-        createdBy: createdByFromRequest(req) });
       const messages = []; const deliveries = [];
       for (let index = 0; index < created.length; index += 1) {
         const participant = created[index];
-        const prompt = renderCollabStartupPrompt({ self: { ...participant, role: requested[index]?.role },
-          participants: created, threadId: thread.id, title: thread.title, initialTask: req.body.initialTask,
-          participantTask: requested[index]?.initialTask });
-        const record = await createBootstrapMessage({ threadId: thread.id, participant, body: prompt });
+        const prompt = prompts[index];
+        const record = records[index] || await createBootstrapMessage({ threadId: thread.id, participant, body: prompt });
         let delivery = record.deliveries[0];
         try {
-          await waitForSessionReady(participant.kind, participant.sessionId);
-          const result = await injectBootstrapStartupText(adapters[participant.kind], app, participant, prompt);
+          let result;
+          if (plans[index].createArgs?.initialPrompt) {
+            result = { attempts: 0, resolution: { channel: 'launch' } };
+          } else {
+            await waitForSessionReady(participant.kind, participant.sessionId);
+            result = await injectBootstrapStartupText(adapters[participant.kind], app, participant, prompt);
+          }
           delivery = await store.updateDelivery(delivery.id, { status: 'injected', attempts: result.attempts,
             lastAttemptAt: Date.now(), resolution: result.resolution, error: null });
         } catch (err) {
