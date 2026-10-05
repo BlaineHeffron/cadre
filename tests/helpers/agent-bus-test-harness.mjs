@@ -173,6 +173,7 @@ export async function createAgentBusHarness({
   freshAgentBusModule = false,
   credentialStore = null,
   sessionDeleteTimeoutMs = undefined,
+  beforeReady = async () => {},
 } = {}) {
   process.env.AUTH_TOKEN = authToken;
   process.env.APP_STATE_STORAGE = 'file';
@@ -217,6 +218,7 @@ export async function createAgentBusHarness({
   const store = new AgentBusStore({ stateDir });
 
   const app = Fastify();
+  app.decorate('agentBusLifecycle', {});
   await app.register(authPlugin);
 
   async function emitRuntimeHook(kind, sessionId, eventName, data = {}) {
@@ -522,6 +524,7 @@ export async function createAgentBusHarness({
     },
   });
 
+  await beforeReady(app, stateDir);
   await app.ready();
 
   const authHeaders = { authorization: `Bearer ${authToken}` };

@@ -153,6 +153,21 @@ export async function githubAgentsPlugin(app, opts = {}) {
     listExistingSessions: opts.listExistingSessions,
     tmuxSessionExists: opts.tmuxSessionExists,
     deleteSession: opts.deleteSession || ((session) => createAgentAdapters()[session.backendType].deleteSession(app, session.id || session.sessionId)),
+    getThread: (id) => app.agentBusLifecycle?.getThread?.(id),
+    endThread: (id, options) => app.agentBusLifecycle.endThread(id, options),
+    notifyWatch: async (target, text) => {
+      const adapter = createAgentAdapters()[target?.kind];
+      if (!adapter) { app.log.warn({ target }, 'PR watch target unavailable'); return; }
+      try { await adapter.getSession(app, target.sessionId); }
+      catch (error) {
+        if (error.statusCode !== 404 && !error.payload?.sessionEnded) throw error;
+        app.log.warn({ target }, 'PR watch target no longer exists');
+        return;
+      }
+      await (opts.enqueueSessionCommand || enqueueAgentSessionCommand)(target.kind, target.sessionId, {
+        source: 'pr_watch', operation: 'message', text, enter: true,
+      });
+    },
     onResult: handleResult,
     log: opts.log || app.log,
   });
@@ -175,6 +190,33 @@ export async function githubAgentsPlugin(app, opts = {}) {
     if (typeof poller.stop === 'function') poller.stop();
     if (typeof repoStore.close === 'function') await repoStore.close();
   });
+
+  app.get('/api/agents/github/watches', async () => ({ watches: await repoStore.listWatches() }));
+  app.route({ method: ['POST', 'DELETE'], url: '/api/agents/github/watches', handler: async (req, reply) => {
+    const principal = req.duenoAuth?.principal;
+    const input = req.body || {};
+    if (req.method === 'POST' && (principal?.type !== 'agent' || !principal.kind || !principal.sessionId)) {
+      return reply.code(403).send({ error: 'Authenticated agent identity required' });
+    }
+    if (principal?.type === 'agent') {
+      const owns = (ref) => ref?.kind === principal.kind && ref?.sessionId === principal.sessionId;
+      const repo = await repoStore.getRepo(normalizeText(input.repo));
+      const prior = repo?.watches.find((watch) => watch.number === input.number);
+      if (prior && !owns(prior.creator) && !owns(app.agentBusLifecycle?.getThread?.(prior.thread_id)?.thread?.createdBy)) {
+        return reply.code(403).send({ error: 'Watch creator or linked room ownership required' });
+      }
+      if (req.method === 'POST' && normalizeText(input.thread_id)) {
+        const thread = app.agentBusLifecycle?.getThread?.(normalizeText(input.thread_id))?.thread;
+        if (!thread) return reply.code(404).send({ error: 'Thread not found' });
+        if (thread.metadata?.dm || !owns(thread.createdBy)) return reply.code(403).send({ error: 'Non-DM room ownership required' });
+      }
+    }
+    try {
+      return { watch: req.method === 'POST'
+        ? await repoStore.putWatch(input, { kind: principal.kind, sessionId: principal.sessionId })
+        : await repoStore.updateWatch(input.repo, input.number) };
+    } catch (error) { return reply.code(400).send({ error: error.message }); }
+  } });
 
   app.get('/api/agents/github', async () => {
     const repos = await repoStore.listRepos();

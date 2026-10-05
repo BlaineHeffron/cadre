@@ -285,8 +285,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     return { ok: true, status: 'open', thread: normalizeThreadSummary(await enrichThread(thread)) };
   });
 
-  app.post('/api/agent-bus/threads/:threadId/end', { schema: { params: params({ threadId: string(ID_MAX, 1) }),
-    body: bodySchema({ reason: string(512), cancelPending: { type: 'boolean' } }) } }, async (req, reply) => {
+  async function endRoom(req, reply) {
     const snapshot = store.getThread(req.params.threadId); if (!snapshot) return reply.code(404).send({ error: 'Thread not found' });
     await authorizeLifecycle(req, snapshot.thread, 'end');
     if (snapshot.thread.metadata?.dm) return reply.code(400).send({ error: 'DM rooms may only be closed' });
@@ -320,6 +319,17 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     thread.participants.forEach(pruneObservedParticipant); await broadcastThreadSummary(thread.id);
     return { ok: results.every((item) => item.status !== 'failed'), status: 'ended', thread: normalizeThreadSummary(await enrichThread(thread)), results, skipped };
     } finally { endingThreads.delete(snapshot.thread.id); }
+  }
+
+  Object.assign(app.agentBusLifecycle, {
+    getThread: (id) => store.getThread(id),
+    endThread: (id, options) => endRoom({ params: { threadId: id }, body: options }, {
+      code(statusCode) { return { send(payload) { throw Object.assign(new Error(payload.error), { statusCode, code: payload.code }); } }; },
+    }),
+  });
+  app.post('/api/agent-bus/threads/:threadId/end', { schema: { params: params({ threadId: string(ID_MAX, 1) }),
+    body: bodySchema({ reason: string(512), cancelPending: { type: 'boolean' } }) } }, async (req, reply) => {
+    return endRoom(req, reply);
   });
 
   app.delete('/api/agent-bus/threads/:threadId', { schema: { params: params({ threadId: string(ID_MAX, 1) }) } }, async (req, reply) => {

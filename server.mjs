@@ -159,6 +159,7 @@ await app.register(agentInterfacePlugin);
 await app.register(researchWorkbenchPlugin, { wsManager });
 
 // Agent collaboration bus
+app.decorate('agentBusLifecycle', {});
 await app.register(agentBusPlugin, { wsManager });
 
 await app.register(opsObservabilityPlugin);

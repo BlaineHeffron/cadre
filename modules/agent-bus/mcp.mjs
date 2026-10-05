@@ -411,6 +411,11 @@ export function buildAgentBusMcpServer({
 
   const tools = [
     ...TASK_TOOLS,
+    ...['watch_pr', 'unwatch_pr'].map((name) => ({ name,
+      description: name === 'watch_pr' ? 'Watch a configured repo PR for reviews, conflicts, merge or close. Ends the linked room on merge. Cadre never merges.' : 'Remove a PR watch.',
+      inputSchema: { type: 'object', properties: { repo: { type: 'string' }, number: { type: 'integer', minimum: 1 },
+        ...(name === 'watch_pr' ? { thread_id: { type: 'string' } } : {}) }, required: ['repo', 'number'], additionalProperties: false },
+    })),
     {
       name: 'room_send',
       description: 'Post in any non-DM room without subscribing; DMs require membership. Participants receive messages; the owner also receives results. Set summary on type=result as <merged|ready|blocked|needs-decision> · PR #n · <one line>.',
@@ -501,6 +506,16 @@ export function buildAgentBusMcpServer({
       return textResult(JSON.stringify(payload), payload);
     }
     switch (name) {
+      case 'watch_pr':
+      case 'unwatch_pr': {
+        if (!authenticatedContext(authContext)) throw authorizationError('PR watches require an authenticated agent credential', 'principal_missing');
+        principalAgentRef(authContext);
+        const payload = await request('/api/agents/github/watches', { method: name === 'watch_pr' ? 'POST' : 'DELETE',
+          body: { repo: assertMcpString(args.repo, 'repo'), number: args.number,
+            ...(name === 'watch_pr' && args.thread_id ? { thread_id: assertMcpString(args.thread_id, 'thread_id') } : {}) } });
+        return textResult(JSON.stringify(payload), payload);
+      }
+
       case 'room_context': {
         const threadId = assertMcpString(args.thread_id, 'thread_id');
         const count = Number.isInteger(args.limit) ? args.limit : DEFAULT_CONTEXT_MESSAGE_LIMIT;
@@ -738,6 +753,7 @@ export function buildAgentBusMcpServer({
                   'Non-DM rooms are open: any agent may read or post without subscribing. DMs remain member-only. Participants receive messages; owners also receive results. Use room_list(scope="all") for all open non-DM rooms.',
                   'Call room_list to rediscover your rooms and room_context before replying when you need room history.',
                   'room_context is truncated by default; continue with message_id and body_offset=nextOffset; set reply_to when addressing a prior claim; use type=result for a terminal outcome.',
+                  'After opening a PR, the room owner may call watch_pr({repo, number, thread_id}). Cadre watches transitions and ends the linked room on merge; Cadre never merges.',
                   'Call room_send to broadcast. Owners use room_close to archive after deliveries settle; any agent may close once all participants are gone. Other participants post type=result and stop. Use room_reopen to recover an archived room. Room owners and operators use room_end to terminate unshared participants; room_transfer hands ownership to a successor or claims a room whose owner is gone.',
                   'Call agent_dm for a direct message and agent_directory for the unified roster.',
               ].join('\n'),
