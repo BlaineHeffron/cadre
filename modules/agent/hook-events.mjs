@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, opendir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deriveHookState } from '../session-state/providers/hook.mjs';
@@ -8,6 +8,108 @@ export const CLAUDE_FLEET_PLUGIN_DIR = resolve(dirname(fileURLToPath(import.meta
 
 const HOOKS_DIRNAME = join('.agent_bus', 'hooks');
 const STATE_DIRNAME = join(HOOKS_DIRNAME, 'state');
+const hookSessionRegistries = new Map();
+const isDirectory = (path) => lstat(path).then((info) => info.isDirectory(), () => false);
+
+export function registerHookSessionRegistry(provider, getSessions) {
+  hookSessionRegistries.set(getSessions, provider);
+  return () => hookSessionRegistries.delete(getSessions);
+}
+
+export async function removeSessionHookFiles(options) {
+  const paths = await buildHookSessionPaths(options);
+  if (!await isDirectory(join(paths.rootDir, '.agent_bus')) || !await isDirectory(paths.hooksDir)) return;
+  await rm(paths.eventsPath, { force: true });
+  if (await isDirectory(paths.stateDir)) await rm(paths.statePath, { force: true });
+}
+
+// One open directory cursor keeps even very large hook directories bounded.
+export function createHookEventRetention({ store, retentionDays = 7 } = {}) {
+  let roots;
+  let workDirs;
+  let directory;
+  let root;
+  let running = false;
+  let closed = false;
+  let finished;
+  function* knownSessions() {
+    for (const [getSessions, provider] of hookSessionRegistries) {
+      for (const [id, meta] of getSessions()) yield { ...meta, provider, id };
+    }
+  }
+  function liveFiles() {
+    const files = new Set();
+    for (const session of knownSessions()) {
+      if ((session.endedAt && !(session.resumedAt > session.endedAt)) || session.lifecycle === 'ended') continue;
+      for (const id of [session.id, session.cliSessionId].filter(Boolean)) {
+        files.add(`${sanitizeFileToken(session.provider)}-${sanitizeFileToken(id)}.jsonl`);
+      }
+    }
+    return files;
+  }
+  return {
+    async sweep({ now = Date.now() } = {}) {
+      if (closed || running || !(retentionDays >= 0)) return;
+      running = true;
+      try {
+        if (!roots) {
+          const saved = await store.load().catch(() => []);
+          roots = new Set(Array.isArray(saved) ? saved.filter((value) => typeof value === 'string').slice(0, 256) : []);
+        }
+        const before = JSON.stringify([...roots].sort());
+        workDirs ||= knownSessions();
+        for (let i = 0; i < 16; i++) {
+          const next = workDirs.next();
+          if (next.done) { workDirs = null; break; }
+          if (!next.value.workDir) continue;
+          const candidate = await resolveHookProjectRoot(next.value.workDir);
+          if (roots.size < 256 && await isDirectory(join(candidate, '.agent_bus'))
+            && await isDirectory(join(candidate, HOOKS_DIRNAME))) roots.add(candidate);
+        }
+        let entries = 0;
+        const live = liveFiles();
+        const rootLimit = Math.min(4, roots.size);
+        for (let scanned = 0; scanned < rootLimit && entries < 128 && roots.size; scanned++) {
+          if (!directory) {
+            root = roots.values().next().value;
+            roots.delete(root);
+            if (!await isDirectory(join(root, '.agent_bus'))) continue;
+            const hooksDir = join(root, HOOKS_DIRNAME);
+            if (!await isDirectory(hooksDir)) continue;
+            roots.add(root);
+            directory = await opendir(hooksDir);
+          }
+          while (entries < 128) {
+            const entry = await directory.read();
+            if (!entry) { await directory.close(); directory = null; break; }
+            entries++;
+            if (!entry.isFile() || !/^(?:codex-app-server|claude|codex|pi|deepseek)-[A-Za-z0-9._-]+\.jsonl$/.test(entry.name)
+              || live.has(entry.name)) continue;
+            const eventsPath = join(root, HOOKS_DIRNAME, entry.name);
+            const info = await lstat(eventsPath).catch(() => null);
+            if (!info?.isFile() || info.mtimeMs > now - retentionDays * 86_400_000 || liveFiles().has(entry.name)) continue;
+            await rm(eventsPath, { force: true });
+            const stateDir = join(root, STATE_DIRNAME);
+            if (await isDirectory(stateDir)) {
+              await rm(join(stateDir, entry.name.replace(/\.jsonl$/, '.json')), { force: true });
+            }
+          }
+        }
+        if (JSON.stringify([...roots].sort()) !== before) await store.save([...roots]);
+      } catch (error) {
+        await directory?.close().catch(() => {});
+        directory = null;
+        throw error;
+      } finally { running = false; finished?.(); }
+    },
+    async close() {
+      closed = true;
+      if (running) await new Promise((resolveFinished) => { finished = resolveFinished; });
+      await directory?.close();
+      directory = null;
+    },
+  };
+}
 
 function normalizeText(value = '') {
   return typeof value === 'string' ? value.trim() : '';

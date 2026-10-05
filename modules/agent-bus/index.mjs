@@ -158,6 +158,7 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
     pruneObservedParticipant, taskService, ...participants, ...delivery });
 
   createAgentBusObserver({ app, store, adapters, wsManager, observedSessions, deliveryInFlight, observerInFlightByRef,
+    hookEventsRetentionDays: config.hookEventsRetentionDays,
     observerIntervalMs: config.agentBus.pollMs, observerSessionTimeoutMs: Math.max(5000, config.agentBus.pollMs * 5),
     broadcast, broadcastAlert, broadcastThreadSnapshot, broadcastThreadSummary, threadSnapshot, enrichThread,
     normalizeThreadSummary, pruneObservedParticipant, deliverMessage: delivery.deliverMessage,

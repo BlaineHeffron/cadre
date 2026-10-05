@@ -133,6 +133,7 @@ export const config = {
       .filter(Boolean),
   },
 
+  hookEventsRetentionDays: Number(env('CADRE_HOOK_EVENTS_RETENTION_DAYS', '7')),
   agentBus: {
     stateDir: env('AGENT_BUS_STATE_DIR', runtimeStatePath('agent_bus')),
     pollMs: Number(env('AGENT_BUS_POLL_MS', '1000')),

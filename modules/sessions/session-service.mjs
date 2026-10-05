@@ -10,6 +10,7 @@ import { canonicalSessionStateId } from '../session-state/contract.mjs';
 import { sessionStateTracker } from '../session-state/tracker.mjs';
 import { recordSessionDeliveryAudit } from './delivery-audit.mjs';
 import { assertSessionDeletable } from './journal-store.mjs';
+import { registerHookSessionRegistry, removeSessionHookFiles } from '../agent/hook-events.mjs';
 
 const ACTIVE_TURNS = new Set(['queued', 'admitted', 'inflight']);
 const UNSETTLED_INTERACTIONS = new Set(['open', 'answer_timeout']);
@@ -362,6 +363,7 @@ export class SessionService {
       }
     }
     this.initialized = true;
+    this.unregisterHookSessions = registerHookSessionRegistry(this.provider, () => this.sessions);
     return this;
   }
 
@@ -820,6 +822,8 @@ export class SessionService {
       await this.attachmentStore?.releaseSession?.(id);
       this.sessions.delete(id);
       this.stateTracker.remove(canonicalSessionStateId(existing.provider, id));
+      void removeSessionHookFiles({ workDir: existing.workDir, provider: this.provider, sessionId: id })
+        .catch((error) => this.#log('warn', 'Session artifact cleanup failed', { id, path: existing.workDir, err: error.message }));
       return { ...verdict, status: 'deleted' };
     });
   }
@@ -852,6 +856,7 @@ export class SessionService {
   async close({ interrupt = true } = {}) {
     if (interrupt) await this.interruptForRestart();
     await this.journal.close();
+    this.unregisterHookSessions?.();
   }
 
   #requireActive(sessionId) {
