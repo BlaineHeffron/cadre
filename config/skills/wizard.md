@@ -66,4 +66,4 @@ Hold the bar the template sets: open the URL before asking for its value, use `a
 
 {{skill:wizard-template}}
 
-<!-- upstream: mattpocock/skills@885e2ca skills/engineering/wizard/SKILL.md -->
+<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/wizard/SKILL.md -->

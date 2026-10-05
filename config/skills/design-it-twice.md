@@ -53,7 +53,7 @@ Prompt each sub-agent with a separate technical brief (file paths, coupling deta
 - Agent 3: "Optimise for the most common caller: make the default case trivial."
 - Agent 4 (if applicable): "Design around ports & adapters for cross-seam dependencies."
 
-Include both the `codebase-design` vocabulary and CONTEXT.md vocabulary in the brief so each sub-agent names things consistently with the architecture language and the project's domain language.
+Include both the `codebase-design` vocabulary and GLOSSARY.md vocabulary in the brief so each sub-agent names things consistently with the architecture language and the project's domain language.
 
 Each sub-agent outputs:
 
@@ -69,4 +69,4 @@ Present designs sequentially so the user can absorb each one, then compare them 
 
 After comparing, give your own recommendation: which design you think is strongest and why. If elements from different designs would combine well, propose a hybrid. Be opinionated: the user wants a strong read, not a menu.
 
-<!-- upstream: mattpocock/skills@885e2ca skills/engineering/codebase-design/DESIGN-IT-TWICE.md -->
+<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/codebase-design/DESIGN-IT-TWICE.md -->

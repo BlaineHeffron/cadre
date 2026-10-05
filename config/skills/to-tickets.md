@@ -38,7 +38,7 @@ Work from whatever is already in the conversation context. If the user passes a 
 
 ### 2. Explore the codebase (optional)
 
-If you have not already explored the codebase, do so to understand the current state of the code. Ticket titles and descriptions should use the project's domain glossary vocabulary (`CONTEXT.md` if it exists), and respect ADRs in the area you're touching.
+If you have not already explored the codebase, do so to understand the current state of the code. Ticket titles and descriptions should use the project's domain glossary vocabulary (`GLOSSARY.md` if it exists), and respect ADRs in the area you're touching.
 
 Look for opportunities to prefactor the code to make the implementation easier. "Make the change easy, then make the easy change."
 
@@ -124,4 +124,4 @@ The end-to-end behaviour this ticket makes work, from the user's perspective, no
 
 In either form, avoid specific file paths or code snippets: they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.
 
-<!-- upstream: mattpocock/skills@885e2ca skills/engineering/to-tickets/SKILL.md -->
+<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/to-tickets/SKILL.md -->

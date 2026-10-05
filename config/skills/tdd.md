@@ -28,7 +28,7 @@ SOFTWARE.
 
 TDD is the red → green loop. This skill is the reference that makes that loop produce tests worth keeping: what a good test is, where tests go, the anti-patterns, and the rules of the loop. Every section applies on every cycle: consult them before and during the loop, not after.
 
-When exploring the codebase, read `CONTEXT.md` (if it exists) so test names and interface vocabulary match the project's domain language, and respect ADRs in the area you're touching.
+When exploring the codebase, read `GLOSSARY.md` (if it exists) so test names and interface vocabulary match the project's domain language, and respect ADRs in the area you're touching.
 
 ## What a good test is
 
@@ -62,4 +62,4 @@ When the shape of that interface is itself in question (how deep the module is, 
 
 {{skill:tdd-tests}}
 
-<!-- upstream: mattpocock/skills@885e2ca skills/engineering/tdd/SKILL.md -->
+<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/tdd/SKILL.md -->

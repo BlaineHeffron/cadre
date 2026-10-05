@@ -75,4 +75,4 @@ printf 'ERRORED=%s\n' "$ERRORED"
 printf 'ERROR_MSG=%s\n' "$ERROR_MSG"
 ```
 
-<!-- upstream: mattpocock/skills@885e2ca skills/engineering/diagnosing-bugs/scripts/hitl-loop.template.sh -->
+<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/diagnosing-bugs/scripts/hitl-loop.template.sh -->

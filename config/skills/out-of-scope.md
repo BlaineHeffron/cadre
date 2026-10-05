@@ -122,4 +122,4 @@ If the maintainer changes their mind about a previously rejected concept:
 - Old issues don't need reopening; they're historical records
 - The new issue that triggered the reconsideration proceeds through normal triage
 
-<!-- upstream: mattpocock/skills@885e2ca skills/engineering/triage/OUT-OF-SCOPE.md -->
+<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/triage/OUT-OF-SCOPE.md -->
