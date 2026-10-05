@@ -41,7 +41,7 @@ async function fixture(t, setup = '') {
   return { root, repo, metadata, head, options, setPr: (value) => { pr = value; } };
 }
 async function pushConfig(f, text) {
-  if (text === undefined) await git(f.repo, 'rm', '-q', '.cadre/worktree.json');
+  if (text === undefined) await git(f.repo, 'rm', '-q', '--cached', '.cadre/worktree.json');
   else { await writeFile(resolve(f.repo, '.cadre/worktree.json'), text); await git(f.repo, 'add', '.cadre/worktree.json'); }
   await git(f.repo, 'commit', '-m', 'config'); await git(f.repo, 'push', 'origin', 'main');
 }
@@ -106,7 +106,7 @@ test('setup failure removes fresh worktree and branch', async (t) => {
   assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/failed'])).code, 128);
 });
 
-test('no config at the base ref rejects the worktree request', async (t) => {
+test('config only in the local checkout rejects the worktree request', async (t) => {
   const f = await fixture(t); await pushConfig(f);
   await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'unused', roomId: 'thr_none', baseDir: f.options.baseDir }), /no \.cadre\/worktree\.json at origin\/main/);
   assert.equal(await exists(resolve(f.options.baseDir, 'thr_none')), false);
@@ -124,13 +124,13 @@ test('orphan sweep only removes marked closed-room worktrees', async (t) => {
   assert.equal(await exists(unmanaged), true);
 });
 
-for (const mode of ['managed', 'stale local config', 'setup failure', 'launch failure', 'no config']) test(`bootstrap ${mode} with real git`, async (t) => {
+for (const mode of ['managed', 'stale local config', 'setup failure', 'launch failure', 'no config (local only)']) test(`bootstrap ${mode} with real git`, async (t) => {
   const f = await fixture(t);
   const h = await createAgentBusHarness({ beforeReady: async (app) => {
     app.get('/api/codex-app-server/sessions', async () => ({ sessions: [] }));
   } }); t.after(() => h.cleanup());
   if (mode === 'setup failure') await pushConfig(f, JSON.stringify({ setup: 'touch failed; exit 1' }));
-  if (mode === 'no config') await pushConfig(f);
+  if (mode === 'no config (local only)') await pushConfig(f);
   if (mode === 'stale local config') await rm(resolve(f.repo, '.cadre/worktree.json'));
   if (mode === 'launch failure') h.createResponders.claude = () => ({ statusCode: 400, body: { error: 'fixture startup failed' } });
   const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
@@ -139,7 +139,7 @@ for (const mode of ['managed', 'stale local config', 'setup failure', 'launch fa
   } });
   if (!['managed', 'stale local config'].includes(mode)) {
     assert.equal(response.statusCode, 400, response.body);
-    if (mode === 'no config') assert.equal(response.json().error, `${f.repo} has no .cadre/worktree.json at origin/main; managed worktrees require the repo to opt in`);
+    if (mode === 'no config (local only)') assert.equal(response.json().error, `${f.repo} has no .cadre/worktree.json at origin/main; managed worktrees require the repo to opt in`);
     if (mode !== 'launch failure') {
       assert.equal(h.store.listThreads().length, 0);
       assert.equal(h.createdSessions.codex.length, 0); assert.equal(h.createdSessions.claude.length, 0);
@@ -160,6 +160,7 @@ for (const mode of ['managed', 'stale local config', 'setup failure', 'launch fa
   assert.equal(metadata.roomId, response.json().thread.id);
   assert.equal(h.createdSessions.codex[0].workDir, metadata.path);
   assert.equal(h.createdSessions.claude[0].workDir, metadata.path);
+  if (mode === 'stale local config') return;
   await h.app.agentBusLifecycle.linkWorktreePr(metadata.roomId, { repo: 'test/repo', number: 1 });
   await git(metadata.path, 'merge', '--ff-only', f.head);
   await git(f.repo, 'merge', '--ff-only', f.head);
@@ -238,6 +239,14 @@ test('setup copies gitignored files and defaults cleanup to off', async (t) => {
   assert.equal((await cleanupManagedWorktree(metadata, f.options)).reason, 'cleanup off');
 });
 
+test('setup runs from the base ref config, not dirty local config', async (t) => {
+  const f = await fixture(t); await pushConfig(f, JSON.stringify({ setup: 'touch from-base' }));
+  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ setup: 'touch from-local' }));
+  const metadata = await createManagedWorktree({ repo: f.repo, branch: 'divergent', roomId: 'thr_divergent', baseDir: f.options.baseDir });
+  assert.equal(await exists(resolve(metadata.path, 'from-base')), true);
+  assert.equal(await exists(resolve(metadata.path, 'from-local')), false);
+});
+
 test('setup timeout terminates child writers before rollback', async (t) => {
   const f = await fixture(t);
   const escaped = resolve(f.root, 'late-write');
@@ -252,6 +261,8 @@ test('invalid config and missing metadata fail closed', async (t) => {
   const f = await fixture(t);
   assert.equal((await cleanupManagedWorktree({ ...f.metadata, ignoredBaseline: undefined }, f.options)).reason, 'missing or invalid metadata');
   await pushConfig(f, '{');
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, false);
+  assert.equal(await exists(f.metadata.path), true);
   await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'invalid', roomId: 'thr_invalid', baseDir: f.options.baseDir }));
   assert.equal(await exists(resolve(f.options.baseDir, 'thr_invalid')), false);
 });

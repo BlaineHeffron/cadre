@@ -13,11 +13,18 @@ async function git(repo, args, input) {
   if (result.code !== 0) throw new Error(`git ${args[0]} failed`);
   return result.stdout.replace(/\n$/, '');
 }
-// Config comes from the worktree's base commit, never the possibly stale or dirty local checkout.
+// Creation reads the base commit, not the possibly stale local checkout; cleanup reads the operator's local config.
 async function configFor(repo, ref) {
   repo = await git(repo, ['rev-parse', '--show-toplevel']);
-  if (!await git(repo, ['ls-tree', '--name-only', ref, '--', '.cadre/worktree.json'])) return null;
-  const config = JSON.parse(await git(repo, ['show', `${ref}:.cadre/worktree.json`]));
+  let text;
+  if (ref) {
+    if (!await git(repo, ['ls-tree', '--name-only', ref, '--', '.cadre/worktree.json'])) return null;
+    text = await git(repo, ['show', `${ref}:.cadre/worktree.json`]);
+  } else {
+    try { text = await readFile(resolve(repo, '.cadre/worktree.json'), 'utf8'); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  }
+  const config = JSON.parse(text);
   if (!config || !['off', 'on-merge'].includes(config.cleanup ?? 'off')
     || (config.setup !== undefined && typeof config.setup !== 'string')
     || (config.copy !== undefined && (!Array.isArray(config.copy) || config.copy.some((file) => typeof file !== 'string' || !file || isAbsolute(file) || !inside(repo, resolve(repo, file)))))) throw new Error('invalid worktree config');
@@ -91,7 +98,7 @@ export async function cleanupManagedWorktree(metadata, { getPr, rooms = [], sess
       || marker.baseHead !== baseHead || JSON.stringify(marker.ignoredBaseline) !== JSON.stringify(ignoredBaseline)
       || await git(path, ['branch', '--show-current']) !== branch) return keep('missing or invalid metadata');
     // Undoing an untouched failed spawn is independent of the repo's merge cleanup policy.
-    if (!spawnFailed && (await configFor(repo, baseHead))?.cleanup !== 'on-merge') return keep('cleanup off');
+    if (!spawnFailed && (await configFor(repo))?.cleanup !== 'on-merge') return keep('cleanup off');
     const head = await git(path, ['rev-parse', 'HEAD']);
     if (spawnFailed) {
       if (head !== baseHead) return keep('local commits after failed spawn');
