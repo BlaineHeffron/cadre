@@ -83,14 +83,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (req.duenoAuth?.principal?.type !== 'agent' || threadHasOwner(thread, createdByFromRequest(req))) return;
     if (action === 'transfer' && participantKey(req.body.to) === participantKey(createdByFromRequest(req))
       && thread.createdBy && !await sessionExists(thread.createdBy)) return;
-    if (action === 'close') {
-      if (thread.metadata?.dm && threadHasParticipant(thread, createdByFromRequest(req))) return;
-      let alive = false;
-      for (const participant of thread.participants || []) {
-        if (await sessionExists(participant)) { alive = true; break; }
-      }
-      if (!alive) return;
-    }
+    if (action === 'close' && (!thread.metadata?.dm || threadHasParticipant(thread, createdByFromRequest(req)))) return;
     throw Object.assign(new Error('Room ownership required'), { statusCode: 403, code: 'room_owner_required' });
   }
 
