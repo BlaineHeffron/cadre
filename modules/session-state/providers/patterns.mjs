@@ -265,6 +265,8 @@ export function detectProviderState(provider, content) {
   const statusLines = [
     ...footerLines,
     ...nonChromeActive.slice(-3).filter((line) => isStatusActivityLine(line)),
+    // Codex may put a command and a tip below its background-terminal wait.
+    ...providerName === 'codex' ? recentLines.filter((line) => /^◦\s+Waiting for background terminal\s+\(.*\besc to interrupt\b/i.test(line)) : [],
   ];
   const codexPlaceholderVisible = config === PROVIDER_CONFIGS.codex
     && matchesAny(promptWindow, CODEX_PLACEHOLDER_PATTERNS);

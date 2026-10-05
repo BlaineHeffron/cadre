@@ -1,0 +1,41 @@
+
+  [38;5;246mCalled dueno [1m2[0m[38;5;246m times (ctrl+o to expand)[39m
+
+[38;5;231m●[39m PR #35 (operator approval) is merged into [38;5;153mmain[39m. Two of the PHONON fixes are
+  now running, and the other two are queued.
+
+  [1mPR #35:[0m the fix updated the test, as I asked. It now checks that the MCP
+  schema rejects [38;5;153mGET[39m and [38;5;153mpost[39m, and it also calls the server directly with [38;5;153mGET[39m to
+  confirm the server-side allowlist still rejects it. All 8 operator-approval
+  tests pass at the final head, which already includes PR #36. I merged it
+  pinned to that commit and confirmed it's on [38;5;153mmain[39m.
+
+  [1mRunning[0m [1mnow:[0m
+  - [1mSafe-wait[0m [1mrule[0m [1mplus[0m [1mANSI[0m [1mstripping[0m (items 1 and 5), room
+    [38;5;153mthr_64531e3cdbc8cc35[39m. Adds one onboarding line ("wait by exact PID; never
+    [38;5;153mpgrep[39m [38;5;153m-f[39m a pattern from your own command") and strips escape codes from
+    [38;5;153mmonitor_get_session_output[39m.
+  - [1mDelivery[0m [1mlatency[0m (item 3), room [38;5;153mthr_bb6583268e61f13d[39m. It starts read-only:
+    measure 7 days of live queue-to-delivery times by hold reason, so we know
+    how much is real busy time and how much is false "not yet stable" holds.
+    Then fix only the false-busy cases it can reproduce from real captured panes
+    or transcripts. The reviewer is told to block anything that could type into
+    a genuinely busy agent. It also exposes how long each message has been
+    held.
+
+  [1mQueued[0m behind the collab-worktrees PR, because both change the spawn path:
+  - [1m2:[0m pass the starting task through the CLI or system prompt instead of
+    pasting it.
+  - [1m4:[0m fix the "can't find pane" spawn race, and clean up half-created rooms.
+
+  [1mAfter[0m [1mthat:[0m
+  - restart production for #35, #36 and everything else that has merged;
+  - the nono spike, once nono is installed.
+
+[38;5;246m✻[39m [38;5;246mSautéed for 1m 16s · done 1:58 PM[39m
+
+[38;5;244m────────────────────────────────────────────────────────────────────────────────
+[39m❯ 
+[38;5;244m────────────────────────────────────────────────────────────────────────────────
+[39m  [38;5;211m⏵⏵[39m [38;5;211mbypass[39m [38;5;211mpermissions[39m [38;5;211mon[38;5;246m (shift+tab[39m [38;5;246mto[39m [38;5;246mcycle)[39m [38;5;246m·[39m [38;5;246m← 1[39m [38;5;246magent[39m
+

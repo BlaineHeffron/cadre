@@ -71,6 +71,31 @@ test('room context defaults to truncated bodies and omits deliveries', async () 
   assert.equal(payload.thread.participants[0].canSendNowReason, 'Provider reports working');
 });
 
+test('room context exposes queued age and detailed hold reason when deliveries are requested', async () => {
+  const now = Date.now();
+  const server = buildAgentBusMcpServer({ requestImpl: async () => ({
+    thread: { id: 'thr_1', participants: [{ kind: 'codex', sessionId: 'c1' }] },
+    messages: [],
+    deliveries: [
+      { id: 'held', status: 'queued', createdAt: now - 120_000, holdReason: 'can_send_false', holdDetail: 'Free-text prompt is not yet stable' },
+      { id: 'pending', status: 'queued', createdAt: now + 60_000 },
+      { id: 'injected', status: 'injected', createdAt: now - 120_000 },
+      { id: 'failed', status: 'failed', createdAt: now - 120_000, holdReason: 'backoff' },
+    ],
+  }) });
+  const result = await server.callTool('room_context', { thread_id: 'thr_1', deliveries: true }, context);
+  const [held, pending, injected, failed] = result.structuredContent.deliveries;
+  assert.ok(held.held_for_s >= 120 && held.held_for_s < 125);
+  assert.equal(held.hold_reason, 'Free-text prompt is not yet stable');
+  assert.equal(held.holdReason, 'can_send_false');
+  assert.equal(pending.held_for_s, 0);
+  assert.equal(pending.hold_reason, null);
+  assert.equal(injected.held_for_s, 0);
+  assert.equal(injected.hold_reason, null);
+  assert.equal(failed.held_for_s, 0);
+  assert.equal(failed.hold_reason, 'backoff');
+});
+
 test('room context pages a truncated body with message_id and body_offset', async () => {
   const longBody = 'x'.repeat(2000);
   const paths = [];
