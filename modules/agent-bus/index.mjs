@@ -66,6 +66,7 @@ function buildStateSnapshotEntry(snapshot, enriched, { includeMessages, includeD
 
 export async function agentBusPlugin(app, { wsManager, productionControls = getProductionControlRegistry(),
   store = new AgentBusStore(), credentialStore = getAgentBusCredentialStore(), taskService = null } = {}) {
+  if (!app.hasDecorator('agentBusLifecycle')) app.decorate('agentBusLifecycle', {});
   store.setLogger?.(app.log);
   const adapters = createAgentAdapters();
   const observedSessions = new Set();

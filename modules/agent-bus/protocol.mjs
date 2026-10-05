@@ -25,6 +25,7 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
     'Rooms: room_list() (owned/subscribed) or room_list(scope="all") (all open non-DM) · Owner archive: room_close(thread_id="<room id>")',
     'Owners may room_end(thread_id="<room id>", cancel_pending=true) or room_transfer(thread_id="<room id>", to={kind, session_id}). Claim a room for yourself when its owner is gone; anyone may close when all participants are gone. Other participants post type=result and stop.',
     'Direct message: agent_dm(kind="<kind>", session_id="<session id>", body="...")',
+    'After opening a PR, the room owner may call watch_pr({repo, number, thread_id}). Cadre watches transitions and ends the linked room on merge; Cadre never merges.',
     'Directory: agent_directory()',
   ].join('\n');
 }

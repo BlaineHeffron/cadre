@@ -311,6 +311,7 @@ export function normalizeGithubAgentRepo(input = {}, {
     lastPollMs: normalizeMs(input.lastPollMs ?? input.last_poll_ms),
     lastEvent: normalizeText(input.lastEvent ?? input.last_event),
     lastSpawnSessionId: normalizeText(input.lastSpawnSessionId ?? input.last_spawn_session_id),
+    watches: Array.isArray(input.watches) ? clone(input.watches) : [],
     spawnedItemKeys: normalizeSpawnedItemKeys(input.spawnedItemKeys ?? input.spawned_item_keys),
     lastError: normalizeText(input.lastError ?? input.last_error),
     enabled: normalizeBoolean(input.enabled, true),
@@ -377,6 +378,7 @@ export function buildGithubAgentRepoStore({
     }
     state.repos[repo.id] = {
       ...repo,
+      watches: prior?.watches || [],
       createdAtMs: prior?.createdAtMs || repo.createdAtMs,
       updatedAtMs: now(),
     };
@@ -395,6 +397,7 @@ export function buildGithubAgentRepoStore({
     });
     state.repos[id] = {
       ...next,
+      watches: prior.watches,
       createdAtMs: prior.createdAtMs || next.createdAtMs,
       updatedAtMs: now(),
     };
@@ -425,12 +428,43 @@ export function buildGithubAgentRepoStore({
     return clone(existing);
   }
 
+  async function listWatches() {
+    await load();
+    return Object.values(state.repos).flatMap((repo) => repo.watches).map(clone);
+  }
+
+  async function putWatch(input, creator) {
+    await load();
+    const repo = state.repos[normalizeText(input.repo)];
+    if (!repo) throw new Error('GitHub repo is not configured');
+    if (!Number.isSafeInteger(input.number) || input.number < 1) throw new Error('PR number must be a positive integer');
+    if (!creator?.kind || !creator.sessionId) throw new Error('Authenticated agent identity required');
+    const prior = repo.watches.find((watch) => watch.number === input.number);
+    const watch = { ...(prior || { createdAtMs: now(), lastReviewId: 0 }), repo: repo.id,
+      number: input.number, creator: clone(creator), thread_id: normalizeText(input.thread_id) || null };
+    if (prior) repo.watches[repo.watches.indexOf(prior)] = watch;
+    else repo.watches.push(watch);
+    await save();
+    return clone(watch);
+  }
+
+  async function updateWatch(repoId, number, patch = null) {
+    await load();
+    const repo = state.repos[repoId];
+    const watch = repo?.watches.find((item) => item.number === number);
+    if (!watch) return null;
+    if (patch) Object.assign(watch, patch);
+    else repo.watches.splice(repo.watches.indexOf(watch), 1);
+    await save();
+    return clone(watch);
+  }
+
   async function close() {
     await saveQueue.catch(() => {});
     if (typeof backingStore.close === 'function') await backingStore.close();
   }
 
-  return { upsertRepo, updateRepo, listRepos, getRepo, deleteRepo, close };
+  return { upsertRepo, updateRepo, listRepos, getRepo, deleteRepo, listWatches, putWatch, updateWatch, close };
 }
 
 export async function pollGithubRepo(repoInput = {}, {
@@ -523,6 +557,9 @@ export class GithubAgentPoller {
     tmuxSessionExists = null,
     deleteSession = null,
     onResult = () => {},
+    getThread = () => null,
+    endThread = null,
+    notifyWatch = async () => {},
     log = null,
   } = {}) {
     this.repoStore = repoStore;
@@ -542,6 +579,9 @@ export class GithubAgentPoller {
     this.deleteSession = deleteSession;
     this.pollQueue = Promise.resolve();
     this.onResult = onResult;
+    this.getThread = getThread;
+    this.endThread = endThread;
+    this.notifyWatch = notifyWatch;
     this.log = log;
     this.timer = null;
   }
@@ -560,6 +600,7 @@ export class GithubAgentPoller {
         updatedRepo: safeRepoRecord(repo),
       };
     }
+    if (!suppressSpawn && repo.enabled) await this.pollWatches(repo);
     const result = await pollGithubRepo(repo, {
       fetchImpl: this.fetchImpl,
       env: this.config.env || process.env,
@@ -625,6 +666,49 @@ export class GithubAgentPoller {
     };
     await this.onResult(payload);
     return payload;
+  }
+
+  async pollWatches(repo) {
+    for (const watch of repo.watches || []) {
+      try {
+        const target = () => {
+          const owner = watch.thread_id ? this.getThread(watch.thread_id)?.thread?.createdBy : null;
+          return owner?.kind && owner.kind !== 'user' && owner.sessionId ? owner : watch.creator;
+        };
+        const label = `PR ${repo.id}#${watch.number}`;
+        const notify = (line, recipient = target()) => this.notifyWatch(recipient, `[PR_WATCH] ${label} ${line}`);
+        if (this.now() - watch.createdAtMs >= 7 * 24 * 60 * 60 * 1000) {
+          await notify('watch expired after 7 days');
+          await this.repoStore.updateWatch(repo.id, watch.number);
+          continue;
+        }
+        const url = `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${watch.number}`;
+        const options = { token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs };
+        const pr = await fetchGithubJson(this.fetchImpl, url, options);
+        const reviews = await fetchGithubJson(this.fetchImpl, `${url}/reviews`, options);
+        for (const review of reviews.filter((item) => item.id > watch.lastReviewId).sort((a, b) => a.id - b.id)) {
+          const lines = String(review.body || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+          const verdict = lines.find((line) => /^VERDICT\b/.test(line)) || (lines[0] || '').slice(0, 200);
+          await notify(`review by ${review.user?.login || 'unknown'} (${review.state}): ${verdict}${lines.filter((line) => /^- \[B\]/.test(line)).slice(0, 5).map((line) => `\n${line}`).join('')}`);
+          await this.repoStore.updateWatch(repo.id, watch.number, { lastReviewId: review.id });
+        }
+        if (pr.merged || pr.state === 'closed') {
+          const recipient = target();
+          let suffix = '';
+          if (pr.merged && watch.thread_id && this.endThread) {
+            const result = await this.endThread(watch.thread_id, { cancelPending: true, reason: 'PR merged' });
+            suffix = ` · ended room ${watch.thread_id}: ${result.results.filter((item) => item.status === 'terminated').length} sessions terminated`;
+          }
+          await notify(pr.merged ? `merged (${String(pr.head?.sha || '').slice(0, 7)})${suffix}` : 'closed without merge', recipient);
+          await this.repoStore.updateWatch(repo.id, watch.number);
+        } else {
+          if (pr.mergeable_state === 'dirty' && watch.mergeableState !== 'dirty') await notify('has merge conflict');
+          await this.repoStore.updateWatch(repo.id, watch.number, { state: pr.state, mergeableState: pr.mergeable_state });
+        }
+      } catch (error) {
+        this.log?.warn?.({ repoId: repo.id, number: watch.number, code: sanitizedError(error) }, 'PR watch poll failed');
+      }
+    }
   }
 
   pollOnce(options = {}) {
