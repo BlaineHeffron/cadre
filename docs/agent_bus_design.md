@@ -166,3 +166,52 @@ A legacy or stopped loop raises no attention item. Only failed deliveries are bu
 Older stored rooms may contain `metadata.managerLoop`. That object is inert archived history. The dashboard shows a compact read-only block with its status, iteration count, last decision, and error. The bus does not inspect it for scheduling, lifecycle transitions, attention, message routing, completion, or session control.
 
 All former manager-loop runtime, parsing, and MCP controls have been removed. Recurring prompt injection is a scheduler feature (loop sessions), not a bus feature.
+
+## Managed worktrees
+
+Repositories opt in with a checked-in `.cadre/worktree.json`:
+
+```json
+{ "setup": "npm ci", "copy": ["local-settings.json"], "cleanup": "on-merge" }
+```
+
+`cleanup` defaults to `off`. Without this config, spawning behaves as before.
+`spawn_collab_session` and `spawn_conference_session` accept
+`worktree: { repo: "/local/repo", branch: "feat/task", base: "origin/main" }`;
+`base` defaults to origin's default branch. Managed spawns require newly created
+participants, all using the same directory. Cadre fetches, creates a locked
+worktree under `~/.cadre/worktrees/collab`, copies only gitignored paths, then
+runs setup with `CADRE_WORKTREE_PATH` and `CADRE_REPO_ROOT` (120-second timeout).
+Setup failure removes the fresh worktree before launching any participants.
+Room metadata and a marker in git metadata preserve the path, repo, branch, base,
+room id and ignored-file baseline.
+
+Link the PR with `watch_pr({ repo, number, thread_id })`. Room end and the PR
+merge notification report `worktree: removed` or `worktree: kept (<reason>)`.
+Cleanup keeps worktrees when cleanup is off; metadata is missing or invalid;
+the linked PR is absent, unmerged or missing its head; local commits are not
+in the merged PR (including unpushed commits); tracked or untracked files are
+dirty; ignored files appear beyond the setup baseline; another open room or
+live session uses the directory; or a GitHub, git, filesystem or session lookup
+fails. User git settings cannot hide untracked files. `node_modules` is exempt
+only when present in the baseline. When `.agent_bus` contains no tracked files
+and is a physical directory, Cadre owns only its `hooks/` and `state/` contents:
+these are excluded from cleanliness checks and removed after all checks pass.
+Other files such as `.agent_bus/notes` still block cleanup. Ancestry or containment of every local
+commit's stable patch-id proves landing, including rewritten PR commits.
+
+Removal unlocks, unlinks external top-level symlinks without following them,
+leaves tracked symlinks for git to remove safely,
+uses plain `git worktree remove`, attempts `git branch -d`, and prunes. If safe
+branch deletion refuses (for example after squash merge), the worktree is
+removed but its branch and tip are retained, with the git reason reported.
+After a partial spawn failure, cleanup removes only an unchanged base HEAD
+with clean files, the setup baseline, and no shared users; otherwise it reports
+why it kept the worktree. Only rollback inside fresh creation uses forced worktree removal; its branch
+is deleted only if it still equals the original base commit.
+The existing hourly observer sweep checks marked Cadre worktrees whose rooms
+are closed or gone with the same checks, and logs every keep reason. Open-room
+worktrees and unmarked directories are left alone.
+
+Ignored-file listings exceeding the git command output limit (for example large
+nested dependency directories) keep the worktree for operator review.

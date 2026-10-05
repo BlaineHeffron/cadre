@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { configFor, createManagedWorktree, linkManagedWorktreePr, cleanupManagedWorktree, sweepManagedWorktrees } from './managed-worktrees.mjs';
 import { listCodexModels } from '../sessions/codex-models.mjs';
 import { listProviderModels } from '../sessions/model-catalog.mjs';
 import { listPiModels, PI_FALLBACK_MODELS, PI_PROVIDER_DEFINITIONS } from '../sessions/pi-model-catalog.mjs';
@@ -71,8 +73,31 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
   threadMatchesStatusFilter, buildStateSnapshotEntry, normalizeCollectionLimit, participantKey, participantRef,
   threadHasParticipant, threadHasOwner, uniqueAgentRefs, isAgentRef, pruneObservedParticipant, planParticipant, executeParticipantPlan,
   discardCreatedParticipants, waitForSessionReady, injectBootstrapStartupText, createBootstrapMessage,
-  deliverMessage, failDelivery, replayDelivery, taskService = null }) {
+  deliverMessage, failDelivery, replayDelivery, taskService = null, managedWorktreeBaseDir }) {
   const endingThreads = new Set();
+  async function cleanupWorktree(metadata, spawnFailed = false) {
+    try {
+      const sessions = [];
+      for (const adapter of Object.values(adapters)) for (const summary of await adapter.listSessions(app)) {
+        if (summary.lifecycle === 'ended') continue;
+        if (summary.lifecycle === 'interrupted') {
+          if (!summary.workDir) throw new Error('interrupted session working directory unknown');
+          sessions.push(summary); continue;
+        }
+        try {
+          const session = await adapter.getSession(app, summary.id || summary.sessionId);
+          const workDir = session.workDir || session.session?.workDir;
+          if (!workDir) throw new Error('live session working directory unknown');
+          sessions.push({ workDir });
+        } catch (error) { if (error.statusCode !== 404) throw error; }
+      }
+      return cleanupManagedWorktree(metadata, { rooms: store.listThreads(), sessions, baseDir: managedWorktreeBaseDir, spawnFailed,
+        getPr: (value) => app.agentBusLifecycle.getWorktreePr?.(value) });
+    } catch (error) { return { removed: false, reason: error.message, report: `worktree: kept (${error.message})` }; }
+  }
+  app.agentBusLifecycle.sweepWorktrees = () => sweepManagedWorktrees({
+    baseDir: managedWorktreeBaseDir, getRoom: (id) => store.getThread(id)?.thread, cleanup: cleanupWorktree, log: app.log,
+  });
   async function sessionExists(ref) {
     if (!adapters[ref?.kind]) return true;
     try { await adapters[ref.kind].getSession(app, ref.sessionId); return true; }
@@ -191,16 +216,24 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     const requested = Array.isArray(req.body?.participants) ? req.body.participants : [];
     if (requested.length < 2) return reply.code(400).send({ error: 'At least two participants are required' });
     const created = [];
+    let worktree = null;
+    const roomId = `thr_${randomUUID().replaceAll('-', '')}`;
     try {
+      if (req.body.worktree && requested.some((p) => p.sessionId || p.create === false) && await configFor(req.body.worktree.repo)) throw new Error('managed worktrees require newly created participants');
       const plans = [];
       for (const participant of requested) plans.push(await planParticipant(participant, req.body.workDir || '', {
         model: req.body.model, thinkingLevel: req.body.thinkingLevel, mcpProfile: req.body.mcpProfile,
         mcpServers: req.body.mcpServers, codexPlugins: req.body.codexPlugins,
         promptProfile: req.body.promptProfile, requireDueno: true, structured: req.body.structured === true,
       }));
-      for (const plan of plans) created.push(await executeParticipantPlan(plan));
-      const thread = await store.createThread({ title: req.body.title, projectKey: req.body.projectKey,
-        participants: created.map(participantRef), metadata: { source: 'bootstrap' },
+      if (req.body.worktree) worktree = await createManagedWorktree({ ...req.body.worktree, roomId, baseDir: managedWorktreeBaseDir });
+      for (const plan of plans) {
+        if (worktree) plan.createArgs.workDir = worktree.path;
+        const participant = await executeParticipantPlan(plan);
+        created.push(participant);
+      }
+      const thread = await store.createThread({ id: worktree ? roomId : undefined, title: req.body.title, projectKey: req.body.projectKey,
+        participants: created.map(participantRef), metadata: { source: 'bootstrap', ...(worktree ? { worktree } : {}) },
         createdBy: createdByFromRequest(req) });
       const messages = []; const deliveries = []; const failedParticipants = [];
       for (let index = 0; index < created.length; index += 1) {
@@ -226,7 +259,8 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
         messages, deliveries, bootstrapOk: failedParticipants.length === 0, failedParticipants, warnings: [] };
     } catch (err) {
       await discardCreatedParticipants(created);
-      return reply.code(400).send({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+      const result = worktree ? await cleanupWorktree(worktree, true) : undefined;
+      return reply.code(400).send({ ...(result ? { worktree: result } : {}), error: err.message, ...(err.rollbackError ? { rollbackError: err.rollbackError, worktree: { removed: false, report: `worktree: kept (${err.rollbackError})` } } : {}), ...(err.code ? { code: err.code } : {}) });
     }
   });
 
@@ -303,12 +337,17 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
         : { participant, status: 'failed', reason: err.message };
     });
     thread.participants.forEach(pruneObservedParticipant); await broadcastThreadSummary(thread.id);
-    return { ok: results.every((item) => item.status !== 'failed'), status: 'ended', thread: normalizeThreadSummary(await enrichThread(thread)), results, skipped };
+    const worktree = thread.metadata?.worktree ? await cleanupWorktree(thread.metadata.worktree) : undefined;
+    return { ...(worktree ? { worktree } : {}), ok: results.every((item) => item.status !== 'failed'), status: 'ended', thread: normalizeThreadSummary(await enrichThread(thread)), results, skipped };
     } finally { endingThreads.delete(snapshot.thread.id); }
   }
 
   Object.assign(app.agentBusLifecycle, {
     getThread: (id) => store.getThread(id),
+    linkWorktreePr: async (id, pr) => {
+      const metadata = store.getThread(id)?.thread.metadata?.worktree;
+      if (metadata) await store.updateThreadMetadata(id, { worktree: await linkManagedWorktreePr(metadata, pr) });
+    },
     endThread: (id, options) => endRoom({ params: { threadId: id }, body: options }, {
       code(statusCode) { return { send(payload) { throw Object.assign(new Error(payload.error), { statusCode, code: payload.code }); } }; },
     }),

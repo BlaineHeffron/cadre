@@ -21,3 +21,9 @@ Cadre injects the collab workflow through `modules/agent-bus/protocol.mjs`; task
 `AGENTS.md` and its linked docs own repo setup, safe execution, verification, and commit/PR conventions; task files must not repeat those rules. The coordinator profile owns findings routing and the Claude Code MCP reconnect instruction.
 
 Keep machine-specific paths and limits in the task file or per-instance prompt profile: shared dependency location, protected live checkout/port, process ownership, one heavy job at a time, and operator playtesting constraints.
+
+For an opted-in repository (`.cadre/worktree.json`), pass
+`worktree: { repo: "/local/repo", branch: "feat/task", base: "origin/main" }`
+to `spawn_collab_session` or `spawn_conference_session` with new participants.
+Cadre creates and sets their shared workDir. Link the PR with `watch_pr` for
+fail-closed cleanup on merge; see [Managed worktrees](agent_bus_design.md#managed-worktrees).

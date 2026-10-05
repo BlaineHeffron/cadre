@@ -65,7 +65,7 @@ function buildStateSnapshotEntry(snapshot, enriched, { includeMessages, includeD
 }
 
 export async function agentBusPlugin(app, { wsManager, productionControls = getProductionControlRegistry(),
-  store = new AgentBusStore(), credentialStore = getAgentBusCredentialStore(), taskService = null } = {}) {
+  store = new AgentBusStore(), credentialStore = getAgentBusCredentialStore(), taskService = null, managedWorktreeBaseDir } = {}) {
   if (!app.hasDecorator('agentBusLifecycle')) app.decorate('agentBusLifecycle', {});
   store.setLogger?.(app.log);
   const adapters = createAgentAdapters();
@@ -155,7 +155,7 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
     readProviderPreferences: () => getAgentProviderPreferencesSync(), broadcast, broadcastAlert, broadcastThreadSnapshot,
     broadcastThreadSummary, enrichThread, normalizeThreadSummary, threadMatchesStatusFilter, buildStateSnapshotEntry,
     normalizeCollectionLimit, participantKey, participantRef, threadHasParticipant, threadHasOwner, uniqueAgentRefs, isAgentRef,
-    pruneObservedParticipant, taskService, ...participants, ...delivery });
+    pruneObservedParticipant, taskService, managedWorktreeBaseDir, ...participants, ...delivery });
 
   createAgentBusObserver({ app, store, adapters, wsManager, observedSessions, deliveryInFlight, observerInFlightByRef,
     hookEventsRetentionDays: config.hookEventsRetentionDays,

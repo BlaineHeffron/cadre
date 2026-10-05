@@ -34,7 +34,7 @@ function safeBranchPart(value = '') {
     .slice(0, 48);
 }
 
-async function resolveOriginBaseRef(repoRoot) {
+export async function resolveOriginBaseRef(repoRoot) {
   const remoteHead = await exec('git', ['-C', repoRoot, 'ls-remote', '--symref', 'origin', 'HEAD']).catch(() => null);
   const defaultBranch = normalizeText(remoteHead?.stdout).match(/^ref:\s+refs\/heads\/([^\s]+)\s+HEAD$/m)?.[1] || '';
   const refs = defaultBranch ? [defaultBranch] : ['main', 'master'];

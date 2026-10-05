@@ -232,13 +232,13 @@ export class AgentBusStore {
     );
   }
 
-  async createThread({ title, projectKey, participants, metadata, createdBy }) {
+  async createThread({ id, title, projectKey, participants, metadata, createdBy }) {
     const now = Date.now();
     const owner = createdBy?.kind && createdBy?.sessionId
       ? { kind: String(createdBy.kind), sessionId: String(createdBy.sessionId) }
       : null;
     const thread = {
-      id: makeId('thr'),
+      id: id || makeId('thr'),
       title: title?.trim() || 'Untitled thread',
       projectKey: projectKey?.trim() || '',
       status: 'open',
