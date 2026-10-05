@@ -233,4 +233,4 @@ set_secret STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"   # CI needs this one
 finish
 ```
 
-<!-- upstream: mattpocock/skills@885e2ca skills/engineering/wizard/template.sh -->
+<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/wizard/template.sh -->

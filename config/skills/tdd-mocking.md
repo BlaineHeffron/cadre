@@ -84,4 +84,4 @@ The SDK approach means:
 - Easier to see which endpoints a test exercises
 - Type safety per endpoint
 
-<!-- upstream: mattpocock/skills@885e2ca skills/engineering/tdd/mocking.md -->
+<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/tdd/mocking.md -->

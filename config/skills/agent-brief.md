@@ -232,4 +232,4 @@ This is bad because:
 - No scope boundaries
 - No description of current vs desired behavior
 
-<!-- upstream: mattpocock/skills@885e2ca skills/engineering/triage/AGENT-BRIEF.md -->
+<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/triage/AGENT-BRIEF.md -->

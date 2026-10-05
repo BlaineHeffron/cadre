@@ -1,5 +1,5 @@
 ---
-description: CONTEXT.md glossary format, single- and multi-context repos.
+description: GLOSSARY.md glossary format, single- and multi-context repos.
 ---
 
 <!--
@@ -24,7 +24,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 -->
 
-# CONTEXT.md Format
+# GLOSSARY.md Format
 
 ## Structure
 
@@ -57,18 +57,18 @@ _Avoid_: Client, buyer, account
 
 ## Single vs multi-context repos
 
-**Single context (most repos):** One `CONTEXT.md` at the repo root.
+**Single context (most repos):** One `GLOSSARY.md` at the repo root.
 
-**Multiple contexts:** A `CONTEXT-MAP.md` at the repo root lists the contexts, where they live, and how they relate to each other:
+**Multiple contexts:** A `GLOSSARY-MAP.md` at the repo root lists the contexts, where they live, and how they relate to each other:
 
 ```md
-# Context Map
+# Glossary Map
 
 ## Contexts
 
-- [Ordering](./src/ordering/CONTEXT.md): receives and tracks customer orders
-- [Billing](./src/billing/CONTEXT.md): generates invoices and processes payments
-- [Fulfillment](./src/fulfillment/CONTEXT.md): manages warehouse picking and shipping
+- [Ordering](./src/ordering/GLOSSARY.md): receives and tracks customer orders
+- [Billing](./src/billing/GLOSSARY.md): generates invoices and processes payments
+- [Fulfillment](./src/fulfillment/GLOSSARY.md): manages warehouse picking and shipping
 
 ## Relationships
 
@@ -79,4 +79,4 @@ _Avoid_: Client, buyer, account
 
 When multiple contexts exist, infer which one the current topic relates to. If unclear, ask.
 
-<!-- upstream: mattpocock/skills@885e2ca skills/engineering/domain-modeling/CONTEXT-FORMAT.md -->
+<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/domain-modeling/GLOSSARY-FORMAT.md -->

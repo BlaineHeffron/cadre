@@ -62,4 +62,4 @@ Third-party services (Stripe, Twilio, etc.) you don't control. The deepened modu
 - Tests assert on observable outcomes through the interface, not internal state.
 - Tests should survive internal refactors, since they describe behaviour, not implementation. If a test has to change when the implementation changes, it's testing past the interface.
 
-<!-- upstream: mattpocock/skills@885e2ca skills/engineering/codebase-design/DEEPENING.md -->
+<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/codebase-design/DEEPENING.md -->

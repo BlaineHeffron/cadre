@@ -134,4 +134,4 @@ Good interfaces make testing natural:
 - **Deepening a cluster given its dependencies**: the `codebase-deepening` fleet skill (config/skills/codebase-deepening.md): dependency categories, seam discipline, and replace-don't-layer testing.
 - **Exploring alternative interfaces**: the `design-it-twice` fleet skill (config/skills/design-it-twice.md): spin up parallel sub-agents to design the interface several radically different ways, then compare on depth, locality, and seam placement.
 
-<!-- upstream: mattpocock/skills@885e2ca skills/engineering/codebase-design/SKILL.md -->
+<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/codebase-design/SKILL.md -->

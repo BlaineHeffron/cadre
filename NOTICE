@@ -5,7 +5,11 @@ Cadre includes adapted third-party launch skills in config/skills/. Those files 
 
 mattpocock/skills (MIT)
 Copyright (c) 2026 Matt Pocock
-Skills: adr-format, agent-brief, codebase-deepening, codebase-design, context-format, debug-hard, design-it-twice, domain-modeling, grilling, hitl-loop, out-of-scope, skill-mechanics, tdd, tdd-mocking, tdd-tests, to-questionnaire, to-tickets, triage, wizard, wizard-template, writing-for-agents.
+Skills: adr-format, agent-brief, codebase-deepening, codebase-design, debug-hard, design-it-twice, domain-modeling, glossary-format, grilling, hitl-loop, implement-spec, out-of-scope, pr, retro, skill-mechanics, tdd, tdd-mocking, tdd-tests, to-questionnaire, to-tickets, triage, wizard, wizard-template, writing-for-agents.
+
+humanlayer/skills (MIT)
+Copyright (c) 2026 HumanLayer
+Skills: pr (Summary visuals adapted from Dex Horthy's show-me, via mattpocock/skills).
 
 obra/superpowers (MIT)
 Copyright (c) 2025 Jesse Vincent

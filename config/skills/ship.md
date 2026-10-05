@@ -78,7 +78,7 @@ git push -u origin <feature-branch>
 gh pr create --base <base-branch>
 ```
 
-Follow the repo's PR template and conventions if present, and report the URL. Keep the worktree — PR feedback gets fixed there.
+Use the `pr` fleet skill (config/skills/pr.md) for the PR body. Follow the repo's PR template and conventions if present, and report the URL. Keep the worktree — PR feedback gets fixed there.
 
 ### Option 2: Merge Locally
 
