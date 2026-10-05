@@ -8,23 +8,24 @@ const thread = { thread_id: id };
 const task = { ...thread, task_id: id };
 
 export const TASK_TOOLS = [
-  { name: 'task_spawn', description: 'Persist and launch one bounded child task. Reusing parent/task_key returns the same task, including unknown startup outcomes.',
+  { name: 'task_spawn', description: 'Persist and launch one bounded child task. Reusing parent/task_key returns the same task, including unknown startup outcomes. Returns task_id, thread_id, session_id and status.',
     inputSchema: object({ ...thread, parent_task_id: id, task_key: id,
       spec: object({ provider: id, workDir: { ...id, maxLength: 4096 }, model: id,
         displayName: id, initialPrompt: { type: 'string', maxLength: 200000 } }, ['provider', 'workDir', 'model']),
     }, ['thread_id', 'task_key', 'spec']) },
-  { name: 'task_send', description: 'Persist idempotent task input. Ordinary input queues while busy; explicit steer requires the expected active turn and negotiated support.',
+  { name: 'task_send', description: 'Persist idempotent task input. Ordinary input queues while busy; explicit steer requires the expected active turn and negotiated support. Returns message_id and status.',
     inputSchema: object({ ...task, message_key: id, input: { type: 'string', minLength: 1, maxLength: 200000 },
       mode: { enum: ['queue', 'steer'] }, expected_turn_id: id }, ['thread_id', 'task_id', 'message_key', 'input']) },
-  { name: 'task_wait', description: 'Collect durable task events/results after an opaque cursor across sessions and replacement attempts. Returning a cursor does not acknowledge its consumption; pass it on the next wait.',
+  { name: 'task_wait', description: 'Collect durable task events/results after an opaque cursor across sessions and replacement attempts. Returning a cursor does not acknowledge its consumption; pass it on the next wait. MCP defaults to 50 events; pass the cursor and limit for more.',
     inputSchema: object({ ...thread, task_ids: { type: 'array', minItems: 1, maxItems: 24, uniqueItems: true, items: id },
+      limit: { type: 'integer', minimum: 1, maximum: 200 },
       after: { type: 'string', maxLength: 100000 }, timeout_ms: { type: 'integer', minimum: 0, maximum: 30000 },
     }, ['thread_id', 'task_ids']) },
   { name: 'task_status', description: 'Read stable task/session/attempt/turn identities, startup evidence, mailbox state and durable outcomes.',
     inputSchema: object(task, ['thread_id', 'task_id']) },
-  { name: 'task_cancel', description: 'Persist idempotent cancellation and fence further input. Provider confirmation and unknown outcomes remain distinct.',
+  { name: 'task_cancel', description: 'Persist idempotent cancellation and fence further input. Provider confirmation and unknown outcomes remain distinct. Returns task_id, thread_id, session_id and status.',
     inputSchema: object({ ...task, request_key: id, scope: { enum: ['child', 'descendants'] } }, ['thread_id', 'task_id', 'request_key']) },
-  { name: 'task_resume', description: 'Reconcile or explicitly replace an interrupted task attempt without replaying uncertain external effects.',
+  { name: 'task_resume', description: 'Reconcile or explicitly replace an interrupted task attempt without replaying uncertain external effects. Returns task_id, thread_id, session_id and status.',
     inputSchema: object({ ...task, request_key: id }, ['thread_id', 'task_id', 'request_key']) },
 ];
 
@@ -92,7 +93,7 @@ export function registerTaskRoutes({ app, store, service }) {
             return await service.send(args.task_id, args.message_key, args.input,
               { mode: args.mode || 'queue', expectedTurnId: args.expected_turn_id });
           case 'task_wait':
-            return await service.wait(args.task_ids, args.after, args.timeout_ms || 0, { consumerId: `${actor.kind}:${actor.sessionId}` });
+            return await service.wait(args.task_ids, args.after, args.timeout_ms || 0, { consumerId: `${actor.kind}:${actor.sessionId}`, ...(args.limit ? { limit: args.limit } : {}) });
           case 'task_status': return await service.status(args.task_id);
           case 'task_cancel': return await service.cancel(args.task_id, args.request_key, args.scope || 'child');
           case 'task_resume': return await service.resume(args.task_id, args.request_key);

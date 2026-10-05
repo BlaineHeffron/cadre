@@ -703,9 +703,9 @@ describe('scheduled agents MCP tools', () => {
       kind: 'codex', session_id: 'session-1', prompt: 'continue',
       interval_seconds: 15, max_iterations: 100, title: 'Review loop',
     });
-    assert.equal(created.type, 'inject');
-    assert.deepEqual(created.targetSession, { kind: 'codex', sessionId: 'session-1' });
-    assert.deepEqual(created.metadata, { title: 'Review loop' });
+    assert.equal(created.id, 'sched_loop_mcp');
+    assert.equal(created.prompt, undefined);
+    assert.deepEqual(bodies[0].targetSession, { kind: 'codex', sessionId: 'session-1' });
     await assert.rejects(() => server.handleToolCall('spawn_loop_session', {
       kind: 'codex', session_id: 'session-1', prompt: 'continue', interval_seconds: 15,
     }), /max_iterations/);
@@ -759,8 +759,8 @@ describe('scheduled agents MCP tools', () => {
     const canceled = await server.handleToolCall('cancel_scheduled_agent', { id: 'sched_mcp' });
 
     assert.equal(registered.id, 'sched_mcp');
-    assert.equal(registered.workDir, '/tmp/work');
-    assert.equal(listed.taskCount, 1);
+    assert.equal(registered.workDir, undefined);
+    assert.equal(listed.total, 1);
     assert.equal(canceled.status, 'canceled');
     assert.deepEqual(requests.map((entry) => [entry.path, entry.opts.method || 'GET']), [
       ['/api/agents/scheduled', 'POST'],
@@ -807,10 +807,10 @@ describe('scheduled agents MCP tools', () => {
       parent_thread_id: 'thr_snake',
     });
 
-    assert.equal(camel.intervalSeconds, 60);
-    assert.equal(camel.parentThreadId, 'thr_camel');
-    assert.equal(snake.intervalSeconds, 45);
-    assert.equal(snake.parentThreadId, 'thr_snake');
+    assert.equal(bodies[0].intervalSeconds, 60);
+    assert.equal(bodies[0].parentThreadId, 'thr_camel');
+    assert.equal(bodies[1].interval_seconds, 45);
+    assert.equal(bodies[1].parent_thread_id, 'thr_snake');
     assert.equal(bodies[0].workDir, '/tmp/camel');
     assert.equal(bodies[1].work_dir, '/tmp/snake');
   });
@@ -825,8 +825,7 @@ describe('scheduled agents MCP tools', () => {
     });
 
     const result = await server.handleToolCall('monitor_step_scheduled_agents', {});
-    assert.deepEqual(Object.keys(result).sort(), ['checked', 'completed', 'skippedRunning', 'spawned', 'tasks'].sort());
-    assert.equal(result.spawned, 1);
+    assert.deepEqual(result, { results: [{ id: 'sched_step', session_id: undefined, status: 'spawned' }] });
   });
 });
 

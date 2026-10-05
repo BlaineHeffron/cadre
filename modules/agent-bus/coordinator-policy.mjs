@@ -609,25 +609,6 @@ export function filterCoordinatorThreads(policy, threads = []) {
   return (Array.isArray(threads) ? threads : []).filter((thread) => threadVisibleToCoordinator(policy, thread));
 }
 
-export function filterCoordinatorControlResult(policy, name, result) {
-  if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
-  const tool = text(name);
-  if (tool === 'monitor_list_codex_sessions' || tool === 'monitor_list_pi_sessions') {
-    const sessions = filterCoordinatorSessions(policy, result.sessions);
-    return { ...result, sessions, sessionCount: sessions.length, total: sessions.length, hasMore: false };
-  }
-  if (tool === 'list_scheduled_agents') {
-    const tasks = filterCoordinatorSchedules(policy, result.tasks);
-    return { ...result, tasks, taskCount: tasks.length };
-  }
-  if (tool === 'monitor_list_threads') {
-    const threads = filterCoordinatorThreads(policy, result.threads || result.items);
-    if (Array.isArray(result.threads)) return { ...result, threads, total: threads.length, hasMore: false };
-    if (Array.isArray(result.items)) return { ...result, items: threads, total: threads.length, hasMore: false };
-  }
-  return result;
-}
-
 export async function assertCoordinatorOptionalPath(policy, value, label = 'path') {
   if (!text(value)) return null;
   return assertCoordinatorPath(policy, value, label);

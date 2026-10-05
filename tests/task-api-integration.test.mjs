@@ -85,8 +85,15 @@ test('two subprocess tasks require genuine authenticated room reads, collect res
   const parent = await credentials.authenticate(issued.token);
   const room = await store.createThread({ participants: [{ kind: 'codex', sessionId: 'parent' }] });
   const call = async (name, args, context = parent) => (await mcp.callTool(name, args, context)).structuredContent;
-  const spawn = (key) => call('task_spawn', { thread_id: room.id, task_key: key,
-    spec: { provider: 'codex-app-server', workDir: root, model: 'fixture-model', initialPrompt: 'Complete this task.' } });
+  const spawn = async (key) => {
+    const action = await call('task_spawn', { thread_id: room.id, task_key: key,
+      spec: { provider: 'codex-app-server', workDir: root, model: 'fixture-model', initialPrompt: 'Complete this task.' } });
+    assert.deepEqual(Object.keys(action).sort(), ['task_id', 'thread_id', 'session_id', 'status'].sort());
+    assert.doesNotMatch(JSON.stringify(action), /Complete this task|initialPrompt|spec/);
+    const status = await call('task_status', { thread_id: room.id, task_id: action.task_id });
+    assert.equal(action.status, status.state);
+    return status;
+  };
   const children = [await spawn('one'), await spawn('two')];
   assert.equal((await spawn('one')).taskId, children[0].taskId);
   assert.equal(binding.service.list().length, 2);
@@ -110,26 +117,32 @@ test('two subprocess tasks require genuine authenticated room reads, collect res
   for (let i = 0; i < 100 && results.size < 2; i++) {
     let page;
     try {
-      page = await call('task_wait', { thread_id: room.id, task_ids: children.map((child) => child.taskId), ...(cursor ? { after: cursor } : {}), timeout_ms: 0 });
+      page = await call('task_wait', { thread_id: room.id, task_ids: children.map((child) => child.taskId), ...(cursor ? { after: cursor } : {}), timeout_ms: 0, limit: 2 });
     } catch (error) {
       assert.equal(error.code, 'task_wait_timeout');
       await delay(10);
       continue; // Retry the same supplied cursor; never skip its result page.
     }
     cursor = page.cursor;
+    assert.ok(page.events.length <= 2);
     for (const result of page.results) results.set(result.taskId, result);
     if (results.size < 2) await delay(10);
   }
   assert.equal(results.size, 2);
   for (const result of results.values()) assert.equal(result.data.state, 'completed');
   const child = children[0];
+  const sent = await call('task_send', { thread_id: room.id, task_id: child.taskId, message_key: 'follow-up', input: 'Follow-up input' });
+  assert.deepEqual(Object.keys(sent).sort(), ['message_id', 'status']);
+  assert.equal(sent.status, store.getMessage(sent.message_id).metadata.state);
+  assert.doesNotMatch(JSON.stringify(sent), /Follow-up input/);
   const before = binding.service.get(child.sessionId).turns.length;
-  await call('task_cancel', { thread_id: room.id, task_id: child.taskId, request_key: 'cancel' });
+  const canceled = await call('task_cancel', { thread_id: room.id, task_id: child.taskId, request_key: 'cancel' });
+  assert.deepEqual(Object.keys(canceled).sort(), ['task_id', 'thread_id', 'session_id', 'status'].sort());
   await assert.rejects(call('room_send', { thread_id: child.taskId, body: 'Bypass cancelled task' }), (error) => error.code === 'task_input_required');
   const direct = await requestImpl('/api/agent-bus/messages', { method: 'POST', authContext: parent,
     body: { threadId: child.taskId, from: { kind: 'codex', sessionId: 'parent' }, body: 'Bypass directly', deliveryMode: 'wait' } }).catch((error) => error);
   assert.equal(direct.code, 'task_input_required');
   assert.equal(binding.service.get(child.sessionId).turns.length, before);
   assert.equal(binding.service.list().length, 2);
-  assert.ok(children.every((child) => store.getThread(child.taskId).messages.filter((message) => message.metadata.taskSend).length === 1));
+  assert.ok(children.every((child) => store.getThread(child.taskId).messages.filter((message) => message.metadata.taskSend).length === (child.taskId === children[0].taskId ? 2 : 1)));
 });

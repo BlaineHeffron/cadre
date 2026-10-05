@@ -204,7 +204,7 @@ describe('structured automated spawns', () => {
 
       // monitor_terminate_session and the agent-bus adapter accept only terminated/already_gone.
       const terminated = await mcp.handleToolCall('monitor_terminate_session', { session_id: session.id });
-      assert.deepEqual([terminated.ok, terminated.status, terminated.kind], [true, 'terminated', 'claude']);
+      assert.deepEqual(terminated, { session_id: session.id, status: 'terminated' });
       assert.equal(getProtocolSessionProvider('claude').service.get(session.id), null);
       await waitFor(() => listIds()?.length === 1);
       assert.deepEqual(listIds(), ['tmux1']);
@@ -229,7 +229,7 @@ describe('structured automated spawns', () => {
     const { app, transports, request, mcp } = await buildApp();
     try {
       const spawned = await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, displayName: 'worker' });
-      const id = spawned.session?.id || spawned.id;
+      const id = spawned.participants[0].session_id;
       assert.equal(transports[0].spec.permissionMode, 'danger-full-access');
       const sent = await request('POST', `/api/claude/sessions/${id}/input`, { payload: { text: 'run tests', source: 'agent_bus' } });
       assert.equal(sent.statusCode, 200, sent.body);
