@@ -289,33 +289,26 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     const snapshot = store.getThread(req.params.threadId); if (!snapshot) return reply.code(404).send({ error: 'Thread not found' });
     await authorizeLifecycle(req, snapshot.thread, 'end');
     if (snapshot.thread.metadata?.dm) return reply.code(400).send({ error: 'DM rooms may only be closed' });
-    if (snapshot.deliveries.some((item) => deliveryInFlight.has(item.id))) {
-      return reply.code(409).send({ error: 'Room has delivery in flight; retry after it settles', code: 'delivery_in_flight' });
-    }
-    const pending = snapshot.deliveries.filter((item) => item.status === 'queued');
-    if (pending.length && req.body?.cancelPending !== true) {
-      return reply.code(409).send({ error: 'Room has pending deliveries; drain them or explicitly cancelPending',
-        code: 'pending_deliveries', pending: pending.length });
-    }
     if (endingThreads.has(snapshot.thread.id)) return reply.code(409).send({ error: 'Room is ending', code: 'room_ending' });
     endingThreads.add(snapshot.thread.id);
     try {
     const thread = await store.closeThread(snapshot.thread.id, req.body?.reason || 'ended');
-    const results = []; const skipped = [];
-    for (const participant of snapshot.thread.participants || []) {
-      const shared = store.listThreads({ status: 'open' }).some((thread) => thread.id !== snapshot.thread.id
-        && !thread.metadata?.dm && threadHasParticipant(thread, participant));
-      if (shared) { skipped.push(participantRef(participant)); results.push({ participant: participantRef(participant), status: 'skipped' }); continue; }
-      try { const result = await adapters[participant.kind].deleteSession(app, participant.sessionId);
-        results.push({ participant: participantRef(participant), status: result.status }); }
-      catch (err) {
-        if (err.statusCode === 404 || err.payload?.sessionEnded === true) {
-          results.push({ participant: participantRef(participant), status: 'already_gone' });
-        } else {
-          results.push({ participant: participantRef(participant), status: 'failed', reason: err.message });
-        }
-      }
-    }
+    const openRooms = store.listThreads({ status: 'open' });
+    const participants = snapshot.thread.participants || [];
+    const skipped = participants.filter((participant) => openRooms.some((room) => room.id !== snapshot.thread.id
+      && !room.metadata?.dm && threadHasParticipant(room, participant))).map(participantRef);
+    const outcomes = await Promise.allSettled(participants.map(async (participant) => {
+      if (skipped.some((ref) => participantKey(ref) === participantKey(participant))) return { status: 'skipped' };
+      return adapters[participant.kind].deleteSession(app, participant.sessionId);
+    }));
+    const results = outcomes.map((outcome, index) => {
+      const participant = participantRef(participants[index]);
+      if (outcome.status === 'fulfilled') return { participant, status: outcome.value.status };
+      const err = outcome.reason;
+      return err.statusCode === 404 || err.payload?.sessionEnded === true
+        ? { participant, status: 'already_gone' }
+        : { participant, status: 'failed', reason: err.message };
+    });
     thread.participants.forEach(pruneObservedParticipant); await broadcastThreadSummary(thread.id);
     return { ok: results.every((item) => item.status !== 'failed'), status: 'ended', thread: normalizeThreadSummary(await enrichThread(thread)), results, skipped };
     } finally { endingThreads.delete(snapshot.thread.id); }
@@ -328,7 +321,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     }),
   });
   app.post('/api/agent-bus/threads/:threadId/end', { schema: { params: params({ threadId: string(ID_MAX, 1) }),
-    body: bodySchema({ reason: string(512), cancelPending: { type: 'boolean' } }) } }, async (req, reply) => {
+    body: bodySchema({ reason: string(512) }) } }, async (req, reply) => {
     return endRoom(req, reply);
   });
 

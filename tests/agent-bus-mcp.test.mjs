@@ -191,8 +191,8 @@ test('room creator can read, address, and close without being a participant', as
     { kind: 'claude', sessionId: 'coord' });
   const closed = await server.callTool('room_close', { thread_id: 'thr_owned' }, owner);
   assert.equal(closed.structuredContent.status, 'closed');
-  assert.equal((await server.callTool('room_end', { thread_id: 'thr_owned', cancel_pending: true }, owner)).structuredContent.status, 'ended');
-  assert.deepEqual(calls.find((item) => item.path.endsWith('/end')).options.body, { cancelPending: true });
+  assert.equal((await server.callTool('room_end', { thread_id: 'thr_owned' }, owner)).structuredContent.status, 'ended');
+  assert.deepEqual(calls.find((item) => item.path.endsWith('/end')).options.body, {});
   const listed = await server.callTool('room_list', {}, owner);
   assert.equal(listed.structuredContent.rooms.some((room) => room.id === 'thr_owned'), true);
 });

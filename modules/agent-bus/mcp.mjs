@@ -453,8 +453,8 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_end',
-      description: 'Owners may close a non-DM room and terminate participants not shared with another open room. Pending deliveries require cancel_pending.',
-      inputSchema: { type: 'object', properties: { thread_id: { type: 'string' }, cancel_pending: { type: 'boolean' } },
+      description: 'Owners may close a non-DM room and terminate participants not shared with another open room. Ending always cancels queued deliveries.',
+      inputSchema: { type: 'object', properties: { thread_id: { type: 'string' } },
         required: ['thread_id'], additionalProperties: false },
     },
     {
@@ -566,7 +566,7 @@ export function buildAgentBusMcpServer({
         if (!authenticatedContext(authContext)) throw authorizationError('Room lifecycle actions require an authenticated agent credential', 'principal_missing');
         const threadId = assertMcpString(args.thread_id, 'thread_id');
         const action = name.slice('room_'.length);
-        const payload = await request(`/api/agent-bus/threads/${encodeURIComponent(threadId)}/${action}`, { method: 'POST', body: ['room_close', 'room_end'].includes(name) && args.cancel_pending === true ? { cancelPending: true } : {} });
+        const payload = await request(`/api/agent-bus/threads/${encodeURIComponent(threadId)}/${action}`, { method: 'POST', body: name === 'room_close' && args.cancel_pending === true ? { cancelPending: true } : {} });
         return textResult(`Room ${threadId} ${payload.status || action}.`, payload);
       }
 

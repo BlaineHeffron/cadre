@@ -51,7 +51,7 @@ test('close protects pending reviews; explicit cancellation persists through reo
   assert.equal(h.store.getThread(thread.id).messages.length, 2);
 });
 
-test('close and end reject injection in flight and preserve its eventual receipt', async (t) => {
+test('close rejects injection in flight and preserve its eventual receipt', async (t) => {
   const { h, thread, request, send } = await setup(t);
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
@@ -61,7 +61,7 @@ test('close and end reject injection in flight and preserve its eventual receipt
   const sending = send('review in flight');
   await started;
   try {
-    for (const action of ['close', 'end']) {
+    for (const action of ['close']) {
       const response = await request(`threads/${thread.id}/${action}`, action === 'close' ? { cancelPending: true } : {});
       assert.equal(response.statusCode, 409, response.body);
       assert.equal(response.json().code, 'delivery_in_flight');

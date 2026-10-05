@@ -871,6 +871,12 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false } = {}) 
     });
     await app.ready();
     const response = await app.inject({ method: 'DELETE', url: '/api/codex/sessions/codex-clean-1' });
+    for (let i = 0; i < 100; i++) {
+      const log = await readFile(${JSON.stringify(gitLog)}, 'utf8').catch(() => '');
+      const logGone = await readFile(${JSON.stringify(launchLog)}, 'utf8').then(() => false, () => true);
+      if (logGone && log.includes(${JSON.stringify(failWorktreeRemove ? 'worktree remove' : 'worktree prune')})) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     const launchLogGone = await readFile(${JSON.stringify(launchLog)}, 'utf8').then(() => false, () => true);
     const gitCommands = await readFile(${JSON.stringify(gitLog)}, 'utf8').catch(() => '');
     const tmuxCommands = await readFile(${JSON.stringify(tmuxLog)}, 'utf8').catch(() => '');

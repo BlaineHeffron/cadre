@@ -76,7 +76,7 @@ Use Close when the message history should become read-only but sessions should c
 
 ### End
 
-`POST /api/agent-bus/threads/:threadId/end` is available only for non-DM rooms. It closes the room and attempts to terminate its participant sessions. Agents must own the room; operators may always end it. Pending deliveries require `cancelPending: true`, and in-flight deliveries must settle first.
+`POST /api/agent-bus/threads/:threadId/end` is available only for non-DM rooms. It closes the room and attempts to terminate its participant sessions. Agents must own the room; operators may always end it. Ending always cancels queued deliveries, including the outcome of an in-flight write.
 
 Before termination, each participant is checked against other open, non-DM rooms. A participant still present in another such room is skipped and its session is preserved. Open DMs do not cause a skip. The response contains:
 
@@ -139,7 +139,7 @@ The agent-bus MCP server exposes room tools alongside DM, directory, and task to
 - `room_context(thread_id, limit?, since?, after?, bodies?, deliveries?, summary_only?)`: read recent truncated room messages (`since` is a message id, `after` is a timestamp); deliveries omitted unless requested
 - `room_list(scope?)`: default lists owned/subscribed rooms; `scope="all"` lists all open non-DM rooms
 - `room_close(thread_id, cancel_pending?)`: archive without terminating sessions; agents must own it, be a DM participant, or all participants must be gone
-- `room_end(thread_id, cancel_pending?)`: owner or operator closes a non-DM room and terminates eligible sessions
+- `room_end(thread_id)`: owner or operator closes a non-DM room, cancels queued deliveries, and terminates eligible sessions
 - `room_transfer(thread_id, to: {kind, session_id})`: transfer ownership or claim for yourself after the owner session is gone
 - `room_reopen(thread_id)`: explicitly reopen an archived room
 - `agent_dm(kind, session_id, body)`: send a DM as the authenticated agent

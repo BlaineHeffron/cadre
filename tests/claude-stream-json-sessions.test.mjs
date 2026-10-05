@@ -458,6 +458,7 @@ describe('Claude stream-json sessions', () => {
       assert.equal((await second.inject({ method: 'POST', url: `${base}/missing/resume` })).statusCode, 404);
       assert.equal((await second.inject({ method: 'DELETE', url: `${base}/${id}` })).json().ok, true);
       assert.equal((await credentialStore.authenticate(resumedToken)).reason, 'revoked');
+      await waitFor(() => stat(join(root, 'sessions', id)).then(() => false, (error) => error.code === 'ENOENT'));
       await assert.rejects(stat(join(root, 'sessions', id)), { code: 'ENOENT' });
     });
 

@@ -1,5 +1,5 @@
-import { mkdir, stat } from 'node:fs/promises';
-import { basename, relative, resolve } from 'node:path';
+import { mkdir, rmdir, stat } from 'node:fs/promises';
+import { basename, dirname, relative, resolve } from 'node:path';
 import { exec } from '../../lib/exec.mjs';
 
 function normalizeText(value) {
@@ -388,6 +388,10 @@ export async function removeAgentSessionWorktree({
   }
 
   const prune = await exec('git', ['-C', repoRoot, 'worktree', 'prune']);
+  await rmdir(dirname(path)).catch((error) => {
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+  });
+
   return {
     removed: true,
     path,

@@ -15,7 +15,7 @@ import {
 } from '../integrations/mcp-launch-preflight.mjs';
 import { buildMcpCapabilityCatalog } from '../integrations/mcp-server-catalog.mjs';
 import { composeLaunchUserPrompt } from '../integrations/launch-skills.mjs';
-import { buildPromptLaunchArgs, cleanupPromptProfileLaunch, preparePromptProfileLaunch } from '../integrations/prompt-profile-launch.mjs';
+import { buildPromptLaunchArgs, cleanupPromptProfileLaunch, promptProfilePath, preparePromptProfileLaunch } from '../integrations/prompt-profile-launch.mjs';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { permissionAuthorityForRequest } from '../platform/auth.mjs';
 import { buildAgentBusMcpUrl, seedClaudeWorkspaceTrust } from '../platform/mcp-seed.mjs';
@@ -409,9 +409,14 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       const serverIds = existing.mcpCapabilities?.serverIds || [];
       const verdict = await service.delete(req.params.id, { reason: 'Deleted' });
       if (verdict.ok) await notifyAgentSessionDeleted({ kind, sessionId: req.params.id });
-      await cleanupSessionLaunch(req.params.id, generation, 'session_terminated', serverIds);
+      await cleanupAttempt(req.params.id, generation, 'session_terminated', serverIds);
+      const sessionPath = resolve(sessionRoot, existing.id);
+      const cleanup = (path, operation) => { void operation.catch((error) => {
+        app.log.warn({ id: existing.id, path, err: error.message }, 'Session artifact cleanup failed');
+      }); };
+      cleanup(promptProfilePath(kind, existing.id), rm(promptProfilePath(kind, existing.id), { force: true }));
       // Drop every attempt directory, including one a concurrent resume created after generation was read.
-      if (verdict.ok) await rm(resolve(sessionRoot, existing.id), { recursive: true, force: true });
+      if (verdict.ok) cleanup(sessionPath, rm(sessionPath, { recursive: true, force: true }));
       // 'terminated' is the delete contract shared with the tmux route and its MCP/agent-bus consumers.
       return verdict.ok ? { ...verdict, status: 'terminated' } : reply.code(500).send(verdict);
     } catch (error) { return errorReply(reply, error); }
