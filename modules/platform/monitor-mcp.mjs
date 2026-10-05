@@ -860,6 +860,13 @@ export function buildMonitorMcpServer({ requestImpl }) {
           sessionId: { type: 'string', description: 'Related session id.' },
           threadId: { type: 'string', description: 'Related agent-bus thread id.' },
           passThrough: { type: 'boolean', description: 'When true, the answer is routed directly to sessionKind/sessionId instead of back through the supervisor.' },
+          operatorAction: {
+            type: 'object',
+            description: 'Allowlisted operator request to run only after dashboard approval. Requester and delivery target come from your authenticated session.',
+            properties: { method: { type: 'string', enum: ['POST', 'DELETE'] }, path: { type: 'string' }, body: {} },
+            required: ['method', 'path'],
+            additionalProperties: false,
+          },
           allowFreeform: { type: 'boolean', description: 'Whether free-form answer input is allowed. Defaults true.' },
           options: {
             type: 'array',

@@ -161,6 +161,10 @@ export function CommandQueuePage() {
                         </div>
                         <div class="dashboard-action-detail">${item.question}</div>
                         ${item.details ? html`<div class="dashboard-action-detail">${item.details}</div>` : null}
+                        ${item.operatorAction ? html`
+                          <pre class="dashboard-action-detail" style="white-space:pre-wrap">${item.operatorAction.method} ${item.operatorAction.path}${item.operatorAction.body !== undefined ? `\n${JSON.stringify(item.operatorAction.body, null, 2)}` : ''}</pre>
+                        ` : null}
+                        ${item.operatorActionResult ? html`<div class="dashboard-action-detail">${item.answer?.text}</div>` : null}
                         <div class="dashboard-action-meta">
                           <span>${item.source || 'supervisor'}</span>
                           <span>${formatTime(item.updatedAt || item.createdAt)}</span>
