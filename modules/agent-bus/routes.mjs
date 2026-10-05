@@ -84,6 +84,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (action === 'transfer' && participantKey(req.body.to) === participantKey(createdByFromRequest(req))
       && thread.createdBy && !await sessionExists(thread.createdBy)) return;
     if (action === 'close') {
+      if (thread.metadata?.dm && threadHasParticipant(thread, createdByFromRequest(req))) return;
       let alive = false;
       for (const participant of thread.participants || []) {
         if (await sessionExists(participant)) { alive = true; break; }

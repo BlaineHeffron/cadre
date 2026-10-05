@@ -123,3 +123,16 @@ test('outsiders cannot read or send in DMs or discover them in all-open listing'
   assert.equal((await call('room_list', {}, participants[1])).structuredContent.rooms.some((room) => room.id === dm.id), true);
   assert.equal(h.store.getThread(dm.id).messages.length, 1);
 });
+
+test('a DM participant may archive while both participant sessions are alive', async (t) => {
+  const { h, call } = await setup(t);
+  const dm = await h.store.createThread({ participants, metadata: { dm: true } });
+  assert.equal(dm.createdBy, null);
+  const closed = await call('room_close', { thread_id: dm.id }, participants[0]);
+  assert.equal(closed.structuredContent.status, 'closed');
+  assert.equal(h.store.getThread(dm.id).thread.status, 'closed');
+  for (const { kind, sessionId } of participants) {
+    assert.equal(h.sessionCatalog[kind].has(sessionId), true);
+    assert.deepEqual(h.deletedSessions[kind], []);
+  }
+});

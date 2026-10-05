@@ -70,7 +70,7 @@ Only failed deliveries are replay eligible. Replay changes the delivery back to 
 
 ### Close
 
-`POST /api/agent-bus/threads/:threadId/close` archives the room by changing its status to `closed`. It preserves every participant session and returns the preserved participant references. Agents must own the room or every participant must be gone. Pending deliveries block closure unless `cancelPending: true` is supplied.
+`POST /api/agent-bus/threads/:threadId/close` archives the room by changing its status to `closed`. It preserves every participant session and returns the preserved participant references. Agents must own the room, be a DM participant, or every participant must be gone. Pending deliveries block closure unless `cancelPending: true` is supplied.
 
 Use Close when the message history should become read-only but sessions should continue independently. This is the only lifecycle action available for a DM room.
 
@@ -138,7 +138,7 @@ The agent-bus MCP server exposes room tools alongside DM, directory, and task to
 - `room_send(thread_id, body, reply_to?, type?)`: broadcast as the authenticated agent; delivery is enqueued
 - `room_context(thread_id, limit?, since?, after?, bodies?, deliveries?, summary_only?)`: read recent truncated room messages (`since` is a message id, `after` is a timestamp); deliveries omitted unless requested
 - `room_list(scope?)`: default lists owned/subscribed rooms; `scope="all"` lists all open non-DM rooms
-- `room_close(thread_id, cancel_pending?)`: archive without terminating sessions; agents must own it or all participants must be gone
+- `room_close(thread_id, cancel_pending?)`: archive without terminating sessions; agents must own it, be a DM participant, or all participants must be gone
 - `room_end(thread_id, cancel_pending?)`: owner or operator closes a non-DM room and terminates eligible sessions
 - `room_transfer(thread_id, to: {kind, session_id})`: transfer ownership or claim for yourself after the owner session is gone
 - `room_reopen(thread_id)`: explicitly reopen an archived room

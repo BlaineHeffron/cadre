@@ -434,7 +434,7 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_close',
-      description: 'Archive a room without terminating sessions. Agents must own the room or all participants must be gone. Pending deliveries block closure unless cancel_pending explicitly cancels them.',
+      description: 'Archive a room without terminating sessions. Agents must own the room, be a DM participant, or all participants must be gone. Pending deliveries block closure unless cancel_pending explicitly cancels them.',
       inputSchema: { type: 'object', properties: { thread_id: { type: 'string' }, cancel_pending: { type: 'boolean' } },
         required: ['thread_id'], additionalProperties: false },
     },
