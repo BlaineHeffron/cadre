@@ -224,4 +224,11 @@ test('resume reuses create-time grants and refuses state the child could have sw
   }
   assert.equal(await readFile(join(decoy, '.credentials.json'), 'utf8'), 'host');
   assert.equal(await readFile(join(decoy, 'settings.json'), 'utf8'), 'host');
+
+  const codexState = join(state, 'sandbox/codex-abab1212/codex');
+  await prepareNonoLaunch({ provider: 'codex', sessionId: 'abab1212', workDir: wt, env, grants: created.grants });
+  await tamper(join(codexState, 'config.toml'), (path) => symlink(join(decoy, 'settings.json'), path));
+  await assert.rejects(prepareNonoLaunch({ provider: 'codex', sessionId: 'abab1212', workDir: wt, env, grants: created.grants }),
+    { code: 'sandbox_state_tampered' });
+  assert.equal(await readFile(join(decoy, 'settings.json'), 'utf8'), 'host');
 });
