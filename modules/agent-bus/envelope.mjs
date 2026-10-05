@@ -24,8 +24,8 @@ export function sessionHasBusMessage(content, message) {
 }
 
 export function messageSummary(message) {
-  if (typeof message.metadata?.summary === 'string' && message.metadata.summary.trim()) return message.metadata.summary.trim();
-  const line = String(message.body || '').split(/\r?\n/).find((line) => line.trim())?.trim() || '';
+  const own = typeof message.metadata?.summary === 'string' ? message.metadata.summary.trim() : '';
+  const line = (own || String(message.body || '').split(/\r?\n/).find((line) => line.trim()) || '').trim().replace(/\s+/g, ' ');
   return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }
 

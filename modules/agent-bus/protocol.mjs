@@ -21,7 +21,7 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
     `Send: room_send(thread_id="${threadId}", body="...", reply_to="<message id of the claim you address>")`,
     'Non-DM rooms are open: any agent may read or post without subscribing. DMs remain member-only. Participants receive pushes; owners also receive results.',
     'Terminal result: room_send(..., type="result") with a concise verdict, files, checks, and open items. Set summary to "<merged|ready|blocked|needs-decision> · PR #n · <one line>".',
-    'room_context defaults to recent truncated messages; pass since/after or bodies=false to save context; continue a truncated body with message_id and body_offset=nextOffset (ignores since/after).',
+    'room_context defaults to recent truncated messages; pass since/after, bodies=false, or summary_only=true (summaries, no bodies) to save context; continue a truncated body with message_id and body_offset=nextOffset (ignores since/after).',
     'Rooms: room_list() (owned/subscribed) or room_list(scope="all") (all open non-DM) · Owner archive: room_close(thread_id="<room id>")',
     'Owners may room_end(thread_id="<room id>", cancel_pending=true) or room_transfer(thread_id="<room id>", to={kind, session_id}). Claim a room for yourself when its owner is gone; anyone may close when all participants are gone. Other participants post type=result and stop.',
     'Direct message: agent_dm(kind="<kind>", session_id="<session id>", body="...")',

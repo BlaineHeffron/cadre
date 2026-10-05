@@ -421,7 +421,7 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_context',
-      description: 'Read recent truncated messages in any non-DM room without subscribing; DMs require membership. Continue a truncated body with message_id and body_offset=nextOffset (ignores since/after). since=message id, after=timestamp; pass deliveries=true or bodies=false as needed.',
+      description: 'Read recent truncated messages in any non-DM room without subscribing; DMs require membership. Continue a truncated body with message_id and body_offset=nextOffset (ignores since/after). since=message id, after=timestamp; pass deliveries=true as needed, or bodies=false or summary_only=true (summaries, no bodies) to save context.',
       inputSchema: { type: 'object', properties: {
         thread_id: { type: 'string' }, limit: { type: 'integer', minimum: 0, maximum: 500 },
         since: { type: 'string' }, after: { type: 'string' }, message_id: { type: 'string' },

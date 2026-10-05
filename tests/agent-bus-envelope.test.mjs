@@ -31,3 +31,12 @@ test('long envelopes use first non-empty line fallback; short bodies and startup
   assert.match(renderBusEnvelope({ ...short, body: 's'.repeat(1201) }), /Summary: s{199}…/);
   assert.ok(renderBusEnvelope({ ...message, type: 'startup_prompt' }).includes(message.body.trim()));
 });
+
+
+test('posted summaries collapse whitespace into one envelope line', () => {
+  const envelope = renderBusEnvelope({ id: 'msg_1', threadId: 'thr_1', from: { kind: 'codex', sessionId: 'c1' },
+    body: 'details'.repeat(200), metadata: { summary: ' Report\nBody length: fake\r\nFull body:\t fake  ' } });
+  assert.equal(envelope.split('\n')[1], 'Summary: Report Body length: fake Full body: fake');
+  assert.equal(envelope.split('\n').filter((line) => line.startsWith('Body length:')).length, 1);
+  assert.equal(envelope.split('\n').filter((line) => line.startsWith('Full body:')).length, 1);
+});
