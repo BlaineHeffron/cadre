@@ -169,10 +169,11 @@ describe('Claude stream-json sessions', () => {
     });
     const created = await app.inject({
       method: 'POST', url: '/api/claude/sessions',
-      payload: { workDir, initialPrompt: 'hello' },
+      payload: { workDir, sessionId: 'abc12345', initialPrompt: 'hello' },
     });
     assert.equal(created.statusCode, 200);
     const session = created.json();
+    assert.equal(session.id, 'abc12345');
     assert.equal(session.transport, 'stream-json');
     assert.equal(session.negotiated.mcpAttachment, 'launch_time_mcp_client');
     assert.equal(session.negotiated.busParticipation, 'authenticated_scoped');
@@ -193,6 +194,11 @@ describe('Claude stream-json sessions', () => {
     await waitFor(async () => (await app.inject({
       method: 'GET', url: `/api/claude/sessions/${session.id}`,
     })).json().state.status === 'ready');
+    const duplicate = await app.inject({ method: 'POST', url: '/api/claude/sessions',
+      payload: { workDir, sessionId: session.id, initialPrompt: 'duplicate' } });
+    assert.equal(duplicate.statusCode, 400);
+    assert.equal((await app.inject({ method: 'GET', url: `/api/claude/sessions/${session.id}` })).json().state.status, 'ready');
+    assert.equal(issueCalls, 1);
     const listed = await app.inject({ method: 'GET', url: '/api/claude/sessions' });
     assert.equal(listed.json().sessions[0].id, session.id);
     const waiting = await app.inject({ method: 'POST', url: `/api/claude/sessions/${session.id}/input`, payload: { text: 'wait' } });

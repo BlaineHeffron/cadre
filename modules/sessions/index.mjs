@@ -42,7 +42,7 @@ import {
 } from '../agent/runtime-args.mjs';
 import { buildLaunchEnvPrefix } from '../agent/launch-env.mjs';
 import { prepareHeadroomLaunch } from '../agent/headroom.mjs';
-import { STARTUP_INJECT_DEADLINE_MS, readLaunchLogTail, waitForStartupPane } from '../agent/startup-input.mjs';
+import { readLaunchLogTail, waitForStartupPane } from '../agent/startup-input.mjs';
 import { detectLaunchFailure } from '../agent/launch-failure.mjs';
 import { normalizeSessionWorkDir } from './workdir.mjs';
 import { seedClaudeWorkspaceTrust } from '../platform/mcp-seed.mjs';
@@ -217,7 +217,7 @@ const PROVIDER_CONFIGS = {
     storageEnv: 'CODEX_SESSIONS_STORAGE',
     stripContent: stripCodexIndent,
     startupDelayMs: 180,
-    initialPromptDelays: [700, 350],
+    initialPromptDelayMs: 350,
     bufferPrefix: 'dueno-codex',
     assertModel: assertValidCodexModel,
     normalizeRuntime(provider = '', runtime = '') {
@@ -251,8 +251,8 @@ const PROVIDER_CONFIGS = {
     shellPrefix(sessionId, provider) {
       return buildLaunchEnvPrefix(sessionId, provider);
     },
-    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, mcpLaunch = {} }) {
-      const baseCommand = `${shellQuote(sessionBinary)} ${allArgs.map(shellQuote).join(' ')}`;
+    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, mcpLaunch = {}, initialPromptFile = '' }) {
+      const baseCommand = `${shellQuote(sessionBinary)} ${allArgs.map(shellQuote).join(' ')}${initialPromptFile ? ` -- "$(< ${shellQuote(initialPromptFile)})"` : ''}`;
       const command = launchLogPath
         ? `${baseCommand} 2> >(tee -a ${shellQuote(launchLogPath)} >&2)`
         : baseCommand;
@@ -276,7 +276,7 @@ const PROVIDER_CONFIGS = {
     storageEnv: 'CLAUDE_SESSIONS_STORAGE',
     stripContent: (text = '') => String(text || ''),
     startupDelayMs: 300,
-    initialPromptDelays: [900, 500],
+    initialPromptDelayMs: 500,
     bufferPrefix: 'dueno-claude',
     assertModel: assertValidClaudeModel,
     normalizeRuntime(provider = '', runtime = '') {
@@ -313,8 +313,9 @@ const PROVIDER_CONFIGS = {
         resumeId,
       ];
     },
-    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId }) {
-      const baseCommand = [sessionBinary, ...allArgs].map(shellQuote).join(' ');
+    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, initialPromptFile = '' }) {
+      const baseCommand = [sessionBinary, ...allArgs].map(shellQuote).join(' ')
+        + (initialPromptFile ? ` -- "$(< ${shellQuote(initialPromptFile)})"` : '');
       const command = launchLogPath
         ? `${baseCommand} 2> >(tee -a ${shellQuote(launchLogPath)} >&2)`
         : baseCommand;
@@ -344,7 +345,7 @@ const PROVIDER_CONFIGS = {
     storageEnv: 'PI_SESSIONS_STORAGE',
     stripContent: (text = '') => String(text || ''),
     startupDelayMs: 180,
-    initialPromptDelays: [700, 350],
+    initialPromptDelayMs: 350,
     // Pi loads extensions after the pane opens, so a failed extension (or bad flag) only shows
     // up ~1-2s in; verify across that window before recording the session.
     launchVerifyMs: 3000,
@@ -389,8 +390,9 @@ const PROVIDER_CONFIGS = {
     async validateBinary(binary) {
       return validatePiCliContract(binary);
     },
-    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, mcpLaunch = {} }) {
-      const baseCommand = [sessionBinary, ...allArgs].map(shellQuote).join(' ');
+    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, mcpLaunch = {}, initialPromptFile = '' }) {
+      const baseCommand = [sessionBinary, ...allArgs].map(shellQuote).join(' ')
+        + (initialPromptFile ? ` "$(< ${shellQuote(initialPromptFile)})"` : '');
       const command = launchLogPath
         ? `${baseCommand} 2> >(tee -a ${shellQuote(launchLogPath)} >&2)`
         : baseCommand;
@@ -430,6 +432,7 @@ export function renderAgentSessionLaunch({
       sessionId,
       provider,
       mcpLaunch: buildOptions.mcpLaunch || {},
+      initialPromptFile: resume ? '' : buildOptions.initialPromptFile || '',
     })].filter(Boolean).join('; '),
   };
 }
@@ -1005,7 +1008,7 @@ async function launchTmuxSession({ sessionName, workDir = '', sessionBinary = ''
   await verifyLaunchedSession(sessionName, launchLogPath);
 }
 
-async function createSession({ workDir, args, model = '', provider = config.id, runtime = '', thinkingLevel = '', source = 'external', displayName = '', autoCloseMode = 'never', autoCloseAfterMs = 0, metadata = {}, coordinatorPolicy = null, loopRegistrationPolicy = null, mcpProfile, mcpServers, mcpCredentialProfile = 'agent', codexPlugins, promptProfile, skills } = {}) {
+async function createSession({ sessionId, initialPrompt = '', workDir, args, model = '', provider = config.id, runtime = '', thinkingLevel = '', source = 'external', displayName = '', autoCloseMode = 'never', autoCloseAfterMs = 0, metadata = {}, coordinatorPolicy = null, loopRegistrationPolicy = null, mcpProfile, mcpServers, mcpCredentialProfile = 'agent', codexPlugins, promptProfile, skills } = {}) {
   const sessionRuntime = config.normalizeRuntime(provider, runtime);
   if (config.id !== 'codex' && codexPlugins !== undefined) {
     throw Object.assign(new Error('codexPlugins is only supported for Codex sessions'), {
@@ -1034,7 +1037,13 @@ async function createSession({ workDir, args, model = '', provider = config.id, 
   resolveLaunchSkills({ skillIds: selectedSkills });
   resolvePromptProfile({ promptProfile });
 
-  const id = generateId();
+  const id = sessionId || generateId();
+  if (typeof id !== 'string' || !/^[a-f0-9]{8,32}$/.test(id) || sessions.has(id)) throw Object.assign(new Error('Invalid or duplicate sessionId'), { statusCode: 400 });
+  const launchPrompt = resolveHarnessUserText(initialPrompt);
+  const initialPromptFile = launchPrompt ? initialPromptPath(id) : '';
+  if (launchPrompt.includes('\0') || (config.id === 'pi' && launchPrompt.startsWith('-')) || Buffer.byteLength(launchPrompt, 'utf8') >= 128 * 1024) {
+    throw Object.assign(new Error('Initial prompt must be under 128 KiB, contain no NUL, and for Pi must not start with a dash'), { statusCode: 400 });
+  }
   const sessionName = `${config.tmuxPrefix}-${id}`;
   const launchStartedAt = Date.now();
 
@@ -1061,6 +1070,10 @@ async function createSession({ workDir, args, model = '', provider = config.id, 
       backendType: config.id,
       sessionId: id,
     });
+    if (initialPromptFile) {
+      await mkdir(resolve(initialPromptFile, '..'), { recursive: true });
+      await writeFile(initialPromptFile, launchPrompt, { mode: 0o600 });
+    }
     launchLogPath = await prepareLaunchLog(sessionName);
     const renderedLaunch = renderAgentSessionLaunch({
       headroom: await prepareHeadroomLaunch(sessionRuntime.provider),
@@ -1079,6 +1092,7 @@ async function createSession({ workDir, args, model = '', provider = config.id, 
         mcpLaunch: mcpPreparation.prepared,
         promptLaunch: promptPreparation.prepared,
         cliSessionId,
+        initialPromptFile,
         researchSafeRuntime: config.id === 'codex' && hasResearchWorkbenchLaunchProfile(metadata),
         codexPlugins: selectedCodexPlugins,
       },
@@ -1105,6 +1119,7 @@ async function createSession({ workDir, args, model = '', provider = config.id, 
       backendType: config.id, sessionId: id, credentialProfile: mcpCredentialProfile, ...credentialStoreOptions(),
     });
     await cleanupPromptProfileLaunch({ backendType: config.id, sessionId: id });
+    await rm(initialPromptPath(id), { force: true }).catch(() => {});
     throw error;
   }
 
@@ -1262,6 +1277,7 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
     ...credentialStoreOptions(),
   });
   await cleanupPromptProfileLaunch({ backendType: config.id, sessionId: id });
+  await rm(initialPromptPath(id), { force: true }).catch(() => {});
   const mcpPreparation = await prepareMcpCapabilityLaunch({
     resolved: resolvedMcp,
     backendType: config.id,
@@ -1365,44 +1381,9 @@ function resolveHarnessUserText(value = '') {
   return expandSkillTokens(value);
 }
 
-async function injectInitialPrompt(id, initialPrompt) {
-  const sourceText = typeof initialPrompt === 'string' ? initialPrompt.trim() : '';
-  const text = resolveHarnessUserText(sourceText);
-  const resolution = skillDeliveryResolution(sourceText, text);
-  if (!text) {
-    return { attempted: false, injected: false, error: null, resolution };
-  }
 
-  try {
-    if (!_enqueueSessionCommand) throw new Error('Session command gate is not ready');
-    // Give the TUI a moment to finish drawing its composer before pasting. Panes
-    // report `running` as soon as tmux has the process, which is earlier than the
-    // agent can accept input, and a paste that lands mid-boot can lose its Enter.
-    const [bootDelayMs] = config.initialPromptDelays || [];
-    if (bootDelayMs > 0) await sleep(bootDelayMs);
-    // The gate re-sends Enter and only reports submission it actually observed.
-    // deadlineAt is required so a blocked/busy wait cannot hang spawn forever.
-    const result = await _enqueueSessionCommand(id, {
-      source: `${config.id}_initial_prompt`,
-      operation: 'startup',
-      text,
-      enter: true,
-      deadlineAt: Date.now() + STARTUP_INJECT_DEADLINE_MS,
-    });
-    // Never report a prompt as injected when submission was not observed — a false
-    // success here is why an unsubmitted prompt sat in the composer looking sent.
-    if (result?.submissionConfirmed === false) {
-      return {
-        attempted: true,
-        injected: false,
-        error: 'Initial prompt was delivered to the composer but submission was not confirmed',
-        resolution: { ...resolution, submission: 'unconfirmed' },
-      };
-    }
-    return { attempted: true, injected: true, error: null, resolution };
-  } catch (error) {
-    return { attempted: true, injected: false, error: error.message || 'Initial prompt injection failed', resolution };
-  }
+function initialPromptPath(id) {
+  return runtimeStatePath(`initial_prompts/${config.id}-${id}.txt`);
 }
 
 function generateId() {
@@ -1579,6 +1560,7 @@ async function cleanupSessionArtifacts(id, meta, logger) {
     cleanup(meta.workDir, removeGithubAgentScratch(meta)),
     cleanup(meta.workDir, removeSessionHookFiles({ workDir: meta.workDir, provider: config.id, sessionId: id })),
     cleanup(promptProfilePath(config.id, id), rm(promptProfilePath(config.id, id), { force: true })),
+    cleanup(initialPromptPath(id), rm(initialPromptPath(id), { force: true })),
     ...(meta.launchLogPath ? [cleanup(meta.launchLogPath, rm(meta.launchLogPath, { force: true }))] : []),
     ...(meta.managedWorktree && meta.worktreePath ? [cleanup(meta.worktreePath, removeAgentSessionWorktree({
       repoPath: meta.worktreeRepoPath || meta.workDir || '',
@@ -2121,7 +2103,7 @@ async function sessionsPlugin(app, {
         execFn: exec,
         target: sessionName,
         delayMs: config.startupDelayMs,
-        startupDelayMs: config.initialPromptDelays?.[1] || config.startupDelayMs,
+        startupDelayMs: config.initialPromptDelayMs || config.startupDelayMs,
         bufferPrefix: config.bufferPrefix,
       }),
       audit: async (transition) => {
@@ -2497,6 +2479,8 @@ async function sessionsPlugin(app, {
       // cannot leave an orphaned process behind.
       resolveHarnessUserText(launchSourcePrompt);
       const result = await createSession({
+        sessionId: body.sessionId,
+        initialPrompt: launchSourcePrompt,
         workDir,
         args,
         model,
@@ -2514,10 +2498,8 @@ async function sessionsPlugin(app, {
         promptProfile,
         skills,
       });
-      const injection = await injectInitialPrompt(
-        result.id,
-        launchSourcePrompt,
-      );
+      const injection = { injected: Boolean(launchSourcePrompt), error: null,
+        resolution: { ...skillDeliveryResolution(launchSourcePrompt, resolveHarnessUserText(launchSourcePrompt)), channel: 'launch' } };
       broadcastSessionList(wsManager);
       queueSessionCreateAudit({
         req,

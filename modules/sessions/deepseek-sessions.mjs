@@ -311,7 +311,9 @@ export async function deepseekSessionsPlugin(app, {
         error.code = 'unsupported_model';
         throw error;
       }
-      id = randomBytes(8).toString('hex');
+      const requestedId = req.body?.sessionId || randomBytes(8).toString('hex');
+      if (typeof requestedId !== 'string' || !/^[a-f0-9]{8,32}$/.test(requestedId) || service.get(requestedId)) throw Object.assign(new Error('Invalid or duplicate sessionId'), { statusCode: 400 });
+      id = requestedId;
       const busCredential = await prepareAgentBusCredentialLaunch({
         backendType: 'deepseek',
         sessionId: id,

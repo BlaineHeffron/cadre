@@ -429,12 +429,13 @@ export function createAgentBusParticipants({
     });
   }
 
-  async function createBootstrapMessage({ threadId, participant, body }) {
+  async function createBootstrapMessage({ threadId, participant, body, deliveryStatus }) {
     return store.createMessage({
       threadId,
       from: { kind: 'system', sessionId: 'bootstrap' },
       targets: [{ kind: participant.kind, sessionId: participant.sessionId }],
       type: 'startup_prompt',
+      deliveryStatus,
       body,
       artifacts: [],
       createdBy: 'bootstrap',

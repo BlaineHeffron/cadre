@@ -313,13 +313,13 @@ describe('agent interface', () => {
     );
   });
 
-  it('creates a standalone session and injects the initial task without creating a room', async () => {
+  it('creates a standalone session with the initial task at launch without creating a room', async () => {
     const requests = [];
     const api = buildAgentInterface({
       async requestImpl(path, opts = {}) {
         requests.push({ path, opts });
         if (path === '/api/codex/sessions' && opts.method === 'POST') {
-          return { id: 'codex_solo', sessionName: 'codex-solo' };
+          return { id: 'codex_solo', sessionName: 'codex-solo', initialPromptInjected: true };
         }
         if (path === '/api/codex/sessions/codex_solo?lines=200') {
           return {
@@ -365,8 +365,8 @@ describe('agent interface', () => {
     assert.equal(typeof requests[0].opts.body.model, 'string');
     assert.ok(requests[0].opts.body.model.length > 0);
     assert.equal(requests.some((request) => request.path === '/api/agent-bus/threads'), false);
-    assert.equal(requests[2].opts.body.text, 'Review the failing tests and report back.');
-    assert.equal(requests[2].opts.body.enter, true);
+    assert.equal(requests[0].opts.body.initialPrompt, 'Review the failing tests and report back.');
+    assert.equal(requests.length, 1);
   });
 
   it('routes xAI models through Pi without merging provider and model', async () => {
@@ -563,48 +563,20 @@ describe('agent interface', () => {
     assert.equal(requests.some((request) => request.opts.method === 'DELETE'), false);
   });
 
-  it('deletes the spawned session if startup prompt injection fails', async () => {
+  it('propagates an initial prompt launch failure without pasting a fallback', async () => {
     const requests = [];
     const api = buildAgentInterface({
       async requestImpl(path, opts = {}) {
         requests.push({ path, opts });
-        if (path === '/api/claude/sessions' && opts.method === 'POST') {
-          return { id: 'claude_solo', sessionName: 'claude-solo' };
-        }
-        if (path === '/api/claude/sessions/claude_solo?lines=200') {
-          return {
-            id: 'claude_solo',
-            state: canonicalSessionState('ready', { state: 'waiting_for_input', interaction: 'free_text' }),
-          };
-        }
-        if (path === '/api/claude/sessions/claude_solo/startup-input' && opts.method === 'POST') {
-          throw new Error('startup input failed');
-        }
-        if (path === '/api/claude/sessions/claude_solo' && opts.method === 'DELETE') {
-          return { ok: true };
-        }
-        throw new Error(`Unexpected request: ${path}`);
+        throw new Error('Initial prompt exceeds launch limit');
       },
-      getPreferences: async () => ({
-        claudeEnabled: true,
-        codexEnabled: true,
-        preferredSingleProvider: 'claude',
-      }),
+      getPreferences: async () => ({ claudeEnabled: true, preferredSingleProvider: 'claude' }),
     });
-
-    await assert.rejects(
-      () => api.createInteractiveSession({
-        provider: 'claude',
-        displayName: 'Cleanup me',
-        initialPrompt: 'Start work',
-      }),
-      /startup input failed/,
-    );
-
-    assert.deepEqual(requests.at(-1), {
-      path: '/api/claude/sessions/claude_solo',
-      opts: { method: 'DELETE' },
-    });
+    await assert.rejects(() => api.createInteractiveSession({
+      provider: 'claude', initialPrompt: 'Start work',
+    }), /Initial prompt exceeds launch limit/);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].path, '/api/claude/sessions');
   });
 
   it('passes BusinessOS MCP selection to session creation without putting secrets in prompts or thread metadata', async () => {
@@ -649,8 +621,8 @@ describe('agent interface', () => {
     assert.equal(Object.hasOwn(sessionCreate.opts.body, 'selectedMcpServers'), false);
     const serializedRequests = JSON.stringify(requests);
     assert.equal(serializedRequests.includes(secret), false);
-    const startupInput = requests.find((entry) => entry.path === '/api/codex/sessions/codex_bos/startup-input');
-    assert.equal(startupInput.opts.body.text.includes('businessos'), false);
+    assert.equal(sessionCreate.opts.body.initialPrompt.includes('businessos'), false);
+    assert.equal(requests.some((entry) => entry.path.endsWith('/startup-input')), false);
     assert.equal(requests.some((entry) => entry.path === '/api/agent-bus/threads'), false);
   });
   it('returns a BusinessOS-compatible standalone session pointer while preserving fleet fields', async () => {

@@ -247,7 +247,9 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       if (!workDir) return reply.code(400).send({ error: `workDir is required for ${label} sessions` });
       // Resolve launch skills before starting so an unknown skill cannot orphan a process.
       const initialPrompt = composeLaunchUserPrompt({ skillIds: req.body?.skills, initialPrompt: req.body?.initialPrompt });
-      id = randomBytes(8).toString('hex');
+      const requestedId = req.body?.sessionId || randomBytes(8).toString('hex');
+      if (typeof requestedId !== 'string' || !/^[a-f0-9]{8,32}$/.test(requestedId) || service.get(requestedId)) throw Object.assign(new Error('Invalid or duplicate sessionId'), { statusCode: 400 });
+      id = requestedId;
       const model = await (claude ? assertValidClaudeModel : assertValidCodexModel)(text(req.body?.model));
       const resolvedMcp = resolveMcpCapabilities({
         request: {

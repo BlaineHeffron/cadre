@@ -479,13 +479,14 @@ export async function createAgentBusHarness({
       return { ok: true };
     });
 
-    app.post(`/api/${kind}/sessions`, async (req) => {
+    app.post(`/api/${kind}/sessions`, async (req, reply) => {
       if (typeof createResponders[kind] === 'function') {
-        await createResponders[kind](req.body);
+        const response = await createResponders[kind](req.body);
+        if (response?.statusCode) return reply.code(response.statusCode).send(response.body);
       }
       createdSessions[kind].push(req.body);
       createCounters[kind] += 1;
-      const nextId = `${kind}-new-${createCounters[kind]}`;
+      const nextId = req.body.sessionId || `${kind}-new-${createCounters[kind]}`;
       sessionCatalog[kind].add(nextId);
       sessionStates[kind].set(nextId, makeSessionState());
       sessionWorkDirs[kind].set(nextId, req.body?.workDir || stateDir);

@@ -204,9 +204,10 @@ describe('DeepSeek Harness ACP sessions', () => {
     const created = await harness.app.inject({
       method: 'POST',
       url: '/api/deepseek/sessions',
-      payload: { workDir: harness.workDir, initialPrompt: 'Run the tests' },
+      payload: { workDir: harness.workDir, sessionId: 'feed0123', initialPrompt: 'Run the tests' },
     });
     assert.equal(created.statusCode, 200, created.body);
+    assert.equal(created.json().id, 'feed0123');
     assert.equal(created.json().transport, 'acp');
     assert.equal(created.json().transcriptGrade, 'committed_text');
     assert.equal(created.json().experimental, true);
@@ -219,6 +220,10 @@ describe('DeepSeek Harness ACP sessions', () => {
       return response.json().state.status === 'ready';
     });
 
+    const duplicate = await harness.app.inject({ method: 'POST', url: '/api/deepseek/sessions',
+      payload: { workDir: harness.workDir, sessionId: created.json().id, initialPrompt: 'Duplicate' } });
+    assert.equal(duplicate.statusCode, 400);
+    assert.equal(harness.clients.length, 1);
     const detail = await harness.app.inject({
       method: 'GET',
       url: `/api/deepseek/sessions/${created.json().id}`,

@@ -42,28 +42,27 @@ test('failed real launch closes the room, terminates created peers, and preserve
   };
   h.createResponders.claude = async () => {
     assert.equal((await run('tmux', ['new-session', '-d', '-s', 'failed', 'sh', '-c', `echo fixture-launch-error > '${log}'; exit 1`])).code, 0);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    try { await waitForStartupPane(run, 'failed', log, { attempts: 5, intervalMs: 20 }); }
+    catch (err) { return { statusCode: 400, body: { error: err.message } }; }
   };
   h.inputResponders.codex = async ({ sessionId, text }) => {
     const target = sessionId === 'codex-1' ? 'attached' : 'created';
     await waitForStartupPane(run, target);
     await sendTmuxText(run, { target, text, delayMs: 0 });
   };
-  h.inputResponders.claude = async () => {
-    try { await waitForStartupPane(run, 'failed', log, { attempts: 5, intervalMs: 20 }); }
-    catch (err) { return { statusCode: err.statusCode, error: err.message }; }
-  };
   h.deleteResponders.codex = async () => { await run('tmux', ['kill-session', '-t', 'created']); };
   const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
     participants: [{ kind: 'codex', create: true }, { kind: 'codex', sessionId: 'codex-1', create: false }, { kind: 'claude', create: true }],
   } });
   assert.equal(response.statusCode, 400, response.body);
-  assert.match(response.json().error, /claude:claude-new-1.*failed bootstrap/);
+  assert.match(response.json().error, /Participant claude:/);
   assert.match(response.json().error, /fixture-launch-error/);
   assert.equal(h.store.listThreads().length, 1);
   assert.equal(h.store.listThreads()[0].status, 'closed');
   assert.equal(h.store.getThread(h.store.listThreads()[0].id).deliveries.some((d) => d.status === 'queued'), false);
-  assert.deepEqual(h.deletedSessions.codex, ['codex-new-1']);
-  assert.deepEqual(h.deletedSessions.claude, ['claude-new-1']);
+  assert.deepEqual(h.deletedSessions.codex, [h.createdSessions.codex[0].sessionId]);
+  assert.deepEqual(h.deletedSessions.claude, []);
   assert.notEqual((await run('tmux', ['has-session', '-t', 'created'])).code, 0);
   assert.equal((await run('tmux', ['has-session', '-t', 'attached'])).code, 0);
 });
@@ -159,7 +158,9 @@ test('bootstrap failure cleans sessions created by the request', async (t) => {
     ],
   } });
   assert.equal(response.statusCode, 400);
-  assert.deepEqual(h.deletedSessions.codex, ['codex-new-1']);
+  assert.deepEqual(h.deletedSessions.codex, [h.createdSessions.codex[0].sessionId]);
+  assert.equal(h.store.listThreads().length, 1);
+  assert.equal(h.store.listThreads()[0].status, 'closed');
 });
 
 test('bootstrap forwards the automated structured-runtime request to created sessions only', async (t) => {
@@ -174,4 +175,18 @@ test('bootstrap forwards the automated structured-runtime request to created ses
   } });
   assert.equal(plain.statusCode, 200, plain.body);
   assert.equal(Object.hasOwn(h.createdSessions.codex[1], 'structured'), false);
+});
+
+
+test('bootstrap rolls back a backend that ignores its reserved session identity', async (t) => {
+  const h = await createAgentBusHarness(); t.after(() => h.cleanup());
+  h.createResponders.claude = (body) => { body.sessionId = 'deadbeef'; };
+  const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders,
+    payload: { participants: [{ kind: 'codex', create: true }, { kind: 'claude', create: true }] } });
+  assert.equal(response.statusCode, 400, response.body);
+  assert.match(response.json().error, /Participant claude: create ignored reserved sessionId/);
+  assert.deepEqual(h.deletedSessions.codex, [h.createdSessions.codex[0].sessionId]);
+  assert.deepEqual(h.deletedSessions.claude, ['deadbeef']);
+  assert.equal(h.store.listThreads()[0].status, 'closed');
+  assert.equal(h.store.getThread(h.store.listThreads()[0].id).deliveries.some((delivery) => delivery.status === 'queued'), false);
 });

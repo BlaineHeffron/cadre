@@ -925,6 +925,9 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false, scratch
   const sessionsStoreFile = join(tempDir, '.codex_sessions.json');
   await mkdir(binDir, { recursive: true });
   await writeFile(launchLog, 'startup failed once');
+  const initialPromptFile = join(tempDir, '.dueno', 'state', 'initial_prompts', 'codex-codex-clean-1.txt');
+  await mkdir(join(initialPromptFile, '..'), { recursive: true });
+  await writeFile(initialPromptFile, 'Starting task');
   const { paths: hookPaths } = await recordHookPayload({ session_id: 'native-clean-1', cwd: workDir, hook_event_name: 'Stop' }, { provider: 'codex', duenoSessionId: 'codex-clean-1' });
   await writeFile(join(binDir, 'tmux'), [
     '#!/bin/sh',
@@ -991,6 +994,7 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false, scratch
       if (logGone && hookGone && artifactsDone) break;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
+    const initialPromptGone = await readFile(${JSON.stringify(initialPromptFile)}, 'utf8').then(() => false, () => true);
     const launchLogGone = await readFile(${JSON.stringify(launchLog)}, 'utf8').then(() => false, () => true);
     const gitCommands = await readFile(${JSON.stringify(gitLog)}, 'utf8').catch(() => '');
     const tmuxCommands = await readFile(${JSON.stringify(tmuxLog)}, 'utf8').catch(() => '');
@@ -1002,7 +1006,7 @@ async function runLifecycleCleanupScenario({ failWorktreeRemove = false, scratch
     const parentExists = await lstat(${JSON.stringify(scratchParent)}).then(() => true, () => false);
     const outsideKept = await readFile(${JSON.stringify(join(outside, 'keep'))}, 'utf8');
     const workDirExists = await lstat(${JSON.stringify(workDir)}).then(() => true, () => false);
-    console.log(JSON.stringify({ scratchExists, parentExists, outsideKept, workDirExists, statusCode: response.statusCode, body: response.json(), launchLogGone, hooksGone, gitCommands, tmuxCommands, scheduled, stored }));
+    console.log(JSON.stringify({ scratchExists, parentExists, outsideKept, workDirExists, statusCode: response.statusCode, body: response.json(), initialPromptGone, launchLogGone, hooksGone, gitCommands, tmuxCommands, scheduled, stored }));
   `;
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
     cwd: resolve('.'),
@@ -2164,6 +2168,7 @@ describe('Codex Sessions module', () => {
 
   it('cleans up managed worktrees, launch logs, and scheduled sends when deleting a session', async () => {
     const result = await runLifecycleCleanupScenario();
+    assert.equal(result.initialPromptGone, true);
 
     assert.equal(result.statusCode, 200);
     assert.equal(result.body.ok, true);

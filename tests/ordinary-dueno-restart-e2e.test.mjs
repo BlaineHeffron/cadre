@@ -99,7 +99,7 @@ async function buildControlPlane({ root, stateFile }) {
     app.post(`/api/${kind}/sessions`, async (request) => {
       const body = request.body || {};
       const provider = kind === 'pi' ? String(body.provider || 'xai') : kind;
-      const sessionId = `${kind}-${sequence += 1}`;
+      const sessionId = body.sessionId || `${kind}-${sequence += 1}`;
       const prepared = await prepareMcpCapabilityLaunch({
         resolved: resolvedDueno(provider, kind),
         backendType: kind,
@@ -114,6 +114,7 @@ async function buildControlPlane({ root, stateFile }) {
         kind,
         provider,
         model: body.model || '',
+        initialPrompt: body.initialPrompt || '',
         workDir: body.workDir || root,
         displayName: body.displayName || '',
         state: { revision: 1, status: 'ready' },
@@ -290,6 +291,7 @@ describe('ordinary Dueno authority after control-plane restart', () => {
       const thread = restarted.busStore.getThread(spawned.result.structuredContent.thread_id).thread;
       assert.deepEqual(thread.participants.map((entry) => entry.kind).sort(), ['codex', 'pi']);
       const childSessions = thread.participants.map((entry) => restarted.sessions.get(entry.sessionId));
+      assert.equal(childSessions.every((entry) => entry.initialPrompt.includes('bounded mocked acceptance task')), true);
       assert.deepEqual(childSessions.map((entry) => `${entry.provider}/${entry.model}`).sort(), [
         'codex/gpt-5.6-sol',
         'xai/grok-4.6',
