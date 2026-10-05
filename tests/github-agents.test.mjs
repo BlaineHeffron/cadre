@@ -60,7 +60,6 @@ describe('GitHub agent lifecycle', () => {
         { id: 'issue-2', source: 'github-agent', metadata: { github_repo: 'octo/demo', github_kind: 'issue', github_number: 2 } },
         { id: 'other-repo', source: 'github-agent', metadata: { github_repo: 'octo/other', github_kind: 'pr', github_number: 3 } },
         { id: 'manual', source: 'external', metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: 3 } },
-        { id: 'legacy', source: 'github-agent', workDir: '/tmp/github-agents/worktrees/octo-demo/pr-105-old/demo' },
       ];
       sessions.find((session) => session.id === 'pr-103').endedAt = 1;
       sessions.find((session) => session.id === 'pr-104').tmuxSession = 'dead';
@@ -77,7 +76,6 @@ describe('GitHub agent lifecycle', () => {
           if (url.includes('/pulls?')) return response(200, [{ ...githubItem(1), author_association: 'NONE' }]);
           if (url.endsWith('/pulls/101')) return response(200, { state: 'closed' });
           if (url.endsWith('/pulls/102')) return response(200, { state: 'open' });
-          if (url.endsWith('/pulls/105')) return response(200, { state: 'closed' });
           assert.fail(`unexpected request ${url}`);
         },
       });
@@ -85,13 +83,48 @@ describe('GitHub agent lifecycle', () => {
       assert.deepEqual(suppressed.deletedSessions, []);
       assert.equal(calls.length, 1);
       const [result] = await poller.pollOnce();
-      assert.deepEqual(deleted, ['pr-101', 'legacy']);
+      assert.deepEqual(deleted, ['pr-101']);
       assert.deepEqual(result.deletedSessions, [
         { sessionId: 'pr-101', kind: 'pr', number: 101 },
-        { sessionId: 'legacy', kind: 'pr', number: 105 },
       ]);
-      assert.equal(logs.length, 2);
-      assert.equal(calls.length, 5);
+      assert.equal(logs.length, 1);
+      assert.equal(calls.length, 4);
+    });
+  });
+
+  it('continues closure checks and spawns after a confirmation or deletion fails', async () => {
+    await withRepoStore(async (store) => {
+      await store.upsertRepo({ ...BASE_REPO, lastSeenPrNumber: 3, lastSeenIssueNumber: 0 });
+      const deleted = [];
+      const launches = [];
+      const warnings = [];
+      const poller = new GithubAgentPoller({
+        repoStore: store, config: { enabled: true, env: { GITHUB_TOKEN_REF: 'test-token' } },
+        listExistingSessions: async () => [1, 2, 3].map((number) => ({
+          id: `pr-${number}`, source: 'github-agent',
+          metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: number },
+        })),
+        fetchImpl: async (url) => {
+          if (url.includes('/pulls?')) return response(200, [githubItem(4)]);
+          if (url.includes('/issues?')) return response(200, []);
+          if (url.endsWith('/pulls/1')) return response(404, {});
+          return response(200, { state: 'closed' });
+        },
+        deleteSession: async (session) => {
+          if (session.id === 'pr-2') throw Object.assign(new Error('termination failed'), { statusCode: 409 });
+          deleted.push(session.id);
+        },
+        log: { warn: (fields) => warnings.push(fields) },
+        resolveScratchWorkDir: async () => '/tmp/unused-github-lifecycle',
+        sessionLauncher: async (input) => { launches.push(input); return { id: 'pr-4' }; },
+      });
+      const [result] = await poller.pollOnce();
+      assert.equal(result.error, null);
+      assert.deepEqual(deleted, ['pr-3']);
+      assert.deepEqual(result.deletedSessions, [{ sessionId: 'pr-3', kind: 'pr', number: 3 }]);
+      assert.deepEqual(warnings.map((fields) => fields.sessionId), ['pr-1', 'pr-2']);
+      assert.equal(launches.length, 1);
+      assert.equal(result.spawned[0].sessionId, 'pr-4');
     });
   });
 
@@ -121,8 +154,6 @@ describe('GitHub agent lifecycle', () => {
       release();
       const results = await Promise.all([first, second]);
       assert.deepEqual(launches.map((input) => input.metadata.github_number), [145, 146]);
-      assert.equal(launches[0].autoCloseMode, 'when_waiting_for_input');
-      assert.equal(launches[0].autoCloseAfterMs, 7200000);
       assert.equal(results[0][0].spawned.length, 2);
       assert.equal(results[1][0].spawned.length, 0);
       assert.deepEqual((await store.getRepo('octo/demo')).spawnedItemKeys, ['issue:145', 'issue:146']);

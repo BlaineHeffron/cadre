@@ -75,8 +75,6 @@ export async function defaultSessionLauncher({
   model,
   thinkingLevel,
   metadata,
-  autoCloseMode = 'when_waiting_for_input',
-  autoCloseAfterMs = 2 * 60 * 60 * 1000,
   createSession = createAgentSession,
   enqueueSessionCommand = enqueueAgentSessionCommand,
 } = {}) {
@@ -93,8 +91,8 @@ export async function defaultSessionLauncher({
     runtime: selection.runtime,
     thinkingLevel,
     source: 'github-agent',
-    autoCloseMode,
-    autoCloseAfterMs,
+    autoCloseMode: 'when_waiting_for_input',
+    autoCloseAfterMs: 2 * 60 * 60 * 1000,
     metadata,
   });
   await enqueueSessionCommand(selection.backendType, result.id, {
@@ -154,7 +152,7 @@ export async function githubAgentsPlugin(app, opts = {}) {
     reapWorktreesImpl: opts.reapWorktreesImpl,
     listExistingSessions: opts.listExistingSessions,
     tmuxSessionExists: opts.tmuxSessionExists,
-    deleteSession: opts.deleteSession || ((session) => createAgentAdapters()[session.backendType || session.provider].deleteSession(app, session.id || session.sessionId)),
+    deleteSession: opts.deleteSession || ((session) => createAgentAdapters()[session.backendType].deleteSession(app, session.id || session.sessionId)),
     onResult: handleResult,
     log: opts.log || app.log,
   });

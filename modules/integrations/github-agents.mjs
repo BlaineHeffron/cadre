@@ -573,22 +573,25 @@ export class GithubAgentPoller {
         : await listRegisteredGithubSessions(this.config);
       for (const session of sessions) {
         if (session.source !== 'github-agent' || session.endedAt) continue;
-        const metadata = session.metadata || {};
-        const legacyItem = normalizeText(session.workDir).match(/(?:^|\/)(pr|issue)-(\d+)-/);
-        const kind = metadata.github_kind || legacyItem?.[1];
-        const number = Number(metadata.github_number || legacyItem?.[2]);
-        if (!sessionMatchesGithubItem(session, repo, kind, { number }, this.config)) continue;
-        const openNumbers = kind === 'pr' ? result.openPullRequestNumbers : kind === 'issue' ? result.openIssueNumbers : null;
-        if (!openNumbers || openNumbers.includes(number)) continue;
-        if (session.tmuxSession && !(await (this.tmuxSessionExists || tmuxSessionExists)(session.tmuxSession))) continue;
-        const item = await fetchGithubJson(this.fetchImpl,
-          `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/${kind === 'pr' ? 'pulls' : 'issues'}/${number}`, {
-            token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs,
-          });
-        if (item?.state !== 'closed') continue;
-        await this.deleteSession(session);
-        deletedSessions.push({ sessionId: session.id || session.sessionId, kind, number });
-        this.log?.info?.({ repoId: repo.id, sessionId: session.id || session.sessionId, kind, number }, 'Deleted GitHub agent session for closed item');
+        try {
+          const metadata = session.metadata || {};
+          const kind = metadata.github_kind;
+          const number = Number(metadata.github_number);
+          if (!sessionMatchesGithubItem(session, repo, kind, { number }, this.config)) continue;
+          const openNumbers = kind === 'pr' ? result.openPullRequestNumbers : kind === 'issue' ? result.openIssueNumbers : null;
+          if (!openNumbers || openNumbers.includes(number)) continue;
+          if (session.tmuxSession && !(await (this.tmuxSessionExists || tmuxSessionExists)(session.tmuxSession))) continue;
+          const item = await fetchGithubJson(this.fetchImpl,
+            `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/${kind === 'pr' ? 'pulls' : 'issues'}/${number}`, {
+              token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs,
+            });
+          if (item?.state !== 'closed') continue;
+          await this.deleteSession(session);
+          deletedSessions.push({ sessionId: session.id || session.sessionId, kind, number });
+          this.log?.info?.({ repoId: repo.id, sessionId: session.id || session.sessionId, kind, number }, 'Deleted GitHub agent session for closed item');
+        } catch (error) {
+          this.log?.warn?.({ repoId: repo.id, sessionId: session.id || session.sessionId, code: sanitizedError(error) }, 'Failed to delete GitHub agent session for closed item');
+        }
       }
     }
     const spawn = suppressSpawn
@@ -923,8 +926,6 @@ export async function spawnGithubAgentForItem({
       provider: config.provider,
       model: config.model,
       thinkingLevel: config.thinkingLevel,
-      autoCloseMode: 'when_waiting_for_input',
-      autoCloseAfterMs: 2 * 60 * 60 * 1000,
       metadata,
     });
     const sessionId = normalizeText(session?.id || session?.sessionId || '');
