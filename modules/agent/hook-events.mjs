@@ -103,10 +103,12 @@ export function createHookEventRetention({ store, retentionDays = 7 } = {}) {
       } finally { running = false; finished?.(); }
     },
     async close() {
+      if (closed) return;
       closed = true;
       if (running) await new Promise((resolveFinished) => { finished = resolveFinished; });
       await directory?.close();
       directory = null;
+      await store.close?.();
     },
   };
 }
