@@ -1,4 +1,4 @@
-import { cp, lstat, mkdir, readFile, readdir, realpath, unlink, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, readFile, readdir, realpath, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { exec } from '../../lib/exec.mjs';
@@ -24,8 +24,8 @@ export async function configFor(repo) {
     || (config.copy !== undefined && (!Array.isArray(config.copy) || config.copy.some((file) => typeof file !== 'string' || !file || isAbsolute(file) || !inside(repo, resolve(repo, file)))))) throw new Error('invalid worktree config');
   return config;
 }
-async function ignored(path) {
-  const files = (await git(path, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z', '--', '.', ':(exclude)node_modules'])).split('\0').filter(Boolean);
+async function ignored(path, exclusions = []) {
+  const files = (await git(path, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z', '--', '.', ':(exclude)node_modules', ...exclusions])).split('\0').filter(Boolean);
   const nodeModules = resolve(path, 'node_modules');
   const info = await lstat(nodeModules).catch((error) => { if (error.code !== 'ENOENT') throw error; });
   if (info && !await git(path, ['ls-files', '--', 'node_modules'])
@@ -124,14 +124,17 @@ export async function cleanupManagedWorktree(metadata, { getPr, rooms = [], sess
       const unpushed = await git(path, ['log', '--format=%H', 'HEAD', '--not', '--remotes']);
       if (!contained) return keep(unpushed ? 'unpushed commits not in PR' : 'local commits not in PR');
     }
-    const status = (await git(path, ['-c', 'status.showUntrackedFiles=all', 'status', '--porcelain', '--untracked-files=all', '-z'])).split('\0').filter(Boolean);
+    const busDir = await lstat(resolve(path, '.agent_bus')).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+    const ownedBus = (!busDir || (busDir.isDirectory() && !busDir.isSymbolicLink())) && !await git(path, ['ls-files', '--', '.agent_bus']);
+    const exclusions = ownedBus ? [':(exclude).agent_bus/hooks', ':(exclude).agent_bus/state'] : [];
+    const status = (await git(path, ['-c', 'status.showUntrackedFiles=all', 'status', '--porcelain', '--untracked-files=all', '-z', '--', '.', ...exclusions])).split('\0').filter(Boolean);
     for (const entry of status) {
       if (entry === '?? node_modules' && ignoredBaseline.includes('node_modules')
         && (await lstat(resolve(path, 'node_modules'))).isSymbolicLink()
         && !inside(path, await realpath(resolve(path, 'node_modules')))) continue;
       return keep('dirty or untracked files');
     }
-    if ((await ignored(path)).some((file) => !ignoredBaseline.includes(file))) return keep('new ignored files');
+    if ((await ignored(path, exclusions)).some((file) => !ignoredBaseline.includes(file))) return keep('new ignored files');
     const canonicalPath = await realpath(path);
     const canonicalDir = async (dir) => {
       try { return await realpath(dir); }
@@ -144,6 +147,7 @@ export async function cleanupManagedWorktree(metadata, { getPr, rooms = [], sess
     await git(repo, ['worktree', 'unlock', path]);
     try {
       await unlinkExternalLinks(path);
+      if (ownedBus) for (const dir of ['hooks', 'state']) await rm(resolve(path, '.agent_bus', dir), { recursive: true, force: true });
       await git(repo, ['worktree', 'remove', path]);
     } catch (error) {
       await git(repo, ['worktree', 'lock', '--reason', `cadre room ${roomId}`, path]);

@@ -194,7 +194,10 @@ in the merged PR (including unpushed commits); tracked or untracked files are
 dirty; ignored files appear beyond the setup baseline; another open room or
 live session uses the directory; or a GitHub, git, filesystem or session lookup
 fails. User git settings cannot hide untracked files. `node_modules` is exempt
-only when present in the baseline. Ancestry or containment of every local
+only when present in the baseline. When `.agent_bus` contains no tracked files
+and is a physical directory, Cadre owns only its `hooks/` and `state/` contents:
+these are excluded from cleanliness checks and removed after all checks pass.
+Other files such as `.agent_bus/notes` still block cleanup. Ancestry or containment of every local
 commit's stable patch-id proves landing, including rewritten PR commits.
 
 Removal unlocks, unlinks external top-level symlinks without following them,

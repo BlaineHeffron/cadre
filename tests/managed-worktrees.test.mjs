@@ -151,11 +151,7 @@ for (const mode of ['managed', 'setup failure', 'no config']) test(`bootstrap ${
   h.app.agentBusLifecycle.getWorktreePr = f.options.getPr;
   const ended = await h.app.inject({ method: 'POST', url: `/api/agent-bus/threads/${metadata.roomId}/end`, headers: h.authHeaders, payload: {} });
   assert.equal(ended.statusCode, 200, ended.body);
-  assert.equal(ended.json().worktree.reason, 'dirty or untracked files', ended.body);
-  // The harness records real runtime hook artifacts; remove them to exercise clean shutdown.
-  await rm(resolve(metadata.path, '.agent_bus'), { recursive: true, force: true });
-  const retried = await h.app.agentBusLifecycle.endThread(metadata.roomId);
-  assert.equal(retried.worktree.removed, true, JSON.stringify(retried));
+  assert.equal(ended.json().worktree.removed, true, ended.body);
   assert.equal(await exists(metadata.path), false);
 });
 
@@ -295,4 +291,27 @@ test('setup failure preserves original error when rollback branch CAS refuses', 
   });
   assert.equal(await exists(resolve(f.options.baseDir, 'thr_setup_commit/repo')), false);
   assert.notEqual(await git(f.repo, 'rev-parse', 'setup-commit'), f.metadata.baseHead);
+});
+
+test('ignored user notes in .agent_bus remain protected', async (t) => {
+  const f = await fixture(t);
+  await writeFile(resolve(f.metadata.path, '.gitignore'), 'node_modules/\ncache/\n.agent_bus/\n');
+  await git(f.metadata.path, 'commit', '-am', 'ignore agent bus');
+  const head = await git(f.metadata.path, 'rev-parse', 'HEAD');
+  await git(f.repo, 'push', 'origin', `+${head}:refs/pull/1/head`);
+  f.setPr({ merged: true, number: 1, head: { sha: head } });
+  await mkdir(resolve(f.metadata.path, '.agent_bus/hooks'), { recursive: true });
+  await writeFile(resolve(f.metadata.path, '.agent_bus/hooks/codex-session.jsonl'), 'hook');
+  await writeFile(resolve(f.metadata.path, '.agent_bus/notes'), 'precious');
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'new ignored files');
+  assert.equal(await readFile(resolve(f.metadata.path, '.agent_bus/notes'), 'utf8'), 'precious');
+  assert.equal(await readFile(resolve(f.metadata.path, '.agent_bus/hooks/codex-session.jsonl'), 'utf8'), 'hook');
+});
+
+test('symlinked Cadre state parent is kept with external content intact', async (t) => {
+  const f = await fixture(t); const target = resolve(f.root, 'shared'); await mkdir(resolve(target, 'hooks'), { recursive: true });
+  await writeFile(resolve(target, 'hooks/precious'), 'keep');
+  await symlink(target, resolve(f.metadata.path, '.agent_bus'));
+  const result = await cleanupManagedWorktree(f.metadata, f.options);
+  assert.equal(result.removed, false); assert.equal(await readFile(resolve(target, 'hooks/precious'), 'utf8'), 'keep');
 });

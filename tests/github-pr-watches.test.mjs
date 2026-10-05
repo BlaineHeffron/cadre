@@ -272,3 +272,12 @@ test('merge ends the room while a delivery is in flight', { timeout: 5000 }, asy
   assert.equal(s.h.store.getThread(s.thread.id).thread.status, 'closed');
   assert.deepEqual(await s.store.listWatches(), []);
 });
+
+test('merge notification includes fail-closed worktree outcome', async (t) => {
+  const s = await setup(t); await s.watch();
+  await s.h.store.updateThreadMetadata(s.thread.id, { worktree: {} });
+  s.setPr({ merged: true, state: 'closed', merge_commit_sha: '123456789' });
+  await s.poller.pollOnce();
+  assert.equal(s.commands.length, 1);
+  assert.match(s.commands[0].text, / · worktree: kept \([^)]+\)$/);
+});
