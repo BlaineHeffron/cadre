@@ -1,3 +1,4 @@
+import { compileToolArguments } from './mcp-validation.mjs';
 import { PAGE_PROPERTIES, paginate } from './mcp-pagination.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -426,7 +427,7 @@ export function buildAgentBusMcpServer({
       inputSchema: { type: 'object', properties: {
         thread_id: { type: 'string' }, limit: { type: 'integer', minimum: 0, maximum: 500 },
         since: { type: 'string' }, after: { type: 'string' }, message_id: { type: 'string' },
-        body_offset: { type: 'integer', minimum: 0 }, body_limit: { type: 'integer', minimum: 1, maximum: 1200 },
+        body_offset: { type: 'integer', minimum: 0 }, body_limit: { type: 'integer', minimum: 0, maximum: 1200 },
         bodies: { type: 'boolean' }, deliveries: { type: 'boolean' }, summary_only: { type: 'boolean' },
       }, required: ['thread_id'], additionalProperties: false },
     },
@@ -482,6 +483,7 @@ export function buildAgentBusMcpServer({
     }
   }
   const exposedTools = tools;
+  const validateArguments = compileToolArguments(tools);
 
   const prompts = [
     {
@@ -495,6 +497,7 @@ export function buildAgentBusMcpServer({
   const resourceTemplates = EMPTY_LIST;
 
   async function callToolImpl(name, args = {}, authContext = null) {
+    validateArguments(name, args);
     await authorizeTool(authContext, name, args);
     if (TASK_TOOLS.some((tool) => tool.name === name)) {
       if (!authenticatedContext(authContext)) throw authorizationError('Task operations require an authenticated credential', 'principal_missing');
@@ -784,10 +787,10 @@ export function buildAgentBusMcpServer({
 
     if (method === 'tools/call') {
       try {
-        const result = await callTool(params?.name, params?.arguments || {}, options.authContext || null);
+        const result = await callTool(params?.name, params?.arguments === undefined ? {} : params.arguments, options.authContext || null);
         return success(result);
       } catch (err) {
-        if (TASK_TOOLS.some((tool) => tool.name === params?.name) && err?.code !== 'mcp_forbidden') {
+        if (TASK_TOOLS.some((tool) => tool.name === params?.name) && !['mcp_forbidden', 'mcp_invalid_arguments'].includes(err?.code)) {
           const failure = { error: err.message || 'Task operation failed', code: err.code || null, statusCode: err.statusCode || 500 };
           return success({ isError: true, content: [{ type: 'text', text: JSON.stringify(failure) }], structuredContent: failure });
         }
@@ -795,7 +798,7 @@ export function buildAgentBusMcpServer({
           jsonrpc: '2.0',
           id,
           error: {
-            code: err?.code === 'mcp_forbidden' ? -32003 : -32000,
+            code: err?.code === 'mcp_forbidden' ? -32003 : err?.code === 'mcp_invalid_arguments' ? -32602 : -32000,
             message: err.message || 'Tool call failed',
             ...(err?.reason ? { data: { reason: err.reason } } : {}),
           },

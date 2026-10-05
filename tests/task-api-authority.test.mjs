@@ -48,7 +48,7 @@ test('task MCP crosses real HTTP auth with stable owner, consumer identity and e
   assert.deepEqual(calls.at(-1).args, [['child'], 'cursor', 10, { consumerId: 'codex:parent', limit: 50 }]);
 });
 
-test('task authority rejects unowned tasks, wrong rooms and missing scopes; strips caller launch authority', async (t) => {
+test('task authority rejects unowned tasks, wrong rooms and missing scopes and caller launch authority', async (t) => {
   const { mcp, calls, tasks, requestImpl, app } = await setup(t);
   const status = { thread_id: 'room', task_id: 'child' };
   await assert.rejects(mcp.callTool('task_status', status, { ...context, principal: { type: 'agent', kind: 'codex', sessionId: 'other' } }), (e) => e.reason === 'task_owner_required');
@@ -58,7 +58,8 @@ test('task authority rejects unowned tasks, wrong rooms and missing scopes; stri
   await assert.rejects(mcp.callTool('task_status', status, { ...context, toolScopes: [] }), (e) => e.reason === 'scope_missing');
   await assert.rejects(requestImpl('/api/agent-bus/tasks/status', { method: 'POST', body: status, authContext: { ...context, toolScopes: [] } }), (e) => e.reason === 'scope_missing');
   assert.equal(calls.length, 0);
-  await mcp.callTool('task_spawn', { thread_id: 'room', task_key: 'one', spec: { provider: 'codex-app-server', model: 'gpt-6-astra', workDir: '/tmp', env: { EVIL: 'value' }, ownerRef: { kind: 'ui', sessionId: 'spoof' } } }, context);
+  await assert.rejects(mcp.callTool('task_spawn', { thread_id: 'room', task_key: 'one', spec: { provider: 'codex-app-server', model: 'gpt-6-astra', workDir: '/tmp', env: { EVIL: 'value' }, ownerRef: { kind: 'ui', sessionId: 'spoof' } } }, context), /task_spawn: unknown argument "spec.env"/);
+  await mcp.callTool('task_spawn', { thread_id: 'room', task_key: 'one', spec: { provider: 'codex-app-server', model: 'gpt-6-astra', workDir: '/tmp' } }, context);
   assert.equal(calls.at(-1).args[2].env, undefined);
   assert.deepEqual(calls.at(-1).args[2].ownerRef, owner);
   const unauthenticated = await app.inject({ method: 'POST', url: '/api/agent-bus/tasks/status', payload: status });

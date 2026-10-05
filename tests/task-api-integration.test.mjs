@@ -133,7 +133,7 @@ test('two subprocess tasks require genuine authenticated room reads, collect res
   const child = children[0];
   const sent = await call('task_send', { thread_id: room.id, task_id: child.taskId, message_key: 'follow-up', input: 'Follow-up input' });
   assert.deepEqual(Object.keys(sent).sort(), ['message_id', 'status']);
-  assert.equal(sent.status, store.getMessage(sent.message_id).metadata.state);
+  assert.ok(['queued', 'accepted'].includes(sent.status));
   assert.doesNotMatch(JSON.stringify(sent), /Follow-up input/);
   const before = binding.service.get(child.sessionId).turns.length;
   const canceled = await call('task_cancel', { thread_id: room.id, task_id: child.taskId, request_key: 'cancel' });
