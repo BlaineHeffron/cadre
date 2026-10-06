@@ -57,6 +57,12 @@ test('an exact repeat of an earlier result posts and delivers once the verdict h
   assert.equal(flipped.delivered, 1);
 });
 
+test('the first result per outcome wins, so a DIRECTOR REPORT after the implementer is not pushed again', async (t) => {
+  const { send } = await setup(t);
+  assert.equal((await send(implementer, 'ready · PR #45 · done', 'Head: 070ef57')).delivered, 1);
+  assert.equal((await send(reviewer, 'ready · PR #45 · approved', 'DIRECTOR REPORT: PR #45\nHead: 070ef5702feae88f')).delivered, 0);
+});
+
 test('a room with no reviewer delivers its result to the owner', async (t) => {
   const { send } = await setup(t, [implementer]);
   assert.equal((await send(implementer, 'ready · PR #45 · done', 'Head: 070ef57')).delivered, 1);
