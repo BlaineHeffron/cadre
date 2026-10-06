@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, stat, symlink, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, writeFile, readFile, stat, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { exec } from '../lib/exec.mjs';
@@ -198,6 +198,89 @@ for (const mode of ['managed', 'stale local config', 'setup failure', 'launch fa
   assert.equal(ended.statusCode, 200, ended.body);
   assert.equal(ended.json().worktree.removed, true, ended.body);
   assert.equal(await exists(metadata.path), false);
+});
+
+for (const mode of ['then merged', 'already merged', 'with explicit watch']) test(`room PR found by branch ${mode}`, async (t) => {
+  const f = await fixture(t);
+  await git(f.repo, 'config', `url.${resolve(f.root, 'remote')}.insteadOf`, 'https://github.com/test/repo.git');
+  await git(f.repo, 'config', '--add', `url.${resolve(f.root, 'remote')}.insteadOf`, 'git@github.com:test/repo.git');
+  await git(f.repo, 'remote', 'set-url', 'origin', 'https://github.com/test/repo.git');
+  const commands = [];
+  const h = await createAgentBusHarness({ beforeReady: async (app, dir) => {
+    app.get('/api/codex-app-server/sessions', async () => ({ sessions: [] }));
+    const { buildGithubAgentRepoStore } = await import('../modules/integrations/github-agents.mjs');
+    const { githubAgentsPlugin } = await import('../modules/integrations/github-agents-plugin.mjs');
+    await mkdir(resolve(dir, 'github'));
+    const repoStore = buildGithubAgentRepoStore({ storeFile: resolve(dir, 'github/repos.json'), env: { APP_STATE_STORAGE: 'file' } });
+    await repoStore.upsertRepo({ owner: 'test', repo: 'repo', authRef: 'TEST_GITHUB_TOKEN', prEnabled: false, issueEnabled: false });
+    await githubAgentsPlugin(app, { repoStore, config: { enabled: false },
+      enqueueSessionCommand: async (kind, sessionId, input) => commands.push({ kind, sessionId, ...input }) });
+  } }); t.after(() => h.cleanup());
+  const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
+    title: 'Auto', worktree: { repo: f.repo, branch: 'auto', base: 'origin/main' },
+    participants: [{ kind: 'codex', create: true }, { kind: 'claude', create: true }],
+  } });
+  assert.equal(response.statusCode, 200, response.body);
+  // Collab rooms are owned by the coordinator agent, which receives the merge notification.
+  const room = await h.store.transferThread(response.json().thread.id, { kind: 'pi', sessionId: 'pi-1' });
+  await git(room.metadata.worktree.path, 'merge', '--ff-only', f.head);
+  await git(f.repo, 'push', 'origin', `${f.head}:refs/pull/2/head`);
+  const stale = { number: 1, created_at: new Date(room.createdAt - 60000).toISOString() };
+  let pulls = [], pr = { number: 2, state: 'open', merged: false, head: { sha: f.head } };
+  const urls = [];
+  const poller = h.app.githubAgents.poller;
+  poller.config = { enabled: true, env: { TEST_GITHUB_TOKEN: 'test-only' } };
+  poller.fetchImpl = async (url) => {
+    urls.push(url); const { pathname } = new URL(url);
+    return new Response(JSON.stringify(pathname.endsWith('/pulls') ? pulls : pathname.endsWith('/reviews') ? [] : pr), { status: 200 });
+  };
+  await poller.pollOnce();
+  assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+  pulls = [{ number: 2, created_at: new Date(Math.floor(room.createdAt / 1000) * 1000).toISOString() }, stale];
+  for (const url of ['https://notgithub.com/test/repo.git', 'git@github.com.evil:test/repo.git']) {
+    await git(f.repo, 'remote', 'set-url', 'origin', url);
+    await poller.pollOnce();
+  }
+  assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+  assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
+  await git(f.repo, 'remote', 'set-url', 'origin', mode === 'already merged' ? 'git@github.com:test/repo.git' : 'https://github.com/test/repo.git');
+  if (mode === 'with explicit watch') {
+    const other = await h.store.createThread({ title: 'Other', participants: [], createdBy: { kind: 'pi', sessionId: 'pi-1' } });
+    const explicit = await h.app.githubAgents.repoStore.putWatch({ repo: 'test/repo', number: 2, thread_id: other.id }, { kind: 'pi', sessionId: 'pi-1' });
+    await poller.pollOnce();
+    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), [explicit]);
+    assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
+    return;
+  }
+  if (mode === 'then merged') {
+    // A read-only marker makes the real link write fail after the watch is stored.
+    const marker = resolve(room.metadata.worktree.path, await git(room.metadata.worktree.path, 'rev-parse', '--git-dir'), 'cadre-room.json');
+    await chmod(marker, 0o444);
+    await poller.pollOnce();
+    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+    assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
+    await chmod(marker, 0o644);
+    // A read-only store directory makes the real watch save fail after the in-memory insert.
+    await chmod(resolve(h.stateDir, 'github'), 0o555);
+    await poller.pollOnce().catch(() => {});
+    await chmod(resolve(h.stateDir, 'github'), 0o755);
+    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+    assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
+    await poller.pollOnce();
+    const [watch] = await h.app.githubAgents.repoStore.listWatches();
+    assert.deepEqual([watch.number, watch.thread_id, watch.creator], [2, room.id, { kind: 'codex', sessionId: room.participants[0].sessionId }]);
+    assert.equal(h.store.getThread(room.id).thread.status, 'open');
+  }
+  pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head };
+  await git(f.repo, 'merge', '--ff-only', f.head);
+  await poller.pollOnce();
+  assert.equal(new URL(urls[0]).searchParams.get('head'), 'test:auto');
+  assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
+  assert.equal(h.store.getThread(room.id).thread.status, 'closed');
+  assert.equal(await exists(room.metadata.worktree.path), false);
+  assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+  assert.deepEqual(commands.map((item) => item.sessionId), ['pi-1']);
+  assert.match(commands[0].text, /^\[PR_WATCH\] PR test\/repo#2 merged .* · ended room .* · worktree: removed$/);
 });
 
 test('ended sessions do not block removal', async (t) => {

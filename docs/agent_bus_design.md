@@ -194,7 +194,10 @@ Setup failure removes the fresh worktree before launching any participants.
 Room metadata and a marker in git metadata preserve the path, repo, branch, base,
 room id, cleanup and merge policies and ignored-file baseline.
 
-Link the PR with `watch_pr({ repo, number, thread_id })`. Room end and the PR
+When the repo's `origin` is a configured GitHub repo, the poller finds the PR
+whose head is the room branch (opened after the room) and watches it as if the
+owner had called `watch_pr({ repo, number, thread_id })`, so a PR merged before
+the first poll still ends the room. Room end and the PR
 merge notification report `worktree: removed` or `worktree: kept (<reason>)`.
 Cleanup keeps worktrees when cleanup is off; metadata is missing or invalid;
 the linked PR is absent, unmerged or missing its head; local commits are not
