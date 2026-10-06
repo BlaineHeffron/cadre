@@ -694,13 +694,14 @@ export class GithubAgentPoller {
         // GitHub timestamps have second precision.
         const pr = pulls.find((item) => Date.parse(item.created_at) >= Math.floor(room.createdAt / 1000) * 1000);
         if (!pr) continue;
-        // Link first: a linked room is never rediscovered, so a removed watch cannot re-notify close or expiry.
-        await this.linkWorktreePr(room.id, { repo: repo.id, number: pr.number });
         // An explicit watch on the same PR keeps its linkage. Notifications go to the room owner;
         // the first (always newly created) participant is the fallback creator.
-        if ((await this.repoStore.getRepo(repo.id))?.watches.some((watch) => watch.number === pr.number)) continue;
+        const watched = (await this.repoStore.getRepo(repo.id))?.watches.some((watch) => watch.number === pr.number);
         const [{ kind, sessionId }] = room.participants;
-        await this.repoStore.putWatch({ repo: repo.id, number: pr.number, thread_id: room.id }, { kind, sessionId });
+        if (!watched) await this.repoStore.putWatch({ repo: repo.id, number: pr.number, thread_id: room.id }, { kind, sessionId });
+        // A linked room is never rediscovered, so a failed link drops the new watch and retries next tick.
+        try { await this.linkWorktreePr(room.id, { repo: repo.id, number: pr.number }); }
+        catch (error) { if (!watched) await this.repoStore.updateWatch(repo.id, pr.number); throw error; }
       } catch (error) {
         this.log?.warn?.({ repoId: repo.id, threadId: room.id, code: sanitizedError(error) }, 'Room PR discovery failed');
       }

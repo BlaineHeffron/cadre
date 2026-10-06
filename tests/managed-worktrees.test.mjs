@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, stat, symlink, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, writeFile, readFile, stat, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { exec } from '../lib/exec.mjs';
@@ -252,6 +252,13 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch']) tes
     return;
   }
   if (mode === 'then merged') {
+    // A read-only marker makes the real link write fail after the watch is stored.
+    const marker = resolve(room.metadata.worktree.path, await git(room.metadata.worktree.path, 'rev-parse', '--git-dir'), 'cadre-room.json');
+    await chmod(marker, 0o444);
+    await poller.pollOnce();
+    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+    assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
+    await chmod(marker, 0o644);
     await poller.pollOnce();
     const [watch] = await h.app.githubAgents.repoStore.listWatches();
     assert.deepEqual([watch.number, watch.thread_id, watch.creator], [2, room.id, { kind: 'codex', sessionId: room.participants[0].sessionId }]);
