@@ -287,12 +287,36 @@ test('setup timeout terminates child writers before rollback', async (t) => {
   assert.equal(await exists(resolve(f.options.baseDir, 'thr_timeout/repo')), false);
 });
 
+test('bootstrap injects the merge policy from the base-ref config', async (t) => {
+  const f = await fixture(t);
+  const h = await createAgentBusHarness({ beforeReady: async (app) => {
+    app.get('/api/codex-app-server/sessions', async () => ({ sessions: [] }));
+  } }); t.after(() => h.cleanup());
+  const bootstrap = (branch) => h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
+    title: 'Merge', worktree: { repo: f.repo, branch, base: 'origin/main' },
+    participants: [{ kind: 'codex', create: true }, { kind: 'claude', create: true }],
+  } });
+  const operatorLine = 'Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges.';
+  assert.equal((await bootstrap('operator')).statusCode, 200);
+  assert.ok(h.createdSessions.codex[0].initialPrompt.split('\n').includes(operatorLine));
+  await pushConfig(f, JSON.stringify({ merge: 'reviewer' }));
+  const response = await bootstrap('reviewer');
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(h.store.getThread(response.json().thread.id).thread.metadata.worktree.merge, 'reviewer');
+  for (const created of [h.createdSessions.codex[1], h.createdSessions.claude[1]]) {
+    assert.ok(created.initialPrompt.split('\n').includes('Unless your task says otherwise: after approval and the project\'s gates pass, the reviewer merges the PR, then reports; do not delete the remote branch.'));
+    assert.doesNotMatch(created.initialPrompt, /coordinator or operator merges/);
+  }
+});
+
 test('invalid config and missing metadata fail closed', async (t) => {
   const f = await fixture(t);
   assert.equal((await cleanupManagedWorktree({ ...f.metadata, ignoredBaseline: undefined }, f.options)).reason, 'missing or invalid metadata');
-  await pushConfig(f, '{');
-  await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'invalid', roomId: 'thr_invalid', baseDir: f.options.baseDir }));
-  assert.equal(await exists(resolve(f.options.baseDir, 'thr_invalid')), false);
+  for (const config of ['{', JSON.stringify({ merge: 'anyone' })]) {
+    await pushConfig(f, config);
+    await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'invalid', roomId: 'thr_invalid', baseDir: f.options.baseDir }), /invalid worktree config|JSON/);
+    assert.equal(await exists(resolve(f.options.baseDir, 'thr_invalid')), false);
+  }
 });
 
 test('failed PR fetch keeps worktree even when head object exists', async (t) => {

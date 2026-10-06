@@ -175,8 +175,12 @@ Repositories opt in with a checked-in `.cadre/worktree.json`:
 { "setup": "npm ci", "copy": ["local-settings.json"], "cleanup": "on-merge" }
 ```
 
-`cleanup` defaults to `off`. Creation reads the config (opt-in, `copy`, `setup`,
-`cleanup`) from the base commit after fetching, not from the local checkout, and
+`cleanup` defaults to `off`. `merge` (`operator` or `reviewer`, default
+`operator`) sets merge ownership in the injected collab onboarding: `operator`
+says the coordinator or operator merges; `reviewer` says the reviewer merges
+after approval and the project's gates, then reports. Rooms without a managed
+worktree always get the `operator` text. Creation reads the config (opt-in, `copy`, `setup`,
+`cleanup`, `merge`) from the base commit after fetching, not from the local checkout, and
 records `cleanup` in the worktree metadata; cleanup uses that recorded policy.
 Worktrees created before the policy was recorded are kept. A `worktree` request for a base without
 this config fails with a 400 before any room or session is created.
@@ -188,7 +192,7 @@ worktree under `~/.cadre/worktrees/collab`, copies only gitignored paths, then
 runs setup with `CADRE_WORKTREE_PATH` and `CADRE_REPO_ROOT` (120-second timeout).
 Setup failure removes the fresh worktree before launching any participants.
 Room metadata and a marker in git metadata preserve the path, repo, branch, base,
-room id, cleanup policy and ignored-file baseline.
+room id, cleanup and merge policies and ignored-file baseline.
 
 Link the PR with `watch_pr({ repo, number, thread_id })`. Room end and the PR
 merge notification report `worktree: removed` or `worktree: kept (<reason>)`.

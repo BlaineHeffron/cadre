@@ -75,6 +75,7 @@ test('onboarding without a room channel omits collab workflow and tools', () => 
 
 test('collab onboarding includes the safe-wait rule on one line', () => {
   const prompt = renderCollabOnboarding({ self: { kind: 'codex', sessionId: 'implementer' } });
+  assert.ok(prompt.split('\n').includes('Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges.'));
   assert.ok(prompt.split('\n').includes('Wait on background jobs by exact PID (`wait <pid>`, `kill -0 <pid>`) or your harness\'s background-task tool; never poll `pgrep -f`/`pkill -f` with a pattern that also appears in your own command line.'));
 });
 

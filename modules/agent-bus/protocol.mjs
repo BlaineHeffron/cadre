@@ -7,7 +7,7 @@ function teammates(self, participants) {
   return (participants || []).filter((item) => item.kind !== self.kind || item.sessionId !== self.sessionId);
 }
 
-export function renderCollabOnboarding({ self, participants, threadId, title, busAvailable = true }) {
+export function renderCollabOnboarding({ self, participants, threadId, title, busAvailable = true, merge = 'operator' }) {
   const roster = teammates(self, participants).map((item) => `- ${agentLabel(item)}`).join('\n') || '- none';
   const lines = [
     'You are participating in a collaboration room managed by Cadre.', '',
@@ -18,7 +18,9 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
   return [...lines, '',
     'Workflow: if you are assigned implementer or reviewer, the implementer writes code and tests; the reviewer blocks on correctness or unnecessary code. Iterate until the reviewer approves.',
     'Coordinator findings go through the reviewer, who forwards accepted findings or rebuts them with evidence. The implementer acts only on forwarded findings.',
-    'Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges.',
+    merge === 'reviewer'
+      ? 'Unless your task says otherwise: after approval and the project\'s gates pass, the reviewer merges the PR, then reports; do not delete the remote branch.'
+      : 'Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges.',
     'Wait on background jobs by exact PID (`wait <pid>`, `kill -0 <pid>`) or your harness\'s background-task tool; never poll `pgrep -f`/`pkill -f` with a pattern that also appears in your own command line.',
     'Use the `dueno-agent-bus` MCP server for room communication.',
     `Context: room_context(thread_id="${threadId}")`,
@@ -36,8 +38,8 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
 }
 
 export function renderCollabStartupPrompt({ self, participants, threadId, title, initialTask, participantTask,
-  busAvailable = true }) {
-  const sections = [renderCollabOnboarding({ self, participants, threadId, title, busAvailable })];
+  busAvailable = true, merge }) {
+  const sections = [renderCollabOnboarding({ self, participants, threadId, title, busAvailable, merge })];
   const shared = String(initialTask || '').trim();
   const own = String(participantTask || '').trim();
   if (shared || own) {
