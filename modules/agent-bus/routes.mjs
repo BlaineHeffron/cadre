@@ -236,7 +236,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
       const prompts = roster.map((participant, index) => renderCollabStartupPrompt({
         self: { ...participant, role: requested[index]?.role }, participants: roster,
         threadId: roomId, title: req.body.title, initialTask: req.body.initialTask,
-        participantTask: requested[index]?.initialTask,
+        participantTask: requested[index]?.initialTask, merge: worktree?.merge,
       }));
       thread = await store.createThread({ id: roomId, title: req.body.title, projectKey: req.body.projectKey,
         participants: roster.map(participantRef), metadata: { source: 'bootstrap', ...(worktree ? { worktree } : {}) },

@@ -18,7 +18,7 @@ async function configFor(repo, ref) {
   if (!await git(repo, ['ls-tree', '--name-only', ref, '--', '.cadre/worktree.json'])) return null;
   const text = await git(repo, ['show', `${ref}:.cadre/worktree.json`]);
   const config = JSON.parse(text);
-  if (!config || !['off', 'on-merge'].includes(config.cleanup ?? 'off')
+  if (!config || !['off', 'on-merge'].includes(config.cleanup ?? 'off') || (config.merge !== undefined && !['operator', 'reviewer'].includes(config.merge))
     || (config.setup !== undefined && typeof config.setup !== 'string')
     || (config.copy !== undefined && (!Array.isArray(config.copy) || config.copy.some((file) => typeof file !== 'string' || !file || isAbsolute(file) || !inside(repo, resolve(repo, file)))))) throw new Error('invalid worktree config');
   return config;
@@ -47,7 +47,7 @@ export async function createManagedWorktree({ repo, branch, base, roomId, baseDi
   if (!inside(baseDir, path) || !inside(resolve(baseDir, roomId), path)) throw new Error('invalid room id');
   await mkdir(dirname(path), { recursive: true });
   await git(repo, ['worktree', 'add', '--lock', '--reason', `cadre room ${roomId}`, '-b', branch, path, baseHead]);
-  const metadata = { path, repo, branch, base, baseHead, roomId, cleanup: config.cleanup ?? 'off' };
+  const metadata = { path, repo, branch, base, baseHead, roomId, cleanup: config.cleanup ?? 'off', merge: config.merge ?? 'operator' };
   try {
     await writeFile(await markerPath(path), JSON.stringify(metadata));
     for (const file of config.copy || []) {
