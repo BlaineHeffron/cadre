@@ -698,10 +698,15 @@ export class GithubAgentPoller {
         // the first (always newly created) participant is the fallback creator.
         const watched = (await this.repoStore.getRepo(repo.id))?.watches.some((watch) => watch.number === pr.number);
         const [{ kind, sessionId }] = room.participants;
-        if (!watched) await this.repoStore.putWatch({ repo: repo.id, number: pr.number, thread_id: room.id }, { kind, sessionId });
-        // A linked room is never rediscovered, so a failed link drops the new watch and retries next tick.
-        try { await this.linkWorktreePr(room.id, { repo: repo.id, number: pr.number }); }
-        catch (error) { if (!watched) await this.repoStore.updateWatch(repo.id, pr.number); throw error; }
+        // A linked room is never rediscovered, and a failed save can leave the watch in memory,
+        // so any failure drops the new watch before the watch tick and retries discovery next tick.
+        try {
+          if (!watched) await this.repoStore.putWatch({ repo: repo.id, number: pr.number, thread_id: room.id }, { kind, sessionId });
+          await this.linkWorktreePr(room.id, { repo: repo.id, number: pr.number });
+        } catch (error) {
+          if (!watched) await this.repoStore.updateWatch(repo.id, pr.number).catch(() => {});
+          throw error;
+        }
       } catch (error) {
         this.log?.warn?.({ repoId: repo.id, threadId: room.id, code: sanitizedError(error) }, 'Room PR discovery failed');
       }

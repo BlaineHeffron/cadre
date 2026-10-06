@@ -210,7 +210,8 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch']) tes
     app.get('/api/codex-app-server/sessions', async () => ({ sessions: [] }));
     const { buildGithubAgentRepoStore } = await import('../modules/integrations/github-agents.mjs');
     const { githubAgentsPlugin } = await import('../modules/integrations/github-agents-plugin.mjs');
-    const repoStore = buildGithubAgentRepoStore({ storeFile: resolve(dir, 'repos.json'), env: { APP_STATE_STORAGE: 'file' } });
+    await mkdir(resolve(dir, 'github'));
+    const repoStore = buildGithubAgentRepoStore({ storeFile: resolve(dir, 'github/repos.json'), env: { APP_STATE_STORAGE: 'file' } });
     await repoStore.upsertRepo({ owner: 'test', repo: 'repo', authRef: 'TEST_GITHUB_TOKEN', prEnabled: false, issueEnabled: false });
     await githubAgentsPlugin(app, { repoStore, config: { enabled: false },
       enqueueSessionCommand: async (kind, sessionId, input) => commands.push({ kind, sessionId, ...input }) });
@@ -259,6 +260,12 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch']) tes
     assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
     assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
     await chmod(marker, 0o644);
+    // A read-only store directory makes the real watch save fail after the in-memory insert.
+    await chmod(resolve(h.stateDir, 'github'), 0o555);
+    await poller.pollOnce().catch(() => {});
+    await chmod(resolve(h.stateDir, 'github'), 0o755);
+    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+    assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
     await poller.pollOnce();
     const [watch] = await h.app.githubAgents.repoStore.listWatches();
     assert.deepEqual([watch.number, watch.thread_id, watch.creator], [2, room.id, { kind: 'codex', sessionId: room.participants[0].sessionId }]);
