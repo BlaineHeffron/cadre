@@ -691,11 +691,14 @@ export class GithubAgentPoller {
         if (origin.stdout.trim().match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/i)?.[1].toLowerCase() !== repo.id.toLowerCase()) continue;
         const pulls = await fetchGithubList(this.fetchImpl, `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls?state=all&head=${encodeURIComponent(`${repo.owner}:${worktree.branch}`)}&per_page=100`,
           { token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs });
-        const pr = pulls.find((item) => Date.parse(item.created_at) >= room.createdAt);
+        // GitHub timestamps have second precision.
+        const pr = pulls.find((item) => Date.parse(item.created_at) >= Math.floor(room.createdAt / 1000) * 1000);
         if (!pr) continue;
         // Link first: a linked room is never rediscovered, so a removed watch cannot re-notify close or expiry.
         await this.linkWorktreePr(room.id, { repo: repo.id, number: pr.number });
-        // Notifications go to the room owner; the first (always newly created) participant is the fallback creator.
+        // An explicit watch on the same PR keeps its linkage. Notifications go to the room owner;
+        // the first (always newly created) participant is the fallback creator.
+        if ((await this.repoStore.getRepo(repo.id))?.watches.some((watch) => watch.number === pr.number)) continue;
         const [{ kind, sessionId }] = room.participants;
         await this.repoStore.putWatch({ repo: repo.id, number: pr.number, thread_id: room.id }, { kind, sessionId });
       } catch (error) {

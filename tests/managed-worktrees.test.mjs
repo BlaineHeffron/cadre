@@ -200,7 +200,7 @@ for (const mode of ['managed', 'stale local config', 'setup failure', 'launch fa
   assert.equal(await exists(metadata.path), false);
 });
 
-for (const openFirst of [true, false]) test(`room PR found by branch ${openFirst ? 'then merged' : 'already merged'} ends room and removes worktree without watch_pr`, async (t) => {
+for (const mode of ['then merged', 'already merged', 'with explicit watch']) test(`room PR found by branch ${mode}`, async (t) => {
   const f = await fixture(t);
   await git(f.repo, 'config', `url.${resolve(f.root, 'remote')}.insteadOf`, 'https://github.com/test/repo.git');
   await git(f.repo, 'remote', 'set-url', 'origin', 'https://github.com/test/repo.git');
@@ -234,8 +234,16 @@ for (const openFirst of [true, false]) test(`room PR found by branch ${openFirst
   };
   await poller.pollOnce();
   assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
-  pulls = [{ number: 2, created_at: new Date(room.createdAt + 1000).toISOString() }, stale];
-  if (openFirst) {
+  pulls = [{ number: 2, created_at: new Date(Math.floor(room.createdAt / 1000) * 1000).toISOString() }, stale];
+  if (mode === 'with explicit watch') {
+    const other = await h.store.createThread({ title: 'Other', participants: [], createdBy: { kind: 'pi', sessionId: 'pi-1' } });
+    const explicit = await h.app.githubAgents.repoStore.putWatch({ repo: 'test/repo', number: 2, thread_id: other.id }, { kind: 'pi', sessionId: 'pi-1' });
+    await poller.pollOnce();
+    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), [explicit]);
+    assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
+    return;
+  }
+  if (mode === 'then merged') {
     await poller.pollOnce();
     const [watch] = await h.app.githubAgents.repoStore.listWatches();
     assert.deepEqual([watch.number, watch.thread_id, watch.creator], [2, room.id, { kind: 'codex', sessionId: room.participants[0].sessionId }]);
