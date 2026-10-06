@@ -24,7 +24,7 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
     `Context: room_context(thread_id="${threadId}")`,
     `Send: room_send(thread_id="${threadId}", body="...", reply_to="<message id of the claim you address>")`,
     'Non-DM rooms are open: any agent may read, post, close or reopen without subscribing. DMs remain member-only. Participants receive pushes; owners also receive results.',
-    'Terminal result: room_send(..., type="result") with a concise verdict, files, checks, and open items. When ready, the reviewer starts the body with "DIRECTOR REPORT": PR number, head SHA, changes, test results, and deferred items. Set summary to "<merged|ready|blocked|needs-decision> · PR #n · <one line>".',
+    'Terminal result: room_send(..., type="result") with a concise verdict, a `Head: <sha>` line for PR work, files, checks, and open items. When ready, the reviewer starts the body with "DIRECTOR REPORT": PR number, head SHA, changes, test results, and deferred items. Set summary to "<merged|ready|blocked|needs-decision> · PR #n · <one line>".',
     'Action tools return ids and status only. Text is read with room_context or monitor_get_session_output. Lists default to a page; pass offset for more.',
     'room_context defaults to recent truncated messages; pass since/after, bodies=false, or summary_only=true (summaries, no bodies) to save context; continue a truncated body with message_id and body_offset=nextOffset (ignores since/after).',
     'Rooms: room_list() (owned/subscribed) or room_list(scope="all") (all open non-DM) · Archive: room_close(thread_id="<room id>")',

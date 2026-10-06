@@ -62,11 +62,13 @@ function threadMatchesQuery(snapshot, needle) {
   return haystack.includes(needle);
 }
 
-// "<verdict> · PR #n" from the summary plus the first commit SHA in the body; null when either is missing.
+// "<verdict> · PR #n" from the summary plus the one SHA labeled "head" in the body; null when missing or ambiguous.
 function resultOutcome(summary, body) {
   const verdict = /^\s*([\w-]+)\s*·\s*PR #(\d+)/.exec(summary || '');
-  const head = /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/.exec(body || '');
-  return verdict && head ? { verdict: `${verdict[1].toLowerCase()} #${verdict[2]}`, head: head[0] } : null;
+  const heads = [...String(body || '').matchAll(/\bhead(?: sha)?\W{1,6}([0-9a-f]{7,40})\b/gi)].map((match) => match[1].toLowerCase());
+  const head = heads.reduce((longest, item) => (item.length > longest.length ? item : longest), '');
+  if (!verdict || !head || heads.some((item) => !head.startsWith(item))) return null;
+  return { verdict: `${verdict[1].toLowerCase()} #${verdict[2]}`, head };
 }
 function sameOutcome(left, right) {
   return Boolean(left && right && left.verdict === right.verdict
@@ -433,16 +435,17 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (duplicate) {
       return { statusCode: 200, payload: { message: duplicate, deliveries: (snapshot.deliveries || []).filter((item) => item.messageId === duplicate.id), deduped: true } };
     }
-    const targets = snapshot.thread.participants.filter((item) => adapters[item.kind]
+    let targets = snapshot.thread.participants.filter((item) => adapters[item.kind]
       && participantKey(item) !== participantKey(from)).map(participantRef);
     const owner = snapshot.thread.createdBy;
-    if (resolvedType === 'result' && adapters[owner?.kind] && !threadHasParticipant(snapshot.thread, owner)
-      && participantKey(owner) !== participantKey(from)) {
+    if (resolvedType === 'result' && adapters[owner?.kind] && participantKey(owner) !== participantKey(from)) {
       // One result per outcome: skip a result that repeats the last one the owner was sent.
       const last = [...(snapshot.messages || [])].reverse().find((item) => item.type === 'result'
         && (snapshot.deliveries || []).some((delivery) => delivery.messageId === item.id
           && participantKey(delivery.target) === participantKey(owner) && ['queued', 'injected'].includes(delivery.status)));
-      if (!sameOutcome(resultOutcome(summary, body), last && resultOutcome(last.metadata?.summary, last.body))) targets.push(participantRef(owner));
+      const repeat = sameOutcome(resultOutcome(summary, body), last && resultOutcome(last.metadata?.summary, last.body));
+      targets = targets.filter((item) => participantKey(item) !== participantKey(owner));
+      if (!repeat) targets.push(participantRef(owner));
     }
     const record = await store.createMessage({ threadId, from: participantRef(from), targets, type: resolvedType, body,
       replyTo, metadata: { ...(metadata || {}), ...(summary !== undefined ? { summary } : {}), ...(snapshot.thread.metadata?.dm ? { dm: true } : {}) } });
