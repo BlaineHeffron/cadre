@@ -68,11 +68,13 @@ test('a failed reporter run does not stop later events', async ($, on) => {
   expect(reported().map((r) => r.payload.hook_event_name)).toEqual(['Stop', 'SessionEnd']);
 });
 
-test('a failing hook still lets the Claude event go on', async ($, on) => {
-  on('classic.SessionEnd', () => ({}));
+test('a rejected reporter or session lookup still runs each Claude event once', async ($, on) => {
+  const engineRuns: string[] = [];
+  on('classic.SessionEnd', () => { engineRuns.push('SessionEnd'); return {}; });
   on('session.id', () => { throw new Error('session gone'); });
-  on('process.run', () => { throw new Error('node missing'); });
-  on('tool.call', () => ({ result: { stdout: 'hi', stderr: '', interrupted: false } }));
+  on('process.run', async () => { throw new Error('node missing'); });
+  on('tool.call', () => { engineRuns.push('Bash'); return { result: { stdout: 'hi', stderr: '', interrupted: false } }; });
   expect(await $.tool.call({ tool: 'Bash', command: 'echo hi' } as any)).toMatchObject({ result: { stdout: 'hi' } });
   expect(await $.classic.SessionEnd({ reason: 'other' })).toEqual({});
+  expect(engineRuns).toEqual(['Bash', 'SessionEnd']);
 });
