@@ -13,7 +13,7 @@ async function git(path, ...args) {
   assert.equal(result.code, 0, result.stderr);
   return result.stdout.trim();
 }
-async function fixture(t, setup = '') {
+async function fixture(t, setup = '', config = {}) {
   const root = await mkdtemp(resolve(tmpdir(), 'cadre-managed-'));
   // Runs before later-registered harness cleanup, which may still be writing hook state under the repo.
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
@@ -23,8 +23,8 @@ async function fixture(t, setup = '') {
   await git(repo, 'init', '--initial-branch=main');
   await git(repo, 'config', 'user.name', 'Test'); await git(repo, 'config', 'user.email', 'test@example.invalid');
   await mkdir(resolve(repo, '.cadre'));
-  await writeFile(resolve(repo, '.cadre/worktree.json'), JSON.stringify({ cleanup: 'on-merge', setup }));
-  await writeFile(resolve(repo, '.gitignore'), 'node_modules/\ncache/\n');
+  await writeFile(resolve(repo, '.cadre/worktree.json'), JSON.stringify({ cleanup: 'on-merge', setup, ...config }));
+  await writeFile(resolve(repo, '.gitignore'), 'node_modules/\ncache/\ndist/\nart/\n');
   await writeFile(resolve(repo, 'file'), 'base\n');
   await git(repo, 'add', '.'); await git(repo, 'commit', '-m', 'base');
   await git(repo, 'remote', 'add', 'origin', remote); await git(repo, 'push', '-u', 'origin', 'main');
@@ -396,7 +396,8 @@ test('bootstrap injects the merge policy from the base-ref config', async (t) =>
 test('invalid config and missing metadata fail closed', async (t) => {
   const f = await fixture(t);
   assert.equal((await cleanupManagedWorktree({ ...f.metadata, ignoredBaseline: undefined }, f.options)).reason, 'missing or invalid metadata');
-  for (const config of ['{', JSON.stringify({ merge: 'anyone' }), JSON.stringify({ merge: null })]) {
+  for (const config of ['{', JSON.stringify({ merge: 'anyone' }), JSON.stringify({ merge: null }), JSON.stringify({ disposable: 'dist' }),
+    JSON.stringify({ disposable: ['/tmp/dist'] }), JSON.stringify({ disposable: ['../dist'] }), JSON.stringify({ disposable: [''] })]) {
     await pushConfig(f, config);
     await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'invalid', roomId: 'thr_invalid', baseDir: f.options.baseDir }), /invalid worktree config|JSON/);
     assert.equal(await exists(resolve(f.options.baseDir, 'thr_invalid')), false);
@@ -453,7 +454,7 @@ test('setup failure preserves original error when rollback branch CAS refuses', 
   assert.notEqual(await git(f.repo, 'rev-parse', 'setup-commit'), f.metadata.baseHead);
 });
 
-test('ignored user notes in .agent_bus remain protected', async (t) => {
+test('ignored Cadre .agent_bus state alone does not block cleanup', async (t) => {
   const f = await fixture(t);
   await writeFile(resolve(f.metadata.path, '.gitignore'), 'node_modules/\ncache/\n.agent_bus/\n');
   await git(f.metadata.path, 'commit', '-am', 'ignore agent bus');
@@ -462,10 +463,29 @@ test('ignored user notes in .agent_bus remain protected', async (t) => {
   f.setPr({ merged: true, number: 1, head: { sha: head } });
   await mkdir(resolve(f.metadata.path, '.agent_bus/hooks'), { recursive: true });
   await writeFile(resolve(f.metadata.path, '.agent_bus/hooks/codex-session.jsonl'), 'hook');
-  await writeFile(resolve(f.metadata.path, '.agent_bus/notes'), 'precious');
+  await writeFile(resolve(f.metadata.path, '.agent_bus/session.json'), 'state');
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, true);
+  assert.equal(await exists(f.metadata.path), false);
+});
+
+test('disposable globs recorded at creation skip matching ignored files only', async (t) => {
+  const f = await fixture(t, '', { disposable: ['packages/*/dist/**'] });
+  assert.deepEqual(f.metadata.disposable, ['packages/*/dist/**']);
+  await mkdir(resolve(f.metadata.path, 'packages/a/dist'), { recursive: true }); await mkdir(resolve(f.metadata.path, 'art'));
+  await writeFile(resolve(f.metadata.path, 'packages/a/dist/index.js'), 'built');
+  await writeFile(resolve(f.metadata.path, 'art/source.psd'), 'precious');
   assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'new ignored files');
-  assert.equal(await readFile(resolve(f.metadata.path, '.agent_bus/notes'), 'utf8'), 'precious');
-  assert.equal(await readFile(resolve(f.metadata.path, '.agent_bus/hooks/codex-session.jsonl'), 'utf8'), 'hook');
+  await rm(resolve(f.metadata.path, 'art'), { recursive: true });
+  const marker = resolve(f.repo, '.git/worktrees/repo/cadre-room.json'), recorded = await readFile(marker, 'utf8');
+  const { disposable, ...legacy } = f.metadata;
+  const { disposable: _, ...legacyMarker } = JSON.parse(recorded);
+  await writeFile(marker, JSON.stringify(legacyMarker));
+  assert.equal((await cleanupManagedWorktree(legacy, f.options)).reason, 'new ignored files');
+  await writeFile(marker, recorded);
+  await pushConfig(f, JSON.stringify({ cleanup: 'on-merge' }));
+  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ cleanup: 'on-merge', disposable: [] }));
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, true);
+  assert.equal(await exists(f.metadata.path), false);
 });
 
 test('symlinked Cadre state parent is kept with external content intact', async (t) => {

@@ -172,16 +172,23 @@ All former manager-loop runtime, parsing, and MCP controls have been removed. Re
 Repositories opt in with a checked-in `.cadre/worktree.json`:
 
 ```json
-{ "setup": "npm ci", "copy": ["local-settings.json"], "cleanup": "on-merge" }
+{ "setup": "npm ci", "copy": ["local-settings.json"], "cleanup": "on-merge",
+  "disposable": ["packages/*/dist/**", "target", "src/**/*.generated.ts"] }
 ```
+
+`disposable` lists git `glob` pathspecs (relative, inside the repo, like
+`copy`) for regenerable ignored build outputs. Cleanup's new-ignored-files check
+skips files matching them, and Cadre's own untracked `.agent_bus/` directory,
+like `node_modules`; any other new ignored file (for example art sources) still
+keeps the worktree. Use `dir/**` or a bare directory name for a directory.
 
 `cleanup` defaults to `off`. `merge` (`operator` or `reviewer`, default
 `operator`) sets merge ownership in the injected collab onboarding: `operator`
 says the coordinator or operator merges; `reviewer` says the reviewer merges
 after approval and the project's gates, then reports. Rooms without a managed
 worktree always get the `operator` text. Creation reads the config (opt-in, `copy`, `setup`,
-`cleanup`, `merge`) from the base commit after fetching, not from the local checkout, and
-records `cleanup` in the worktree metadata; cleanup uses that recorded policy.
+`cleanup`, `merge`, `disposable`) from the base commit after fetching, not from the local checkout, and
+records `cleanup` and `disposable` in the worktree metadata; cleanup uses that recorded policy.
 Worktrees created before the policy was recorded are kept. A `worktree` request for a base without
 this config fails with a 400 before any room or session is created.
 `spawn_collab_session` and `spawn_conference_session` accept

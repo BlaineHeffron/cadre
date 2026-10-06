@@ -18,9 +18,10 @@ async function configFor(repo, ref) {
   if (!await git(repo, ['ls-tree', '--name-only', ref, '--', '.cadre/worktree.json'])) return null;
   const text = await git(repo, ['show', `${ref}:.cadre/worktree.json`]);
   const config = JSON.parse(text);
+  const paths = (list) => list === undefined || (Array.isArray(list) && list.every((file) => typeof file === 'string' && file && !isAbsolute(file) && inside(repo, resolve(repo, file))));
   if (!config || !['off', 'on-merge'].includes(config.cleanup ?? 'off') || (config.merge !== undefined && !['operator', 'reviewer'].includes(config.merge))
     || (config.setup !== undefined && typeof config.setup !== 'string')
-    || (config.copy !== undefined && (!Array.isArray(config.copy) || config.copy.some((file) => typeof file !== 'string' || !file || isAbsolute(file) || !inside(repo, resolve(repo, file)))))) throw new Error('invalid worktree config');
+    || !paths(config.copy) || !paths(config.disposable)) throw new Error('invalid worktree config');
   return config;
 }
 async function ignored(path, exclusions = []) {
@@ -47,7 +48,8 @@ export async function createManagedWorktree({ repo, branch, base, roomId, baseDi
   if (!inside(baseDir, path) || !inside(resolve(baseDir, roomId), path)) throw new Error('invalid room id');
   await mkdir(dirname(path), { recursive: true });
   await git(repo, ['worktree', 'add', '--lock', '--reason', `cadre room ${roomId}`, '-b', branch, path, baseHead]);
-  const metadata = { path, repo, branch, base, baseHead, roomId, cleanup: config.cleanup ?? 'off', merge: config.merge ?? 'operator' };
+  const metadata = { path, repo, branch, base, baseHead, roomId, cleanup: config.cleanup ?? 'off', merge: config.merge ?? 'operator',
+    disposable: config.disposable ?? [] };
   try {
     await writeFile(await markerPath(path), JSON.stringify(metadata));
     for (const file of config.copy || []) {
@@ -84,11 +86,12 @@ async function rollbackManagedWorktree({ repo, path, branch, baseHead }) {
 export async function cleanupManagedWorktree(metadata, { getPr, rooms = [], sessions = [], baseDir = managedWorktreeBase, spawnFailed = false } = {}) {
   const keep = (reason) => ({ removed: false, reason, report: `worktree: kept (${reason})` });
   try {
-    const { path, repo, branch, baseHead, roomId, ignoredBaseline, cleanup } = metadata || {};
+    const { path, repo, branch, baseHead, roomId, ignoredBaseline, cleanup, disposable } = metadata || {};
     if (!path || !repo || !branch || !baseHead || !roomId || !Array.isArray(ignoredBaseline) || !inside(baseDir, path)) return keep('missing or invalid metadata');
     const marker = JSON.parse(await readFile(await markerPath(path), 'utf8'));
     if (marker.path !== path || marker.repo !== repo || marker.branch !== branch || marker.roomId !== roomId || marker.cleanup !== cleanup
       || marker.baseHead !== baseHead || JSON.stringify(marker.ignoredBaseline) !== JSON.stringify(ignoredBaseline)
+      || JSON.stringify(marker.disposable) !== JSON.stringify(disposable)
       || await git(path, ['branch', '--show-current']) !== branch) return keep('missing or invalid metadata');
     // Undoing an untouched failed spawn is independent of the policy recorded at creation; legacy metadata has none and is kept.
     if (!spawnFailed && cleanup !== 'on-merge') return keep(cleanup ? 'cleanup off' : 'cleanup policy not recorded');
@@ -133,7 +136,9 @@ export async function cleanupManagedWorktree(metadata, { getPr, rooms = [], sess
         && !inside(path, await realpath(resolve(path, 'node_modules')))) continue;
       return keep('dirty or untracked files');
     }
-    if ((await ignored(path, exclusions)).some((file) => !ignoredBaseline.includes(file))) return keep('new ignored files');
+    // Cadre's own state and the disposable globs recorded at creation never block; worktree removal deletes them.
+    const disposables = [...(ownedBus ? [':(exclude).agent_bus'] : []), ...(disposable || []).map((glob) => `:(exclude,glob)${glob}`)];
+    if ((await ignored(path, disposables)).some((file) => !ignoredBaseline.includes(file))) return keep('new ignored files');
     const canonicalPath = await realpath(path);
     const canonicalDir = async (dir) => {
       try { return await realpath(dir); }
