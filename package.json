@@ -67,6 +67,7 @@
     "pg": "^8.16.0",
     "preact": "^10.29.1",
     "preact-router": "^4.1.2",
+    "rea-agents": "4.1.0",
     "web-push": "3.6.7"
   },
   "devDependencies": {

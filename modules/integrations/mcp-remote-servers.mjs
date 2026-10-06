@@ -7,9 +7,9 @@
  * the value is resolved at launch behind the loopback proxy.
  */
 
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { config } from '../../config.mjs';
 import { readEnv } from '../platform/cadre-env.mjs';
 
@@ -272,6 +272,15 @@ const DEFINITIONS = Object.freeze({
     envKeys: ['MESHY_API_KEY'],
     secretEnv: ['MESHY_API_KEY'],
   }),
+  // Installed dependency, not npx: concurrent npx installs corrupt the shared cache.
+  // Upstream's manual stdio config is `rea-agents@<pinned> mcp`; never run `rea setup`, it rewrites agent configs.
+  rea: remote({
+    transport: 'stdio',
+    command: process.execPath,
+    args: [join(dirname(createRequire(import.meta.url).resolve('rea-agents/package.json')), 'scripts/rea.mjs'), 'mcp'],
+  }),
+  // Installed by the operator with `cargo install bevy_brp_mcp`; resolved from PATH, then ~/.cargo/bin.
+  bevy_brp: remote({ transport: 'stdio', binary: 'bevy_brp_mcp' }),
   pixellab: remote({
     url: 'https://api.pixellab.ai/mcp',
     auth: REMOTE_MCP_AUTH.apiKeyEnv,
@@ -394,8 +403,25 @@ function withEntryPath(server, sourceConfig) {
   });
 }
 
+function executable(path) {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve a cargo-installed server binary from PATH, then ~/.cargo/bin; '' when absent. */
+function withBinary(server, env) {
+  if (!server?.binary) return server;
+  const dirs = [...text(env.PATH).split(delimiter), text(env.HOME) && join(text(env.HOME), '.cargo', 'bin')];
+  const command = dirs.filter(Boolean).map((dir) => join(dir, server.binary)).find(executable) || '';
+  return Object.freeze({ ...server, command });
+}
+
 /** Definition with operator overrides (url/command/args) applied, or null. */
-export function remoteMcpServer(id, { sourceConfig = config } = {}) {
+export function remoteMcpServer(id, { sourceConfig = config, env = process.env } = {}) {
   const serverId = text(id);
   const defined = GOOGLE_LOCAL_SERVICES[serverId] && googleLocalMode(sourceConfig)
     ? localGoogleServer(serverId, sourceConfig)
@@ -404,7 +430,7 @@ export function remoteMcpServer(id, { sourceConfig = config } = {}) {
       : serverId === 'slack' && slackLocalMode(sourceConfig)
         ? localSlackServer(sourceConfig)
         : DEFINITIONS[serverId];
-  const base = withEntryPath(defined, sourceConfig);
+  const base = withBinary(withEntryPath(defined, sourceConfig), env);
   if (!base) return null;
   const override = overrideFor(text(id), sourceConfig);
   if (!Object.keys(override).length) return base;
@@ -474,10 +500,12 @@ export function remoteMcpAvailability(id, {
   connectedOauthProviders = new Set(),
   configuredOauthProviders = null,
 } = {}) {
-  const server = remoteMcpServer(id, { sourceConfig });
+  const server = remoteMcpServer(id, { sourceConfig, env });
   if (!server) return null;
   if (server.transport === 'stdio') {
-    if (!text(server.command)) return { configured: false, reasonCode: 'command_missing' };
+    if (!text(server.command)) {
+      return { configured: false, reasonCode: server.binary ? 'binary_missing' : 'command_missing' };
+    }
     // An out-of-repo entry point may simply not be built yet.
     if (server.entryPathKey && !(text(server.entryPath) && existsSync(server.entryPath))) {
       return { configured: false, reasonCode: 'entry_point_missing' };

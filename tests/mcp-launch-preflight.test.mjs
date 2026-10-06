@@ -465,6 +465,22 @@ describe('MCP launch preflight', () => {
   });
 
 
+  it('initializes the pinned rea server and lists its tools', { timeout: 30000 }, async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'dueno-rea-preflight-'));
+    tempDirs.push(stateDir);
+    process.env.CADRE_STATE_DIR = stateDir;
+    const result = await prepareMcpCapabilityLaunch({
+      resolved: resolved(['rea']),
+      backendType: 'codex',
+      sessionId: 'rea-preflight',
+      sourceConfig: sourceConfig(),
+      credentialStore: credentialStore(),
+      stdioEnv: {},
+    });
+    assert.equal(result.preflight.rea.state, 'ready');
+    assert.ok(result.preflight.rea.toolCount > 0);
+  });
+
   it('rejects a selected stdio server when MCP initialize fails', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'dueno-stdio-preflight-'));
     tempDirs.push(stateDir);

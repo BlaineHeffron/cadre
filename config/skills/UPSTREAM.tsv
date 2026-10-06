@@ -48,3 +48,9 @@ latex-preamble	hameefy/claude-latex-skill	SKILL.md	c594f5a	Step 2 slice
 latex-math	hameefy/claude-latex-skill	SKILL.md	c594f5a	Steps 3,6,7 slice
 slides-beamer	hameefy/claude-latex-skill	SKILL.md	c594f5a	Steps 2B,3B slice
 unslop	kentnielsen-droid/cursor-skills	pstack/skills/unslop/SKILL.md	60c641e
+reverse-engineer-anything	morluto/rea	skills/reverse-engineer-anything/SKILL.md	d2aed17
+rea-native-and-artifacts	morluto/rea	skills/reverse-engineer-anything/references/native-and-artifacts.md	d2aed17
+rea-javascript-applications	morluto/rea	skills/reverse-engineer-anything/references/javascript-applications.md	d2aed17
+rea-android-applications	morluto/rea	skills/reverse-engineer-anything/references/android-applications.md	d2aed17
+rea-runtime-observation	morluto/rea	skills/reverse-engineer-anything/references/runtime-observation.md	d2aed17
+rea-evidence-workflows	morluto/rea	skills/reverse-engineer-anything/references/evidence-workflows.md	d2aed17

@@ -335,6 +335,22 @@ describe('launch skill authoring', () => {
     assert.match(expanded, /# Web Design Review/);
   });
 
+  it('discovers reverse-engineer-anything and inlines every REA target guide', () => {
+    const ids = new Set(discoverLaunchSkills().map((skill) => skill.id));
+    assert.equal(ids.has('reverse-engineer-anything'), true);
+
+    const expanded = expandSkillTokens('{{skill:reverse-engineer-anything}}');
+    assert.equal(expanded.includes('{{skill:'), false);
+    assert.match(expanded, /## Clean room/);
+    for (const heading of [
+      /# Native, managed, and packaged artifacts/,
+      /# JavaScript and Electron application artifacts/,
+      /# Android application artifacts/,
+      /# Passive browser and Electron observation/,
+      /# Evidence, comparison, and verification workflows/,
+    ]) assert.match(expanded, heading);
+  });
+
   it('composes stock, ordered custom directories, and local overrides through real discovery and resolution', async () => {
     const sourceConfig = await skillDir({ 'shared.md': 'stock', 'stock-only.md': 'stock only' });
     const root = await mkdtemp(join(tmpdir(), 'dueno-custom-skills-'));

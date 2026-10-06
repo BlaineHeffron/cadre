@@ -1,8 +1,8 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   REMOTE_MCP_AUTH,
   remoteMcpAvailability,
@@ -352,6 +352,39 @@ describe('paid-credit servers', () => {
     assert.equal(remoteMcpAvailability('pixellab', { sourceConfig, env: {} }).reasonCode, 'credential_missing');
     assert.equal(remoteMcpAvailability('pixellab', { sourceConfig, env: { PIXELLAB_API_KEY: 'k' } }).configured, true);
     assert.equal(remoteMcpSecret(server, { env: { DM_MCP_PIXELLAB_API_KEY: 'k' } }), 'k');
+  });
+});
+
+describe('reverse-engineering servers', () => {
+  it('launches the installed rea-agents bin as an MCP server', () => {
+    const server = remoteMcpServer('rea', { sourceConfig: testConfig() });
+    assert.equal(server.command, process.execPath);
+    assert.match(server.args[0], /[/\\]node_modules[/\\]rea-agents[/\\]scripts[/\\]rea\.mjs$/);
+    assert.equal(server.args[1], 'mcp');
+    assert.equal(remoteMcpAvailability('rea', { sourceConfig: testConfig(), env: {} }).configured, true);
+  });
+
+  it('resolves bevy_brp_mcp from PATH, then ~/.cargo/bin, and reports it missing otherwise', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bevy-brp-'));
+    try {
+      const sourceConfig = testConfig();
+      const env = { PATH: join(root, 'bin'), HOME: root };
+      assert.deepEqual(
+        remoteMcpAvailability('bevy_brp', { sourceConfig, env }),
+        { configured: false, reasonCode: 'binary_missing' },
+      );
+      const cargoBin = join(root, '.cargo', 'bin', 'bevy_brp_mcp');
+      await mkdir(dirname(cargoBin), { recursive: true });
+      await writeFile(cargoBin, '#!/bin/sh\n', { mode: 0o755 });
+      assert.equal(remoteMcpServer('bevy_brp', { sourceConfig, env }).command, cargoBin);
+      assert.equal(remoteMcpAvailability('bevy_brp', { sourceConfig, env }).configured, true);
+      const pathBin = join(root, 'bin', 'bevy_brp_mcp');
+      await mkdir(dirname(pathBin), { recursive: true });
+      await writeFile(pathBin, '#!/bin/sh\n', { mode: 0o755 });
+      assert.equal(remoteMcpServer('bevy_brp', { sourceConfig, env }).command, pathBin);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
