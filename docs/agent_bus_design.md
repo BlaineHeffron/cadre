@@ -176,11 +176,12 @@ Repositories opt in with a checked-in `.cadre/worktree.json`:
   "disposable": ["packages/*/dist/**", "target", "src/**/*.generated.ts"] }
 ```
 
-`disposable` lists git `glob` pathspecs (relative, inside the repo, like
-`copy`) for regenerable ignored build outputs. Cleanup's new-ignored-files check
+`disposable` lists plain relative git `glob` pathspecs (inside the repo, like
+`copy`; no `:` magic prefix or trailing `/`) for regenerable ignored build outputs. Cleanup's new-ignored-files check
 skips files matching them, and Cadre's own untracked `.agent_bus/` directory,
 like `node_modules`; any other new ignored file (for example art sources) still
-keeps the worktree. Use `dir/**` or a bare directory name for a directory.
+keeps the worktree. `*` does not cross `/`, so match a directory's descendants with `dir/**`
+(`packages/*/dist/**`) or a bare top-level name (`target`).
 
 `cleanup` defaults to `off`. `merge` (`operator` or `reviewer`, default
 `operator`) sets merge ownership in the injected collab onboarding: `operator`
@@ -199,7 +200,7 @@ worktree under `~/.cadre/worktrees/collab`, copies only gitignored paths, then
 runs setup with `CADRE_WORKTREE_PATH` and `CADRE_REPO_ROOT` (120-second timeout).
 Setup failure removes the fresh worktree before launching any participants.
 Room metadata and a marker in git metadata preserve the path, repo, branch, base,
-room id, cleanup and merge policies and ignored-file baseline.
+room id, cleanup and merge policies, disposable globs and ignored-file baseline.
 
 When the repo's `origin` is a configured GitHub repo, the poller finds the PR
 whose head is the room branch (opened after the room) and watches it as if the
@@ -209,13 +210,14 @@ merge notification report `worktree: removed` or `worktree: kept (<reason>)`.
 Cleanup keeps worktrees when cleanup is off; metadata is missing or invalid;
 the linked PR is absent, unmerged or missing its head; local commits are not
 in the merged PR (including unpushed commits); tracked or untracked files are
-dirty; ignored files appear beyond the setup baseline; another open room or
+dirty; ignored files outside `disposable` appear beyond the setup baseline; another open room or
 live session uses the directory; or a GitHub, git, filesystem or session lookup
 fails. User git settings cannot hide untracked files. `node_modules` is exempt
 only when present in the baseline. When `.agent_bus` contains no tracked files
 and is a physical directory, Cadre owns only its `hooks/` and `state/` contents:
-these are excluded from cleanliness checks and removed after all checks pass.
-Other files such as `.agent_bus/notes` still block cleanup. Ancestry or containment of every local
+these are excluded from the status check and removed after all checks pass,
+and every ignored file under `.agent_bus` is exempt from the ignored-files check.
+Untracked, non-ignored files outside `hooks/` and `state/` such as `.agent_bus/notes` still block cleanup. Ancestry or containment of every local
 commit's stable patch-id proves landing, including rewritten PR commits.
 
 Removal unlocks, unlinks external top-level symlinks without following them,

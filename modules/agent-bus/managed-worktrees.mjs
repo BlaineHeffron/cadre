@@ -21,7 +21,9 @@ async function configFor(repo, ref) {
   const paths = (list) => list === undefined || (Array.isArray(list) && list.every((file) => typeof file === 'string' && file && !isAbsolute(file) && inside(repo, resolve(repo, file))));
   if (!config || !['off', 'on-merge'].includes(config.cleanup ?? 'off') || (config.merge !== undefined && !['operator', 'reviewer'].includes(config.merge))
     || (config.setup !== undefined && typeof config.setup !== 'string')
-    || !paths(config.copy) || !paths(config.disposable)) throw new Error('invalid worktree config');
+    || !paths(config.copy) || !paths(config.disposable)
+    // Entries become `:(exclude,glob)` pathspecs: magic prefixes and trailing slashes would silently match nothing.
+    || config.disposable?.some((glob) => glob.startsWith(':') || glob.endsWith('/'))) throw new Error('invalid worktree config');
   return config;
 }
 async function ignored(path, exclusions = []) {

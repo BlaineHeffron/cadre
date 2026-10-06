@@ -397,7 +397,8 @@ test('invalid config and missing metadata fail closed', async (t) => {
   const f = await fixture(t);
   assert.equal((await cleanupManagedWorktree({ ...f.metadata, ignoredBaseline: undefined }, f.options)).reason, 'missing or invalid metadata');
   for (const config of ['{', JSON.stringify({ merge: 'anyone' }), JSON.stringify({ merge: null }), JSON.stringify({ disposable: 'dist' }),
-    JSON.stringify({ disposable: ['/tmp/dist'] }), JSON.stringify({ disposable: ['../dist'] }), JSON.stringify({ disposable: [''] })]) {
+    JSON.stringify({ disposable: ['/tmp/dist'] }), JSON.stringify({ disposable: ['../dist'] }), JSON.stringify({ disposable: [''] }),
+    JSON.stringify({ disposable: [':(glob)dist/**'] }), JSON.stringify({ disposable: ['dist/'] })]) {
     await pushConfig(f, config);
     await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'invalid', roomId: 'thr_invalid', baseDir: f.options.baseDir }), /invalid worktree config|JSON/);
     assert.equal(await exists(resolve(f.options.baseDir, 'thr_invalid')), false);
