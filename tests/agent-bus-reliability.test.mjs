@@ -144,7 +144,9 @@ test('room delivery to a wrong-kind participant fails with the kind mismatch, no
   const sent = await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
     payload: { threadId: thread.id, from: refs[0], body: 'review' } });
   assert.equal(sent.statusCode, 200, sent.body);
-  const [delivery] = sent.json().deliveries;
+  const [{ id }] = sent.json().deliveries;
+  for (let i = 0; i < 50 && h.store.getDelivery(id).status === 'queued'; i++) await delay(20);
+  const delivery = h.store.getDelivery(id);
   assert.equal(delivery.status, 'failed');
   assert.equal(delivery.error, 'no claude session codex-2; a codex session with that id exists');
 });
