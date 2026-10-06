@@ -1,5 +1,6 @@
 import { worktreeSchema } from '../agent-bus/managed-worktrees.mjs';
 import { compileToolArguments } from '../agent-bus/mcp-validation.mjs';
+import { reportServerRestart } from '../agent-bus/mcp.mjs';
 import { DEFAULT_LIST_LIMIT, PAGE_PROPERTIES, normalizeLimit, normalizeOffset, paginate } from '../agent-bus/mcp-pagination.mjs';
 /**
  * MCP server exposing Cadre tools for the command center AI.
@@ -62,10 +63,10 @@ export function buildMonitorMcpServer({ requestImpl }) {
 
   async function request(path, opts) {
     const authContext = callContext.getStore()?.authContext || null;
-    return requestImpl(path, {
+    return reportServerRestart(() => requestImpl(path, {
       ...(opts || {}),
       ...(authContext ? { authContext } : {}),
-    });
+    }));
   }
 
   function assertLoopSessionArgs({ kind, session_id: sessionId, prompt, interval_seconds: intervalSeconds, max_iterations: maxIterations } = {}) {
