@@ -275,7 +275,9 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
     await git(f.repo, 'push', 'origin', `${next}:refs/pull/3/head`, `${next}:refs/heads/auto-next`);
     // A marker already re-pointed by an attempt whose room save failed is retried, not treated as a mismatch.
     await linkManagedWorktreePr(h.store.getThread(room.id).thread.metadata.worktree, undefined, 'auto-next');
+    await git(f.repo, 'merge', '--ff-only', f.head);
     await poller.pollOnce();
+    assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/auto'])).code, 128);
     assert.equal(h.store.getThread(room.id).thread.status, 'open');
     assert.deepEqual(Object.values(h.deletedSessions).flat(), []);
     assert.equal(h.store.getThread(room.id).thread.metadata.worktree.branch, 'auto-next');
@@ -321,7 +323,8 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
     assert.deepEqual([watch.number, watch.thread_id, watch.creator], [2, room.id, { kind: 'codex', sessionId: room.participants[0].sessionId }]);
     assert.equal(h.store.getThread(room.id).thread.status, 'open');
   }
-  pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head };
+  // A merge payload without head.ref ends the room rather than keeping it alive.
+  pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head, head: mode === 'already merged' ? { sha: f.head } : pr.head };
   await git(f.repo, 'merge', '--ff-only', f.head);
   await poller.pollOnce();
   assert.equal(new URL(urls[0]).searchParams.get('head'), 'test:auto');

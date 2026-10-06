@@ -751,8 +751,10 @@ export class GithubAgentPoller {
             branch = current.stdout.trim();
             if (current.code !== 0 || !branch) throw new Error('worktree branch unknown');
           }
-          if (branch && branch !== pr.head?.ref) {
+          if (branch && pr.head?.ref && branch !== pr.head.ref) {
             await this.linkWorktreePr(watch.thread_id, undefined, branch);
+            // Best effort: cleanup only deletes the current branch, so drop the merged hop's branch now.
+            await exec('git', ['-C', thread.metadata.worktree.repo, 'branch', '-d', '--', thread.metadata.worktree.branch]);
             suffix = ` · room continues on ${branch}`;
           } else if (pr.merged && thread?.status === 'open' && this.endThread) {
             try {
