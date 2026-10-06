@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -22,6 +22,10 @@ test('requesters withdraw, edit, and filter queue items through the real routes 
     config.auth.browserSessionSecret = priorSecret;
     await rm(dir, { recursive: true, force: true });
   });
+  const legacy = { id: 'ccq_1_1', status: 'open', title: 'Legacy?', question: 'Legacy?', details: '', source: 'fleet_supervisor', priority: 'normal',
+    sessionKind: 'codex', sessionId: 'requester', threadId: '', passThrough: true, options: [], allowFreeform: true, events: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), answer: null };
+  await mkdir(join(dir, 'command_center'), { recursive: true });
+  await writeFile(join(dir, 'command_center/work-queue.json'), JSON.stringify({ seq: 1, items: [legacy] }));
   const { commandCenterAIPlugin } = await import('../modules/integrations/command-center-ai.mjs');
   const app = Fastify();
   t.after(() => app.close());
@@ -46,6 +50,20 @@ test('requesters withdraw, edit, and filter queue items through the real routes 
     assert.equal(commands.length, 0);
     const listed = await requester('monitor_list_human_queue', { status: 'withdrawn' });
     assert.deepEqual(listed.items.map((item) => item.id), [own.id]);
+
+    // Records without requestedBy keep the old delivery-target match.
+    await assert.rejects(other('monitor_update_human_queue_item', { id: legacy.id, details: 'x' }), (error) => error.statusCode === 403);
+    assert.deepEqual(await requester('monitor_dismiss_human_queue_item', { id: legacy.id }), { id: legacy.id, status: 'withdrawn' });
+    assert.equal(commands.length, 0);
+
+    // The dashboard is never a withdrawing requester, even for an item it created.
+    const fromUi = (await app.inject({ method: 'POST', url: '/api/command-center/work-queue', headers: operatorHeaders,
+      payload: { question: 'UI?', sessionKind: 'codex', sessionId: 'requester', passThrough: true } })).json();
+    assert.equal(fromUi.requestedBy.type, 'ui');
+    const uiDismiss = await app.inject({ method: 'POST', url: `/api/command-center/work-queue/${fromUi.id}/dismiss`, headers: operatorHeaders, payload: {} });
+    assert.equal(uiDismiss.json().status, 'dismissed');
+    assert.equal(commands.length, 1);
+    commands.length = 0;
 
     const byOperator = await create();
     const response = await app.inject({ method: 'POST', url: `/api/command-center/work-queue/${byOperator.id}/dismiss`, headers: operatorHeaders, payload: {} });

@@ -361,7 +361,7 @@ export async function addHumanQueueItem(input = {}, { wsManager, persist = true,
     sessionId: String(input.sessionId || input.session_id || '').trim(),
     threadId: String(input.threadId || input.thread_id || '').trim(),
     passThrough: input.passThrough === true || input.pass_through === true,
-    ...(principal?.sessionId ? { requestedBy: { type: principal.type, kind: principal.kind, sessionId: principal.sessionId } } : {}),
+    requestedBy: { type: principal?.type || '', kind: principal?.kind || '', sessionId: principal?.sessionId || '' },
     ...(operatorAction ? {
       operatorAction,
       sessionKind: principal.kind,
@@ -540,8 +540,9 @@ export async function acknowledgeHumanQueueItem(id, input = {}, { wsManager, per
 }
 
 function isQueueRequester(item, principal) {
-  const by = item.requestedBy;
-  return Boolean(by?.sessionId) && principal?.type === by.type && principal.kind === by.kind && principal.sessionId === by.sessionId;
+  // Records from before requestedBy existed fall back to their delivery target.
+  const by = item.requestedBy || { type: 'agent', kind: item.sessionKind, sessionId: item.sessionId };
+  return principal?.type === 'agent' && Boolean(by.sessionId) && principal.type === by.type && principal.kind === by.kind && principal.sessionId === by.sessionId;
 }
 
 export async function updateHumanQueueItem(id, input = {}, { wsManager, principal, persist = true } = {}) {
