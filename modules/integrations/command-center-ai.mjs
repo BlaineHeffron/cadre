@@ -361,6 +361,7 @@ export async function addHumanQueueItem(input = {}, { wsManager, persist = true,
     sessionId: String(input.sessionId || input.session_id || '').trim(),
     threadId: String(input.threadId || input.thread_id || '').trim(),
     passThrough: input.passThrough === true || input.pass_through === true,
+    requestedBy: { type: principal?.type || '', kind: principal?.kind || '', sessionId: principal?.sessionId || '' },
     ...(operatorAction ? {
       operatorAction,
       sessionKind: principal.kind,
@@ -538,7 +539,13 @@ export async function acknowledgeHumanQueueItem(id, input = {}, { wsManager, per
   return item;
 }
 
-export async function dismissHumanQueueItem(id, { wsManager, sendSessionInput, persist = true } = {}) {
+function isQueueRequester(item, principal) {
+  // Records from before requestedBy existed fall back to their delivery target.
+  const by = item.requestedBy || { type: 'agent', kind: item.sessionKind, sessionId: item.sessionId };
+  return principal?.type === 'agent' && Boolean(by.sessionId) && principal.type === by.type && principal.kind === by.kind && principal.sessionId === by.sessionId;
+}
+
+export async function updateHumanQueueItem(id, input = {}, { wsManager, principal, persist = true } = {}) {
   await ensureHumanWorkQueueLoaded();
   const item = humanWorkQueue.find((entry) => entry.id === id);
   if (!item) {
@@ -546,16 +553,56 @@ export async function dismissHumanQueueItem(id, { wsManager, sendSessionInput, p
     error.statusCode = 404;
     throw error;
   }
-  if (item.status === 'dismissed') return item;
+  if (!isQueueRequester(item, principal)) {
+    const error = new Error('Only the requesting session can update this queue item');
+    error.statusCode = 403;
+    throw error;
+  }
+  if (item.status !== 'open') {
+    const error = new Error(`Queue item is already ${item.status}`);
+    error.statusCode = 409;
+    throw error;
+  }
+  if (item.operatorAction && input.options !== undefined) {
+    const error = new Error('Operator action options cannot be changed');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (['title', 'question'].some((field) => input[field] !== undefined && !String(input[field]).trim())) {
+    const error = new Error('title and question cannot be blank');
+    error.statusCode = 400;
+    throw error;
+  }
+  for (const field of ['title', 'question', 'details']) {
+    if (input[field] !== undefined) item[field] = String(input[field]).trim();
+  }
+  if (Array.isArray(input.options)) item.options = input.options.map(normalizeQueueOption).filter((option) => option.label);
+  item.updatedAt = new Date().toISOString();
+  item.events.push(queueEvent('updated'));
+  if (persist) await persistHumanWorkQueue();
+  broadcastWorkQueue(wsManager, 'updated');
+  return item;
+}
+
+export async function dismissHumanQueueItem(id, { wsManager, sendSessionInput, principal, persist = true } = {}) {
+  await ensureHumanWorkQueueLoaded();
+  const item = humanWorkQueue.find((entry) => entry.id === id);
+  if (!item) {
+    const error = new Error('Queue item not found');
+    error.statusCode = 404;
+    throw error;
+  }
+  if (['dismissed', 'withdrawn'].includes(item.status)) return item;
+  const withdrawn = isQueueRequester(item, principal);
   // An open pass-through item has a session waiting on it; tell it there is no answer coming.
-  if (item.status === 'open' && item.passThrough) {
+  if (item.status === 'open' && item.passThrough && !withdrawn) {
     await maybeRouteQueueAnswer(item, 'Dismissed by the operator without an answer.', { sendSessionInput });
   }
   if (!Array.isArray(item.events)) item.events = [];
-  item.status = 'dismissed';
+  item.status = withdrawn ? 'withdrawn' : 'dismissed';
   item.dismissedAt = new Date().toISOString();
   item.updatedAt = item.dismissedAt;
-  item.events.push(queueEvent('dismissed'));
+  item.events.push(queueEvent(item.status));
   if (persist) await persistHumanWorkQueue();
   broadcastWorkQueue(wsManager, 'item_dismissed');
   return item;
@@ -830,9 +877,17 @@ export async function commandCenterAIPlugin(app, {
 
   app.post('/api/command-center/work-queue/:id/dismiss', async (req, reply) => {
     try {
-      return await dismissHumanQueueItem(req.params.id, { wsManager, sendSessionInput });
+      return await dismissHumanQueueItem(req.params.id, { wsManager, sendSessionInput, principal: req.duenoAuth?.principal });
     } catch (err) {
       return reply.code(err.statusCode || 500).send({ error: err.message || 'Failed to dismiss queue item' });
+    }
+  });
+
+  app.post('/api/command-center/work-queue/:id/update', async (req, reply) => {
+    try {
+      return await updateHumanQueueItem(req.params.id, req.body || {}, { wsManager, principal: req.duenoAuth?.principal });
+    } catch (err) {
+      return reply.code(err.statusCode || 500).send({ error: err.message || 'Failed to update queue item' });
     }
   });
 

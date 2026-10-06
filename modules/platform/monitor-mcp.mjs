@@ -606,14 +606,14 @@ export function buildMonitorMcpServer({ requestImpl }) {
       description: 'List server-owned MCP capability profiles, allowlisted servers, compatibility, and sanitized availability.',
       inputSchema: {
         type: 'object',
-        properties: { ...PAGE_PROPERTIES },
+        properties: { ...PAGE_PROPERTIES, serverId: { type: 'string', description: 'Only return this server.' } },
         additionalProperties: false,
       },
       handler: async (args = {}) => {
         const payload = await request('/api/agents/mcp-servers');
         return { defaultProfileId: payload.defaultProfileId,
           profiles: (payload.profiles || []).map((row) => pickFields(row, ['id', 'label', 'serverIds'])),
-          servers: paginate((payload.servers || []).map((row) => ({ id: row.id, label: row.label, state: row.availability?.state, providers: row.providers, runtimes: row.runtimes })), args) };
+          servers: paginate((payload.servers || []).filter((row) => !args.serverId || row.id === args.serverId).map((row) => ({ id: row.id, label: row.label, state: row.availability?.state, providers: row.providers, runtimes: row.runtimes })), args) };
       },
     },
     {
@@ -825,9 +825,11 @@ export function buildMonitorMcpServer({ requestImpl }) {
           compact: { type: 'boolean', description: 'Defaults true; false reads full records in the requested page.' },
           status: {
             type: 'string',
-            enum: ['open', 'answered', 'routed', 'delivery_failed', 'acknowledged', 'dismissed', 'all'],
-            description: 'Queue status filter: open, answered, routed, delivery_failed, acknowledged, or all. Defaults to open.',
+            enum: ['open', 'answered', 'routed', 'delivery_failed', 'acknowledged', 'dismissed', 'withdrawn', 'all'],
+            description: 'Queue status filter: open, answered, routed, delivery_failed, acknowledged, dismissed, withdrawn, or all. Defaults to open.',
           },
+          source: { type: 'string', description: 'Only items with this source label.' },
+          sessionId: { type: 'string', description: 'Only items for this related session id.' },
         },
         additionalProperties: false,
       },
@@ -835,7 +837,8 @@ export function buildMonitorMcpServer({ requestImpl }) {
         const params = new URLSearchParams();
         params.set('status', status || 'open');
         const payload = await request(`/api/command-center/work-queue?${params.toString()}`);
-        const { items, ...page } = paginate((payload.items || []).map((row) => args.compact === false ? row : pickFields(row, ['id', 'title', 'status', 'priority', 'sessionKind', 'sessionId', 'threadId'])), args);
+        const rows = (payload.items || []).filter((row) => (!args.source || row.source === args.source) && (!args.sessionId || row.sessionId === args.sessionId));
+        const { items, ...page } = paginate(rows.map((row) => args.compact === false ? row : pickFields(row, ['id', 'title', 'status', 'priority', 'sessionKind', 'sessionId', 'threadId'])), args);
         return { items, ...page };
       },
     },
@@ -904,6 +907,32 @@ export function buildMonitorMcpServer({ requestImpl }) {
         }).then((payload) => ({ id: payload.item?.id || payload.id, status: payload.item?.status || payload.status })),
     },
     {
+      name: 'monitor_update_human_queue_item',
+      description: 'Update your own open Command Center queue item instead of dismissing and re-adding it. Returns id and status.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Queue item id.' },
+          title: { type: 'string', description: 'Replacement title.' },
+          question: { type: 'string', description: 'Replacement decision question.' },
+          details: { type: 'string', description: 'Replacement context.' },
+          options: {
+            type: 'array',
+            description: 'Replacement multiple-choice answers.',
+            items: {
+              type: 'object',
+              properties: { id: { type: 'string' }, label: { type: 'string' }, value: { type: 'string' }, description: { type: 'string' } },
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['id'],
+        additionalProperties: false,
+      },
+      handler: async ({ id, ...body }) =>
+        request(`/api/command-center/work-queue/${encodeURIComponent(String(id || ''))}/update`, { method: 'POST', body }).then((payload) => ({ id: payload.item?.id || payload.id, status: payload.item?.status || payload.status })),
+    },
+    {
       name: 'monitor_acknowledge_human_queue_item',
       description: 'Mark a Command Center human queue item as acknowledged after routed session action is verified. Returns id and status.',
       inputSchema: {
@@ -923,7 +952,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_dismiss_human_queue_item',
-      description: 'Withdraw a Command Center human queue item that no longer needs a decision. Returns id and status.',
+      description: 'Withdraw a Command Center human queue item that no longer needs a decision. Your own item becomes withdrawn with nothing sent back to you. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1387,6 +1416,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     'monitor_list_human_queue',
     'monitor_add_human_queue_item',
     'monitor_answer_human_queue_item',
+    'monitor_update_human_queue_item',
     'monitor_dismiss_human_queue_item',
     'monitor_send_to_session',
     'monitor_list_session_deliveries',
