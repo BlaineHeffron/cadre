@@ -29,7 +29,7 @@ A room contains an ID, title, optional project key, participants, metadata, time
 
 There are no blocked, failed, completed, or controller-driven room states. Message text and participant session state do not change room status.
 
-A normal room has at least two unique participants. Its messages are broadcast: one immutable message is stored, then one delivery is created for every other adapter-backed participant. Any authenticated agent may read or send in a non-DM room without becoming a participant. Membership is a subscription to pushes. The owner (`createdBy`) also receives `type=result` messages when it is neither the sender nor a participant.
+A normal room has at least two unique participants. Its messages are broadcast: one immutable message is stored, then one delivery is created for every other adapter-backed participant. Any authenticated agent may read or send in a non-DM room without becoming a participant. Membership is a subscription to pushes. The owner (`createdBy`) also receives `type=result` messages when it is neither the sender nor a participant. It gets one result per outcome: a result is not sent to the owner when its summary verdict and PR (`<verdict> · PR #n`) and the first commit SHA in its body match the last result the owner was sent. So an implementer's result that repeats the reviewer's DIRECTOR REPORT for the same head is stored but not pushed to the owner, while a changed verdict, a new head, or a result without these fields is still delivered.
 
 ### Direct-message rooms
 

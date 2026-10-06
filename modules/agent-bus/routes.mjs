@@ -62,6 +62,17 @@ function threadMatchesQuery(snapshot, needle) {
   return haystack.includes(needle);
 }
 
+// "<verdict> · PR #n" from the summary plus the first commit SHA in the body; null when either is missing.
+function resultOutcome(summary, body) {
+  const verdict = /^\s*([\w-]+)\s*·\s*PR #(\d+)/.exec(summary || '');
+  const head = /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/.exec(body || '');
+  return verdict && head ? { verdict: `${verdict[1].toLowerCase()} #${verdict[2]}`, head: head[0] } : null;
+}
+function sameOutcome(left, right) {
+  return Boolean(left && right && left.verdict === right.verdict
+    && (left.head.startsWith(right.head) || right.head.startsWith(left.head)));
+}
+
 function createdByFromRequest(req) {
   const principal = req?.duenoAuth?.principal;
   if (!principal?.kind || !principal.sessionId) return null;
@@ -426,7 +437,13 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
       && participantKey(item) !== participantKey(from)).map(participantRef);
     const owner = snapshot.thread.createdBy;
     if (resolvedType === 'result' && adapters[owner?.kind] && !threadHasParticipant(snapshot.thread, owner)
-      && participantKey(owner) !== participantKey(from)) targets.push(participantRef(owner));
+      && participantKey(owner) !== participantKey(from)) {
+      // One result per outcome: skip a result that repeats the last one the owner was sent.
+      const last = [...(snapshot.messages || [])].reverse().find((item) => item.type === 'result'
+        && (snapshot.deliveries || []).some((delivery) => delivery.messageId === item.id
+          && participantKey(delivery.target) === participantKey(owner) && ['queued', 'injected'].includes(delivery.status)));
+      if (!sameOutcome(resultOutcome(summary, body), last && resultOutcome(last.metadata?.summary, last.body))) targets.push(participantRef(owner));
+    }
     const record = await store.createMessage({ threadId, from: participantRef(from), targets, type: resolvedType, body,
       replyTo, metadata: { ...(metadata || {}), ...(summary !== undefined ? { summary } : {}), ...(snapshot.thread.metadata?.dm ? { dm: true } : {}) } });
     broadcast(wsManager, `agent-bus:thread:${threadId}`, 'message_created', { message: record.message, deliveries: record.deliveries });

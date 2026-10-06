@@ -59,6 +59,24 @@ test('results deliver to an unsubscribed owner exactly once, plain messages do n
   assert.equal(targets('Owner report').some((ref) => ref.kind === owner.kind), false);
 });
 
+test('the owner gets one result per outcome: repeats skip, changed verdicts and heads deliver', async (t) => {
+  const { h, thread, call } = await setup(t);
+  const [implementer, reviewer] = participants;
+  const ownerGot = async (ref, summary, body) => {
+    const sent = await call('room_send', { thread_id: thread.id, body, summary, type: 'result' }, ref);
+    const id = sent.structuredContent.message_id;
+    return h.store.getThread(thread.id).deliveries.some((d) => d.messageId === id && d.target.kind === owner.kind);
+  };
+  assert.equal(await ownerGot(reviewer, 'ready · PR #45 · approved', 'DIRECTOR REPORT: PR #45\nHead: 070ef5702feae88fbaed58242302aef5b3bce94a'), true);
+  assert.equal(await ownerGot(implementer, 'Ready · PR #45 · done', 'Approved by the reviewer at 070ef57.'), false);
+  assert.equal(await ownerGot(implementer, 'needs-decision · PR #45 · scope', 'Head 070ef57 needs a call.'), true);
+  assert.equal(await ownerGot(reviewer, 'needs-decision · PR #45 · new head', 'Head: 9a1b2c3d4e5f'), true);
+  assert.equal(await ownerGot(implementer, 'needs-decision · PR #45 · no head', 'Still waiting.'), true);
+  const solo = await h.store.createThread({ title: 'Solo', participants: [implementer], createdBy: owner });
+  const sent = await call('room_send', { thread_id: solo.id, body: 'Head 070ef57', summary: 'ready · PR #45 · done', type: 'result' }, implementer);
+  assert.deepEqual(h.store.getThread(solo.id).deliveries.filter((d) => d.messageId === sent.structuredContent.message_id).map((d) => d.target), [owner]);
+});
+
 test('owner transfers; live owners block claims; gone owners permit claims; operators always transfer', async (t) => {
   const { h, thread, call, requestImpl } = await setup(t);
   const args = { thread_id: thread.id, to: { kind: outsider.kind, session_id: outsider.sessionId } };
