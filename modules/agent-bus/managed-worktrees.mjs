@@ -87,6 +87,7 @@ async function rollbackManagedWorktree({ repo, path, branch, baseHead }) {
 
 export async function cleanupManagedWorktree(metadata, { getPr, rooms = [], sessions = [], baseDir = managedWorktreeBase, spawnFailed = false } = {}) {
   const keep = (reason) => ({ removed: false, reason, report: `worktree: kept (${reason})` });
+  const keepFiles = (reason, files) => keep(`${reason}: ${files.slice(0, 3).join(', ')}${files.length > 3 ? `, ... +${files.length - 3} more` : ''}`);
   try {
     const { path, repo, branch, baseHead, roomId, ignoredBaseline, cleanup, disposable } = metadata || {};
     const missing = ['path', 'repo', 'branch', 'baseHead', 'roomId'].find((key) => !metadata?.[key]) || (!Array.isArray(ignoredBaseline) && 'ignoredBaseline');
@@ -133,16 +134,20 @@ export async function cleanupManagedWorktree(metadata, { getPr, rooms = [], sess
     const busDir = await lstat(resolve(path, '.agent_bus')).catch((error) => { if (error.code !== 'ENOENT') throw error; });
     const ownedBus = (!busDir || (busDir.isDirectory() && !busDir.isSymbolicLink())) && !await git(path, ['ls-files', '--', '.agent_bus']);
     const exclusions = ownedBus ? [':(exclude).agent_bus/hooks', ':(exclude).agent_bus/state'] : [];
-    const status = (await git(path, ['-c', 'status.showUntrackedFiles=all', 'status', '--porcelain', '--untracked-files=all', '-z', '--', '.', ...exclusions])).split('\0').filter(Boolean);
+    // --no-renames keeps one path per -z entry.
+    const status = (await git(path, ['-c', 'status.showUntrackedFiles=all', 'status', '--porcelain', '--untracked-files=all', '--no-renames', '-z', '--', '.', ...exclusions])).split('\0').filter(Boolean);
+    const dirty = [];
     for (const entry of status) {
       if (entry === '?? node_modules' && ignoredBaseline.includes('node_modules')
         && (await lstat(resolve(path, 'node_modules'))).isSymbolicLink()
         && !inside(path, await realpath(resolve(path, 'node_modules')))) continue;
-      return keep('dirty or untracked files');
+      dirty.push(entry.slice(3));
     }
+    if (dirty.length) return keepFiles('dirty or untracked files', dirty);
     // Cadre's own state and the disposable globs recorded at creation never block; worktree removal deletes them.
     const disposables = [...(ownedBus ? [':(exclude).agent_bus'] : []), ...(disposable || []).map((glob) => `:(exclude,glob)${glob}`)];
-    if ((await ignored(path, disposables)).some((file) => !ignoredBaseline.includes(file))) return keep('new ignored files');
+    const newIgnored = (await ignored(path, disposables)).filter((file) => !ignoredBaseline.includes(file));
+    if (newIgnored.length) return keepFiles('new ignored files', newIgnored);
     const canonicalPath = await realpath(path);
     const canonicalDir = async (dir) => {
       try { return await realpath(dir); }

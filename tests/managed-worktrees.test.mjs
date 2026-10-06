@@ -49,12 +49,13 @@ async function pushConfig(f, text) {
 const exists = async (path) => !!await stat(path).catch(() => null);
 
 for (const [name, change, reason] of [
-  ['dirty', async (f) => writeFile(resolve(f.metadata.path, 'file'), 'dirty'), 'dirty or untracked files'],
-  ['untracked with hidden user configuration', async (f) => { await git(f.repo, 'config', 'status.showUntrackedFiles', 'no'); await writeFile(resolve(f.metadata.path, 'untracked'), 'data'); }, 'dirty or untracked files'],
+  ['dirty', async (f) => writeFile(resolve(f.metadata.path, 'file'), 'dirty'), 'dirty or untracked files: file'],
+  ['untracked with hidden user configuration', async (f) => { await git(f.repo, 'config', 'status.showUntrackedFiles', 'no'); await writeFile(resolve(f.metadata.path, 'untracked'), 'data'); }, 'dirty or untracked files: untracked'],
   ['unpushed', async (f) => { await writeFile(resolve(f.metadata.path, 'file'), 'extra'); await git(f.metadata.path, 'commit', '-am', 'extra'); }, 'unpushed commits not in PR'],
   ['not merged', async (f) => f.setPr({ merged: false, number: 1, head: { sha: f.head } }), 'PR not merged'],
-  ['untracked .agent_bus notes', async (f) => { await mkdir(resolve(f.metadata.path, '.agent_bus/hooks'), { recursive: true }); await writeFile(resolve(f.metadata.path, '.agent_bus/notes'), 'precious'); }, 'dirty or untracked files'],
-  ['new ignored', async (f) => { await mkdir(resolve(f.metadata.path, 'cache')); await writeFile(resolve(f.metadata.path, 'cache/new'), 'data'); }, 'new ignored files'],
+  ['untracked .agent_bus notes', async (f) => { await mkdir(resolve(f.metadata.path, '.agent_bus/hooks'), { recursive: true }); await writeFile(resolve(f.metadata.path, '.agent_bus/notes'), 'precious'); }, 'dirty or untracked files: .agent_bus/notes'],
+  ['staged rename', async (f) => git(f.metadata.path, 'mv', 'file', 'moved'), 'dirty or untracked files: file, moved'],
+  ['new ignored', async (f) => { await mkdir(resolve(f.metadata.path, 'cache')); await writeFile(resolve(f.metadata.path, 'cache/new'), 'data'); }, 'new ignored files: cache/new'],
   ['shared room', async (f) => { f.options.rooms = [{ id: 'other', status: 'open', metadata: { worktree: { path: resolve(f.metadata.path, 'subdir') } } }]; }, 'shared with another room or live session'],
   ['interrupted session', async (f) => { f.options.sessions = [{ lifecycle: 'interrupted', workDir: f.metadata.path }]; }, 'shared with another room or live session'],
   ['shared session', async (f) => { f.options.sessions = [{ workDir: resolve(f.metadata.path, 'subdir') }]; }, 'shared with another room or live session'],
@@ -346,14 +347,23 @@ test('new ignored file inside an existing ignored directory blocks removal', asy
   const f = await fixture(t, 'mkdir cache; touch cache/baseline');
   assert.ok(f.metadata.ignoredBaseline.includes('cache/baseline'));
   await writeFile(resolve(f.metadata.path, 'cache/new'), 'precious');
-  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'new ignored files');
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'new ignored files: cache/new');
   assert.equal(await readFile(resolve(f.metadata.path, 'cache/new'), 'utf8'), 'precious');
+});
+
+test('kept reason names the first three new ignored files inside collapsed directories', async (t) => {
+  const f = await fixture(t); const cache = resolve(f.metadata.path, 'packages/sim/node_modules/.vite');
+  await mkdir(cache, { recursive: true });
+  for (const name of ['a', 'b', 'c', 'd', 'e']) await writeFile(resolve(cache, name), 'data');
+  const result = await cleanupManagedWorktree(f.metadata, f.options);
+  const reason = 'new ignored files: packages/sim/node_modules/.vite/a, packages/sim/node_modules/.vite/b, packages/sim/node_modules/.vite/c, ... +2 more';
+  assert.equal(result.reason, reason); assert.equal(result.report, `worktree: kept (${reason})`);
 });
 
 test('new external node_modules link blocks removal', async (t) => {
   const f = await fixture(t); const target = resolve(f.root, 'shared'); await mkdir(target);
   await symlink(target, resolve(f.metadata.path, 'node_modules'));
-  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'dirty or untracked files');
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'dirty or untracked files: node_modules');
   assert.equal(await exists(f.metadata.path), true);
 });
 
@@ -544,13 +554,13 @@ test('disposable globs recorded at creation skip matching ignored files only', a
   await mkdir(resolve(f.metadata.path, 'packages/a/dist'), { recursive: true }); await mkdir(resolve(f.metadata.path, 'art'));
   await writeFile(resolve(f.metadata.path, 'packages/a/dist/index.js'), 'built');
   await writeFile(resolve(f.metadata.path, 'art/source.psd'), 'precious');
-  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'new ignored files');
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'new ignored files: art/source.psd');
   await rm(resolve(f.metadata.path, 'art'), { recursive: true });
   const marker = resolve(f.repo, '.git/worktrees/repo/cadre-room.json'), recorded = await readFile(marker, 'utf8');
   const { disposable, ...legacy } = f.metadata;
   const { disposable: _, ...legacyMarker } = JSON.parse(recorded);
   await writeFile(marker, JSON.stringify(legacyMarker));
-  assert.equal((await cleanupManagedWorktree(legacy, f.options)).reason, 'new ignored files');
+  assert.equal((await cleanupManagedWorktree(legacy, f.options)).reason, 'new ignored files: packages/a/dist/index.js');
   await writeFile(marker, recorded);
   await pushConfig(f, JSON.stringify({ cleanup: 'on-merge' }));
   await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ cleanup: 'on-merge', disposable: [] }));
