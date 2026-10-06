@@ -40,13 +40,16 @@ async function relayToolUse($: any, e: any, next: any) {
   return next(e);
 }
 
+// A failed hook still lets the event go on: next(e) replays the call it made, or makes the one it missed.
+const passThrough = ($: any, e: any, next: any) => next(e);
+
 export const register: Register = (on) => {
-  on('classic.SessionStart', relay);
-  on('classic.UserPromptSubmit', relay);
-  on('classic.PreToolUse', relayToolUse);
-  on('classic.PostToolUse', relay);
-  on('classic.PermissionRequest', relay);
-  on('classic.Notification', relay);
-  on('classic.Stop', relay);
-  on('classic.SessionEnd', relay);
+  on('classic.SessionStart', relay).catch(passThrough);
+  on('classic.UserPromptSubmit', relay).catch(passThrough);
+  on('classic.PreToolUse', relayToolUse).catch(passThrough);
+  on('classic.PostToolUse', relay).catch(passThrough);
+  on('classic.PermissionRequest', relay).catch(passThrough);
+  on('classic.Notification', relay).catch(passThrough);
+  on('classic.Stop', relay).catch(passThrough);
+  on('classic.SessionEnd', relay).catch(passThrough);
 };
