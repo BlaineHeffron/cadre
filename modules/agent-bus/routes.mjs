@@ -62,6 +62,19 @@ function threadMatchesQuery(snapshot, needle) {
   return haystack.includes(needle);
 }
 
+// "<verdict> · PR #n" from the summary plus the one SHA labeled "head" in the body; null when missing or ambiguous.
+function resultOutcome(summary, body) {
+  const verdict = /^\s*([\w-]+)\s*·\s*PR #(\d+)/.exec(summary || '');
+  const heads = [...String(body || '').matchAll(/\bhead(?: sha)?\W{1,6}([0-9a-f]{7,40})\b/gi)].map((match) => match[1].toLowerCase());
+  const head = heads.reduce((longest, item) => (item.length > longest.length ? item : longest), '');
+  if (!verdict || !head || heads.some((item) => !head.startsWith(item))) return null;
+  return { verdict: `${verdict[1].toLowerCase()} #${verdict[2]}`, head };
+}
+function sameOutcome(left, right) {
+  return Boolean(left && right && left.verdict === right.verdict
+    && (left.head.startsWith(right.head) || right.head.startsWith(left.head)));
+}
+
 function createdByFromRequest(req) {
   const principal = req?.duenoAuth?.principal;
   if (!principal?.kind || !principal.sessionId) return null;
@@ -412,7 +425,9 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
       return { statusCode: 403, payload: { error: 'Sender is not a participant in this DM' } };
     }
     const resolvedType = type === 'result' ? 'result' : (type || 'message');
-    const duplicate = [...(snapshot.messages || [])].reverse().find((item) => (
+    const history = [...(snapshot.messages || [])].reverse();
+    // A repeated result is a duplicate only of the room's latest result, so a verdict that flips back still posts.
+    const duplicate = (resolvedType === 'result' ? history.filter((item) => item.type === 'result').slice(0, 1) : history).find((item) => (
       participantKey(item.from) === participantKey(from)
       && item.body === body
       && item.metadata?.summary === summary
@@ -423,11 +438,18 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (duplicate) {
       return { statusCode: 200, payload: { message: duplicate, deliveries: (snapshot.deliveries || []).filter((item) => item.messageId === duplicate.id), deduped: true } };
     }
-    const targets = snapshot.thread.participants.filter((item) => adapters[item.kind]
+    let targets = snapshot.thread.participants.filter((item) => adapters[item.kind]
       && participantKey(item) !== participantKey(from)).map(participantRef);
     const owner = snapshot.thread.createdBy;
-    if (resolvedType === 'result' && adapters[owner?.kind] && !threadHasParticipant(snapshot.thread, owner)
-      && participantKey(owner) !== participantKey(from)) targets.push(participantRef(owner));
+    if (resolvedType === 'result' && adapters[owner?.kind] && participantKey(owner) !== participantKey(from)) {
+      // One result per outcome: skip a result that repeats the last one the owner was sent.
+      const last = [...(snapshot.messages || [])].reverse().find((item) => item.type === 'result'
+        && (snapshot.deliveries || []).some((delivery) => delivery.messageId === item.id
+          && participantKey(delivery.target) === participantKey(owner) && ['queued', 'injected'].includes(delivery.status)));
+      const repeat = sameOutcome(resultOutcome(summary, body), last && resultOutcome(last.metadata?.summary, last.body));
+      targets = targets.filter((item) => participantKey(item) !== participantKey(owner));
+      if (!repeat) targets.push(participantRef(owner));
+    }
     const record = await store.createMessage({ threadId, from: participantRef(from), targets, type: resolvedType, body,
       replyTo, metadata: { ...(metadata || {}), ...(summary !== undefined ? { summary } : {}), ...(snapshot.thread.metadata?.dm ? { dm: true } : {}) } });
     broadcast(wsManager, `agent-bus:thread:${threadId}`, 'message_created', { message: record.message, deliveries: record.deliveries });
