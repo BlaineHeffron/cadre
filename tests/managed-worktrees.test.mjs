@@ -203,6 +203,7 @@ for (const mode of ['managed', 'stale local config', 'setup failure', 'launch fa
 for (const mode of ['then merged', 'already merged', 'with explicit watch']) test(`room PR found by branch ${mode}`, async (t) => {
   const f = await fixture(t);
   await git(f.repo, 'config', `url.${resolve(f.root, 'remote')}.insteadOf`, 'https://github.com/test/repo.git');
+  await git(f.repo, 'config', '--add', `url.${resolve(f.root, 'remote')}.insteadOf`, 'git@github.com:test/repo.git');
   await git(f.repo, 'remote', 'set-url', 'origin', 'https://github.com/test/repo.git');
   const commands = [];
   const h = await createAgentBusHarness({ beforeReady: async (app, dir) => {
@@ -235,6 +236,13 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch']) tes
   await poller.pollOnce();
   assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
   pulls = [{ number: 2, created_at: new Date(Math.floor(room.createdAt / 1000) * 1000).toISOString() }, stale];
+  for (const url of ['https://notgithub.com/test/repo.git', 'git@github.com.evil:test/repo.git']) {
+    await git(f.repo, 'remote', 'set-url', 'origin', url);
+    await poller.pollOnce();
+  }
+  assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+  assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
+  await git(f.repo, 'remote', 'set-url', 'origin', mode === 'already merged' ? 'git@github.com:test/repo.git' : 'https://github.com/test/repo.git');
   if (mode === 'with explicit watch') {
     const other = await h.store.createThread({ title: 'Other', participants: [], createdBy: { kind: 'pi', sessionId: 'pi-1' } });
     const explicit = await h.app.githubAgents.repoStore.putWatch({ repo: 'test/repo', number: 2, thread_id: other.id }, { kind: 'pi', sessionId: 'pi-1' });

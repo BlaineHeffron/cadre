@@ -688,7 +688,7 @@ export class GithubAgentPoller {
       if (!worktree?.branch || worktree.pr) continue;
       try {
         const origin = await exec('git', ['-C', worktree.repo, 'config', '--get', 'remote.origin.url']);
-        if (origin.stdout.trim().match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/i)?.[1].toLowerCase() !== repo.id.toLowerCase()) continue;
+        if (origin.stdout.trim().match(/^(?:https:\/\/(?:[^@/]+@)?github\.com\/|(?:ssh:\/\/)?git@github\.com[:/])([^/]+\/[^/]+?)(?:\.git)?\/?$/i)?.[1].toLowerCase() !== repo.id.toLowerCase()) continue;
         const pulls = await fetchGithubList(this.fetchImpl, `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls?state=all&head=${encodeURIComponent(`${repo.owner}:${worktree.branch}`)}&per_page=100`,
           { token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs });
         // GitHub timestamps have second precision.
