@@ -130,6 +130,9 @@ test('DM to a live session under the wrong kind names the kind instead of report
   assert.deepEqual(wrongKind.json(), { error: 'no claude session codex-2; a codex session with that id exists', code: 'session_kind_mismatch' });
   const unknown = await request('dm', { from: refs[0], target: { kind: 'claude', sessionId: 'no-such' }, body: 'review' });
   assert.equal(unknown.statusCode, 404); assert.equal(unknown.json().code, 'session_not_found');
+  h.sessionDetailResponders.claude = async () => ({ statusCode: 503, payload: { error: 'backend unavailable' } });
+  const unavailable = await request('dm', { from: refs[0], target: { kind: 'claude', sessionId: 'codex-2' }, body: 'review' });
+  assert.equal(unavailable.statusCode, 503, unavailable.body);
 });
 
 test('room delivery to a wrong-kind participant fails with the kind mismatch, not ended', async (t) => {
