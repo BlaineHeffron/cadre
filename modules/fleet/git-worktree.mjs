@@ -1,4 +1,4 @@
-import { mkdir, rmdir, stat } from 'node:fs/promises';
+import { lstat, mkdir, rmdir, stat } from 'node:fs/promises';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { exec } from '../../lib/exec.mjs';
 
@@ -354,12 +354,17 @@ async function removeWorktree(repoRoot, entry, { force }) {
   }
 }
 
-// Fail closed: changes outside Cadre's hook state, commits on no remote-tracking ref or PR head,
-// or any git error (including a missing worktree) keep the worktree and its branch.
-async function unpushedWorktreeReason(path, pullRequest) {
+// Fail closed: a branch other than the one to delete, changes outside Cadre's untracked hook state,
+// commits on no remote-tracking ref or PR head, or any error (including a missing worktree) keep it.
+async function unpushedWorktreeReason(path, branch, pullRequest) {
   try {
+    if (branch && await git(path, ['branch', '--show-current']) !== branch) return 'branch changed';
+    const bus = await lstat(resolve(path, '.agent_bus')).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+    const ownedBus = (!bus || (bus.isDirectory() && !bus.isSymbolicLink())) && !await git(path, ['ls-files', '--', '.agent_bus']);
+    const exclusions = ownedBus ? [':(exclude).agent_bus/hooks', ':(exclude).agent_bus/state'] : [];
+    if (await git(path, ['status', '--porcelain', '--untracked-files=all', '--', '.', ...exclusions])) return 'uncommitted changes';
+    // FETCH_HEAD is per worktree, so fetches elsewhere in the repository cannot move it.
     if (pullRequest) await git(path, ['fetch', '--quiet', 'origin', `pull/${pullRequest}/head`]);
-    if (await git(path, ['status', '--porcelain', '--untracked-files=all', '--', '.', ':(exclude).agent_bus/hooks', ':(exclude).agent_bus/state'])) return 'uncommitted changes';
     if (await git(path, ['log', '--format=%H', 'HEAD', '--not', '--remotes', ...(pullRequest ? ['FETCH_HEAD'] : [])])) return 'unpushed commits';
     return '';
   } catch (error) {
@@ -380,7 +385,7 @@ export async function removeAgentSessionWorktree({
   const branchName = normalizeText(branch);
   if (!source || !path) return { removed: false, skipped: true, reason: 'missing_worktree_metadata' };
   if (keepUnpushed) {
-    const reason = await unpushedWorktreeReason(path, Number(pullRequest) || 0);
+    const reason = await unpushedWorktreeReason(path, branchName, Number(pullRequest) || 0);
     if (reason) return { removed: false, kept: true, path, reason };
   }
 

@@ -399,7 +399,7 @@ describe('git worktree helper', () => {
     await assert.rejects(stat(worktreePath), { code: 'ENOENT' });
   });
 
-  it('with keepUnpushed, removes only pushed worktrees whose changes are Cadre hook state', async () => {
+  it('with keepUnpushed, removes only pushed worktrees on their own branch whose changes are untracked Cadre hook state', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dueno-worktree-keep-'));
     tempDirs.push(root);
     const repo = await initRepo(root);
@@ -414,6 +414,20 @@ describe('git worktree helper', () => {
     assert.equal(await readFile(join(userFile, '.agent_bus', 'notes'), 'utf8'), 'keep');
     const missing = join(root, 'worktrees', 'missing', 'repo');
     assert.equal((await remove(missing, 'dueno-fleet/missing')).kept, true);
+    const switched = await addWorktree(repo, 'dueno-fleet/switched', join(root, 'worktrees', 'switched', 'repo'));
+    await writeFile(join(switched, 'README.md'), 'unpushed\n');
+    await git(switched, ['commit', '-am', 'unpushed']);
+    await git(switched, ['checkout', '-b', 'clean', 'origin/main']);
+    assert.equal((await remove(switched, 'dueno-fleet/switched')).reason, 'branch changed');
+    assert.ok(String((await git(repo, ['branch', '--list', 'dueno-fleet/switched'])).stdout).trim());
+    const trackedBus = await addWorktree(repo, 'dueno-fleet/tracked-bus', join(root, 'worktrees', 'tracked-bus', 'repo'));
+    await mkdir(join(trackedBus, '.agent_bus', 'hooks'), { recursive: true });
+    await writeFile(join(trackedBus, '.agent_bus', 'hooks', 'tracked'), 'v1');
+    await git(trackedBus, ['add', '.agent_bus']);
+    await git(trackedBus, ['commit', '-m', 'tracked bus']);
+    await git(trackedBus, ['push', 'origin', 'HEAD']);
+    await writeFile(join(trackedBus, '.agent_bus', 'hooks', 'tracked'), 'v2');
+    assert.equal((await remove(trackedBus, 'dueno-fleet/tracked-bus')).reason, 'uncommitted changes');
     const hooksOnly = await addWorktree(repo, 'dueno-fleet/hooks-only', join(root, 'worktrees', 'hooks-only', 'repo'));
     await mkdir(join(hooksOnly, '.agent_bus', 'hooks'), { recursive: true });
     await writeFile(join(hooksOnly, '.agent_bus', 'hooks', 'state.json'), '{}');
