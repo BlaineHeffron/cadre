@@ -102,12 +102,13 @@ test('protocol inject uses a stable delivery idempotency key', async () => {
   }
 });
 
-function codexPaneState(fixture) {
+function codexPaneState(fixture, extra = []) {
   const content = readFileSync(new URL(`./fixtures/session-state/panes/${fixture}.pane`, import.meta.url), 'utf8');
   const tracker = createSessionStateTracker({ now: () => 1000 });
   return tracker.observe('c1', [
     { source: 'process', kind: 'lifecycle', value: { lifecycle: 'running' }, observedAt: 1000, expiresAt: 0, fingerprint: 'process:running' },
     ...observeCodexPane(content, { observedAt: 1000, expiresAt: 0 }),
+    ...extra,
   ]);
 }
 
@@ -155,5 +156,14 @@ test('delivers to a working Codex pane, which steers input into the running turn
 test('holds Codex delivery behind a visible permission prompt', async () => {
   const state = codexPaneState('codex-reconstructed-permission');
   assert.equal(state.status, 'blocked');
+  assert.deepEqual(await deliverTo('codex', state), { injected: 0, status: 'queued', holdReason: 'target_busy' });
+});
+
+test('holds Codex delivery while a prior send to the working pane awaits response', async () => {
+  const state = codexPaneState('codex-reconstructed-working', [{
+    source: 'delivery', kind: 'command_gate', value: { state: 'awaiting_response' }, observedAt: 1000, expiresAt: 0, fingerprint: 'cmd_1:awaiting_response',
+  }]);
+  assert.equal(state.execution, 'working');
+  assert.equal(state.status, 'awaiting_response');
   assert.deepEqual(await deliverTo('codex', state), { injected: 0, status: 'queued', holdReason: 'target_busy' });
 });

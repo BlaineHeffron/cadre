@@ -331,6 +331,26 @@ describe('session command gate', () => {
     assert.deepEqual(test.executions.map((entry) => entry.text), ['room message']);
   });
 
+  it('holds an allowed Telegram answer while a transcript reports working', async () => {
+    const test = harness();
+    test.observe({ execution: 'working', interaction: 'none', fingerprint: 'working-composer' });
+    test.observeTranscript('working');
+    const ticket = test.gate.submit(test.sessionId, {
+      id: 'telegram-mid-turn',
+      source: 'telegram_answer',
+      operation: 'message',
+      text: 'operator answer',
+      allowActiveQueue: true,
+    });
+    assert.equal((await ticket.accepted).state, 'queued');
+    await immediate();
+    assert.equal(test.executions.length, 0);
+
+    test.observeTranscript('idle');
+    await ticket.completion;
+    assert.deepEqual(test.executions.map((entry) => entry.text), ['operator answer']);
+  });
+
   it('does not execute when the deadline expires during the final pre-send refresh', async () => {
     let refreshCount = 0;
     const test = harness({
