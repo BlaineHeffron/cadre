@@ -4,6 +4,9 @@ import { createAgentBusDelivery } from '../modules/agent-bus/delivery.mjs';
 import { renderBusEnvelope } from '../modules/agent-bus/envelope.mjs';
 import { createAgentAdapters } from '../modules/agent-bus/adapters.mjs';
 import { registerProtocolSessionProvider } from '../modules/sessions/protocol-session-registry.mjs';
+import { readFileSync } from 'node:fs';
+import { observeCodexPane } from '../modules/session-state/providers/codex.mjs';
+import { createSessionStateTracker } from '../modules/session-state/tracker.mjs';
 
 function idleSession() {
   return { state: { capabilities: { canSendNow: true }, status: 'waiting_for_input', execution: 'idle' } };
@@ -97,4 +100,70 @@ test('protocol inject uses a stable delivery idempotency key', async () => {
   } finally {
     unregister();
   }
+});
+
+function codexPaneState(fixture, extra = []) {
+  const content = readFileSync(new URL(`./fixtures/session-state/panes/${fixture}.pane`, import.meta.url), 'utf8');
+  const tracker = createSessionStateTracker({ now: () => 1000 });
+  return tracker.observe('c1', [
+    { source: 'process', kind: 'lifecycle', value: { lifecycle: 'running' }, observedAt: 1000, expiresAt: 0, fingerprint: 'process:running' },
+    ...observeCodexPane(content, { observedAt: 1000, expiresAt: 0 }),
+    ...extra,
+  ]);
+}
+
+async function deliverTo(kind, state) {
+  const message = { id: 'msg_3', threadId: 'thr_1', from: { kind: 'claude', sessionId: 'a1' }, body: 'hello' };
+  const delivery = { id: 'del_3', messageId: 'msg_3', target: { kind, sessionId: 'c1' }, status: 'queued', attempts: 0 };
+  const store = {
+    getThread: () => ({ thread: { status: 'open' } }),
+    getDelivery: () => delivery,
+    getMessage: () => null,
+    async updateDelivery(_id, patch) { return { ...delivery, ...patch }; },
+  };
+  let injected = 0;
+  const { deliverMessage } = createAgentBusDelivery({
+    app: {},
+    store,
+    wsManager: null,
+    observedSessions: new Set(),
+    deliveryInFlight: new Set(),
+    sessionDeliveryInFlight: new Set(),
+    broadcast() {},
+    broadcastAlert() {},
+    async resolveAgentSession() {
+      return {
+        async getSession() { return { state }; },
+        async captureSession() { return ''; },
+        async injectEnvelope() { injected += 1; return { ok: true, resolution: 'sent' }; },
+      };
+    },
+  });
+  const updated = await deliverMessage(message, delivery);
+  return { injected, status: updated.status, holdReason: updated.holdReason };
+}
+
+test('delivers to a working Codex pane, which steers input into the running turn', async () => {
+  for (const fixture of ['codex-e5ea5b75-background-terminal', 'codex-reconstructed-working']) {
+    const state = codexPaneState(fixture);
+    assert.equal(state.status, 'working');
+    assert.equal(state.capabilities.canSendNow, false);
+    assert.deepEqual(await deliverTo('codex', state), { injected: 1, status: 'injected', holdReason: null });
+    assert.deepEqual(await deliverTo('claude', state), { injected: 0, status: 'queued', holdReason: 'target_busy' });
+  }
+});
+
+test('holds Codex delivery behind a visible permission prompt', async () => {
+  const state = codexPaneState('codex-reconstructed-permission');
+  assert.equal(state.status, 'blocked');
+  assert.deepEqual(await deliverTo('codex', state), { injected: 0, status: 'queued', holdReason: 'target_busy' });
+});
+
+test('holds Codex delivery while a prior send to the working pane awaits response', async () => {
+  const state = codexPaneState('codex-reconstructed-working', [{
+    source: 'delivery', kind: 'command_gate', value: { state: 'awaiting_response' }, observedAt: 1000, expiresAt: 0, fingerprint: 'cmd_1:awaiting_response',
+  }]);
+  assert.equal(state.execution, 'working');
+  assert.equal(state.status, 'awaiting_response');
+  assert.deepEqual(await deliverTo('codex', state), { injected: 0, status: 'queued', holdReason: 'target_busy' });
 });

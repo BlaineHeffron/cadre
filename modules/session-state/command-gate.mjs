@@ -134,12 +134,13 @@ function startupFailOpen(transaction = {}, snapshot = {}) {
 function canAttemptSend(snapshot, capability, transaction = {}) {
   if (!snapshot || TERMINAL_LIFECYCLES.has(snapshot.lifecycle)) return false;
   if (BLOCKING_INTERACTIONS.has(snapshot.interaction?.kind)) return false;
-  if (isDeterministicallyBusy(snapshot)) return false;
-  if (
-    transaction.allowActiveQueue
+  const activeQueue = transaction.allowActiveQueue
     && transaction.operation === 'message'
-    && snapshot.capabilities?.canQueueMessage === true
-  ) return true;
+    && snapshot.capabilities?.canQueueMessage === true;
+  // Codex room messages steer into the running turn, even when hook/transcript say working.
+  if (activeQueue && transaction.source === 'agent_bus') return true;
+  if (isDeterministicallyBusy(snapshot)) return false;
+  if (activeQueue) return true;
   // lifecycle can stay 'running' after process evidence expires. Send only
   // while a fresh process observation still grants canQueueMessage.
   if (snapshot.lifecycle === 'running' && snapshot.capabilities?.canQueueMessage === true) return true;

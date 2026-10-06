@@ -9,6 +9,15 @@ function appendReplayHistory(delivery, entry) {
   return [...(Array.isArray(delivery?.replayHistory) ? delivery.replayHistory : []), entry].slice(-20);
 }
 
+// Codex submits Enter mid-turn as a steer into the running turn, so a working
+// Codex pane accepts room messages. Other providers wait for idle. Blocked,
+// awaiting_response, and unknown sessions still hold.
+function canDeliverNow(kind, state) {
+  if (state?.capabilities?.canSendNow === true) return true;
+  return kind === 'codex' && state?.capabilities?.canQueueMessage === true
+    && ['working', 'thinking'].includes(state?.status);
+}
+
 function holdReasonFor(session) {
   const status = session?.state?.status;
   const execution = session?.state?.execution;
@@ -52,7 +61,7 @@ export function createAgentBusDelivery({ app, store, wsManager, observedSessions
     try {
       const adapter = await resolveAgentSession(target);
       const session = await adapter.getSession(app, target.sessionId);
-      if (session?.state?.capabilities?.canSendNow !== true) {
+      if (!canDeliverNow(target.kind, session?.state)) {
         const holdReason = holdReasonFor(session);
         return markHold(message, delivery, {
           holdReason,
