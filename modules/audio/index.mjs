@@ -353,7 +353,8 @@ export async function audioPlugin(app, opts = {}) {
   // can say video/webm. The type only picks the temp file extension (unknown -> .bin); faster-whisper
   // probes the bytes, while whisper-cpp decodes only the formats its build supports.
   app.post('/api/audio/transcribe', async (req, reply) => {
-    const match = String(req.body?.audio || '').match(/^data:(?:[\w.+-]+\/([\w.+-]+))?[^,]*;base64,([A-Za-z0-9+/]+={0,2})$/);
+    const match = String(req.body?.audio || '')
+      .match(/^data:(?:[\w.+-]+\/([\w.+-]+))?(?:;\s*[\w.+-]+=[^;,]*)*;base64,((?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?)$/);
     const audio = match && Buffer.from(match[2], 'base64');
     if (!audio?.length) return reply.code(400).send({ error: 'Expected a base64 audio data URL', code: 'invalid_audio' });
     const ext = ['webm', 'ogg', 'mp4', 'wav'].includes(match[1]) ? match[1] : 'bin';

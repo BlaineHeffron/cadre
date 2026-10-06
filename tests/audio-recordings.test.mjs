@@ -504,7 +504,8 @@ describe('push-to-talk transcribe route', () => {
     });
 
     assert.equal((await post(app, { audio: clip }, {})).statusCode, 401);
-    for (const audio of [undefined, 'AAAA', 'data:audio/webm;base64,', 'data:audio/webm,AAAA', 'data:audio/webm;base64,$$$$', 'data:audio/webm;base64,A']) {
+    for (const audio of [undefined, 'AAAA', 'data:audio/webm;base64,', 'data:audio/webm,AAAA', 'data:audio/webm;base64,$$$$', 'data:audio/webm;base64,A',
+      'data:garbage;base64,YQ==', 'data:audio/;base64,YQ==', 'data:audio/webm;base64,AAAAA', 'data:audio/webm;base64,YQ=']) {
       const bad = await post(app, { audio });
       assert.equal(bad.statusCode, 400, audio);
       assert.equal(bad.json().code, 'invalid_audio');
