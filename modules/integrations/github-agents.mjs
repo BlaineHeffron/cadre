@@ -693,10 +693,11 @@ export class GithubAgentPoller {
           { token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs });
         const pr = pulls.find((item) => Date.parse(item.created_at) >= room.createdAt);
         if (!pr) continue;
+        // Link first: a linked room is never rediscovered, so a removed watch cannot re-notify close or expiry.
+        await this.linkWorktreePr(room.id, { repo: repo.id, number: pr.number });
         // Notifications go to the room owner; the first (always newly created) participant is the fallback creator.
         const [{ kind, sessionId }] = room.participants;
         await this.repoStore.putWatch({ repo: repo.id, number: pr.number, thread_id: room.id }, { kind, sessionId });
-        await this.linkWorktreePr(room.id, { repo: repo.id, number: pr.number });
       } catch (error) {
         this.log?.warn?.({ repoId: repo.id, threadId: room.id, code: sanitizedError(error) }, 'Room PR discovery failed');
       }
