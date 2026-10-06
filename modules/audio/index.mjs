@@ -349,9 +349,14 @@ export async function audioPlugin(app, opts = {}) {
   app.post('/api/recordings/scan', async () => scan());
 
   // Body size is bounded by the server bodyLimit; the client caps clips at two minutes.
+  // Any media type: Firefox drops recorder.mimeType on stop (application/octet-stream) and Chromium
+  // can say video/webm. The type only picks the temp file extension (unknown -> .bin); faster-whisper
+  // probes the bytes, while whisper-cpp decodes only the formats its build supports.
   app.post('/api/audio/transcribe', async (req, reply) => {
-    const match = String(req.body?.audio || '').match(/^data:audio\/([\w.+-]+)[^,]*;base64,(.+)$/);
-    if (!match) return reply.code(400).send({ error: 'Expected a base64 audio data URL', code: 'invalid_audio' });
+    const match = String(req.body?.audio || '').match(/^data:(?:[\w.+-]+\/([\w.+-]+))?[^,]*;base64,([A-Za-z0-9+/]+={0,2})$/);
+    const audio = match && Buffer.from(match[2], 'base64');
+    if (!audio?.length) return reply.code(400).send({ error: 'Expected a base64 audio data URL', code: 'invalid_audio' });
+    const ext = ['webm', 'ogg', 'mp4', 'wav'].includes(match[1]) ? match[1] : 'bin';
     if (transcribing) {
       return reply.code(429).header('retry-after', '5').send({ error: 'Another transcription is running', code: 'transcription_busy' });
     }
@@ -360,7 +365,7 @@ export async function audioPlugin(app, opts = {}) {
     const abort = new AbortController();
     reply.raw.on('close', () => { if (!reply.raw.writableEnded) abort.abort(); });
     try {
-      return { text: await transcribe(Buffer.from(match[2], 'base64'), match[1], abort.signal) };
+      return { text: await transcribe(audio, ext, abort.signal) };
     } catch (error) {
       if (error.statusCode === 503) {
         return reply.code(503).send({ error: 'No speech-to-text engine on the server', code: 'transcriber_unavailable' });

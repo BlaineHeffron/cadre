@@ -69,7 +69,11 @@ export async function openRecorder({ getUserMedia, Recorder, transcribe }) {
         } finally {
           releaseMic();
         }
-        return keep ? transcribe(new Blob(chunks, { type: recorder.mimeType })) : '';
+        if (!keep) return '';
+        // Chunk type, not recorder.mimeType: Firefox resets that to '' on stop.
+        const blob = new Blob(chunks, { type: chunks[0]?.type });
+        if (!blob.size) throw new Error('No audio captured');
+        return transcribe(blob);
       },
     };
   } catch (error) {
