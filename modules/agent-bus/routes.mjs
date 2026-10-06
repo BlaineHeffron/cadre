@@ -71,7 +71,7 @@ function createdByFromRequest(req) {
 export function registerAgentBusRoutes({ app, store, adapters, wsManager, productionControls, observedSessions, deliveryInFlight,
   broadcast, broadcastAlert, broadcastThreadSnapshot, broadcastThreadSummary, enrichThread, normalizeThreadSummary,
   threadMatchesStatusFilter, buildStateSnapshotEntry, normalizeCollectionLimit, participantKey, participantRef,
-  threadHasParticipant, threadHasOwner, uniqueAgentRefs, isAgentRef, pruneObservedParticipant, planParticipant, executeParticipantPlan,
+  threadHasParticipant, threadHasOwner, uniqueAgentRefs, isAgentRef, pruneObservedParticipant, resolveAgentSession, planParticipant, executeParticipantPlan,
   discardCreatedParticipants, waitForSessionReady, injectBootstrapStartupText, createBootstrapMessage,
   deliverMessage, failDelivery, replayDelivery, taskService = null, managedWorktreeBaseDir }) {
   const endingThreads = new Set();
@@ -458,24 +458,19 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (isDashboardUser(ref)) return true;
     const adapter = adapters[ref.kind];
     if (!adapter) { await reply.code(404).send({ error: `Unknown ${label} kind` }); return false; }
-    let ended = false;
     try {
-      const session = await adapter.getSession(app, ref.sessionId);
-      if (session) return true;
+      await resolveAgentSession(ref);
+      return true;
     } catch (err) {
-      ended = err.payload?.sessionEnded === true || err.payload?.state?.status === 'ended';
-      if (!ended && err.statusCode !== 404 && err.code !== 'session_not_found') throw err;
-    }
-    // Session routes report unknown ids as ended, so a wrong kind would otherwise read as "session ended".
-    for (const [kind, other] of Object.entries(adapters)) {
-      if (kind === ref.kind || !await other.getSession(app, ref.sessionId).catch(() => null)) continue;
-      await reply.code(404).send({ error: `no ${ref.kind} session ${ref.sessionId}; a ${kind} session with that id exists`,
-        code: 'session_kind_mismatch' });
-      return false;
-    }
-    if (ended) {
-      await reply.code(410).send({ error: `${label} session ended`, code: 'session_ended', sessionEnded: true });
-      return false;
+      if (err.code === 'session_kind_mismatch') {
+        await reply.code(404).send({ error: err.message, code: err.code });
+        return false;
+      }
+      if (err.payload?.sessionEnded === true || err.payload?.state?.status === 'ended') {
+        await reply.code(410).send({ error: `${label} session ended`, code: 'session_ended', sessionEnded: true });
+        return false;
+      }
+      if (err.statusCode !== 404 && err.code !== 'session_not_found') throw err;
     }
     await reply.code(404).send({ error: `${label} agent not found`, code: 'session_not_found' });
     return false;

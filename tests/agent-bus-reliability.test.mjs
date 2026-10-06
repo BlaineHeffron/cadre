@@ -132,6 +132,20 @@ test('DM to a live session under the wrong kind names the kind instead of report
   assert.equal(unknown.statusCode, 404); assert.equal(unknown.json().code, 'session_not_found');
 });
 
+test('room delivery to a wrong-kind participant fails with the kind mismatch, not ended', async (t) => {
+  const { h } = await setup(t);
+  h.sessionCatalog.codex.add('codex-2');
+  h.sessionDetailResponders.claude = async ({ sessionId }) => (sessionId === 'codex-2'
+    ? { statusCode: 200, payload: { id: sessionId, sessionEnded: true } } : null);
+  const thread = await h.store.createThread({ title: 'wrong kind', participants: [refs[0], { kind: 'claude', sessionId: 'codex-2' }] });
+  const sent = await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
+    payload: { threadId: thread.id, from: refs[0], body: 'review' } });
+  assert.equal(sent.statusCode, 200, sent.body);
+  const [delivery] = sent.json().deliveries;
+  assert.equal(delivery.status, 'failed');
+  assert.equal(delivery.error, 'no claude session codex-2; a codex session with that id exists');
+});
+
 test('MCP close cancellation and outsider reopen reach real routes with scope checks', async (t) => {
   const { h, thread, send } = await setup(t);
   await h.store.transferThread(thread.id, refs[0]);

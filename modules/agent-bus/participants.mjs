@@ -151,7 +151,15 @@ export function createAgentBusParticipants({
     if (!adapter) {
       throw new Error(`Unsupported agent kind: ${agentRef.kind}`);
     }
-    await adapter.getSession(app, agentRef.sessionId);
+    try { await adapter.getSession(app, agentRef.sessionId); } catch (err) {
+      // Session routes report unknown ids as ended, so name the kind that owns a live session with this id.
+      for (const [kind, other] of Object.entries(adapters)) {
+        if (kind === agentRef.kind || !await other.getSession(app, agentRef.sessionId).catch(() => null)) continue;
+        throw Object.assign(new Error(`no ${agentRef.kind} session ${agentRef.sessionId}; a ${kind} session with that id exists`),
+          { statusCode: 404, code: 'session_kind_mismatch', cause: err });
+      }
+      throw err;
+    }
     return adapter;
   }
 
