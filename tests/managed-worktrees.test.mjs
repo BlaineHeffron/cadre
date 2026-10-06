@@ -262,11 +262,19 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
     assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
     // The room moves to a follow-up branch before its first PR merges.
     const path = room.metadata.worktree.path;
+    pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head };
+    // An unknown branch neither ends the room nor consumes the watch.
+    await git(path, 'checkout', '-q', '--detach');
+    await poller.pollOnce();
+    assert.equal(h.store.getThread(room.id).thread.status, 'open');
+    assert.deepEqual((await h.app.githubAgents.repoStore.listWatches()).map((watch) => watch.number), [2]);
+    assert.deepEqual(commands, []);
     await git(path, 'checkout', '-q', '-b', 'auto-next');
     await writeFile(resolve(path, 'file'), 'next\n'); await git(path, 'commit', '-qam', 'next');
     const next = await git(path, 'rev-parse', 'HEAD');
     await git(f.repo, 'push', 'origin', `${next}:refs/pull/3/head`, `${next}:refs/heads/auto-next`);
-    pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head };
+    // A marker already re-pointed by an attempt whose room save failed is retried, not treated as a mismatch.
+    await linkManagedWorktreePr(h.store.getThread(room.id).thread.metadata.worktree, undefined, 'auto-next');
     await poller.pollOnce();
     assert.equal(h.store.getThread(room.id).thread.status, 'open');
     assert.deepEqual(Object.values(h.deletedSessions).flat(), []);
@@ -433,6 +441,22 @@ test('bootstrap injects the merge policy from the base-ref config', async (t) =>
     assert.ok(created.initialPrompt.split('\n').includes('Unless your task says otherwise: after approval and the project\'s gates pass, the reviewer merges the PR, then reports; do not delete the remote branch.'));
     assert.doesNotMatch(created.initialPrompt, /coordinator or operator merges/);
   }
+});
+
+for (const [name, change, reason] of [
+  ['mismatching marker', async (marker) => ({ ...marker, roomId: 'thr_other' }), 'marker mismatch: roomId'],
+  ['mismatching marker branch', async (marker) => ({ ...marker, branch: 'other' }), 'marker mismatch: branch'],
+  ['missing marker', async () => null, 'marker missing'],
+]) test(`re-pointing the branch keeps a ${name} failing cleanup`, async (t) => {
+  const f = await fixture(t);
+  const file = resolve(f.metadata.path, await git(f.metadata.path, 'rev-parse', '--git-dir'), 'cadre-room.json');
+  const marker = await change(JSON.parse(await readFile(file, 'utf8')));
+  if (marker) await writeFile(file, JSON.stringify(marker)); else await rm(file);
+  await git(f.metadata.path, 'checkout', '-q', '-b', 'next');
+  const next = await linkManagedWorktreePr(f.metadata, { repo: 'test/repo', number: 1 }, 'next');
+  assert.equal(next.branch, 'next');
+  assert.equal((await cleanupManagedWorktree(next, f.options)).reason, reason);
+  assert.equal(await exists(f.metadata.path), true);
 });
 
 test('invalid config and missing metadata fail closed', async (t) => {

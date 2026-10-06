@@ -744,8 +744,13 @@ export class GithubAgentPoller {
           let suffix = '';
           const thread = watch.thread_id ? this.getThread(watch.thread_id)?.thread : null;
           // A room whose worktree moved to another branch keeps working; rediscovery watches the PR on that branch.
-          const branch = pr.merged && thread?.status === 'open' && thread.metadata?.worktree
-            ? (await exec('git', ['-C', thread.metadata.worktree.path, 'branch', '--show-current'])).stdout.trim() : '';
+          // An unknown branch (git failure, detached HEAD) keeps the watch and retries next tick.
+          let branch = '';
+          if (pr.merged && thread?.status === 'open' && thread.metadata?.worktree?.path) {
+            const current = await exec('git', ['-C', thread.metadata.worktree.path, 'branch', '--show-current']);
+            branch = current.stdout.trim();
+            if (current.code !== 0 || !branch) throw new Error('worktree branch unknown');
+          }
           if (branch && branch !== pr.head?.ref) {
             await this.linkWorktreePr(watch.thread_id, undefined, branch);
             suffix = ` · room continues on ${branch}`;

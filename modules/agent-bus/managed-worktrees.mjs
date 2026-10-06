@@ -199,7 +199,13 @@ async function unlinkExternalLinks(path) {
 }
 
 export async function linkManagedWorktreePr(metadata, pr, branch = metadata.branch) {
-  const next = { ...metadata, branch, pr };
-  await writeFile(await markerPath(metadata.path), JSON.stringify(next));
-  return next;
+  // Patch only the PR and branch so a missing or mismatching marker still keeps the worktree at cleanup.
+  // The marker branch moves only from the recorded branch, or stays if a prior attempt moved it before the room save failed.
+  const file = await markerPath(metadata.path);
+  const text = await readFile(file, 'utf8').catch((error) => { if (error.code !== 'ENOENT') throw error; return null; });
+  if (text !== null) {
+    const marker = JSON.parse(text);
+    await writeFile(file, JSON.stringify({ ...marker, pr, branch: [metadata.branch, branch].includes(marker.branch) ? branch : marker.branch }));
+  }
+  return { ...metadata, branch, pr };
 }
