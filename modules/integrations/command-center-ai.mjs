@@ -567,8 +567,13 @@ export async function updateHumanQueueItem(id, input = {}, { wsManager, principa
     error.statusCode = 400;
     throw error;
   }
+  if (['title', 'question'].some((field) => input[field] !== undefined && !String(input[field]).trim())) {
+    const error = new Error('title and question cannot be blank');
+    error.statusCode = 400;
+    throw error;
+  }
   for (const field of ['title', 'question', 'details']) {
-    if (typeof input[field] === 'string' && input[field].trim()) item[field] = input[field].trim();
+    if (input[field] !== undefined) item[field] = String(input[field]).trim();
   }
   if (Array.isArray(input.options)) item.options = input.options.map(normalizeQueueOption).filter((option) => option.label);
   item.updatedAt = new Date().toISOString();
