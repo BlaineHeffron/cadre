@@ -133,7 +133,7 @@ async function runKill(t, { scoped = false, scopeStopFails = false } = {}) {
   `;
   await execFileAsync(process.execPath, ['--input-type=module', '--eval', script], {
     cwd: root,
-    env: { ...process.env, NODE_TEST_CONTEXT: 'child-v8', APP_STATE_STORAGE: 'file', CODEX_SESSIONS_STORAGE: 'file',
+    env: { ...process.env, NODE_TEST_CONTEXT: 'child-v8', DM_STATE_DIR: join(root, '.dueno/state'), APP_STATE_STORAGE: 'file', CODEX_SESSIONS_STORAGE: 'file',
       DATABASE_URL: '', CODEX_APP_SERVER_ENABLED: '0', CADRE_STRUCTURED_AUTOMATED_SPAWNS: '0',
       CADRE_DISABLE_SIDE_EFFECTS: '1', CADRE_GITHUB_AGENT_POLLER_ENABLED: '0', CADRE_GITHUB_AGENTS_ENABLED: '0',
       CADRE_SCHEDULED_AGENT_PUMP_ENABLED: '0', TELEGRAM_BRIDGE: '0' },

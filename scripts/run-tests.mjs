@@ -34,6 +34,7 @@ function runNodeTests(targets, extraFlags = []) {
   return spawnSync(process.execPath, [
     '--test',
     '--test-concurrency=1',
+    `--import=${new URL('../tests/helpers/isolated-state-dir.mjs', import.meta.url).href}`,
     ...nodeTestFlags,
     ...extraFlags,
     ...targets,
