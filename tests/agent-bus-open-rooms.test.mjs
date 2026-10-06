@@ -71,6 +71,10 @@ test('the owner gets one result per outcome: repeats skip, changed verdicts and 
   assert.equal(await ownerGot(implementer, 'Ready · PR #45 · done', 'Approved by the reviewer at 070ef57.'), false);
   assert.equal(await ownerGot(implementer, 'needs-decision · PR #45 · scope', 'Head 070ef57 needs a call.'), true);
   assert.equal(await ownerGot(reviewer, 'needs-decision · PR #45 · new head', 'Head: 9a1b2c3d4e5f'), true);
+  assert.equal(await ownerGot(implementer, 'ready · PR #45 · back to ready', 'Head 9a1b2c3d'), true);
+  const latest = h.store.getThread(thread.id).deliveries.findLast((d) => d.target.kind === owner.kind);
+  await h.store.updateDelivery(latest.id, { status: 'failed' });
+  assert.equal(await ownerGot(reviewer, 'ready · PR #45 · retry after failure', 'Head: 9a1b2c3d4e5f'), true);
   assert.equal(await ownerGot(implementer, 'needs-decision · PR #45 · no head', 'Still waiting.'), true);
   const solo = await h.store.createThread({ title: 'Solo', participants: [implementer], createdBy: owner });
   const sent = await call('room_send', { thread_id: solo.id, body: 'Head 070ef57', summary: 'ready · PR #45 · done', type: 'result' }, implementer);
