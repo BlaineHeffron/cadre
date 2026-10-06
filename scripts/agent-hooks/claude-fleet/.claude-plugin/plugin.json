@@ -1,1 +1,1 @@
-{ "name": "cadre-fleet", "version": "0.1.0", "description": "Reports Claude lifecycle events to Cadre's session-state hook slot." }
+{ "name": "cadre-fleet", "version": "0.1.0", "description": "Reports Claude lifecycle events to Cadre's session-state hook slot.", "author": { "name": "Blaine Heffron" } }
