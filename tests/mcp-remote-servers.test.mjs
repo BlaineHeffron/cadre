@@ -373,6 +373,13 @@ describe('reverse-engineering servers', () => {
         remoteMcpAvailability('bevy_brp', { sourceConfig, env }),
         { configured: false, reasonCode: 'binary_missing' },
       );
+      // A directory or a non-executable file with the binary's name is not an install.
+      await mkdir(join(root, 'bin', 'bevy_brp_mcp'), { recursive: true });
+      await mkdir(join(root, '.cargo', 'bin'), { recursive: true });
+      await writeFile(join(root, '.cargo', 'bin', 'bevy_brp_mcp'), '#!/bin/sh\n', { mode: 0o644 });
+      assert.equal(remoteMcpAvailability('bevy_brp', { sourceConfig, env }).reasonCode, 'binary_missing');
+      await rm(join(root, 'bin'), { recursive: true });
+      await rm(join(root, '.cargo', 'bin', 'bevy_brp_mcp'));
       const cargoBin = join(root, '.cargo', 'bin', 'bevy_brp_mcp');
       await mkdir(dirname(cargoBin), { recursive: true });
       await writeFile(cargoBin, '#!/bin/sh\n', { mode: 0o755 });

@@ -7,7 +7,7 @@
  * the value is resolved at launch behind the loopback proxy.
  */
 
-import { accessSync, constants, existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { delimiter, dirname, join } from 'node:path';
 import { config } from '../../config.mjs';
@@ -406,7 +406,7 @@ function withEntryPath(server, sourceConfig) {
 function executable(path) {
   try {
     accessSync(path, constants.X_OK);
-    return true;
+    return statSync(path).isFile();
   } catch {
     return false;
   }
