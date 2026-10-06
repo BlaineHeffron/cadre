@@ -378,13 +378,12 @@ describe('reverse-engineering servers', () => {
       await mkdir(join(root, '.cargo', 'bin'), { recursive: true });
       await writeFile(join(root, '.cargo', 'bin', 'bevy_brp_mcp'), '#!/bin/sh\n', { mode: 0o644 });
       assert.equal(remoteMcpAvailability('bevy_brp', { sourceConfig, env }).reasonCode, 'binary_missing');
-      await rm(join(root, 'bin'), { recursive: true });
       await rm(join(root, '.cargo', 'bin', 'bevy_brp_mcp'));
       const cargoBin = join(root, '.cargo', 'bin', 'bevy_brp_mcp');
-      await mkdir(dirname(cargoBin), { recursive: true });
       await writeFile(cargoBin, '#!/bin/sh\n', { mode: 0o755 });
       assert.equal(remoteMcpServer('bevy_brp', { sourceConfig, env }).command, cargoBin);
       assert.equal(remoteMcpAvailability('bevy_brp', { sourceConfig, env }).configured, true);
+      await rm(join(root, 'bin'), { recursive: true });
       const pathBin = join(root, 'bin', 'bevy_brp_mcp');
       await mkdir(dirname(pathBin), { recursive: true });
       await writeFile(pathBin, '#!/bin/sh\n', { mode: 0o755 });
