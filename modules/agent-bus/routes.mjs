@@ -378,6 +378,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
 
   Object.assign(app.agentBusLifecycle, {
     getThread: (id) => store.getThread(id),
+    listThreads: (filters) => store.listThreads(filters),
     linkWorktreePr: async (id, pr) => {
       const metadata = store.getThread(id)?.thread.metadata?.worktree;
       if (metadata) await store.updateThreadMetadata(id, { worktree: await linkManagedWorktreePr(metadata, pr) });

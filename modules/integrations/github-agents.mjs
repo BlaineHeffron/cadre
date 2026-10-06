@@ -558,6 +558,8 @@ export class GithubAgentPoller {
     deleteSession = null,
     onResult = () => {},
     getThread = () => null,
+    listRooms = () => [],
+    linkWorktreePr = async () => {},
     endThread = null,
     notifyWatch = async () => {},
     log = null,
@@ -580,6 +582,8 @@ export class GithubAgentPoller {
     this.pollQueue = Promise.resolve();
     this.onResult = onResult;
     this.getThread = getThread;
+    this.listRooms = listRooms;
+    this.linkWorktreePr = linkWorktreePr;
     this.endThread = endThread;
     this.notifyWatch = notifyWatch;
     this.log = log;
@@ -677,8 +681,31 @@ export class GithubAgentPoller {
     return payload;
   }
 
+  // Managed-worktree rooms are watched by branch so merge ends the room even if no one called watch_pr.
+  async watchRoomPrs(repo) {
+    for (const room of await this.listRooms()) {
+      const worktree = room.metadata?.worktree;
+      if (!worktree?.branch || worktree.pr) continue;
+      try {
+        const origin = await exec('git', ['-C', worktree.repo, 'config', '--get', 'remote.origin.url']);
+        if (origin.stdout.trim().match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/i)?.[1].toLowerCase() !== repo.id.toLowerCase()) continue;
+        const pulls = await fetchGithubList(this.fetchImpl, `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls?state=all&head=${encodeURIComponent(`${repo.owner}:${worktree.branch}`)}&per_page=100`,
+          { token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs });
+        const pr = pulls.find((item) => Date.parse(item.created_at) >= room.createdAt);
+        if (!pr) continue;
+        // Notifications go to the room owner; the first (always newly created) participant is the fallback creator.
+        const [{ kind, sessionId }] = room.participants;
+        await this.repoStore.putWatch({ repo: repo.id, number: pr.number, thread_id: room.id }, { kind, sessionId });
+        await this.linkWorktreePr(room.id, { repo: repo.id, number: pr.number });
+      } catch (error) {
+        this.log?.warn?.({ repoId: repo.id, threadId: room.id, code: sanitizedError(error) }, 'Room PR discovery failed');
+      }
+    }
+  }
+
   async pollWatches(repo) {
-    for (const watch of repo.watches || []) {
+    await this.watchRoomPrs(repo);
+    for (const watch of (await this.repoStore.getRepo(repo.id))?.watches || []) {
       try {
         const target = () => {
           const owner = watch.thread_id ? this.getThread(watch.thread_id)?.thread?.createdBy : null;

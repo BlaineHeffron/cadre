@@ -768,7 +768,7 @@ export function buildAgentBusMcpServer({
                   'Actions return ids and status only; read text with room_context or monitor_get_session_output. List reads default to a page; pass offset for more.',
                   'Call room_list to rediscover your rooms and room_context before replying when you need room history.',
                   'room_context is truncated by default; continue with message_id and body_offset=nextOffset; set reply_to when addressing a prior claim; use type=result for a terminal outcome.',
-                  'After opening a PR, the room owner may call watch_pr({repo, number, thread_id}). Cadre watches transitions and ends the linked room on merge; Cadre never merges.',
+                  'Managed-worktree rooms watch the PR for their branch automatically. Otherwise, after opening a PR, the room owner may call watch_pr({repo, number, thread_id}). Cadre watches transitions and ends the linked room on merge; Cadre never merges.',
                   'Call room_send to broadcast. Any agent may use room_close to archive a non-DM room after deliveries settle, or room_reopen to recover it; DMs require membership. Other participants post type=result and stop. Room owners and operators use room_end to terminate unshared participants; room_transfer hands ownership to a successor or claims a room whose owner is gone.',
                   'Call agent_dm for a direct message and agent_directory for the unified roster.',
               ].join('\n'),

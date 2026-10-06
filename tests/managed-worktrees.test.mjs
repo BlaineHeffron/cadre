@@ -200,6 +200,59 @@ for (const mode of ['managed', 'stale local config', 'setup failure', 'launch fa
   assert.equal(await exists(metadata.path), false);
 });
 
+for (const openFirst of [true, false]) test(`room PR found by branch ${openFirst ? 'then merged' : 'already merged'} ends room and removes worktree without watch_pr`, async (t) => {
+  const f = await fixture(t);
+  await git(f.repo, 'config', `url.${resolve(f.root, 'remote')}.insteadOf`, 'https://github.com/test/repo.git');
+  await git(f.repo, 'remote', 'set-url', 'origin', 'https://github.com/test/repo.git');
+  const commands = [];
+  const h = await createAgentBusHarness({ beforeReady: async (app, dir) => {
+    app.get('/api/codex-app-server/sessions', async () => ({ sessions: [] }));
+    const { buildGithubAgentRepoStore } = await import('../modules/integrations/github-agents.mjs');
+    const { githubAgentsPlugin } = await import('../modules/integrations/github-agents-plugin.mjs');
+    const repoStore = buildGithubAgentRepoStore({ storeFile: resolve(dir, 'repos.json'), env: { APP_STATE_STORAGE: 'file' } });
+    await repoStore.upsertRepo({ owner: 'test', repo: 'repo', authRef: 'TEST_GITHUB_TOKEN', prEnabled: false, issueEnabled: false });
+    await githubAgentsPlugin(app, { repoStore, config: { enabled: false },
+      enqueueSessionCommand: async (kind, sessionId, input) => commands.push({ kind, sessionId, ...input }) });
+  } }); t.after(() => h.cleanup());
+  const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
+    title: 'Auto', worktree: { repo: f.repo, branch: 'auto', base: 'origin/main' },
+    participants: [{ kind: 'codex', create: true }, { kind: 'claude', create: true }],
+  } });
+  assert.equal(response.statusCode, 200, response.body);
+  // Collab rooms are owned by the coordinator agent, which receives the merge notification.
+  const room = await h.store.transferThread(response.json().thread.id, { kind: 'pi', sessionId: 'pi-1' });
+  await git(room.metadata.worktree.path, 'merge', '--ff-only', f.head);
+  await git(f.repo, 'push', 'origin', `${f.head}:refs/pull/2/head`);
+  const stale = { number: 1, created_at: new Date(room.createdAt - 60000).toISOString() };
+  let pulls = [], pr = { number: 2, state: 'open', merged: false, head: { sha: f.head } };
+  const urls = [];
+  const poller = h.app.githubAgents.poller;
+  poller.config = { enabled: true, env: { TEST_GITHUB_TOKEN: 'test-only' } };
+  poller.fetchImpl = async (url) => {
+    urls.push(url); const { pathname } = new URL(url);
+    return new Response(JSON.stringify(pathname.endsWith('/pulls') ? pulls : pathname.endsWith('/reviews') ? [] : pr), { status: 200 });
+  };
+  await poller.pollOnce();
+  assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+  pulls = [{ number: 2, created_at: new Date(room.createdAt + 1000).toISOString() }, stale];
+  if (openFirst) {
+    await poller.pollOnce();
+    const [watch] = await h.app.githubAgents.repoStore.listWatches();
+    assert.deepEqual([watch.number, watch.thread_id, watch.creator], [2, room.id, { kind: 'codex', sessionId: room.participants[0].sessionId }]);
+    assert.equal(h.store.getThread(room.id).thread.status, 'open');
+  }
+  pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head };
+  await git(f.repo, 'merge', '--ff-only', f.head);
+  await poller.pollOnce();
+  assert.equal(new URL(urls[0]).searchParams.get('head'), 'test:auto');
+  assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
+  assert.equal(h.store.getThread(room.id).thread.status, 'closed');
+  assert.equal(await exists(room.metadata.worktree.path), false);
+  assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+  assert.deepEqual(commands.map((item) => item.sessionId), ['pi-1']);
+  assert.match(commands[0].text, /^\[PR_WATCH\] PR test\/repo#2 merged .* · ended room .* · worktree: removed$/);
+});
+
 test('ended sessions do not block removal', async (t) => {
   const f = await fixture(t); await git(f.repo, 'merge', '--ff-only', 'topic');
   f.options.sessions = [{ lifecycle: 'ended', workDir: f.metadata.path }];
