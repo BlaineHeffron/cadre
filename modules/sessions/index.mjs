@@ -2923,7 +2923,8 @@ async function sessionsPlugin(app, {
         // Codex can accept additional prompts while a turn is active and
         // queue them in the harness itself; do not strand those prompts in
         // Dueno waiting for an idle state that may never be observed.
-        allowActiveQueue: source === 'telegram_answer',
+        // Codex room messages steer into the running turn the same way.
+        allowActiveQueue: source === 'telegram_answer' || (source === 'agent_bus' && config.id === 'codex'),
         resolveOnAwaiting: true,
         deadlineAt,
       });

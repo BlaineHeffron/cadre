@@ -313,6 +313,24 @@ describe('session command gate', () => {
     assert.deepEqual(statesFor(test.audit, 'provider-queued-message'), ['queued', 'sending', 'awaiting_response']);
   });
 
+  it('lets an allowed active-queue message through while a transcript reports working', async () => {
+    const test = harness();
+    test.observe({ execution: 'working', interaction: 'none', fingerprint: 'working-composer' });
+    test.observeTranscript('working');
+
+    const result = await test.gate.enqueue(test.sessionId, {
+      id: 'steer-mid-turn',
+      source: 'agent_bus',
+      operation: 'message',
+      text: 'room message',
+      allowActiveQueue: true,
+      resolveOnAwaiting: true,
+    });
+
+    assert.equal(result.state, 'awaiting_response');
+    assert.deepEqual(test.executions.map((entry) => entry.text), ['room message']);
+  });
+
   it('does not execute when the deadline expires during the final pre-send refresh', async () => {
     let refreshCount = 0;
     const test = harness({
