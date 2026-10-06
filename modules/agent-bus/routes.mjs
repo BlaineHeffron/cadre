@@ -458,15 +458,24 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (isDashboardUser(ref)) return true;
     const adapter = adapters[ref.kind];
     if (!adapter) { await reply.code(404).send({ error: `Unknown ${label} kind` }); return false; }
+    let ended = false;
     try {
       const session = await adapter.getSession(app, ref.sessionId);
       if (session) return true;
     } catch (err) {
-      if (err.payload?.sessionEnded === true || err.payload?.state?.status === 'ended') {
-        await reply.code(410).send({ error: `${label} session ended`, code: 'session_ended', sessionEnded: true });
-        return false;
-      }
-      if (err.statusCode !== 404 && err.code !== 'session_not_found') throw err;
+      ended = err.payload?.sessionEnded === true || err.payload?.state?.status === 'ended';
+      if (!ended && err.statusCode !== 404 && err.code !== 'session_not_found') throw err;
+    }
+    // Session routes report unknown ids as ended, so a wrong kind would otherwise read as "session ended".
+    for (const [kind, other] of Object.entries(adapters)) {
+      if (kind === ref.kind || !await other.getSession(app, ref.sessionId).catch(() => null)) continue;
+      await reply.code(404).send({ error: `no ${ref.kind} session ${ref.sessionId}; a ${kind} session with that id exists`,
+        code: 'session_kind_mismatch' });
+      return false;
+    }
+    if (ended) {
+      await reply.code(410).send({ error: `${label} session ended`, code: 'session_ended', sessionEnded: true });
+      return false;
     }
     await reply.code(404).send({ error: `${label} agent not found`, code: 'session_not_found' });
     return false;

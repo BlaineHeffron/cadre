@@ -119,6 +119,19 @@ test('DM preserves backend 503 and distinguishes ended sessions from absent sess
   assert.equal(missing.statusCode, 404); assert.equal(missing.json().code, 'session_not_found');
 });
 
+test('DM to a live session under the wrong kind names the kind instead of reporting it ended', async (t) => {
+  const { h, request } = await setup(t);
+  h.sessionCatalog.codex.add('codex-2');
+  // Real session routes answer unknown ids with a synthetic ended record.
+  h.sessionDetailResponders.claude = async ({ sessionId }) => (sessionId === 'codex-2'
+    ? { statusCode: 200, payload: { id: sessionId, sessionEnded: true } } : null);
+  const wrongKind = await request('dm', { from: refs[0], target: { kind: 'claude', sessionId: 'codex-2' }, body: 'review' });
+  assert.equal(wrongKind.statusCode, 404, wrongKind.body);
+  assert.deepEqual(wrongKind.json(), { error: 'no claude session codex-2; a codex session with that id exists', code: 'session_kind_mismatch' });
+  const unknown = await request('dm', { from: refs[0], target: { kind: 'claude', sessionId: 'no-such' }, body: 'review' });
+  assert.equal(unknown.statusCode, 404); assert.equal(unknown.json().code, 'session_not_found');
+});
+
 test('MCP close cancellation and outsider reopen reach real routes with scope checks', async (t) => {
   const { h, thread, send } = await setup(t);
   await h.store.transferThread(thread.id, refs[0]);

@@ -314,7 +314,16 @@ export function buildAgentBusMcpServer({
   }
   const requestContext = new AsyncLocalStorage();
 
-  async function request(path, { method = 'GET', body, taskRoomRead = false } = {}) {
+  async function request(path, options) {
+    try { return await rawRequest(path, options); } catch (err) {
+      // A refused or reset socket means the Cadre server is down, almost always mid-restart. Writes are not
+      // retried because the server may have applied them before the connection dropped.
+      if (!['ECONNREFUSED', 'ECONNRESET'].includes(err.code || err.cause?.code)) throw err;
+      throw Object.assign(new Error('Cadre server is restarting; retry in a few seconds'), { code: 'server_restarting', cause: err });
+    }
+  }
+
+  async function rawRequest(path, { method = 'GET', body, taskRoomRead = false } = {}) {
     if (requestImpl) {
       const context = requestContext.getStore();
       return requestImpl(path, { method, body, authContext: context ? { ...context, taskRoomRead } : null });
