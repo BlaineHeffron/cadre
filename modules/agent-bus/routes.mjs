@@ -392,9 +392,9 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
   Object.assign(app.agentBusLifecycle, {
     getThread: (id) => store.getThread(id),
     listThreads: (filters) => store.listThreads(filters),
-    linkWorktreePr: async (id, pr) => {
+    linkWorktreePr: async (id, pr, branch) => {
       const metadata = store.getThread(id)?.thread.metadata?.worktree;
-      if (metadata) await store.updateThreadMetadata(id, { worktree: await linkManagedWorktreePr(metadata, pr) });
+      if (metadata) await store.updateThreadMetadata(id, { worktree: await linkManagedWorktreePr(metadata, pr, branch) });
     },
     endThread: (id, options) => endRoom({ params: { threadId: id }, body: options }, {
       code(statusCode) { return { send(payload) { throw Object.assign(new Error(payload.error), { statusCode, code: payload.code }); } }; },

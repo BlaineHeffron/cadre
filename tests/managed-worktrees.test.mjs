@@ -60,6 +60,11 @@ for (const [name, change, reason] of [
   ['shared session', async (f) => { f.options.sessions = [{ workDir: resolve(f.metadata.path, 'subdir') }]; }, 'shared with another room or live session'],
   ['missing PR head', async (f) => f.setPr({ merged: true, number: 1 }), 'PR not merged'],
   ['GitHub failure', async (f) => { f.options.getPr = async () => { throw new Error('GitHub unavailable'); }; }, 'GitHub unavailable'],
+  ['branch changed', async (f) => git(f.metadata.path, 'checkout', '-q', '-b', 'next'), 'branch changed from topic to next'],
+  ['marker missing', async (f) => rm(resolve(f.metadata.path, await git(f.metadata.path, 'rev-parse', '--git-dir'), 'cadre-room.json')), 'marker missing'],
+  ['marker mismatch', async (f) => { f.metadata = { ...f.metadata, baseHead: f.head }; }, 'marker mismatch: baseHead'],
+  ['disposable mismatch', async (f) => { f.metadata = { ...f.metadata, disposable: ['dist/**'] }; }, 'marker mismatch: disposable'],
+  ['metadata outside base', async (f) => { f.options.baseDir = resolve(f.root, 'elsewhere'); }, 'path outside managed base'],
 ]) test(`managed worktree keeps ${name}`, async (t) => {
   const f = await fixture(t); await change(f);
   const result = await cleanupManagedWorktree(f.metadata, f.options);
@@ -201,7 +206,7 @@ for (const mode of ['managed', 'stale local config', 'setup failure', 'launch fa
   assert.equal(await exists(metadata.path), false);
 });
 
-for (const mode of ['then merged', 'already merged', 'with explicit watch']) test(`room PR found by branch ${mode}`, async (t) => {
+for (const mode of ['then merged', 'already merged', 'with explicit watch', 'after branch switch']) test(`room PR found by branch ${mode}`, async (t) => {
   const f = await fixture(t);
   await git(f.repo, 'config', `url.${resolve(f.root, 'remote')}.insteadOf`, 'https://github.com/test/repo.git');
   await git(f.repo, 'config', '--add', `url.${resolve(f.root, 'remote')}.insteadOf`, 'git@github.com:test/repo.git');
@@ -227,7 +232,7 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch']) tes
   await git(room.metadata.worktree.path, 'merge', '--ff-only', f.head);
   await git(f.repo, 'push', 'origin', `${f.head}:refs/pull/2/head`);
   const stale = { number: 1, created_at: new Date(room.createdAt - 60000).toISOString() };
-  let pulls = [], pr = { number: 2, state: 'open', merged: false, head: { sha: f.head } };
+  let pulls = [], pr = { number: 2, state: 'open', merged: false, head: { sha: f.head, ref: 'auto' } };
   const urls = [];
   const poller = h.app.githubAgents.poller;
   poller.config = { enabled: true, env: { TEST_GITHUB_TOKEN: 'test-only' } };
@@ -253,6 +258,52 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch']) tes
     assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
     return;
   }
+  if (mode === 'after branch switch') {
+    await poller.pollOnce();
+    assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
+    // The room moves to a follow-up branch before its first PR merges.
+    const path = room.metadata.worktree.path;
+    // Without head.ref the recorded branch stands in, so the switched room still continues.
+    pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head, head: { sha: f.head } };
+    // An unknown branch neither ends the room nor consumes the watch.
+    await git(path, 'checkout', '-q', '--detach');
+    await poller.pollOnce();
+    assert.equal(h.store.getThread(room.id).thread.status, 'open');
+    assert.deepEqual((await h.app.githubAgents.repoStore.listWatches()).map((watch) => watch.number), [2]);
+    assert.deepEqual(commands, []);
+    await git(path, 'checkout', '-q', '-b', 'auto-next');
+    await writeFile(resolve(path, 'file'), 'next\n'); await git(path, 'commit', '-qam', 'next');
+    const next = await git(path, 'rev-parse', 'HEAD');
+    await git(f.repo, 'push', 'origin', `${next}:refs/pull/3/head`, `${next}:refs/heads/auto-next`);
+    // A marker already re-pointed by an attempt whose room save failed is retried, not treated as a mismatch.
+    await linkManagedWorktreePr(h.store.getThread(room.id).thread.metadata.worktree, undefined, 'auto-next');
+    await poller.pollOnce();
+    assert.equal(h.store.getThread(room.id).thread.status, 'open');
+    assert.deepEqual(Object.values(h.deletedSessions).flat(), []);
+    assert.equal(h.store.getThread(room.id).thread.metadata.worktree.branch, 'auto-next');
+    assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
+    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+    assert.match(commands.at(-1).text, /^\[PR_WATCH\] PR test\/repo#2 merged \(.*\) · room continues on auto-next$/);
+    const prs = { 2: pr, 3: { number: 3, state: 'open', merged: false, head: { sha: next, ref: 'auto-next' } } };
+    poller.fetchImpl = async (url) => {
+      const { pathname, searchParams } = new URL(url);
+      const body = pathname.endsWith('/pulls')
+        ? (searchParams.get('head') === 'test:auto-next' ? [{ number: 3, created_at: new Date().toISOString() }] : pulls)
+        : pathname.endsWith('/reviews') ? [] : prs[pathname.split('/').at(-1)];
+      return new Response(JSON.stringify(body), { status: 200 });
+    };
+    await poller.pollOnce();
+    assert.deepEqual((await h.app.githubAgents.repoStore.listWatches()).map((watch) => [watch.number, watch.thread_id]), [[3, room.id]]);
+    assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 3 });
+    prs[3] = { ...prs[3], state: 'closed', merged: true, merge_commit_sha: next };
+    await git(f.repo, 'merge', '--ff-only', next);
+    await poller.pollOnce();
+    assert.equal(h.store.getThread(room.id).thread.status, 'closed');
+    assert.equal(await exists(path), false);
+    assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/auto-next'])).code, 128);
+    assert.match(commands.at(-1).text, /^\[PR_WATCH\] PR test\/repo#3 merged .* · ended room .* · worktree: removed$/);
+    return;
+  }
   if (mode === 'then merged') {
     // A read-only marker makes the real link write fail after the watch is stored.
     const marker = resolve(room.metadata.worktree.path, await git(room.metadata.worktree.path, 'rev-parse', '--git-dir'), 'cadre-room.json');
@@ -272,7 +323,8 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch']) tes
     assert.deepEqual([watch.number, watch.thread_id, watch.creator], [2, room.id, { kind: 'codex', sessionId: room.participants[0].sessionId }]);
     assert.equal(h.store.getThread(room.id).thread.status, 'open');
   }
-  pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head };
+  // A merge payload without head.ref ends the room rather than keeping it alive.
+  pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head, head: mode === 'already merged' ? { sha: f.head } : pr.head };
   await git(f.repo, 'merge', '--ff-only', f.head);
   await poller.pollOnce();
   assert.equal(new URL(urls[0]).searchParams.get('head'), 'test:auto');
@@ -394,9 +446,25 @@ test('bootstrap injects the merge policy from the base-ref config', async (t) =>
   }
 });
 
+for (const [name, change, reason] of [
+  ['mismatching marker', async (marker) => ({ ...marker, roomId: 'thr_other' }), 'marker mismatch: roomId'],
+  ['mismatching marker branch', async (marker) => ({ ...marker, branch: 'other' }), 'marker mismatch: branch'],
+  ['missing marker', async () => null, 'marker missing'],
+]) test(`re-pointing the branch keeps a ${name} failing cleanup`, async (t) => {
+  const f = await fixture(t);
+  const file = resolve(f.metadata.path, await git(f.metadata.path, 'rev-parse', '--git-dir'), 'cadre-room.json');
+  const marker = await change(JSON.parse(await readFile(file, 'utf8')));
+  if (marker) await writeFile(file, JSON.stringify(marker)); else await rm(file);
+  await git(f.metadata.path, 'checkout', '-q', '-b', 'next');
+  const next = await linkManagedWorktreePr(f.metadata, { repo: 'test/repo', number: 1 }, 'next');
+  assert.equal(next.branch, 'next');
+  assert.equal((await cleanupManagedWorktree(next, f.options)).reason, reason);
+  assert.equal(await exists(f.metadata.path), true);
+});
+
 test('invalid config and missing metadata fail closed', async (t) => {
   const f = await fixture(t);
-  assert.equal((await cleanupManagedWorktree({ ...f.metadata, ignoredBaseline: undefined }, f.options)).reason, 'missing or invalid metadata');
+  assert.equal((await cleanupManagedWorktree({ ...f.metadata, ignoredBaseline: undefined }, f.options)).reason, 'metadata missing ignoredBaseline');
   for (const config of ['{', JSON.stringify({ merge: 'anyone' }), JSON.stringify({ merge: null }), JSON.stringify({ disposable: 'dist' }),
     JSON.stringify({ disposable: ['/tmp/dist'] }), JSON.stringify({ disposable: ['../dist'] }), JSON.stringify({ disposable: [''] }),
     JSON.stringify({ disposable: [':(glob)dist/**'] }), JSON.stringify({ disposable: ['dist/'] })]) {

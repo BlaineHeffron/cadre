@@ -89,12 +89,14 @@ export async function cleanupManagedWorktree(metadata, { getPr, rooms = [], sess
   const keep = (reason) => ({ removed: false, reason, report: `worktree: kept (${reason})` });
   try {
     const { path, repo, branch, baseHead, roomId, ignoredBaseline, cleanup, disposable } = metadata || {};
-    if (!path || !repo || !branch || !baseHead || !roomId || !Array.isArray(ignoredBaseline) || !inside(baseDir, path)) return keep('missing or invalid metadata');
-    const marker = JSON.parse(await readFile(await markerPath(path), 'utf8'));
-    if (marker.path !== path || marker.repo !== repo || marker.branch !== branch || marker.roomId !== roomId || marker.cleanup !== cleanup
-      || marker.baseHead !== baseHead || JSON.stringify(marker.ignoredBaseline) !== JSON.stringify(ignoredBaseline)
-      || JSON.stringify(marker.disposable) !== JSON.stringify(disposable)
-      || await git(path, ['branch', '--show-current']) !== branch) return keep('missing or invalid metadata');
+    const missing = ['path', 'repo', 'branch', 'baseHead', 'roomId'].find((key) => !metadata?.[key]) || (!Array.isArray(ignoredBaseline) && 'ignoredBaseline');
+    if (missing) return keep(`metadata missing ${missing}`);
+    if (!inside(baseDir, path)) return keep('path outside managed base');
+    const marker = JSON.parse(await readFile(await markerPath(path), 'utf8').catch((error) => { throw error.code === 'ENOENT' ? new Error('marker missing') : error; }));
+    const mismatch = ['path', 'repo', 'branch', 'roomId', 'cleanup', 'baseHead', 'ignoredBaseline', 'disposable'].find((key) => JSON.stringify(marker[key]) !== JSON.stringify(metadata[key]));
+    if (mismatch) return keep(`marker mismatch: ${mismatch}`);
+    const current = await git(path, ['branch', '--show-current']);
+    if (current !== branch) return keep(`branch changed from ${branch} to ${current || 'detached HEAD'}`);
     // Undoing an untouched failed spawn is independent of the policy recorded at creation; legacy metadata has none and is kept.
     if (!spawnFailed && cleanup !== 'on-merge') return keep(cleanup ? 'cleanup off' : 'cleanup policy not recorded');
     const head = await git(path, ['rev-parse', 'HEAD']);
@@ -196,8 +198,14 @@ async function unlinkExternalLinks(path) {
   }
 }
 
-export async function linkManagedWorktreePr(metadata, pr) {
-  const next = { ...metadata, pr };
-  await writeFile(await markerPath(metadata.path), JSON.stringify(next));
-  return next;
+export async function linkManagedWorktreePr(metadata, pr, branch = metadata.branch) {
+  // Patch only the PR and branch so a missing or mismatching marker still keeps the worktree at cleanup.
+  // The marker branch moves only from the recorded branch, or stays if a prior attempt moved it before the room save failed.
+  const file = await markerPath(metadata.path);
+  const text = await readFile(file, 'utf8').catch((error) => { if (error.code !== 'ENOENT') throw error; return null; });
+  if (text !== null) {
+    const marker = JSON.parse(text);
+    await writeFile(file, JSON.stringify({ ...marker, pr, branch: [metadata.branch, branch].includes(marker.branch) ? branch : marker.branch }));
+  }
+  return { ...metadata, branch, pr };
 }

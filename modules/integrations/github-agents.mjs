@@ -742,7 +742,19 @@ export class GithubAgentPoller {
         if (pr.merged || pr.state === 'closed') {
           const recipient = target();
           let suffix = '';
-          if (pr.merged && watch.thread_id && this.endThread && this.getThread(watch.thread_id)?.thread?.status === 'open') {
+          const thread = watch.thread_id ? this.getThread(watch.thread_id)?.thread : null;
+          // A room whose worktree moved to another branch keeps working; rediscovery watches the PR on that branch.
+          // An unknown branch (git failure, detached HEAD) keeps the watch and retries next tick.
+          let branch = '';
+          if (pr.merged && thread?.status === 'open' && thread.metadata?.worktree?.path) {
+            const current = await exec('git', ['-C', thread.metadata.worktree.path, 'branch', '--show-current']);
+            branch = current.stdout.trim();
+            if (current.code !== 0 || !branch) throw new Error('worktree branch unknown');
+          }
+          if (branch && branch !== (pr.head?.ref || thread.metadata.worktree.branch)) {
+            await this.linkWorktreePr(watch.thread_id, undefined, branch);
+            suffix = ` · room continues on ${branch}`;
+          } else if (pr.merged && thread?.status === 'open' && this.endThread) {
             try {
               const result = await this.endThread(watch.thread_id, { reason: 'PR merged' });
               suffix = ` · ended room ${watch.thread_id}: ${result.results.filter((item) => item.status === 'terminated').length} sessions terminated${result.worktree ? ` · ${result.worktree.report}` : ''}`;
