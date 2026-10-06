@@ -40,7 +40,7 @@ function isSharedFooter(line) {
   return /^⏵⏵\s+/i.test(line)
     || /\bshift\+tab\b/i.test(line)
     || /\bpress enter to send\b/i.test(line)
-    || /^\?\s+for shortcuts/i.test(line)
+    || /(?:^|\s·\s)\?\s+for shortcuts/i.test(line)
     || /^new task\?\s+\/clear\b/i.test(line)
     || /\btokens? left\b/i.test(line)
     || /\bbypass permissions\b/i.test(line);
