@@ -67,6 +67,14 @@ test('requesters withdraw, edit, and filter queue items through the real routes 
     assert.equal(item.events.at(-1).type, 'updated');
 
     await assert.rejects(other('monitor_update_human_queue_item', { id, details: 'hijack' }), (error) => error.statusCode === 403);
+    // The delivery target is not the requester: ownership comes from the authenticated creator.
+    const forOther = await requester('monitor_add_human_queue_item', { question: 'For other?', sessionKind: 'codex', sessionId: 'other', passThrough: true });
+    await assert.rejects(other('monitor_update_human_queue_item', { id: forOther.id, details: 'not mine' }), (error) => error.statusCode === 403);
+    const asClaude = (name, args) => monitor.handleToolCall(name, args, { authContext: { authenticated: true, principal: { type: 'agent', kind: 'claude', sessionId: 'requester' } } });
+    await assert.rejects(asClaude('monitor_update_human_queue_item', { id, details: 'wrong kind' }), (error) => error.statusCode === 403);
+    const approval = await requester('monitor_add_human_queue_item', { question: 'Run?', operatorAction: { method: 'POST', path: '/api/agents/github', body: {} } });
+    await assert.rejects(requester('monitor_update_human_queue_item', { id: approval.id, options: [{ label: 'Yes' }] }), (error) => error.statusCode === 400);
+    assert.deepEqual(await requester('monitor_update_human_queue_item', { id: approval.id, details: 'more context' }), { id: approval.id, status: 'open' });
     await requester('monitor_dismiss_human_queue_item', { id });
     await assert.rejects(requester('monitor_update_human_queue_item', { id, details: 'late' }), (error) => error.statusCode === 409);
   });
