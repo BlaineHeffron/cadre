@@ -36,7 +36,7 @@ describe('Monitor MCP server', () => {
     assert.ok(toolNames.includes('monitor_list_pi_sessions'));
     assert.deepEqual(
       server.listTools().find((tool) => tool.name === 'monitor_list_human_queue').inputSchema.properties.status.enum,
-      ['open', 'answered', 'routed', 'delivery_failed', 'acknowledged', 'dismissed', 'all'],
+      ['open', 'answered', 'routed', 'delivery_failed', 'acknowledged', 'dismissed', 'withdrawn', 'all'],
     );
 
     assert.deepEqual(await server.handleToolCall('monitor_list_human_queue', {}), {
@@ -848,7 +848,7 @@ describe('Monitor MCP server', () => {
       catalogDigest: `sha256:${'a'.repeat(64)}`,
       defaultProfileId: 'default',
       profiles: [{ id: 'default', serverIds: ['dueno'] }],
-      servers: [{ id: 'dueno', availability: { state: 'configured' } }],
+      servers: [{ id: 'dueno', availability: { state: 'configured' } }, { id: 'zotero', availability: { state: 'missing' } }],
     };
     const server = buildMonitorMcpServer({
       async requestImpl(path, opts = {}) {
@@ -858,7 +858,8 @@ describe('Monitor MCP server', () => {
       },
     });
 
-    assert.deepEqual(await server.handleToolCall('monitor_list_mcp_servers', {}), {
+    assert.equal((await server.handleToolCall('monitor_list_mcp_servers', {})).servers.total, 2);
+    assert.deepEqual(await server.handleToolCall('monitor_list_mcp_servers', { serverId: 'dueno' }), {
       defaultProfileId: 'default', profiles: catalog.profiles,
       servers: { total: 1, limit: 25, offset: 0, hasMore: false, items: [{ id: 'dueno', label: undefined, state: 'configured', providers: undefined, runtimes: undefined }] },
     });

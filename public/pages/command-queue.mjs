@@ -32,7 +32,7 @@ function statusBadgeClass(status = '') {
   if (status === 'open') return 'warning';
   if (status === 'delivery_failed') return 'critical';
   if (status === 'routed') return 'info';
-  if (status === 'dismissed') return 'low';
+  if (status === 'dismissed' || status === 'withdrawn') return 'low';
   return 'success';
 }
 
@@ -123,6 +123,7 @@ export function CommandQueuePage() {
             <option value="delivery_failed">Failed</option>
             <option value="acknowledged">Acknowledged</option>
             <option value="dismissed">Dismissed</option>
+            <option value="withdrawn">Withdrawn</option>
             <option value="all">All</option>
           </select>
           <button class="btn" onclick=${loadQueue}>Refresh</button>
@@ -201,7 +202,7 @@ export function CommandQueuePage() {
                       </div>
                       <div class="dashboard-row-actions">
                         ${routePath ? html`<button class="btn btn-subtle" onclick=${() => route(routePath)}>Open</button>` : null}
-                        ${item.status !== 'dismissed' ? html`<button class="btn btn-subtle" onclick=${() => dismissQueueItem(item)}>Dismiss</button>` : null}
+                        ${!['dismissed', 'withdrawn'].includes(item.status) ? html`<button class="btn btn-subtle" onclick=${() => dismissQueueItem(item)}>Dismiss</button>` : null}
                       </div>
                     </div>
                   `;
