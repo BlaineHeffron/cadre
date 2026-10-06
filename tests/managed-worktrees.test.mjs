@@ -53,6 +53,7 @@ for (const [name, change, reason] of [
   ['untracked with hidden user configuration', async (f) => { await git(f.repo, 'config', 'status.showUntrackedFiles', 'no'); await writeFile(resolve(f.metadata.path, 'untracked'), 'data'); }, 'dirty or untracked files'],
   ['unpushed', async (f) => { await writeFile(resolve(f.metadata.path, 'file'), 'extra'); await git(f.metadata.path, 'commit', '-am', 'extra'); }, 'unpushed commits not in PR'],
   ['not merged', async (f) => f.setPr({ merged: false, number: 1, head: { sha: f.head } }), 'PR not merged'],
+  ['untracked .agent_bus notes', async (f) => { await mkdir(resolve(f.metadata.path, '.agent_bus/hooks'), { recursive: true }); await writeFile(resolve(f.metadata.path, '.agent_bus/notes'), 'precious'); }, 'dirty or untracked files'],
   ['new ignored', async (f) => { await mkdir(resolve(f.metadata.path, 'cache')); await writeFile(resolve(f.metadata.path, 'cache/new'), 'data'); }, 'new ignored files'],
   ['shared room', async (f) => { f.options.rooms = [{ id: 'other', status: 'open', metadata: { worktree: { path: resolve(f.metadata.path, 'subdir') } } }]; }, 'shared with another room or live session'],
   ['interrupted session', async (f) => { f.options.sessions = [{ lifecycle: 'interrupted', workDir: f.metadata.path }]; }, 'shared with another room or live session'],
