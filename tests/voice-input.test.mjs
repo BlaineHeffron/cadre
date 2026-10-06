@@ -17,9 +17,9 @@ describe('voice input transcript append', () => {
 });
 
 // Fake mic stream and recorder with the MediaRecorder surface openRecorder uses.
-function fakeMic({ failConstruct, failStart } = {}) {
+function fakeMic({ failConstruct, failStart, chunks = [new Blob(['clip'], { type: 'audio/webm' })] } = {}) {
   const tracks = [{ live: true, stop() { this.live = false; } }];
-  const mic = { tracks, grants: 0, transcribed: [] };
+  const mic = { tracks, grants: 0, transcribed: [], types: [] };
   mic.getUserMedia = async () => { mic.grants += 1; return { getTracks: () => tracks }; };
   mic.Recorder = class {
     constructor() {
@@ -33,11 +33,16 @@ function fakeMic({ failConstruct, failStart } = {}) {
     }
     stop() {
       this.state = 'inactive';
-      this.ondataavailable({ data: new Blob(['clip']) });
+      this.mimeType = ''; // Firefox resets mimeType on stop
+      for (const data of chunks) this.ondataavailable({ data });
       setTimeout(() => this.onstop());
     }
   };
-  mic.transcribe = async (blob) => { mic.transcribed.push(await blob.text()); return 'heard'; };
+  mic.transcribe = async (blob) => {
+    mic.transcribed.push(await blob.text());
+    mic.types.push(blob.type);
+    return 'heard';
+  };
   return mic;
 }
 
@@ -66,6 +71,24 @@ describe('voice input hold-to-talk lifecycle', () => {
     assert.deepEqual(mic.transcribed, ['clip']);
     assert.deepEqual(log.texts, ['heard']);
     assert.deepEqual(log.statuses, ['recording', 'transcribing', 'idle']);
+  });
+
+  it('types the clip from its chunks after the recorder clears its mimeType', async () => {
+    const mic = fakeMic({ chunks: [new Blob(['ogg'], { type: 'audio/ogg; codecs=opus' })] });
+    const { hold } = holdWith(() => openRecorder(mic), 1);
+    await hold.start();
+    assert.deepEqual(mic.types, ['audio/ogg; codecs=opus']);
+  });
+
+  it('reports an empty recording without transcribing it', async () => {
+    for (const chunks of [[], [new Blob([], { type: 'audio/webm' })]]) {
+      const mic = fakeMic({ chunks });
+      const { hold, log } = holdWith(() => openRecorder(mic), 1);
+      await hold.start();
+      assert.deepEqual(mic.transcribed, []);
+      assert.deepEqual(log.errors, ['No audio captured']);
+      assert.equal(mic.tracks[0].live, false);
+    }
   });
 
   it('ignores new holds from any input until acquisition, recording, and transcription finish', async () => {

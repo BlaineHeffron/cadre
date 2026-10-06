@@ -504,14 +504,27 @@ describe('push-to-talk transcribe route', () => {
     });
 
     assert.equal((await post(app, { audio: clip }, {})).statusCode, 401);
-    const bad = await post(app, { audio: 'data:image/png;base64,AAAA' });
-    assert.equal(bad.statusCode, 400);
-    assert.equal(bad.json().code, 'invalid_audio');
+    for (const audio of [undefined, 'AAAA', 'data:audio/webm;base64,', 'data:audio/webm,AAAA', 'data:audio/webm;base64,$$$$', 'data:audio/webm;base64,A',
+      'data:garbage;base64,YQ==', 'data:audio/;base64,YQ==', 'data:audio/webm;base64,AAAAA', 'data:audio/webm;base64,YQ=']) {
+      const bad = await post(app, { audio });
+      assert.equal(bad.statusCode, 400, audio);
+      assert.equal(bad.json().code, 'invalid_audio');
+    }
+    assert.deepEqual(calls, []);
 
     const ok = await post(app, { audio: clip });
     assert.equal(ok.statusCode, 200);
     assert.deepEqual(ok.json(), { text: 'hello world' });
     assert.deepEqual(calls, [{ audio: 'fake opus bytes', ext: 'webm' }]);
+
+    // What browsers send: Firefox before the client fix, Firefox's chunk type, Chromium's video/webm,
+    // Safari; then no type and an unsafe subtype, which fall back to .bin.
+    calls.length = 0;
+    const payload = Buffer.from('clip').toString('base64');
+    for (const type of ['application/octet-stream', 'audio/ogg; codecs=opus', 'video/webm;codecs=opus', 'audio/mp4', '', `audio/${'x'.repeat(300)}`]) {
+      assert.equal((await post(app, { audio: `data:${type};base64,${payload}` })).statusCode, 200, type);
+    }
+    assert.deepEqual(calls.map((call) => call.ext), ['bin', 'ogg', 'webm', 'mp4', 'bin', 'bin']);
 
     failure = Object.assign(new Error('whisper-cli is required'), { statusCode: 503 });
     const unavailable = await post(app, { audio: clip });
