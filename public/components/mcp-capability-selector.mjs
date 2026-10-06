@@ -57,6 +57,7 @@ const REASON_LABELS = {
   credential_missing: 'Missing credential',
   endpoint_not_configured: 'No endpoint set',
   command_missing: 'Command unavailable',
+  binary_missing: 'Not installed',
   local_server_not_configured: 'Local server URL unset',
   entry_point_missing: 'Not built',
   health_check_failed: 'Local server unreachable',
