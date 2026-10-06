@@ -43,7 +43,10 @@ async function fixture(t) {
   await run('git', ['-C', main, 'worktree', 'add', '-q', join(root, 'wt')], { env });
   const priorStateDir = process.env.DM_STATE_DIR;
   process.env.DM_STATE_DIR = env.DM_STATE_DIR;
-  t.after(() => { process.env.DM_STATE_DIR = priorStateDir; });
+  t.after(() => {
+    if (priorStateDir === undefined) delete process.env.DM_STATE_DIR;
+    else process.env.DM_STATE_DIR = priorStateDir;
+  });
   return { root, home, main, wt: join(root, 'wt'), env };
 }
 
