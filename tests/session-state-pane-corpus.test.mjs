@@ -8,6 +8,7 @@ import { observeCodexPane } from '../modules/session-state/providers/codex.mjs';
 import { detectProviderState } from '../modules/session-state/providers/patterns.mjs';
 import { normalizeProviderPane } from '../modules/session-state/providers/pane-view.mjs';
 import { observePiPane } from '../modules/session-state/providers/pi.mjs';
+import { createSessionStateTracker } from '../modules/session-state/tracker.mjs';
 
 const paneDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'session-state', 'panes');
 const observers = {
@@ -172,6 +173,23 @@ describe('captured pane corpus', () => {
       false,
       'activeLines must still exclude the footer',
     );
+  });
+
+  it('reads a Codex 0.160 shell command as working and its finished turn as ready', async () => {
+    const cases = [
+      ['codex-repro-background-terminal-working.pane', 'working', false],
+      ['codex-derived-idle-agents-footer.pane', 'ready', true],
+    ];
+    for (const [file, status, canSendNow] of cases) {
+      const content = (await loadPane(file)).toString('utf8');
+      const tracker = createSessionStateTracker({ now: () => 100 });
+      const snapshot = tracker.observe('codex', [
+        { source: 'process', kind: 'lifecycle', value: { lifecycle: 'running' }, observedAt: 100, expiresAt: 0, fingerprint: 'process:running' },
+        ...observeCodexPane(content, { observedAt: 100, expiresAt: 0 }),
+      ]);
+      assert.equal(snapshot.status, status, file);
+      assert.equal(snapshot.capabilities.canSendNow, canSendNow, file);
+    }
   });
 
   it('keeps knownDefect flags aligned with intended vs current classification', async () => {

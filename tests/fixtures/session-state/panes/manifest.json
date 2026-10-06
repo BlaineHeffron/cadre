@@ -598,6 +598,39 @@
       "currentInteraction": "none",
       "knownDefect": false,
       "notes": "Live wait for background terminal with command and tip below the interrupt marker. Before fix misread as idle."
+    },
+    {
+      "id": "codex-repro-background-terminal-working",
+      "file": "codex-repro-background-terminal-working.pane",
+      "provider": "codex",
+      "source": "live-tmux",
+      "capturedFrom": "codex-repro-aa974c95",
+      "capturedAt": "2026-10-06T19:13:09Z",
+      "intendedState": "mid-tool",
+      "intendedLegacyState": "working",
+      "intendedExecution": "working",
+      "intendedInteraction": "none",
+      "currentLegacyState": "working",
+      "currentExecution": "working",
+      "currentInteraction": "none",
+      "knownDefect": false,
+      "notes": "Codex 0.160.1 shell command running, with the \"← for agents · ? for shortcuts\" footer. Before fix the footer was not chrome, so the composer was missed and this read as idle."
+    },
+    {
+      "id": "codex-derived-idle-agents-footer",
+      "file": "codex-derived-idle-agents-footer.pane",
+      "provider": "codex",
+      "source": "live-derived",
+      "capturedFrom": "codex-repro-aa974c95",
+      "intendedState": "idle-after-reply",
+      "intendedLegacyState": "waiting_for_input",
+      "intendedExecution": "idle",
+      "intendedInteraction": "free_text",
+      "currentLegacyState": "waiting_for_input",
+      "currentExecution": "idle",
+      "currentInteraction": "free_text",
+      "knownDefect": false,
+      "notes": "codex-repro-background-terminal-working with the Working line removed: Codex 0.160.1 idle composer above the \"← for agents\" footer."
     }
   ],
   "reconstructedOnlyStates": [
