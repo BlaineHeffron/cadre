@@ -54,6 +54,7 @@ for (const [name, change, reason] of [
   ['unpushed', async (f) => { await writeFile(resolve(f.metadata.path, 'file'), 'extra'); await git(f.metadata.path, 'commit', '-am', 'extra'); }, 'unpushed commits not in PR'],
   ['not merged', async (f) => f.setPr({ merged: false, number: 1, head: { sha: f.head } }), 'PR not merged'],
   ['untracked .agent_bus notes', async (f) => { await mkdir(resolve(f.metadata.path, '.agent_bus/hooks'), { recursive: true }); await writeFile(resolve(f.metadata.path, '.agent_bus/notes'), 'precious'); }, 'dirty or untracked files: .agent_bus/notes'],
+  ['many untracked', async (f) => { for (const name of ['u1', 'u2', 'u3', 'u4', 'u5']) await writeFile(resolve(f.metadata.path, name), 'data'); }, 'dirty or untracked files: u1, u2, u3, ... +2 more'],
   ['staged rename', async (f) => git(f.metadata.path, 'mv', 'file', 'moved'), 'dirty or untracked files: file, moved'],
   ['new ignored', async (f) => { await mkdir(resolve(f.metadata.path, 'cache')); await writeFile(resolve(f.metadata.path, 'cache/new'), 'data'); }, 'new ignored files: cache/new'],
   ['shared room', async (f) => { f.options.rooms = [{ id: 'other', status: 'open', metadata: { worktree: { path: resolve(f.metadata.path, 'subdir') } } }]; }, 'shared with another room or live session'],
