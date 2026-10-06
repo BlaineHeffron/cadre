@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAgentBusMcpServer } from '../modules/agent-bus/mcp.mjs';
+import { createServer } from 'node:net';
+import { buildAgentBusMcpRequest, buildAgentBusMcpServer } from '../modules/agent-bus/mcp.mjs';
 import { AGENT_BUS_AGENT_TOOL_SCOPES } from '../modules/agent-bus/mcp-auth.mjs';
 
 const context = { authenticated: true, principal: { type: 'agent', kind: 'codex', sessionId: 'c1' },
@@ -44,6 +45,17 @@ test('room sends and DMs pin the authenticated sender server-side', async () => 
     { kind: 'codex', sessionId: 'c1' });
   assert.deepEqual(calls.find((item) => item.path === '/api/agent-bus/dm').options.body.from,
     { kind: 'codex', sessionId: 'c1' });
+});
+
+test('a refused Cadre connection reports a restart instead of a bare ECONNREFUSED', async () => {
+  const listener = createServer().listen(0, '127.0.0.1');
+  await new Promise((resolve) => listener.once('listening', resolve));
+  const baseUrl = `http://127.0.0.1:${listener.address().port}`;
+  await new Promise((resolve) => listener.close(resolve));
+  for (const server of [buildAgentBusMcpServer({ requestImpl: buildAgentBusMcpRequest({ baseUrl }) }), buildAgentBusMcpServer({ baseUrl })]) {
+    await assert.rejects(server.callTool('agent_dm', { kind: 'claude', session_id: 'a1', body: 'dm' }, context),
+      { code: 'server_restarting', message: 'Cadre server is restarting; retry in a few seconds' });
+  }
 });
 
 test('room context defaults to truncated bodies and omits deliveries', async () => {

@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:net';
 import { buildMonitorMcpServer } from '../modules/platform/monitor-mcp.mjs';
+import { buildAgentBusMcpRequest } from '../modules/agent-bus/mcp.mjs';
 import { config } from '../config.mjs';
 
 describe('Monitor MCP server', () => {
@@ -1091,4 +1093,13 @@ describe('Monitor MCP server', () => {
     assert.deepEqual(requests, []);
   });
 
+  it('reports a refused Cadre connection as a restart instead of a bare ECONNREFUSED', async () => {
+    const listener = createServer().listen(0, '127.0.0.1');
+    await new Promise((resolve) => listener.once('listening', resolve));
+    const baseUrl = `http://127.0.0.1:${listener.address().port}`;
+    await new Promise((resolve) => listener.close(resolve));
+    const server = buildMonitorMcpServer({ requestImpl: buildAgentBusMcpRequest({ baseUrl }) });
+    await assert.rejects(server.handleToolCall('monitor_spawn_claude', { workDir: '/tmp/project', initialPrompt: 'hi' }),
+      { code: 'server_restarting', message: 'Cadre server is restarting; retry in a few seconds' });
+  });
 });

@@ -71,7 +71,7 @@ function createdByFromRequest(req) {
 export function registerAgentBusRoutes({ app, store, adapters, wsManager, productionControls, observedSessions, deliveryInFlight,
   broadcast, broadcastAlert, broadcastThreadSnapshot, broadcastThreadSummary, enrichThread, normalizeThreadSummary,
   threadMatchesStatusFilter, buildStateSnapshotEntry, normalizeCollectionLimit, participantKey, participantRef,
-  threadHasParticipant, threadHasOwner, uniqueAgentRefs, isAgentRef, pruneObservedParticipant, planParticipant, executeParticipantPlan,
+  threadHasParticipant, threadHasOwner, uniqueAgentRefs, isAgentRef, pruneObservedParticipant, resolveAgentSession, planParticipant, executeParticipantPlan,
   discardCreatedParticipants, waitForSessionReady, injectBootstrapStartupText, createBootstrapMessage,
   deliverMessage, failDelivery, replayDelivery, taskService = null, managedWorktreeBaseDir }) {
   const endingThreads = new Set();
@@ -460,9 +460,13 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     const adapter = adapters[ref.kind];
     if (!adapter) { await reply.code(404).send({ error: `Unknown ${label} kind` }); return false; }
     try {
-      const session = await adapter.getSession(app, ref.sessionId);
-      if (session) return true;
+      await resolveAgentSession(ref);
+      return true;
     } catch (err) {
+      if (err.code === 'session_kind_mismatch') {
+        await reply.code(404).send({ error: err.message, code: err.code });
+        return false;
+      }
       if (err.payload?.sessionEnded === true || err.payload?.state?.status === 'ended') {
         await reply.code(410).send({ error: `${label} session ended`, code: 'session_ended', sessionEnded: true });
         return false;
