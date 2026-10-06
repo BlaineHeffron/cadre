@@ -424,7 +424,9 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
       return { statusCode: 403, payload: { error: 'Sender is not a participant in this DM' } };
     }
     const resolvedType = type === 'result' ? 'result' : (type || 'message');
-    const duplicate = [...(snapshot.messages || [])].reverse().find((item) => (
+    const history = [...(snapshot.messages || [])].reverse();
+    // A repeated result is a duplicate only of the room's latest result, so a verdict that flips back still posts.
+    const duplicate = (resolvedType === 'result' ? history.filter((item) => item.type === 'result').slice(0, 1) : history).find((item) => (
       participantKey(item.from) === participantKey(from)
       && item.body === body
       && item.metadata?.summary === summary

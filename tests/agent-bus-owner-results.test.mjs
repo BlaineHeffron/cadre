@@ -13,9 +13,11 @@ async function setup(t, participants = [implementer, reviewer]) {
   const request = (path, payload) => h.app.inject({ method: 'POST', url: `/api/agent-bus/${path}`, headers: h.authHeaders, payload });
   const ownerInjections = () => h.injected.pi.filter((text) => text.includes(thread.id)).length;
   const ownerDelivery = (id) => h.store.getThread(thread.id).deliveries.find((d) => d.messageId === id && d.target.kind === owner.kind);
-  const send = async (from, summary, body) => {
+  const send = async (from, summary, body, { settled = true } = {}) => {
     const before = ownerInjections();
     const id = (await request('messages', { threadId: thread.id, from, summary, body, type: 'result' })).json().message.id;
+    // The observer may claim the delivery first; wait for it to land before counting.
+    if (settled) await settle(() => h.store.getThread(thread.id).deliveries.every((d) => d.messageId !== id || d.status !== 'queued'));
     return { id, delivered: ownerInjections() - before };
   };
   return { h, thread, request, send, ownerInjections, ownerDelivery };
@@ -42,6 +44,19 @@ test('the owner gets one result per outcome: repeats skip, changed verdicts and 
   assert.equal(await delivered(reviewer, 'blocked · PR #45 · owner subscribed', 'Head: abcdefa'), 1);
 });
 
+test('an exact repeat of an earlier result posts and delivers once the verdict has changed', async (t) => {
+  const { send } = await setup(t);
+  const ready = ['ready · PR #45 · approved', 'Head: 070ef57'];
+  const first = await send(reviewer, ...ready);
+  assert.equal(first.delivered, 1);
+  const again = await send(reviewer, ...ready);
+  assert.equal(again.id, first.id);
+  assert.equal((await send(reviewer, 'needs-decision · PR #45 · scope', 'Head: 070ef57')).delivered, 1);
+  const flipped = await send(reviewer, ...ready);
+  assert.notEqual(flipped.id, first.id);
+  assert.equal(flipped.delivered, 1);
+});
+
 test('a room with no reviewer delivers its result to the owner', async (t) => {
   const { send } = await setup(t, [implementer]);
   assert.equal((await send(implementer, 'ready · PR #45 · done', 'Head: 070ef57')).delivered, 1);
@@ -50,16 +65,16 @@ test('a room with no reviewer delivers its result to the owner', async (t) => {
 test('a busy owner and a lost acknowledgement still get one injection per outcome', async (t) => {
   const { h, request, send, ownerInjections, ownerDelivery } = await setup(t);
   h.sessionStates.pi.set(owner.sessionId, { state: 'working', needsInput: false });
-  const queued = await send(reviewer, 'ready · PR #45 · approved', 'Head: 070ef57');
+  const queued = await send(reviewer, 'ready · PR #45 · approved', 'Head: 070ef57', { settled: false });
   assert.equal(ownerDelivery(queued.id).status, 'queued');
-  assert.equal(ownerDelivery((await send(implementer, 'ready · PR #45 · done', 'Head: 070ef5702feae88f')).id), undefined);
+  assert.equal(ownerDelivery((await send(implementer, 'ready · PR #45 · done', 'Head: 070ef5702feae88f', { settled: false })).id), undefined);
   h.sessionStates.pi.set(owner.sessionId, { state: 'waiting_for_input', needsInput: true });
   await settle(() => ownerDelivery(queued.id).status !== 'queued');
   assert.equal(ownerInjections(), 1);
   let lostAcks = 0;
   // The owner accepts the envelope but the acknowledgement is lost, so the harness does not record it as injected.
   h.inputResponders.pi = async ({ text }) => { lostAcks++; return { content: text, statusCode: 502, payload: { error: 'acknowledgement lost' } }; };
-  const lost = await send(reviewer, 'needs-decision · PR #45 · scope', 'Head: 070ef57');
+  const lost = await send(reviewer, 'needs-decision · PR #45 · scope', 'Head: 070ef57', { settled: false });
   await settle(() => ownerDelivery(lost.id).status === 'failed');
   h.inputResponders.pi = null;
   assert.equal((await request(`deliveries/${ownerDelivery(lost.id).id}/replay`, {})).statusCode, 200);
