@@ -63,6 +63,7 @@ for (const [name, change, reason] of [
   ['branch changed', async (f) => git(f.metadata.path, 'checkout', '-q', '-b', 'next'), 'branch changed from topic to next'],
   ['marker missing', async (f) => rm(resolve(f.metadata.path, await git(f.metadata.path, 'rev-parse', '--git-dir'), 'cadre-room.json')), 'marker missing'],
   ['marker mismatch', async (f) => { f.metadata = { ...f.metadata, baseHead: f.head }; }, 'marker mismatch: baseHead'],
+  ['disposable mismatch', async (f) => { f.metadata = { ...f.metadata, disposable: ['dist/**'] }; }, 'marker mismatch: disposable'],
   ['metadata outside base', async (f) => { f.options.baseDir = resolve(f.root, 'elsewhere'); }, 'path outside managed base'],
 ]) test(`managed worktree keeps ${name}`, async (t) => {
   const f = await fixture(t); await change(f);
