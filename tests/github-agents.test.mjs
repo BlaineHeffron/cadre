@@ -1,8 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 import {
   buildGithubAgentPrompt,
   buildGithubAgentRepoStore,
@@ -12,8 +15,9 @@ import {
   spawnGithubAgentsForPollResult,
   validateGithubAuthRef,
 } from '../modules/integrations/github-agents.mjs';
-import { exec } from '../lib/exec.mjs';
 import { assertValidCodexModel } from '../modules/sessions/codex-models.mjs';
+
+const execFileAsync = promisify(execFile);
 
 const BASE_REPO = {
   owner: 'octo',
@@ -92,72 +96,106 @@ describe('GitHub agent lifecycle', () => {
     });
   });
 
-  it('after a restart, removes closed items\' scratch and pushed worktrees but keeps unpushed work', async () => {
+  it('after a restart, deletes closed items\' sessions and scratch through the real delete route but keeps unpushed worktrees', { timeout: 60000 }, async () => {
     const root = await mkdtemp(join(tmpdir(), 'github-expiry-'));
-    try {
+    const moduleUrl = (path) => pathToFileURL(resolve(path)).href;
+    const script = `
+      import assert from 'node:assert/strict';
+      import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+      import { join } from 'node:path';
+      import Fastify from ${JSON.stringify(moduleUrl('node_modules/fastify/fastify.js'))};
+      const { exec } = await import(${JSON.stringify(moduleUrl('lib/exec.mjs'))});
+      const { codexSessionsPlugin } = await import(${JSON.stringify(moduleUrl('modules/sessions/codex-sessions.mjs'))});
+      const { createAgentAdapters } = await import(${JSON.stringify(moduleUrl('modules/agent-bus/adapters.mjs'))});
+      const { buildGithubAgentRepoStore, GithubAgentPoller } = await import(${JSON.stringify(moduleUrl('modules/integrations/github-agents.mjs'))});
       const git = async (cwd, ...args) => {
-        const result = await exec('git', ['-C', cwd, ...args], { env: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+        const result = await exec('git', ['-C', cwd, ...args], { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
         assert.equal(result.code, 0, result.stderr);
         return result.stdout.trim();
       };
-      const workDir = join(root, 'agents');
-      const repoPath = join(root, 'repo');
-      const remote = join(root, 'remote');
+      const exists = (path) => stat(path).then(() => true, () => false);
+      const until = async (check) => {
+        for (let i = 0; i < 200 && !(await check()); i++) await new Promise((resolve) => setTimeout(resolve, 25));
+        assert.ok(await check());
+      };
+      const workDir = join(process.cwd(), 'agents');
+      const repoPath = join(process.cwd(), 'repo');
+      const remote = join(process.cwd(), 'remote');
       await mkdir(repoPath); await mkdir(remote);
       await git(remote, 'init', '--bare', '--initial-branch=main');
       await git(repoPath, 'init', '--initial-branch=main');
       await git(repoPath, 'config', 'user.name', 'Test'); await git(repoPath, 'config', 'user.email', 'test@example.invalid');
-      await writeFile(join(repoPath, 'file'), 'base\n');
+      await writeFile(join(repoPath, 'file'), 'base\\n');
       await git(repoPath, 'add', '.'); await git(repoPath, 'commit', '-m', 'base');
       await git(repoPath, 'remote', 'add', 'origin', remote); await git(repoPath, 'push', '-u', 'origin', 'main');
       const worktree = async (name) => {
-        const path = join(workDir, 'worktrees', 'octo-demo', `${name}-1`, 'repo');
-        await git(repoPath, 'worktree', 'add', '-b', `dueno-fleet/${name}`, path, 'origin/main');
-        await writeFile(join(path, 'file'), `${name}\n`);
+        const path = join(workDir, 'worktrees', 'octo-demo', name + '-1', 'repo');
+        await git(repoPath, 'worktree', 'add', '-b', 'dueno-fleet/' + name, path, 'origin/main');
+        await writeFile(join(path, 'file'), name + '\\n');
         await git(path, 'commit', '-am', name);
         return path;
       };
       const prWorktree = await worktree('pr-5');
-      const prHead = await git(prWorktree, 'rev-parse', 'HEAD');
-      await git(repoPath, 'push', 'origin', `${prHead}:refs/pull/5/head`);
+      await git(repoPath, 'push', 'origin', 'dueno-fleet/pr-5:refs/pull/5/head');
       const issueWorktree = await worktree('issue-6');
-      const scratch = (name) => join(workDir, 'scratch', 'octo-demo', `${name}-1`);
+      const scratch = (name) => join(workDir, 'scratch', 'octo-demo', name + '-1');
       for (const name of ['pr-4', 'issue-7']) await mkdir(scratch(name), { recursive: true });
+      // Ended registry entries whose tmux sessions are gone, as a restart leaves them.
       const session = (kind, number, path, worktreePath = null) => ({
-        id: `${kind}-${number}`, source: 'github-agent', endedAt: 1, tmuxSession: `dead-${number}`, workDir: path,
-        metadata: { github_repo: 'octo/demo', github_kind: kind, github_number: number, github_worktree_path: worktreePath, github_source_repo_path: repoPath },
+        id: 'github-expiry-' + process.pid + '-' + kind + '-' + number, source: 'github-agent', endedAt: 1, created: 1,
+        tmuxSession: 'github-expiry-missing-' + process.pid + '-' + number, workDir: path,
+        metadata: { github_repo: 'octo/demo', github_kind: kind, github_number: number, github_worktree_path: worktreePath,
+          github_branch: worktreePath ? 'dueno-fleet/' + kind + '-' + number : '', github_source_repo_path: repoPath },
+        ...(worktreePath ? { managedWorktree: true, worktreePath, worktreeBranch: 'dueno-fleet/' + kind + '-' + number, worktreeRepoPath: repoPath } : {}),
       });
-      const sessions = [
-        session('pr', 4, scratch('pr-4')),
-        session('pr', 5, prWorktree, prWorktree),
-        session('issue', 6, issueWorktree, issueWorktree),
-        session('issue', 7, scratch('issue-7')),
-      ];
-      await withRepoStore(async (store) => {
-        await store.upsertRepo({ ...BASE_REPO, lastSeenPrNumber: 10, lastSeenIssueNumber: 10 });
-        const deleted = [];
+      const sessions = [session('pr', 4, scratch('pr-4')), session('pr', 5, prWorktree, prWorktree),
+        session('issue', 6, issueWorktree, issueWorktree), session('issue', 7, scratch('issue-7'))];
+      await mkdir('.dueno/state', { recursive: true });
+      await writeFile('.dueno/state/codex_sessions.json', JSON.stringify(sessions));
+      const app = Fastify({ logger: { level: 'warn', file: join(process.cwd(), 'warnings.log') } });
+      try {
+        await app.register(codexSessionsPlugin, { wsManager: { broadcast() {}, onChannel() {}, channels: new Map() } });
+        await app.ready();
+        const store = buildGithubAgentRepoStore({ storeFile: join(process.cwd(), 'repos.json'), env: { APP_STATE_STORAGE: 'file' } });
+        await store.upsertRepo({ owner: 'octo', repo: 'demo', authRef: 'GITHUB_TOKEN_REF', prEnabled: true, issueEnabled: true, enabled: true, lastSeenPrNumber: 10, lastSeenIssueNumber: 10 });
+        const json = (payload) => ({ status: 200, ok: true, json: async () => payload });
         const poller = new GithubAgentPoller({
           repoStore: store, config: { enabled: true, workDir, env: { GITHUB_TOKEN_REF: 'test-token' } },
-          listExistingSessions: async () => sessions.filter((entry) => !deleted.includes(entry.id)),
-          deleteSession: async (entry) => { deleted.push(entry.id); },
-          log: { info() {}, warn() {} },
+          deleteSession: (entry) => createAgentAdapters()[entry.backendType].deleteSession(app, entry.id),
           fetchImpl: async (url) => {
-            if (url.includes('/pulls?')) return response(200, []);
-            if (url.includes('/issues?')) return response(200, [githubItem(7)]);
-            if (url.endsWith('/pulls/4')) return response(200, { state: 'closed', merged: false });
-            if (url.endsWith('/pulls/5')) return response(200, { state: 'closed', merged: true, head: { sha: prHead } });
-            if (url.endsWith('/issues/6')) return response(200, { state: 'closed' });
-            assert.fail(`unexpected request ${url}`);
+            if (url.includes('/pulls?')) return json([]);
+            if (url.includes('/issues?')) return json([{ number: 7, state: 'open', user: { login: 'alice' }, author_association: 'OWNER' }]);
+            if (url.endsWith('/pulls/4')) return json({ state: 'closed', merged: false });
+            if (url.endsWith('/pulls/5')) return json({ state: 'closed', merged: true });
+            if (url.endsWith('/issues/6')) return json({ state: 'closed' });
+            throw new Error('unexpected request ' + url);
           },
         });
         const [startup] = await poller.pollOnce({ suppressSpawn: true });
-        assert.deepEqual([startup.deletedSessions, deleted], [[], []]);
+        assert.deepEqual(startup.deletedSessions, []);
         const [result] = await poller.pollOnce();
-        assert.deepEqual(deleted, ['pr-4', 'pr-5']);
-        assert.deepEqual(result.keptWorktrees, [{ sessionId: 'issue-6', kind: 'issue', number: 6, path: issueWorktree, reason: 'unpushed commits' }]);
-        assert.equal(await stat(scratch('pr-4')).catch(() => null), null);
-        assert.ok(await stat(scratch('issue-7')));
-        assert.ok(await stat(issueWorktree));
+        assert.equal(result.error, null);
+        assert.deepEqual(result.deletedSessions.map((entry) => entry.number), [4, 5, 6]);
+        assert.deepEqual(JSON.parse(await readFile('.dueno/state/codex_sessions.json', 'utf8')).map((entry) => entry.id), [sessions[3].id]);
+        await until(async () => !(await exists(scratch('pr-4'))) && !(await exists(prWorktree)));
+        await until(async () => (await readFile('warnings.log', 'utf8').catch(() => '')).includes('Session worktree kept'));
+        const kept = (await readFile('warnings.log', 'utf8')).trim().split('\\n').map((line) => JSON.parse(line)).find((entry) => entry.msg === 'Session worktree kept');
+        assert.deepEqual([kept.id, kept.path, kept.reason], [sessions[2].id, issueWorktree, 'unpushed commits']);
+        assert.ok(await exists(issueWorktree));
+        assert.ok(await git(repoPath, 'branch', '--list', 'dueno-fleet/issue-6'));
+        assert.ok(await exists(scratch('issue-7')));
+        await store.close();
+      } finally {
+        await app.close();
+      }
+    `;
+    try {
+      await execFileAsync(process.execPath, ['--input-type=module', '--eval', script], {
+        cwd: root,
+        env: { ...process.env, NODE_TEST_CONTEXT: 'child-v8', APP_STATE_STORAGE: 'file', CODEX_SESSIONS_STORAGE: 'file',
+          DATABASE_URL: '', DM_STATE_DIR: '', DM_GITHUB_AGENT_WORKDIR: join(root, 'agents'), CODEX_APP_SERVER_ENABLED: '0',
+          CADRE_STRUCTURED_AUTOMATED_SPAWNS: '0', CADRE_DISABLE_SIDE_EFFECTS: '1', CADRE_GITHUB_AGENT_POLLER_ENABLED: '0',
+          CADRE_GITHUB_AGENTS_ENABLED: '0', CADRE_SCHEDULED_AGENT_PUMP_ENABLED: '0', TELEGRAM_BRIDGE: '0' },
       });
     } finally {
       await rm(root, { recursive: true, force: true });

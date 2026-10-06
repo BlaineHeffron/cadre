@@ -354,16 +354,35 @@ async function removeWorktree(repoRoot, entry, { force }) {
   }
 }
 
+// Fail closed: changes outside Cadre's hook state, commits on no remote-tracking ref or PR head,
+// or any git error (including a missing worktree) keep the worktree and its branch.
+async function unpushedWorktreeReason(path, pullRequest) {
+  try {
+    if (pullRequest) await git(path, ['fetch', '--quiet', 'origin', `pull/${pullRequest}/head`]);
+    if (await git(path, ['status', '--porcelain', '--untracked-files=all', '--', '.', ':(exclude).agent_bus/hooks', ':(exclude).agent_bus/state'])) return 'uncommitted changes';
+    if (await git(path, ['log', '--format=%H', 'HEAD', '--not', '--remotes', ...(pullRequest ? ['FETCH_HEAD'] : [])])) return 'unpushed commits';
+    return '';
+  } catch (error) {
+    return error.code || error.message;
+  }
+}
+
 export async function removeAgentSessionWorktree({
   repoPath = '',
   worktreePath = '',
   branch = '',
   force = true,
+  keepUnpushed = false,
+  pullRequest = 0,
 } = {}) {
   const source = normalizeText(repoPath);
   const path = normalizeText(worktreePath);
   const branchName = normalizeText(branch);
   if (!source || !path) return { removed: false, skipped: true, reason: 'missing_worktree_metadata' };
+  if (keepUnpushed) {
+    const reason = await unpushedWorktreeReason(path, Number(pullRequest) || 0);
+    if (reason) return { removed: false, kept: true, path, reason };
+  }
 
   const repoRoot = await git(source, ['rev-parse', '--show-toplevel']);
   const removeArgs = ['-C', repoRoot, 'worktree', 'remove'];

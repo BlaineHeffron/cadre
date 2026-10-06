@@ -399,4 +399,26 @@ describe('git worktree helper', () => {
     await assert.rejects(stat(worktreePath), { code: 'ENOENT' });
   });
 
+  it('with keepUnpushed, removes only pushed worktrees whose changes are Cadre hook state', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dueno-worktree-keep-'));
+    tempDirs.push(root);
+    const repo = await initRepo(root);
+    await git(root, ['init', '--bare', '-b', 'main', 'remote']);
+    await git(repo, ['remote', 'add', 'origin', join(root, 'remote')]);
+    await git(repo, ['push', 'origin', 'main']);
+    const remove = (worktreePath, branch) => removeAgentSessionWorktree({ repoPath: repo, worktreePath, branch, keepUnpushed: true });
+    const userFile = await addWorktree(repo, 'dueno-fleet/user-file', join(root, 'worktrees', 'user-file', 'repo'));
+    await mkdir(join(userFile, '.agent_bus'));
+    await writeFile(join(userFile, '.agent_bus', 'notes'), 'keep');
+    assert.deepEqual(await remove(userFile, 'dueno-fleet/user-file'), { removed: false, kept: true, path: userFile, reason: 'uncommitted changes' });
+    assert.equal(await readFile(join(userFile, '.agent_bus', 'notes'), 'utf8'), 'keep');
+    const missing = join(root, 'worktrees', 'missing', 'repo');
+    assert.equal((await remove(missing, 'dueno-fleet/missing')).kept, true);
+    const hooksOnly = await addWorktree(repo, 'dueno-fleet/hooks-only', join(root, 'worktrees', 'hooks-only', 'repo'));
+    await mkdir(join(hooksOnly, '.agent_bus', 'hooks'), { recursive: true });
+    await writeFile(join(hooksOnly, '.agent_bus', 'hooks', 'state.json'), '{}');
+    assert.equal((await remove(hooksOnly, 'dueno-fleet/hooks-only')).removed, true);
+    await assert.rejects(stat(hooksOnly), { code: 'ENOENT' });
+  });
+
 });

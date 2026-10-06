@@ -1620,6 +1620,11 @@ async function cleanupSessionArtifacts(id, meta, logger) {
       worktreePath: meta.worktreePath,
       branch: meta.worktreeBranch || '',
       force: true,
+      // GitHub agents are deleted automatically when their item closes, so keep any work they left.
+      keepUnpushed: meta.source === 'github-agent',
+      pullRequest: meta.metadata?.github_kind === 'pr' ? meta.metadata.github_number : 0,
+    }).then((result) => {
+      if (result.kept) logger.warn({ id, path: meta.worktreePath, reason: result.reason }, 'Session worktree kept');
     }))] : []),
   ]);
 }
