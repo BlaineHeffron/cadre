@@ -300,6 +300,7 @@ test('bootstrap injects the merge policy from the base-ref config', async (t) =>
   assert.equal((await bootstrap('operator')).statusCode, 200);
   assert.ok(h.createdSessions.codex[0].initialPrompt.split('\n').includes(operatorLine));
   await pushConfig(f, JSON.stringify({ merge: 'reviewer' }));
+  await writeFile(resolve(f.repo, '.cadre/worktree.json'), JSON.stringify({ merge: 'operator' }));
   const response = await bootstrap('reviewer');
   assert.equal(response.statusCode, 200, response.body);
   assert.equal(h.store.getThread(response.json().thread.id).thread.metadata.worktree.merge, 'reviewer');
@@ -312,7 +313,7 @@ test('bootstrap injects the merge policy from the base-ref config', async (t) =>
 test('invalid config and missing metadata fail closed', async (t) => {
   const f = await fixture(t);
   assert.equal((await cleanupManagedWorktree({ ...f.metadata, ignoredBaseline: undefined }, f.options)).reason, 'missing or invalid metadata');
-  for (const config of ['{', JSON.stringify({ merge: 'anyone' })]) {
+  for (const config of ['{', JSON.stringify({ merge: 'anyone' }), JSON.stringify({ merge: null })]) {
     await pushConfig(f, config);
     await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'invalid', roomId: 'thr_invalid', baseDir: f.options.baseDir }), /invalid worktree config|JSON/);
     assert.equal(await exists(resolve(f.options.baseDir, 'thr_invalid')), false);

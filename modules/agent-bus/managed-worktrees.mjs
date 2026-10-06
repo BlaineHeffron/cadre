@@ -18,7 +18,7 @@ async function configFor(repo, ref) {
   if (!await git(repo, ['ls-tree', '--name-only', ref, '--', '.cadre/worktree.json'])) return null;
   const text = await git(repo, ['show', `${ref}:.cadre/worktree.json`]);
   const config = JSON.parse(text);
-  if (!config || !['off', 'on-merge'].includes(config.cleanup ?? 'off') || !['operator', 'reviewer'].includes(config.merge ?? 'operator')
+  if (!config || !['off', 'on-merge'].includes(config.cleanup ?? 'off') || (config.merge !== undefined && !['operator', 'reviewer'].includes(config.merge))
     || (config.setup !== undefined && typeof config.setup !== 'string')
     || (config.copy !== undefined && (!Array.isArray(config.copy) || config.copy.some((file) => typeof file !== 'string' || !file || isAbsolute(file) || !inside(repo, resolve(repo, file)))))) throw new Error('invalid worktree config');
   return config;
