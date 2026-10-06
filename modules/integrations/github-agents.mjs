@@ -626,7 +626,8 @@ export class GithubAgentPoller {
         ? await this.listExistingSessions()
         : await listRegisteredGithubSessions(this.config);
       for (const session of sessions) {
-        if (session.source !== 'github-agent' || session.endedAt) continue;
+        // Ended sessions are included: agents exit after posting, leaving their registry entry and scratch dir.
+        if (session.source !== 'github-agent') continue;
         try {
           const metadata = session.metadata || {};
           const kind = metadata.github_kind;
@@ -634,7 +635,6 @@ export class GithubAgentPoller {
           if (!sessionMatchesGithubItem(session, repo, kind, { number }, this.config)) continue;
           const openNumbers = kind === 'pr' ? result.openPullRequestNumbers : kind === 'issue' ? result.openIssueNumbers : null;
           if (!openNumbers || openNumbers.includes(number)) continue;
-          if (session.tmuxSession && !(await (this.tmuxSessionExists || tmuxSessionExists)(session.tmuxSession))) continue;
           const item = await fetchGithubJson(this.fetchImpl,
             `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/${kind === 'pr' ? 'pulls' : 'issues'}/${number}`, {
               token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs,
