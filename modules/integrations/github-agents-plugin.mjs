@@ -65,6 +65,7 @@ function safePollResult(result = {}) {
     spawned: Array.isArray(result.spawned) ? result.spawned.map(safeSpawn) : [],
     spawnCapped: result.spawnCapped === true,
     deletedSessions: result.deletedSessions || [],
+    keptWorktrees: result.keptWorktrees || [],
     repo: result.updatedRepo ? safeRepo(result.updatedRepo) : null,
   };
 }

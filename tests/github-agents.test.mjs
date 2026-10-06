@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -12,6 +12,7 @@ import {
   spawnGithubAgentsForPollResult,
   validateGithubAuthRef,
 } from '../modules/integrations/github-agents.mjs';
+import { exec } from '../lib/exec.mjs';
 import { assertValidCodexModel } from '../modules/sessions/codex-models.mjs';
 
 const BASE_REPO = {
@@ -52,7 +53,7 @@ describe('GitHub agent lifecycle', () => {
     assert.equal(second.updatedRepo.lastEvent, 'no_new_items');
   });
 
-  it('confirms absent items before deletion and leaves disabled issues and unrelated sessions alone', async () => {
+  it('confirms absent items before deleting live or ended sessions and leaves disabled issues and unrelated sessions alone', async () => {
     await withRepoStore(async (store) => {
       await store.upsertRepo({ ...BASE_REPO, issueEnabled: false, lastSeenPrNumber: 200 });
       const sessions = [
@@ -76,6 +77,7 @@ describe('GitHub agent lifecycle', () => {
           if (url.includes('/pulls?')) return response(200, [{ ...githubItem(1), author_association: 'NONE' }]);
           if (url.endsWith('/pulls/101')) return response(200, { state: 'closed' });
           if (url.endsWith('/pulls/102')) return response(200, { state: 'open' });
+          if (url.endsWith('/pulls/103') || url.endsWith('/pulls/104')) return response(200, { state: 'closed', merged: true });
           assert.fail(`unexpected request ${url}`);
         },
       });
@@ -83,13 +85,83 @@ describe('GitHub agent lifecycle', () => {
       assert.deepEqual(suppressed.deletedSessions, []);
       assert.equal(calls.length, 1);
       const [result] = await poller.pollOnce();
-      assert.deepEqual(deleted, ['pr-101']);
-      assert.deepEqual(result.deletedSessions, [
-        { sessionId: 'pr-101', kind: 'pr', number: 101 },
-      ]);
-      assert.equal(logs.length, 1);
-      assert.equal(calls.length, 4);
+      assert.deepEqual(deleted, ['pr-101', 'pr-103', 'pr-104']);
+      assert.deepEqual(result.deletedSessions, [101, 103, 104].map((number) => ({ sessionId: `pr-${number}`, kind: 'pr', number })));
+      assert.equal(logs.length, 3);
+      assert.equal(calls.length, 6);
     });
+  });
+
+  it('after a restart, removes closed items\' scratch and pushed worktrees but keeps unpushed work', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'github-expiry-'));
+    try {
+      const git = async (cwd, ...args) => {
+        const result = await exec('git', ['-C', cwd, ...args], { env: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+        assert.equal(result.code, 0, result.stderr);
+        return result.stdout.trim();
+      };
+      const workDir = join(root, 'agents');
+      const repoPath = join(root, 'repo');
+      const remote = join(root, 'remote');
+      await mkdir(repoPath); await mkdir(remote);
+      await git(remote, 'init', '--bare', '--initial-branch=main');
+      await git(repoPath, 'init', '--initial-branch=main');
+      await git(repoPath, 'config', 'user.name', 'Test'); await git(repoPath, 'config', 'user.email', 'test@example.invalid');
+      await writeFile(join(repoPath, 'file'), 'base\n');
+      await git(repoPath, 'add', '.'); await git(repoPath, 'commit', '-m', 'base');
+      await git(repoPath, 'remote', 'add', 'origin', remote); await git(repoPath, 'push', '-u', 'origin', 'main');
+      const worktree = async (name) => {
+        const path = join(workDir, 'worktrees', 'octo-demo', `${name}-1`, 'repo');
+        await git(repoPath, 'worktree', 'add', '-b', `dueno-fleet/${name}`, path, 'origin/main');
+        await writeFile(join(path, 'file'), `${name}\n`);
+        await git(path, 'commit', '-am', name);
+        return path;
+      };
+      const prWorktree = await worktree('pr-5');
+      const prHead = await git(prWorktree, 'rev-parse', 'HEAD');
+      await git(repoPath, 'push', 'origin', `${prHead}:refs/pull/5/head`);
+      const issueWorktree = await worktree('issue-6');
+      const scratch = (name) => join(workDir, 'scratch', 'octo-demo', `${name}-1`);
+      for (const name of ['pr-4', 'issue-7']) await mkdir(scratch(name), { recursive: true });
+      const session = (kind, number, path, worktreePath = null) => ({
+        id: `${kind}-${number}`, source: 'github-agent', endedAt: 1, tmuxSession: `dead-${number}`, workDir: path,
+        metadata: { github_repo: 'octo/demo', github_kind: kind, github_number: number, github_worktree_path: worktreePath, github_source_repo_path: repoPath },
+      });
+      const sessions = [
+        session('pr', 4, scratch('pr-4')),
+        session('pr', 5, prWorktree, prWorktree),
+        session('issue', 6, issueWorktree, issueWorktree),
+        session('issue', 7, scratch('issue-7')),
+      ];
+      await withRepoStore(async (store) => {
+        await store.upsertRepo({ ...BASE_REPO, lastSeenPrNumber: 10, lastSeenIssueNumber: 10 });
+        const deleted = [];
+        const poller = new GithubAgentPoller({
+          repoStore: store, config: { enabled: true, workDir, env: { GITHUB_TOKEN_REF: 'test-token' } },
+          listExistingSessions: async () => sessions.filter((entry) => !deleted.includes(entry.id)),
+          deleteSession: async (entry) => { deleted.push(entry.id); },
+          log: { info() {}, warn() {} },
+          fetchImpl: async (url) => {
+            if (url.includes('/pulls?')) return response(200, []);
+            if (url.includes('/issues?')) return response(200, [githubItem(7)]);
+            if (url.endsWith('/pulls/4')) return response(200, { state: 'closed', merged: false });
+            if (url.endsWith('/pulls/5')) return response(200, { state: 'closed', merged: true, head: { sha: prHead } });
+            if (url.endsWith('/issues/6')) return response(200, { state: 'closed' });
+            assert.fail(`unexpected request ${url}`);
+          },
+        });
+        const [startup] = await poller.pollOnce({ suppressSpawn: true });
+        assert.deepEqual([startup.deletedSessions, deleted], [[], []]);
+        const [result] = await poller.pollOnce();
+        assert.deepEqual(deleted, ['pr-4', 'pr-5']);
+        assert.deepEqual(result.keptWorktrees, [{ sessionId: 'issue-6', kind: 'issue', number: 6, path: issueWorktree, reason: 'unpushed commits' }]);
+        assert.equal(await stat(scratch('pr-4')).catch(() => null), null);
+        assert.ok(await stat(scratch('issue-7')));
+        assert.ok(await stat(issueWorktree));
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('continues closure checks and spawns after a confirmation or deletion fails', async () => {

@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { exec } from '../../lib/exec.mjs';
 import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
@@ -152,6 +152,28 @@ async function cleanupSpawnedGithubWorktree({
       }, 'Failed to remove GitHub agent worktree after spawn error');
     }
     return { removed: false };
+  }
+}
+
+// Session deletion force-removes its worktree, so a closed item keeps its session while the
+// worktree holds uncommitted or unpushed work. Any git failure keeps it too.
+async function githubWorktreeKeepReason(session, item = {}) {
+  const metadata = session.metadata || {};
+  const path = normalizeText(metadata.github_worktree_path);
+  if (!path || !await stat(path).catch(() => null)) return '';
+  const git = async (args) => {
+    const result = await exec('git', ['-C', path, ...args]);
+    if (result.code !== 0) throw new Error('git check failed');
+    return normalizeText(result.stdout);
+  };
+  try {
+    const prHead = normalizeText(item.head?.sha);
+    if (prHead) await git(['fetch', '--quiet', 'origin', `pull/${metadata.github_number}/head`]);
+    if (await git(['status', '--porcelain', '--', '.', ':(exclude).agent_bus'])) return 'uncommitted changes';
+    if (await git(['log', '--format=%H', 'HEAD', '--not', '--remotes', ...(prHead ? [prHead] : [])])) return 'unpushed commits';
+    return '';
+  } catch (error) {
+    return error.message;
   }
 }
 
@@ -617,12 +639,14 @@ export class GithubAgentPoller {
       timeoutMs: this.timeoutMs,
     });
     const deletedSessions = [];
+    const keptWorktrees = [];
     if (!suppressSpawn && !result.error && !result.skipped && typeof this.deleteSession === 'function') {
       const sessions = this.listExistingSessions
         ? await this.listExistingSessions()
         : await listRegisteredGithubSessions(this.config);
       for (const session of sessions) {
-        if (session.source !== 'github-agent' || session.endedAt) continue;
+        // Ended sessions are included: agents exit after posting, leaving their registry entry and scratch dir.
+        if (session.source !== 'github-agent') continue;
         try {
           const metadata = session.metadata || {};
           const kind = metadata.github_kind;
@@ -630,13 +654,21 @@ export class GithubAgentPoller {
           if (!sessionMatchesGithubItem(session, repo, kind, { number }, this.config)) continue;
           const openNumbers = kind === 'pr' ? result.openPullRequestNumbers : kind === 'issue' ? result.openIssueNumbers : null;
           if (!openNumbers || openNumbers.includes(number)) continue;
-          if (session.tmuxSession && !(await (this.tmuxSessionExists || tmuxSessionExists)(session.tmuxSession))) continue;
           const item = await fetchGithubJson(this.fetchImpl,
             `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/${kind === 'pr' ? 'pulls' : 'issues'}/${number}`, {
               token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs,
             });
           if (item?.state !== 'closed') continue;
+          const reason = await githubWorktreeKeepReason(session, item);
+          if (reason) {
+            keptWorktrees.push({ sessionId: session.id || session.sessionId, kind, number, path: session.metadata.github_worktree_path, reason });
+            this.log?.warn?.({ repoId: repo.id, sessionId: session.id || session.sessionId, kind, number, reason }, 'Kept GitHub agent session and worktree for closed item');
+            continue;
+          }
           await this.deleteSession(session);
+          // Imported lazily: the scratch helper loads config.mjs, which must not freeze env at this module's import.
+          const { removeGithubAgentScratch } = await import('./github-agent-scratch.mjs');
+          await removeGithubAgentScratch(session, this.config.workDir || '~/.dueno-fleet/github-agents');
           deletedSessions.push({ sessionId: session.id || session.sessionId, kind, number });
           this.log?.info?.({ repoId: repo.id, sessionId: session.id || session.sessionId, kind, number }, 'Deleted GitHub agent session for closed item');
         } catch (error) {
@@ -670,6 +702,7 @@ export class GithubAgentPoller {
       ...result,
       spawned: spawn.spawned,
       deletedSessions,
+      keptWorktrees,
       spawnCapped: spawn.capped,
       updatedRepo,
     };
