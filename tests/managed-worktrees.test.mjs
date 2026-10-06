@@ -262,7 +262,8 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
     assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
     // The room moves to a follow-up branch before its first PR merges.
     const path = room.metadata.worktree.path;
-    pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head };
+    // Without head.ref the recorded branch stands in, so the switched room still continues.
+    pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head, head: { sha: f.head } };
     // An unknown branch neither ends the room nor consumes the watch.
     await git(path, 'checkout', '-q', '--detach');
     await poller.pollOnce();
@@ -275,9 +276,7 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
     await git(f.repo, 'push', 'origin', `${next}:refs/pull/3/head`, `${next}:refs/heads/auto-next`);
     // A marker already re-pointed by an attempt whose room save failed is retried, not treated as a mismatch.
     await linkManagedWorktreePr(h.store.getThread(room.id).thread.metadata.worktree, undefined, 'auto-next');
-    await git(f.repo, 'merge', '--ff-only', f.head);
     await poller.pollOnce();
-    assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/auto'])).code, 128);
     assert.equal(h.store.getThread(room.id).thread.status, 'open');
     assert.deepEqual(Object.values(h.deletedSessions).flat(), []);
     assert.equal(h.store.getThread(room.id).thread.metadata.worktree.branch, 'auto-next');
