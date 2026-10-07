@@ -117,6 +117,7 @@ test('bootstrap injects simplified room prompts without loop startup metadata', 
     assert.match(prompt, /Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges/);
     assert.match(prompt, /type="result".*reviewer starts the body with "DIRECTOR REPORT": PR number, head SHA, changes, test results, and deferred items/);
     assert.match(prompt, /<merged\|ready\|blocked\|needs-decision> · PR #n · <one line>/);
+    assert.match(prompt, /The room owner already receives it; do not also DM it to the owner or coordinator\. agent_dm is for things not posted in the room\./);
     assert.match(prompt, /any agent may read, post, close or reopen without subscribing/);
     assert.match(prompt, /Action tools return ids and status only/);
   }
