@@ -98,7 +98,7 @@ test('a recorded branch checked out in another worktree is kept after the room w
   await git(f.repo, 'worktree', 'add', '-q', other, 'topic');
   const result = await cleanupManagedWorktree(f.metadata, f.options);
   assert.equal(result.removed, true); assert.equal(result.branchKept, true);
-  assert.match(result.report, /^worktree: removed \(branch kept: .*topic/);
+  assert.equal(result.report, 'worktree: removed (branch kept: checked out in another worktree)');
   assert.equal(await exists(f.metadata.path), false);
   assert.equal(await git(other, 'rev-parse', 'topic'), f.head);
   assert.equal(await git(other, 'branch', '--show-current'), 'topic');

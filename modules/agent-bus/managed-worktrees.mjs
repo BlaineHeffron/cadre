@@ -140,10 +140,14 @@ export async function cleanupManagedWorktree(metadata, { rooms = [], sessions = 
       await git(repo, ['worktree', 'lock', '--reason', `cadre room ${roomId}`, path]);
       throw error;
     }
-    // The recorded branch is deleted only when fully on a remote (or still the untouched base after a failed spawn).
-    const local = !spawnFailed && await exec('git', ['-C', repo, 'log', '--format=%H', `refs/heads/${branch}`, '--not', '--remotes']);
-    const deletion = spawnFailed ? await exec('git', ['-C', repo, 'update-ref', '-d', `refs/heads/${branch}`, baseHead])
-      : local.code !== 0 ? local : local.stdout ? { code: 1, stderr: 'unpushed commits' } : await exec('git', ['-C', repo, 'branch', '-D', branch]);
+    // The recorded branch is deleted only at the tip verified to be fully on a remote (or the untouched base after a failed spawn),
+    // and never while another worktree has it checked out.
+    const tip = spawnFailed ? baseHead : (await exec('git', ['-C', repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`])).stdout.trim();
+    const local = spawnFailed || !tip ? { code: 0, stdout: '' } : await exec('git', ['-C', repo, 'log', '--format=%H', tip, '--not', '--remotes']);
+    const worktrees = await exec('git', ['-C', repo, 'worktree', 'list', '--porcelain']);
+    const kept = !tip ? 'branch missing' : local.code !== 0 || worktrees.code !== 0 ? 'git check failed' : local.stdout ? 'unpushed commits'
+      : worktrees.stdout.split('\n').includes(`branch refs/heads/${branch}`) ? 'checked out in another worktree' : '';
+    const deletion = kept ? { code: 1, stderr: kept } : await exec('git', ['-C', repo, 'update-ref', '-d', `refs/heads/${branch}`, tip]);
     await git(repo, ['worktree', 'prune']);
     return { removed: true, branchKept: deletion.code !== 0, report: `worktree: removed${deletion.code !== 0 ? ` (branch kept: ${deletion.stderr.trim()})` : ''}` };
   } catch (error) { return keep(error.message); }
