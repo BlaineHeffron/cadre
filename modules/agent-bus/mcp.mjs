@@ -430,7 +430,7 @@ export function buildAgentBusMcpServer({
     })),
     {
       name: 'room_send',
-      description: 'Post in any non-DM room without subscribing; DMs require membership. Participants receive messages; the owner also receives results. Set summary on type=result as <merged|ready|blocked|needs-decision> · PR #n · <one line>. Returns message_id, delivery_count and failed_targets on failure.',
+      description: 'Post in any non-DM room without subscribing; DMs require membership. Participants receive messages; the owner also receives results. Set summary on type=result as <merged|ready|blocked|needs-decision|continues> · PR #n · <one line>; continues keeps a watched room open past this merge. Returns message_id, delivery_count and failed_targets on failure.',
       inputSchema: { type: 'object', properties: {
         thread_id: { type: 'string' }, body: { type: 'string' }, summary: { type: 'string', maxLength: 200 }, reply_to: { type: 'string' },
         type: { type: 'string', enum: ['message', 'result'] },

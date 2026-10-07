@@ -208,7 +208,7 @@ for (const mode of ['managed', 'stale local config', 'setup failure', 'launch fa
   assert.equal(await exists(metadata.path), false);
 });
 
-for (const mode of ['then merged', 'already merged', 'with explicit watch', 'after branch switch', 'reviewer report', 'reviewer deadline after restart', 'reviewer after branch switch']) test(`room PR found by branch ${mode}`, async (t) => {
+for (const mode of ['then merged', 'already merged', 'with explicit watch', 'after branch switch', 'reviewer report', 'reviewer deadline after restart', 'reviewer after branch switch', 'continues', 'reviewer continues']) test(`room PR found by branch ${mode}`, async (t) => {
   const reviewer = mode.startsWith('reviewer');
   const f = await fixture(t, '', reviewer ? { merge: 'reviewer' } : {});
   await git(f.repo, 'config', `url.${resolve(f.root, 'remote')}.insteadOf`, 'https://github.com/test/repo.git');
@@ -306,6 +306,57 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
     assert.equal(h.store.getThread(room.id).thread.status, 'closed');
     assert.equal(await exists(path), false);
     assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/auto-next'])).code, 128);
+    assert.match(commands.at(-1).text, /^\[PR_WATCH\] PR test\/repo#3 merged .* · ended room .* · worktree: removed$/);
+    return;
+  }
+  if (mode.endsWith('continues')) {
+    const result = async (summary) => {
+      const posted = await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
+        payload: { threadId: room.id, from: room.participants[0], type: 'result', summary, body: 'report' } });
+      assert.equal(posted.statusCode, 200, posted.body);
+    };
+    await poller.pollOnce();
+    // An operator-merge room says so before the merge; a reviewer-merge room within the grace window after it.
+    if (!reviewer) await result('continues · PR #2 · PR 2 in progress');
+    pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head, merged_at: new Date().toISOString() };
+    await git(f.repo, 'merge', '--ff-only', f.head);
+    await poller.pollOnce();
+    if (reviewer) {
+      assert.equal(h.store.getThread(room.id).messages.filter((item) => item.from.sessionId === 'pr_watch').length, 1);
+      await result('continues · PR #2 · PR 2 in progress');
+      await poller.pollOnce();
+    }
+    const path = room.metadata.worktree.path;
+    assert.equal(h.store.getThread(room.id).thread.status, 'open');
+    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+    assert.match(commands.at(-1).text, /^\[PR_WATCH\] PR test\/repo#2 merged \(.*\) · room continues$/);
+    // The merged PR on the unchanged branch is not rediscovered.
+    await poller.pollOnce();
+    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+    assert.equal(commands.length, 1);
+    await git(path, 'checkout', '-q', '-b', 'auto-next');
+    await writeFile(resolve(path, 'file'), 'next\n'); await git(path, 'commit', '-qam', 'next');
+    const next = await git(path, 'rev-parse', 'HEAD');
+    await git(f.repo, 'push', 'origin', `${next}:refs/pull/3/head`, `${next}:refs/heads/auto-next`);
+    const prs = { 2: pr, 3: { number: 3, state: 'open', merged: false, head: { sha: next, ref: 'auto-next' } } };
+    poller.fetchImpl = async (url) => {
+      const { pathname, searchParams } = new URL(url);
+      const body = pathname.endsWith('/pulls')
+        ? (searchParams.get('head') === 'test:auto-next' ? [{ number: 3, created_at: new Date().toISOString() }] : pulls)
+        : pathname.endsWith('/reviews') ? [] : prs[pathname.split('/').at(-1)];
+      return new Response(JSON.stringify(body), { status: 200 });
+    };
+    await poller.pollOnce();
+    assert.deepEqual((await h.app.githubAgents.repoStore.listWatches()).map((watch) => [watch.number, watch.thread_id]), [[3, room.id]]);
+    assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 3 });
+    assert.equal(h.store.getThread(room.id).thread.metadata.worktree.branch, 'auto-next');
+    // A later result with a normal verdict ends the room on the next merge.
+    await result('merged · PR #3 · done');
+    prs[3] = { ...prs[3], state: 'closed', merged: true, merge_commit_sha: next, merged_at: new Date(0).toISOString() };
+    await git(f.repo, 'merge', '--ff-only', next);
+    await poller.pollOnce();
+    assert.equal(h.store.getThread(room.id).thread.status, 'closed');
+    assert.equal(await exists(path), false);
     assert.match(commands.at(-1).text, /^\[PR_WATCH\] PR test\/repo#3 merged .* · ended room .* · worktree: removed$/);
     return;
   }

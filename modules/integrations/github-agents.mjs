@@ -688,14 +688,16 @@ export class GithubAgentPoller {
   async watchRoomPrs(repo) {
     for (const room of await this.listRooms()) {
       const worktree = room.metadata?.worktree;
-      if (!worktree?.branch || worktree.pr) continue;
+      if (!worktree?.branch || (worktree.pr && !worktree.pr.continued)) continue;
       try {
         const origin = await exec('git', ['-C', worktree.repo, 'config', '--get', 'remote.origin.url']);
         if (origin.stdout.trim().match(/^(?:https:\/\/(?:[^@/]+@)?github\.com\/|(?:ssh:\/\/)?git@github\.com[:/])([^/]+\/[^/]+?)(?:\.git)?\/?$/i)?.[1].toLowerCase() !== repo.id.toLowerCase()) continue;
-        const pulls = await fetchGithubList(this.fetchImpl, `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls?state=all&head=${encodeURIComponent(`${repo.owner}:${worktree.branch}`)}&per_page=100`,
+        // A continued room follows its worktree's current branch to a PR newer than the merged one.
+        const branch = worktree.pr ? (await exec('git', ['-C', worktree.path, 'branch', '--show-current'])).stdout.trim() || worktree.branch : worktree.branch;
+        const pulls = await fetchGithubList(this.fetchImpl, `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls?state=all&head=${encodeURIComponent(`${repo.owner}:${branch}`)}&per_page=100`,
           { token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs });
         // GitHub timestamps have second precision.
-        const pr = pulls.find((item) => Date.parse(item.created_at) >= Math.floor(room.createdAt / 1000) * 1000);
+        const pr = pulls.find((item) => Date.parse(item.created_at) >= Math.floor(room.createdAt / 1000) * 1000 && !(item.number <= worktree.pr?.number));
         if (!pr) continue;
         // An explicit watch on the same PR keeps its linkage. Notifications go to the room owner;
         // the first (always newly created) participant is the fallback creator.
@@ -705,7 +707,7 @@ export class GithubAgentPoller {
         // so any failure drops the new watch before the watch tick and retries discovery next tick.
         try {
           if (!watched) await this.repoStore.putWatch({ repo: repo.id, number: pr.number, thread_id: room.id }, { kind, sessionId });
-          await this.linkWorktreePr(room.id, { repo: repo.id, number: pr.number });
+          await this.linkWorktreePr(room.id, { repo: repo.id, number: pr.number }, branch);
         } catch (error) {
           if (!watched) await this.repoStore.updateWatch(repo.id, pr.number).catch(() => {});
           throw error;
@@ -761,16 +763,20 @@ export class GithubAgentPoller {
           } else if (pr.merged && thread?.status === 'open' && this.endThread) {
             // A reviewer-merge room gets a grace period to post its report; GitHub timestamps have second precision.
             const mergedAtMs = Math.floor(Date.parse(pr.merged_at) / 1000) * 1000;
-            const reported = this.getThread(watch.thread_id)?.messages?.some((item) => item.type === 'result' && item.createdAt >= mergedAtMs);
-            if (thread.metadata?.worktree?.merge === 'reviewer' && !reported && !(this.now() >= watch.graceUntilMs)) {
+            const results = this.getThread(watch.thread_id)?.messages?.filter((item) => item.type === 'result') || [];
+            const reported = results.some((item) => item.createdAt >= mergedAtMs);
+            // A latest result with a `continues` verdict keeps the room; rediscovery watches its next PR.
+            if (/^\s*continues\b/i.test(results.findLast((item) => item.createdAt >= watch.createdAtMs)?.metadata?.summary)) {
+              await this.linkWorktreePr(watch.thread_id, { repo: repo.id, number: watch.number, continued: true });
+              suffix = ' · room continues';
+            } else if (thread.metadata?.worktree?.merge === 'reviewer' && !reported && !(this.now() >= watch.graceUntilMs)) {
               if (!watch.graceUntilMs) {
                 await this.sendRoomMessage({ threadId: watch.thread_id, from: { kind: 'system', sessionId: 'pr_watch' }, deliveryMode: 'enqueue',
                   body: `PR #${watch.number} merged. Post your terminal result now; this room ends in ${MERGE_REPORT_GRACE_MS / 60000} minutes.` });
                 await this.repoStore.updateWatch(repo.id, watch.number, { graceUntilMs: this.now() + MERGE_REPORT_GRACE_MS });
               }
               continue;
-            }
-            try {
+            } else try {
               const result = await this.endThread(watch.thread_id, { reason: 'PR merged' });
               suffix = ` · ended room ${watch.thread_id}: ${result.results.filter((item) => item.status === 'terminated').length} sessions terminated${result.worktree ? ` · ${result.worktree.report}` : ''}`;
             } catch (error) {
