@@ -767,7 +767,7 @@ export class GithubAgentPoller {
             const reported = results.some((item) => item.createdAt >= mergedAtMs);
             // A latest result with a `continues` verdict keeps the room; rediscovery watches its next PR.
             if (/^\s*continues\s*·\s*PR #\d+/i.test(results.findLast((item) => item.createdAt >= watch.createdAtMs)?.metadata?.summary)) {
-              await this.linkWorktreePr(watch.thread_id, undefined, thread.metadata.worktree.branch, { continuedAfter: watch.number });
+              await this.linkWorktreePr(watch.thread_id, undefined, undefined, watch.number);
               suffix = ' · room continues';
             } else if (thread.metadata?.worktree?.merge === 'reviewer' && !reported && !(this.now() >= watch.graceUntilMs)) {
               if (!watch.graceUntilMs) {

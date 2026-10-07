@@ -124,6 +124,18 @@ test('merge ends room, preserves shared participants, reports counts and removes
   assert.deepEqual(await s.store.listWatches(), []);
 });
 
+test('continues result keeps a watched room without a worktree open and drops the watch', async (t) => {
+  const s = await setup(t);
+  await s.watch();
+  await s.h.store.createMessage({ threadId: s.thread.id, from: participants[0], targets: [creator], type: 'result', body: 'PR 1 done',
+    metadata: { summary: 'continues · PR #1 · PR 2 in progress' } });
+  s.setPr({ merged: true, state: 'closed', merge_commit_sha: '123456789' });
+  await s.poller.pollOnce();
+  assert.equal(s.h.store.getThread(s.thread.id).thread.status, 'open');
+  assert.deepEqual(s.commands.map((item) => [item.sessionId, item.text]), [[creator.sessionId, '[PR_WATCH] PR octo/demo#1 merged (1234567) · room continues']]);
+  assert.deepEqual(await s.store.listWatches(), []);
+});
+
 test('close leaves room open; no room owner falls back to creator; missing sessions drop', async (t) => {
   const s = await setup(t);
   const unowned = await s.h.store.createThread({ title: 'Unowned', participants, createdBy: creator });
