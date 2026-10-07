@@ -94,6 +94,7 @@ describe('Model catalog', () => {
     assert.deepEqual(result.models.map((entry) => entry.id), [
       'claude-fable-5-1',
       'claude-haiku-4-5',
+      'claude-haiku-5-5',
       'claude-opus-4-8',
       'claude-opus-5',
       'claude-opus-5-5',
@@ -175,6 +176,7 @@ describe('Model catalog', () => {
     assert.deepEqual(anthropic.models.map((entry) => entry.id), [
       'claude-fable-5-1',
       'claude-haiku-4-5',
+      'claude-haiku-5-5',
       'claude-opus-4-8',
       'claude-opus-5',
       'claude-opus-5-5',
