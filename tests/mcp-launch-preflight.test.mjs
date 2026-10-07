@@ -576,19 +576,20 @@ describe('MCP launch preflight', () => {
     }
   });
 
-  it('exports meshy and gpt-image keys to the Codex pane by name, values intact', { timeout: 60000 }, async () => {
+  it('exports meshy and image-server keys to the Codex pane by name, values intact', { timeout: 60000 }, async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'dueno-codex-pane-env-'));
     tempDirs.push(stateDir);
     process.env.CADRE_STATE_DIR = stateDir;
     const meshy = 'dummy meshy "quoted" $(touch pwned) `x`\nsecond line';
     const openai = "dummy-openai 'single' $HOME";
+    const xai = 'dummy xai\ttab';
     const fixture = new URL('./fixtures/mcp/stdio-tools-server.mjs', import.meta.url).pathname;
     const reportPath = join(stateDir, 'env.json');
     const fakeCodex = join(stateDir, 'fake-codex');
     await writeFile(fakeCodex, `#!${process.execPath}\nrequire('fs').writeFileSync(${JSON.stringify(reportPath)}, JSON.stringify(process.env));\n`, { mode: 0o700 });
 
     for (const [stdioEnv, byName] of [
-      [{ MESHY_API_KEY: meshy, OPENAI_API_KEY: openai }, ['MESHY_API_KEY', 'OPENAI_API_KEY']],
+      [{ MESHY_API_KEY: meshy, OPENAI_API_KEY: openai, DM_MCP_XAI_API_KEY: xai }, ['MESHY_API_KEY', 'OPENAI_API_KEY', 'XAI_API_KEY']],
       // Deferred: a differing alias stays inline rather than replace Codex's own OPENAI_API_KEY.
       [{ MESHY_API_KEY: meshy, OPENAI_API_KEY: 'codex-own', DM_MCP_OPENAI_API_KEY: openai }, ['MESHY_API_KEY']],
     ]) {
@@ -597,7 +598,7 @@ describe('MCP launch preflight', () => {
       // Meshy validates its key against the live API at startup, so its command runs the stdio fixture.
       const configured = { ...sourceConfig(), mcpCredentials: { overrides: { meshy: { command: process.execPath, args: [fixture] } } } };
       const result = await prepareMcpCapabilityLaunch({
-        resolved: resolved(['meshy', 'gpt-image']), backendType: 'codex', sessionId, workDir: stateDir,
+        resolved: resolved(['meshy', 'gpt-image', ...(byName.includes('XAI_API_KEY') ? ['grok-imagine'] : [])]), backendType: 'codex', sessionId, workDir: stateDir,
         sourceConfig: configured, credentialStore: credentials, stdioEnv,
       });
       assert.equal(result.preflight.meshy.state, 'ready');
@@ -612,13 +613,14 @@ describe('MCP launch preflight', () => {
       });
       assert.equal(JSON.stringify(rendered.allArgs).includes(meshy), false);
       assert.equal(rendered.paneCommand.includes(meshy), false);
+      assert.equal(JSON.stringify(rendered.allArgs).includes(xai), false);
       assert.equal(JSON.stringify(rendered.allArgs).includes(openai), !byName.includes('OPENAI_API_KEY'));
 
       await rm(reportPath, { force: true });
       const run = spawnSync('bash', ['-c', rendered.paneCommand], { cwd: stateDir, env: { PATH: process.env.PATH } });
       assert.equal(run.status, 0, String(run.stderr));
       const seen = JSON.parse(await readFile(reportPath, 'utf8'));
-      for (const key of byName) assert.equal(seen[key], stdioEnv[key]);
+      for (const key of byName) assert.equal(seen[key], key === 'XAI_API_KEY' ? xai : stdioEnv[key]);
       await assert.rejects(stat(join(stateDir, 'pwned')), /ENOENT/);
       await cleanupMcpCapabilityLaunch({ backendType: 'codex', sessionId, sourceConfig: sourceConfig(), credentialStore: credentials });
     }

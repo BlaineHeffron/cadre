@@ -126,8 +126,8 @@ only. No send scope is requested anywhere.
   so nothing reaches a spawned server by inheritance. For Claude and Pi the
   value lands in the `0600` launch config. Keep genuinely sensitive
   credentials on the HTTP proxy path instead, where the agent never sees them.
-- Secret forwarding to Codex: forwarded keys never appear on the Codex command
-  line. Cadre writes them to a `0600` per-session file, the tmux pane exports
+- Secret forwarding to Codex: forwarded keys stay off the Codex command line,
+  except a differing `DM_MCP_OPENAI_API_KEY` for `gpt-image` (above). Cadre writes them to a `0600` per-session file, the tmux pane exports
   them without echoing a value (app-server Codex gets them in its process
   environment), and `mcp_servers.<id>.env_vars=[...]` tells Codex to copy them
   by name into the server. The forwarded value is still agent-visible: the
