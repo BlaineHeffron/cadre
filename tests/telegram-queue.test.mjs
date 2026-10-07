@@ -201,6 +201,18 @@ describe('telegram Command Queue topic', () => {
     assert.match(sent()[0].body.text, /…\n\nReply to this message/);
   });
 
+  it('keeps a long dashboard answer edit under the configured limit', async () => {
+    const { loop, calls } = await bridge({ maxMsgLength: 200 });
+    const item = await addItem({ details: 'x'.repeat(1000) });
+    await loop.queueSync;
+    await app.inject({ method: 'POST', url: `/api/command-center/work-queue/${item.id}/answer`, payload: { answer: 'y'.repeat(1000) } });
+    await loop.queueSync;
+    loop.stop();
+    const edit = calls.find((call) => call.method === 'editMessageText').body.text;
+    assert.ok(Array.from(edit).length <= 200);
+    assert.match(edit, /Status: routed · y+…$/);
+  });
+
   it('ignores answers from another chat', async () => {
     const { loop } = await bridge();
     const item = await addItem();
@@ -229,12 +241,20 @@ describe('telegram Command Queue topic', () => {
     const { calls, loop } = await bridge({ gate: new Promise((resolve) => { release = resolve; }) });
     const first = await addItem();
     while (!calls.length) await new Promise((resolve) => setImmediate(resolve));
-    // The first item is mid-send; its dismissal is queued behind it.
+    // The first item is waiting on createForumTopic; its dismissal is queued behind it.
     await queue.dismissHumanQueueItem(first.id, { persist: false });
     loop.stop();
     release();
     await loop.queueSync;
-    assert.equal(calls.some((call) => call.method === 'editMessageText'), false);
+    assert.deepEqual(calls.map((call) => call.method), ['createForumTopic']);
+  });
+
+  it('sends nothing for an item added just before stop', async () => {
+    const { calls, loop } = await bridge();
+    await addItem();
+    loop.stop();
+    await loop.queueSync;
+    assert.deepEqual(calls, []);
   });
 
   it('sends nothing while the bridge is not running', async () => {

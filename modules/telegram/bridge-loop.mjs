@@ -55,7 +55,8 @@ function clip(value, limit) {
 function queueItemText(item = {}, limit) {
   let footer = item.operatorAction ? 'Approve or reject this action in the dashboard.'
     : item.allowFreeform ? 'Reply to this message to answer in your own words.' : '';
-  if (item.status !== 'open') footer = `Status: ${item.status}${item.answer?.text ? ` · ${clip(item.answer.text, 300)}` : ''}`;
+  if (item.status !== 'open') footer = `Status: ${item.status}${item.answer?.text ? ` · ${item.answer.text}` : ''}`;
+  footer = clip(footer, Math.min(300, Math.floor(limit / 2)));
   const body = clip([
     `❓ ${item.title} [${item.priority}]`,
     item.sessionId ? `From: ${item.sessionKind}:${item.sessionId}` : '',
@@ -551,15 +552,17 @@ export class TelegramBridgeLoop {
   }
 
   async syncQueueItem(item) {
-    if (!this.running) return null;
     const messages = await readJsonFile(this.queueMessagesPath(), {});
     const text = queueItemText(item, (await this.sender.loadConfig()).maxMsgLength);
+    // Checked after the local reads so a stop() that races a just-queued sync still wins.
+    if (!this.running) return null;
     const buttons = queueButtonsLive(item)
       ? item.options.map((option, index) => ({ text: option.label, callback_data: `q:${item.id}:${index}` }))
       : [];
     if (messages[item.id]) return this.sender.editMessageText(messages[item.id], text, { buttons });
     if (item.status !== 'open') return null;
     const { threadId } = await this.sender.resolveTopic(QUEUE_ROUTE);
+    if (!this.running) return null;
     messages[item.id] = await this.sender.sendMessage(text, { threadId, buttons });
     // The queue keeps at most 200 items.
     await writeJsonAtomic(this.queueMessagesPath(), Object.fromEntries(Object.entries(messages).slice(-200)));
