@@ -168,14 +168,12 @@ export function extractCodexConversationText(content = '') {
   return renderConversation(extractCodexConversationMessages(content));
 }
 
-export const MAX_PAGE_RECORD_BYTES = 4 * 1024 * 1024;
 export const MAX_PAGE_TEXT_CHARS = 1_000_000;
 
 // Reads conversation messages backward from byte offset `before` (default EOF)
-// until `limit` messages or MAX_PAGE_TEXT_CHARS, holding at most one record at
-// a time, so a page never loads the whole log. `start` is the byte offset of
-// the earliest line read; pass it back as `before` for the previous page.
-// Records over MAX_PAGE_RECORD_BYTES are skipped.
+// until `limit` messages or MAX_PAGE_TEXT_CHARS, holding one record at a time,
+// so a page never loads the whole log. `start` is the byte offset of the
+// earliest line read; pass it back as `before` for the previous page.
 export async function readConversationPage(filePath, runtime = 'claude', { before, limit } = {}) {
   const extract = String(runtime || '').toLowerCase() === 'codex'
     ? extractCodexConversationMessages
@@ -188,27 +186,12 @@ export async function readConversationPage(filePath, runtime = 'claude', { befor
   let chars = 0;
   let start = end;
   let pending = [];
-  let pendingBytes = 0;
-  let oversized = false;
-  const addPart = (part) => {
-    if (oversized) return;
-    pendingBytes += part.length;
-    if (pendingBytes > MAX_PAGE_RECORD_BYTES) {
-      oversized = true;
-      pending = [];
-      return;
-    }
-    pending.unshift(part);
-  };
+  const addPart = (part) => pending.unshift(part);
   const takeLine = (lineStart) => {
-    if (!oversized) {
-      const found = extract(Buffer.concat(pending).toString('utf8'));
-      messages.unshift(...found);
-      chars += found.reduce((sum, message) => sum + message.text.length, 0);
-    }
+    const found = extract(Buffer.concat(pending).toString('utf8'));
+    messages.unshift(...found);
+    chars += found.reduce((sum, message) => sum + message.text.length, 0);
     pending = [];
-    pendingBytes = 0;
-    oversized = false;
     start = lineStart;
     return messages.length >= maxMessages || chars >= MAX_PAGE_TEXT_CHARS;
   };

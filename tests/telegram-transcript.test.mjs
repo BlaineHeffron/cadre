@@ -9,7 +9,6 @@ import {
   extractClaudeOperatorQuestion,
   extractCodexAssistantText,
   extractCodexConversationText,
-  MAX_PAGE_RECORD_BYTES,
   readConversationPage,
   readTranscriptDelta,
 } from '../modules/telegram/transcript.mjs';
@@ -108,7 +107,7 @@ describe('conversation paging', () => {
     await withTempDir(async (dir) => {
       const path = join(dir, 'rollout.jsonl');
       const records = Array.from({ length: 400 }, (_, index) => codexMessage(index, `message ${index} ${'x'.repeat(1000)}`));
-      records.splice(200, 0, { type: 'response_item', payload: { type: 'function_call_output', output: 'y'.repeat(MAX_PAGE_RECORD_BYTES + 10) } });
+      records.splice(200, 0, { type: 'response_item', payload: { type: 'function_call_output', output: 'y'.repeat(5 * 1024 * 1024) } });
       await writeFile(path, `${jsonl(records)}{"partial":`);
       const full = extractCodexConversationText(await readFile(path, 'utf8'));
       assert.ok(full.length > 200_000);
@@ -133,17 +132,19 @@ describe('conversation paging', () => {
     });
   });
 
-  it('skips oversized records and clamps bad cursors', async () => {
+  it('returns a message record over 4 MiB whole, on its own page, and clamps bad cursors', async () => {
     await withTempDir(async (dir) => {
       const path = join(dir, 'session.jsonl');
+      const huge = `huge-start ${'z'.repeat(5 * 1024 * 1024)} huge-end`;
       await writeFile(path, jsonl([
         { message: { role: 'user', content: 'a' } },
-        { message: { role: 'assistant', content: 'z'.repeat(MAX_PAGE_RECORD_BYTES + 1) } },
+        { message: { role: 'assistant', content: huge } },
         { message: { role: 'assistant', content: 'b' } },
       ]));
-      const page = await readConversationPage(path, 'claude', { limit: '10' });
-      assert.deepEqual(page.messages, [{ role: 'user', text: 'a' }, { role: 'assistant', text: 'b' }]);
-      assert.equal(page.start, 0);
+      const newest = await readConversationPage(path, 'claude', { limit: '10' });
+      assert.deepEqual(newest.messages, [{ role: 'assistant', text: huge }, { role: 'assistant', text: 'b' }]);
+      const earliest = await readConversationPage(path, 'claude', { before: String(newest.start), limit: '10' });
+      assert.deepEqual([earliest.messages, earliest.start], [[{ role: 'user', text: 'a' }], 0]);
       assert.deepEqual((await readConversationPage(path, 'claude', { before: '-5', limit: '10' })).messages, []);
       assert.equal((await readConversationPage(path, 'claude', { before: '999999999999', limit: '1' })).messages[0].text, 'b');
     });
