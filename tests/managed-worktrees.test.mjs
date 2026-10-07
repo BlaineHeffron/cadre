@@ -261,13 +261,39 @@ for (const merge of ['operator', 'reviewer']) test(`${merge}-merge room: merges 
     const posted = await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
       payload: { threadId: room.id, from: room.participants[0], type: 'result', summary: 'merged · PR #3 · done', body: 'DIRECTOR REPORT: merged' } });
     assert.equal(posted.statusCode, 200, posted.body);
-    assert.ok(posted.json().deliveries.some((delivery) => delivery.target.sessionId === owner.sessionId && delivery.status !== 'failed'), posted.body);
+    assert.equal(posted.json().deliveries.find((delivery) => delivery.target.sessionId === owner.sessionId)?.status, 'injected', posted.body);
+    assert.equal(h.injected.pi.filter((text) => text.includes('DIRECTOR REPORT: merged')).length, 1);
   }
   const ended = await h.app.inject({ method: 'POST', url: `/api/agent-bus/threads/${room.id}/end`, headers: h.authHeaders, payload: {} });
   assert.equal(ended.statusCode, 200, ended.body);
   assert.equal(ended.json().worktree.report, 'worktree: removed', ended.body);
   assert.equal(await exists(path), false);
   assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/auto'])).code, 128);
+});
+
+for (const [name, change, reason] of [
+  ['unpushed commits', async (path) => { await writeFile(resolve(path, 'file'), 'extra'); await git(path, 'commit', '-qam', 'extra'); }, 'unpushed commits'],
+  ['dirty files', async (path) => writeFile(resolve(path, 'file'), 'dirty'), 'dirty or untracked files: file'],
+  ['new ignored files', async (path) => { await mkdir(resolve(path, 'art')); await writeFile(resolve(path, 'art/source.psd'), 'precious'); }, 'new ignored files: art/source.psd'],
+]) test(`room_end keeps a managed worktree with ${name}`, async (t) => {
+  const f = await fixture(t);
+  const h = await createAgentBusHarness({ beforeReady: async (app) => {
+    app.get('/api/codex-app-server/sessions', async () => ({ sessions: [] }));
+  } }); t.after(() => h.cleanup());
+  const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
+    title: 'Keep', worktree: { repo: f.repo, branch: 'keep', base: 'origin/main' },
+    participants: [{ kind: 'codex', create: true }, { kind: 'claude', create: true }],
+  } });
+  assert.equal(response.statusCode, 200, response.body);
+  const { path, roomId } = h.store.getThread(response.json().thread.id).thread.metadata.worktree;
+  await git(path, 'push', '-q', 'origin', 'keep');
+  await change(path);
+  const ended = await h.app.inject({ method: 'POST', url: `/api/agent-bus/threads/${roomId}/end`, headers: h.authHeaders, payload: {} });
+  assert.equal(ended.statusCode, 200, ended.body);
+  assert.equal(ended.json().worktree.report, `worktree: kept (${reason})`, ended.body);
+  assert.equal(h.store.getThread(roomId).thread.status, 'closed');
+  assert.equal(await exists(path), true);
+  assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', '--quiet', 'refs/heads/keep'])).code, 0);
 });
 
 test('ended sessions do not block removal', async (t) => {
