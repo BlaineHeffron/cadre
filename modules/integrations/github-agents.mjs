@@ -688,16 +688,16 @@ export class GithubAgentPoller {
   async watchRoomPrs(repo) {
     for (const room of await this.listRooms()) {
       const worktree = room.metadata?.worktree;
-      if (!worktree?.branch || (worktree.pr && !worktree.pr.continued)) continue;
+      if (!worktree?.branch || worktree.pr) continue;
       try {
         const origin = await exec('git', ['-C', worktree.repo, 'config', '--get', 'remote.origin.url']);
         if (origin.stdout.trim().match(/^(?:https:\/\/(?:[^@/]+@)?github\.com\/|(?:ssh:\/\/)?git@github\.com[:/])([^/]+\/[^/]+?)(?:\.git)?\/?$/i)?.[1].toLowerCase() !== repo.id.toLowerCase()) continue;
         // A continued room follows its worktree's current branch to a PR newer than the merged one.
-        const branch = worktree.pr ? (await exec('git', ['-C', worktree.path, 'branch', '--show-current'])).stdout.trim() || worktree.branch : worktree.branch;
+        const branch = worktree.continuedAfter ? (await exec('git', ['-C', worktree.path, 'branch', '--show-current'])).stdout.trim() || worktree.branch : worktree.branch;
         const pulls = await fetchGithubList(this.fetchImpl, `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls?state=all&head=${encodeURIComponent(`${repo.owner}:${branch}`)}&per_page=100`,
           { token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs });
         // GitHub timestamps have second precision.
-        const pr = pulls.find((item) => Date.parse(item.created_at) >= Math.floor(room.createdAt / 1000) * 1000 && !(item.number <= worktree.pr?.number));
+        const pr = pulls.find((item) => Date.parse(item.created_at) >= Math.floor(room.createdAt / 1000) * 1000 && !(item.number <= worktree.continuedAfter));
         if (!pr) continue;
         // An explicit watch on the same PR keeps its linkage. Notifications go to the room owner;
         // the first (always newly created) participant is the fallback creator.
@@ -766,8 +766,8 @@ export class GithubAgentPoller {
             const results = this.getThread(watch.thread_id)?.messages?.filter((item) => item.type === 'result') || [];
             const reported = results.some((item) => item.createdAt >= mergedAtMs);
             // A latest result with a `continues` verdict keeps the room; rediscovery watches its next PR.
-            if (/^\s*continues\b/i.test(results.findLast((item) => item.createdAt >= watch.createdAtMs)?.metadata?.summary)) {
-              await this.linkWorktreePr(watch.thread_id, { repo: repo.id, number: watch.number, continued: true });
+            if (/^\s*continues\s*·\s*PR #\d+/i.test(results.findLast((item) => item.createdAt >= watch.createdAtMs)?.metadata?.summary)) {
+              await this.linkWorktreePr(watch.thread_id, undefined, thread.metadata.worktree.branch, { continuedAfter: watch.number });
               suffix = ' · room continues';
             } else if (thread.metadata?.worktree?.merge === 'reviewer' && !reported && !(this.now() >= watch.graceUntilMs)) {
               if (!watch.graceUntilMs) {

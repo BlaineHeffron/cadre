@@ -208,7 +208,7 @@ for (const mode of ['managed', 'stale local config', 'setup failure', 'launch fa
   assert.equal(await exists(metadata.path), false);
 });
 
-for (const mode of ['then merged', 'already merged', 'with explicit watch', 'after branch switch', 'reviewer report', 'reviewer deadline after restart', 'reviewer after branch switch', 'continues', 'reviewer continues']) test(`room PR found by branch ${mode}`, async (t) => {
+for (const mode of ['then merged', 'already merged', 'with explicit watch', 'after branch switch', 'reviewer report', 'reviewer deadline after restart', 'reviewer after branch switch', 'continues', 'reviewer continues', 'stale continues', 'overridden continues', 'malformed continues']) test(`room PR found by branch ${mode}`, async (t) => {
   const reviewer = mode.startsWith('reviewer');
   const f = await fixture(t, '', reviewer ? { merge: 'reviewer' } : {});
   await git(f.repo, 'config', `url.${resolve(f.root, 'remote')}.insteadOf`, 'https://github.com/test/repo.git');
@@ -309,12 +309,22 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
     assert.match(commands.at(-1).text, /^\[PR_WATCH\] PR test\/repo#3 merged .* · ended room .* · worktree: removed$/);
     return;
   }
-  if (mode.endsWith('continues')) {
-    const result = async (summary) => {
-      const posted = await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
-        payload: { threadId: room.id, from: room.participants[0], type: 'result', summary, body: 'report' } });
-      assert.equal(posted.statusCode, 200, posted.body);
-    };
+  const result = async (summary) => {
+    const posted = await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
+      payload: { threadId: room.id, from: room.participants[0], type: 'result', summary, body: 'report' } });
+    assert.equal(posted.statusCode, 200, posted.body);
+  };
+  // Only the latest well-formed result posted after the watch began keeps the room open.
+  if (mode === 'stale continues') {
+    await result('continues · PR #2 · before the watch');
+    await new Promise((done) => setTimeout(done, 5));
+  }
+  if (mode === 'overridden continues' || mode === 'malformed continues') {
+    await poller.pollOnce();
+    await result(mode === 'overridden continues' ? 'continues · PR #2 · more' : 'continues-later · PR #2 · more');
+    if (mode === 'overridden continues') await result('ready · PR #2 · done');
+  }
+  if (mode === 'continues' || mode === 'reviewer continues') {
     await poller.pollOnce();
     // An operator-merge room says so before the merge; a reviewer-merge room within the grace window after it.
     if (!reviewer) await result('continues · PR #2 · PR 2 in progress');
@@ -329,6 +339,8 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
     const path = room.metadata.worktree.path;
     assert.equal(h.store.getThread(room.id).thread.status, 'open');
     assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
+    assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
+    assert.deepEqual(commands.map((item) => item.sessionId), ['pi-1']);
     assert.match(commands.at(-1).text, /^\[PR_WATCH\] PR test\/repo#2 merged \(.*\) · room continues$/);
     // The merged PR on the unchanged branch is not rediscovered.
     await poller.pollOnce();
