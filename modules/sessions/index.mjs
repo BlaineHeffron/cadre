@@ -262,7 +262,10 @@ const PROVIDER_CONFIGS = {
       const credentialPrefix = mcpLaunch.credentialPath && mcpLaunch.credentialEnvVar
         ? `export ${mcpLaunch.credentialEnvVar}="$(< ${shellQuote(mcpLaunch.credentialPath)})"; export ${cadreEnvName(mcpLaunch.credentialEnvVar)}="$${mcpLaunch.credentialEnvVar}"`
         : '';
-      const envPrefix = [buildLaunchEnvPrefix(sessionId, provider), credentialPrefix].filter(Boolean).join('; ');
+      const forwardedEnvPrefix = mcpLaunch.envPath
+        ? `while IFS= read -r -d '' entry; do export "$entry"; done < ${shellQuote(mcpLaunch.envPath)}`
+        : '';
+      const envPrefix = [buildLaunchEnvPrefix(sessionId, provider), credentialPrefix, forwardedEnvPrefix].filter(Boolean).join('; ');
       return envPrefix ? `${envPrefix}; ${command}` : command;
     },
   },

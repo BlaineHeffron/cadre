@@ -112,7 +112,11 @@ describe('MCP launch preflight', () => {
       if (backendType === 'codex') {
         assert.equal(rendered.allArgs.some((arg) => arg === 'mcp_servers.seodata.command="node"'), true);
         assert.equal(rendered.allArgs.some((arg) => arg.includes(fixture)), true);
-        assert.equal(rendered.allArgs.some((arg) => arg.includes(`SEODATA_API_KEY="${secret}"`)), true);
+        assert.equal(rendered.allArgs.includes('mcp_servers.seodata.env_vars=["SEODATA_API_KEY"]'), true);
+        assert.equal(JSON.stringify(rendered.allArgs).includes(secret), false);
+        assert.equal(rendered.paneCommand.includes(secret), false);
+        assert.equal(rendered.paneCommand.includes(result.prepared.envPath), true);
+        assert.equal(await readFile(result.prepared.envPath, 'utf8'), `SEODATA_API_KEY=${secret}\0`);
       } else {
         const configPath = backendType === 'pi' ? result.prepared.piConfigPath : result.prepared.claudeConfigPath;
         const configFile = JSON.parse(await readFile(configPath, 'utf8'));
@@ -262,6 +266,60 @@ describe('MCP launch preflight', () => {
       backendType: 'codex', sessionId: 'codex-test', sourceConfig: sourceConfig(), credentialStore: credentials,
     });
     await assert.rejects(stat(result.prepared.credentialPath), /ENOENT/);
+  });
+
+  it('forwards paper-search keys by name to Codex and by value in Claude and Pi configs', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'dueno-paper-search-env-'));
+    tempDirs.push(stateDir);
+    process.env.CADRE_STATE_DIR = stateDir;
+    const configured = sourceConfig();
+    configured.researchWorkbench.paperSearchPath = join(stateDir, 'paper-search');
+    await writeFile(configured.researchWorkbench.paperSearchPath, '');
+    const keys = {
+      SEMANTIC_SCHOLAR_API_KEY: 'dummy-s2-key',
+      ADS_API_KEY: 'dummy-ads-key',
+      OPENALEX_EMAIL: 'openalex@example.test',
+      UNPAYWALL_EMAIL: 'unpaywall@example.test',
+    };
+
+    for (const [stdioEnv, forwarded] of [[{ ...keys, UNRELATED_SECRET: 'dummy-unrelated-secret' }, keys], [{ UNRELATED_SECRET: 'dummy-unrelated-secret' }, {}]]) {
+      for (const [backendType, provider] of [['codex', 'codex'], ['claude', 'claude'], ['pi', 'xai']]) {
+        const sessionId = `${backendType}-paper-search-${Object.keys(forwarded).length}`;
+        const credentials = credentialStore();
+        const result = await prepareMcpCapabilityLaunch({
+          resolved: resolved(['paper-search'], provider, backendType),
+          backendType, sessionId, sourceConfig: configured, credentialStore: credentials, stdioEnv,
+        });
+        assert.deepEqual(result.preflight['paper-search'], { state: 'ready' });
+        const rendered = renderAgentSessionLaunch({
+          backendType, sessionBinary: `/opt/bin/${backendType}`, sessionId, provider,
+          buildOptions: { workDir: stateDir, runtime: backendType, provider, mcpLaunch: result.prepared },
+        });
+        for (const value of Object.values(stdioEnv)) {
+          assert.equal(JSON.stringify(rendered.allArgs).includes(value), false);
+          assert.equal(rendered.paneCommand.includes(value), false);
+        }
+        if (backendType === 'codex') {
+          const envVars = rendered.allArgs.filter((arg) => arg.startsWith('mcp_servers.paper-search.env'));
+          assert.deepEqual(envVars, Object.keys(forwarded).length
+            ? [`mcp_servers.paper-search.env_vars=${JSON.stringify(Object.keys(forwarded)).replaceAll(',', ', ')}`]
+            : []);
+          assert.deepEqual(result.codexEnv, forwarded);
+          if (Object.keys(forwarded).length) {
+            assert.equal((await stat(result.prepared.envPath)).mode & 0o777, 0o600);
+            assert.equal(rendered.paneCommand.includes(result.prepared.envPath), true);
+          } else {
+            assert.equal(result.prepared.envPath, '');
+          }
+        } else {
+          const path = backendType === 'pi' ? result.prepared.piConfigPath : result.prepared.claudeConfigPath;
+          const server = JSON.parse(await readFile(path, 'utf8')).mcpServers['paper-search'];
+          assert.deepEqual(server.env, Object.keys(forwarded).length ? forwarded : undefined);
+        }
+        await cleanupMcpCapabilityLaunch({ backendType, sessionId, sourceConfig: configured, credentialStore: credentials });
+        if (result.prepared.envPath) await assert.rejects(stat(result.prepared.envPath), /ENOENT/);
+      }
+    }
   });
 
   it('identifies the missing research path when an optional server is selected', async () => {
@@ -503,8 +561,12 @@ describe('MCP launch preflight', () => {
       });
       assert.deepEqual(result.preflight['grok-imagine'], { state: 'ready', toolCount: 3 });
       if (backendType === 'codex') {
-        const env = Object.entries(expected).map(([key, value]) => `${key}="${value}"`).join(', ');
+        const { XAI_API_KEY, ...inline } = expected;
+        const env = Object.entries(inline).map(([key, value]) => `${key}="${value}"`).join(', ');
         assert.equal(result.prepared.codexArgs.includes(`mcp_servers.grok-imagine.env={${env}}`), true);
+        assert.equal(result.prepared.codexArgs.includes('mcp_servers.grok-imagine.env_vars=["XAI_API_KEY"]'), true);
+        assert.equal(JSON.stringify(result.prepared.codexArgs).includes(XAI_API_KEY), false);
+        assert.deepEqual(result.codexEnv, { XAI_API_KEY });
       } else {
         const path = backendType === 'pi' ? result.prepared.piConfigPath : result.prepared.claudeConfigPath;
         const configFile = JSON.parse(await readFile(path, 'utf8'));
