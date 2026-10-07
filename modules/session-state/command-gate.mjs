@@ -137,7 +137,7 @@ function canAttemptSend(snapshot, capability, transaction = {}) {
   const activeQueue = transaction.allowActiveQueue
     && transaction.operation === 'message'
     && snapshot.capabilities?.canQueueMessage === true;
-  // Codex room messages steer into the running turn, even when hook/transcript say working.
+  // Codex and Claude room messages steer or queue into the running turn, even when hook/transcript say working.
   if (activeQueue && transaction.source === 'agent_bus') return true;
   if (isDeterministicallyBusy(snapshot)) return false;
   if (activeQueue) return true;

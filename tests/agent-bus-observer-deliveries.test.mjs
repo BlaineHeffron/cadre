@@ -4,7 +4,7 @@ import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
 
 test('observer injects queued deliveries only when canonical canSendNow becomes true', async (t) => {
   const h = await createAgentBusHarness({ pollMs: 10 }); t.after(() => h.cleanup());
-  h.sessionStates.claude.set('claude-1', { state: 'working', needsInput: false });
+  h.sessionStates.claude.set('claude-1', { state: 'needs_approval', needsInput: true });
   const threadResponse = await h.app.inject({ method: 'POST', url: '/api/agent-bus/threads', headers: h.authHeaders, payload: {
     title: 'queue', participants: [{ kind: 'codex', sessionId: 'codex-1' }, { kind: 'claude', sessionId: 'claude-1' }],
   } });

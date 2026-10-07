@@ -44,7 +44,7 @@ test('dead target fails its delivery and leaves room open', async (t) => {
 
 test('busy target remains queued and later messages preserve single-flight FIFO', async (t) => {
   const h = await createAgentBusHarness({ pollMs: 20 }); t.after(() => h.cleanup());
-  h.sessionStates.claude.set('claude-1', { state: 'working', needsInput: false });
+  h.sessionStates.claude.set('claude-1', { state: 'needs_approval', needsInput: true });
   const thread = await room(h, [{ kind: 'codex', sessionId: 'codex-1' }, { kind: 'claude', sessionId: 'claude-1' }]);
   for (const body of ['one', 'two']) await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
     payload: { threadId: thread.id, from: { kind: 'codex', sessionId: 'codex-1' }, body } });
@@ -84,6 +84,10 @@ test('DM get-or-create is idempotent, rejects self-DM, reopens archived pair roo
   const missing = await h.app.inject({ method: 'POST', url: '/api/agent-bus/dm', headers: h.authHeaders,
     payload: { from: payload.from, target: { kind: 'claude', sessionId: 'no-such' }, body: 'x' } });
   assert.equal(missing.statusCode, 404);
+  const badKind = await h.app.inject({ method: 'POST', url: '/api/agent-bus/dm', headers: h.authHeaders,
+    payload: { from: payload.from, target: { kind: 'message', sessionId: 'claude-1' }, body: 'x' } });
+  assert.equal(badKind.statusCode, 404);
+  assert.equal(badKind.json().error, "kind must be the target's provider (claude, codex, pi, deepseek, codex-app-server), got 'message'");
 });
 
 test('human DM participants stay in the roster without injection deliveries or failure alerts', async (t) => {
@@ -140,7 +144,7 @@ test('room send accepts type result and dedupes identical bodies', async (t) => 
 
 test('killing one participant drops it from the room and fails queued deliveries', async (t) => {
   const h = await createAgentBusHarness(); t.after(() => h.cleanup());
-  h.sessionStates.claude.set('claude-1', { state: 'working', needsInput: false });
+  h.sessionStates.claude.set('claude-1', { state: 'needs_approval', needsInput: true });
   const thread = await room(h, [{ kind: 'codex', sessionId: 'codex-1' }, { kind: 'claude', sessionId: 'claude-1' }]);
   await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
     payload: { threadId: thread.id, from: { kind: 'codex', sessionId: 'codex-1' }, body: 'hello' } });

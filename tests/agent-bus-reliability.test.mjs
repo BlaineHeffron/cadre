@@ -17,7 +17,7 @@ async function setup(t) {
 
 test('close protects pending reviews; explicit cancellation persists through reopen and reload without replay', async (t) => {
   const { h, thread, request, send } = await setup(t);
-  h.sessionStates.claude.set('claude-1', { state: 'working', needsInput: false });
+  h.sessionStates.claude.set('claude-1', { state: 'needs_approval', needsInput: true });
   await send('review one'); await send('review two');
   const rejected = await request(`threads/${thread.id}/close`);
   assert.equal(rejected.statusCode, 409, rejected.body);
@@ -83,7 +83,7 @@ test('close rejects injection in flight and preserve its eventual receipt', asyn
 
 test('legacy closed queue resumes only after explicit reopen; held age degrades health', async (t) => {
   const { h, thread, request, send } = await setup(t);
-  h.sessionStates.claude.set('claude-1', { state: 'working', needsInput: false });
+  h.sessionStates.claude.set('claude-1', { state: 'needs_approval', needsInput: true });
   await send('old queued review');
   const delivery = h.store.getThread(thread.id).deliveries[0];
   await h.store.updateDelivery(delivery.id, { createdAt: Date.now() - 3600000 });
@@ -154,7 +154,7 @@ test('room delivery to a wrong-kind participant fails with the kind mismatch, no
 test('MCP close cancellation and outsider reopen reach real routes with scope checks', async (t) => {
   const { h, thread, send } = await setup(t);
   await h.store.transferThread(thread.id, refs[0]);
-  h.sessionStates.claude.set('claude-1', { state: 'working', needsInput: false });
+  h.sessionStates.claude.set('claude-1', { state: 'needs_approval', needsInput: true });
   await send('pending');
   const { buildAgentBusMcpServer } = await import('../modules/agent-bus/mcp.mjs');
   const { AGENT_BUS_AGENT_TOOL_SCOPES } = await import('../modules/agent-bus/mcp-auth.mjs');

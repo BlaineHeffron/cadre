@@ -9,12 +9,15 @@ function appendReplayHistory(delivery, entry) {
   return [...(Array.isArray(delivery?.replayHistory) ? delivery.replayHistory : []), entry].slice(-20);
 }
 
-// Codex submits Enter mid-turn as a steer into the running turn, so a working
-// Codex pane accepts room messages. Other providers wait for idle. Blocked,
+const BLOCKED_NOTIFY_MS = 5 * 60_000;
+
+// Codex submits Enter mid-turn as a steer into the running turn; Claude Code
+// queues it and reads it at the next tool boundary. So working Codex and Claude
+// panes accept room messages. Other providers wait for idle. Blocked,
 // awaiting_response, and unknown sessions still hold.
 function canDeliverNow(kind, state) {
   if (state?.capabilities?.canSendNow === true) return true;
-  return kind === 'codex' && state?.capabilities?.canQueueMessage === true
+  return ['codex', 'claude'].includes(kind) && state?.capabilities?.canQueueMessage === true
     && ['working', 'thinking'].includes(state?.status);
 }
 
@@ -26,7 +29,7 @@ function holdReasonFor(session) {
   return 'can_send_false';
 }
 
-export function createAgentBusDelivery({ app, store, wsManager, observedSessions, deliveryInFlight,
+export function createAgentBusDelivery({ app, store, adapters, wsManager, observedSessions, deliveryInFlight,
   sessionDeliveryInFlight, broadcast, broadcastAlert, resolveAgentSession }) {
   async function markHold(message, delivery, patch) {
     const latest = store.getDelivery(delivery.id) || delivery;
@@ -47,6 +50,25 @@ export function createAgentBusDelivery({ app, store, wsManager, observedSessions
     return updated;
   }
 
+  // Tell the room owner once per episode when a delivery sits behind a blocking dialog.
+  async function trackBlockedHold(message, delivery, state) {
+    const latest = store.getDelivery(delivery.id) || delivery;
+    if (state?.status !== 'blocked') {
+      if (latest.blockedSince) await store.updateDelivery(delivery.id, { blockedSince: null, blockedOwnerNotifiedAt: null });
+      return;
+    }
+    if (!latest.blockedSince) return store.updateDelivery(delivery.id, { blockedSince: Date.now() });
+    if (latest.blockedOwnerNotifiedAt || Date.now() - latest.blockedSince < BLOCKED_NOTIFY_MS) return;
+    await store.updateDelivery(delivery.id, { blockedOwnerNotifiedAt: Date.now() });
+    const owner = store.getThread(message.threadId)?.thread.createdBy;
+    const target = delivery.target;
+    if (!adapters?.[owner?.kind] || (owner.kind === target.kind && owner.sessionId === target.sessionId)) return;
+    const minutes = Math.floor((Date.now() - latest.blockedSince) / 60_000);
+    await store.createMessage({ threadId: message.threadId, from: { kind: 'system', sessionId: 'agent-bus' },
+      targets: [{ kind: owner.kind, sessionId: owner.sessionId }], createdBy: 'agent-bus', replyTo: message.id,
+      body: `Delivery to ${target.kind}:${target.sessionId} held ${minutes} min on a blocking ${state.interaction?.kind || 'unknown'} interaction. That session needs an operator answer.` });
+  }
+
   async function deliverMessage(message, delivery) {
     const current = store.getDelivery(delivery.id) || delivery;
     if (current.status !== 'queued') return current;
@@ -63,10 +85,12 @@ export function createAgentBusDelivery({ app, store, wsManager, observedSessions
       const session = await adapter.getSession(app, target.sessionId);
       if (!canDeliverNow(target.kind, session?.state)) {
         const holdReason = holdReasonFor(session);
-        return markHold(message, delivery, {
+        const held = await markHold(message, delivery, {
           holdReason,
           holdDetail: session?.state?.reason || session?.state?.status || holdReason,
         });
+        if (held.status === 'queued') await trackBlockedHold(message, held, session?.state);
+        return held;
       }
       let content = '';
       try { content = await adapter.captureSession(app, target.sessionId); } catch {}

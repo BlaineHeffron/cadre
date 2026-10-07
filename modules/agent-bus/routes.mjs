@@ -446,7 +446,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
   async function assertKnownDmRef(ref, label, reply) {
     if (isDashboardUser(ref)) return true;
     const adapter = adapters[ref.kind];
-    if (!adapter) { await reply.code(404).send({ error: `Unknown ${label} kind` }); return false; }
+    if (!adapter) { await reply.code(404).send({ error: `kind must be the ${label.toLowerCase()}'s provider (${Object.keys(adapters).join(', ')}), got '${ref.kind}'` }); return false; }
     try {
       await resolveAgentSession(ref);
       return true;
