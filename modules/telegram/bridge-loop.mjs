@@ -51,18 +51,23 @@ function clip(value, limit) {
   return chars.length > limit ? `${chars.slice(0, limit - 1).join('')}…` : chars.join('');
 }
 
-// One message per queue item; stays under the sender's default page size so it is never split.
-function queueItemText(item = {}) {
+// One message per queue item; stays under the configured page size so it is never split.
+function queueItemText(item = {}, limit) {
+  let footer = item.operatorAction ? 'Approve or reject this action in the dashboard.'
+    : item.allowFreeform ? 'Reply to this message to answer in your own words.' : '';
+  if (item.status !== 'open') footer = `Status: ${item.status}${item.answer?.text ? ` · ${clip(item.answer.text, 300)}` : ''}`;
   const body = clip([
     `❓ ${item.title} [${item.priority}]`,
     item.sessionId ? `From: ${item.sessionKind}:${item.sessionId}` : '',
     item.question !== item.title ? item.question : '',
     item.details,
-  ].filter(Boolean).join('\n\n'), 2500);
-  let footer = item.operatorAction ? 'Approve or reject this action in the dashboard.'
-    : item.allowFreeform ? 'Reply to this message to answer in your own words.' : '';
-  if (item.status !== 'open') footer = `Status: ${item.status}${item.answer?.text ? ` · ${clip(item.answer.text, 300)}` : ''}`;
+  ].filter(Boolean).join('\n\n'), limit - Array.from(footer).length - 2);
   return footer ? `${body}\n\n${footer}` : body;
+}
+
+// After a requester edit, option indices on an already-delivered button may point at a different option.
+function queueButtonsLive(item = {}) {
+  return item.status === 'open' && !item.operatorAction && !(item.events || []).some((event) => event.type === 'updated');
 }
 
 function updateMessage(update = {}) {
@@ -344,7 +349,8 @@ export class TelegramBridgeLoop {
     const queueMessages = await readJsonFile(this.queueMessagesPath(), {});
     const [queueTag, queueItemId, optionIndex] = String(callback?.data || '').split(':');
     if (queueTag === 'q') {
-      return this.handleQueueAnswer({ updateId, processed, message, callback, itemId: queueItemId, optionIndex: Number(optionIndex) });
+      const recorded = queueMessages[queueItemId] === Number(message.message_id);
+      return this.handleQueueAnswer({ updateId, processed, message, callback, itemId: recorded ? queueItemId : '', optionIndex: Number(optionIndex) });
     }
     const repliedQueueItemId = !callback && Object.keys(queueMessages)
       .find((itemId) => queueMessages[itemId] === Number(message.reply_to_message?.message_id));
@@ -516,6 +522,7 @@ export class TelegramBridgeLoop {
       const item = queue?.items?.find((entry) => entry.id === itemId);
       const option = callback ? item?.options?.[optionIndex] : null;
       if (!item) throw new Error('Queue item not found');
+      if (callback && !queueButtonsLive(item)) throw new Error('Options changed; answer in the dashboard');
       if (callback ? !option : !item.allowFreeform || !text) throw new Error('Choose one of the options');
       await this.requestImpl(`/api/command-center/work-queue/${encodeURIComponent(itemId)}/answer`, {
         method: 'POST',
@@ -544,9 +551,10 @@ export class TelegramBridgeLoop {
   }
 
   async syncQueueItem(item) {
+    if (!this.running) return null;
     const messages = await readJsonFile(this.queueMessagesPath(), {});
-    const text = queueItemText(item);
-    const buttons = item.status === 'open' && !item.operatorAction
+    const text = queueItemText(item, (await this.sender.loadConfig()).maxMsgLength);
+    const buttons = queueButtonsLive(item)
       ? item.options.map((option, index) => ({ text: option.label, callback_data: `q:${item.id}:${index}` }))
       : [];
     if (messages[item.id]) return this.sender.editMessageText(messages[item.id], text, { buttons });
