@@ -91,6 +91,19 @@ for (const recorded of ['pushed', 'unpushed']) test(`a worktree switched to anot
   }
 });
 
+test('a recorded branch checked out in another worktree is kept after the room worktree is removed', async (t) => {
+  const f = await fixture(t);
+  await git(f.metadata.path, 'checkout', '-q', '-b', 'next'); await git(f.metadata.path, 'push', '-q', 'origin', 'next');
+  const other = resolve(f.root, 'other');
+  await git(f.repo, 'worktree', 'add', '-q', other, 'topic');
+  const result = await cleanupManagedWorktree(f.metadata, f.options);
+  assert.equal(result.removed, true); assert.equal(result.branchKept, true);
+  assert.match(result.report, /^worktree: removed \(branch kept: .*topic/);
+  assert.equal(await exists(f.metadata.path), false);
+  assert.equal(await git(other, 'rev-parse', 'topic'), f.head);
+  assert.equal(await git(other, 'branch', '--show-current'), 'topic');
+});
+
 test('baseline external node_modules symlink is unlinked without touching target', async (t) => {
   const f = await fixture(t, 'mkdir -p "$CADRE_REPO_ROOT/../shared"; ln -s "$CADRE_REPO_ROOT/../shared" node_modules');
   const target = resolve(f.root, 'shared'); await writeFile(resolve(target, 'precious'), 'keep');
