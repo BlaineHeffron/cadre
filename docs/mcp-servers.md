@@ -91,10 +91,13 @@ only. No send scope is requested anywhere.
   Claude/Pi launch config and in Codex `-c` (visible in `ps`). `grok-imagine`
   pins `grok-imagine-image-2.0`, overriding any model the agent passes.
   `gpt-image` defaults to `gpt-image-2.5-flare`, and an agent can still request
-  `gpt-image-2.5-sunburst` per call. Each ID also lists the package's other
-  provider tools, which fail because those keys are not forwarded. Images are
-  written to `<session work dir>/generated-images/` unless the agent passes an
-  `output_path`.
+  `gpt-image-2.5-sunburst` per call. Each ID exposes all three upstream tools
+  (OpenAI, Google, xAI); only the selected provider's key is forwarded
+  explicitly, but there is no provider isolation: a key the agent runtime
+  already inherits can still reach the other tools. Images are written to
+  `<session work dir>/generated-images/` (the Cadre state dir's
+  `generated-images/` when a session has no work dir) unless the agent passes
+  an `output_path`.
 - `rea` and `bevy_brp` require explicit selection and are in no profile.
   REA reads JS/Electron trees and ASARs, .NET assemblies, and loopback
   browser/Electron targets with only Node. Native analysis needs Ghidra or

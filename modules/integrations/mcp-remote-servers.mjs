@@ -9,9 +9,10 @@
 
 import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { delimiter, dirname, join } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { config } from '../../config.mjs';
 import { readEnv } from '../platform/cadre-env.mjs';
+import { runtimeStatePath } from '../ops/runtime-state.mjs';
 
 export const REMOTE_MCP_AUTH = Object.freeze({
   /** Reachable with no credential. */
@@ -483,7 +484,10 @@ export function remoteMcpStdioEnv(server, { env = process.env, workDir = '' } = 
   }
   const secret = server?.secretEnvName ? firstEnv(server.secretEnv || [], env) : '';
   if (secret) result[server.secretEnvName] = secret;
-  if (server?.outputDirEnv && text(workDir)) result[server.outputDirEnv] = join(text(workDir), 'generated-images');
+  // Absolute, so the server never falls back to its own cwd.
+  if (server?.outputDirEnv) {
+    result[server.outputDirEnv] = text(workDir) ? resolve(text(workDir), 'generated-images') : runtimeStatePath('generated-images');
+  }
   return result;
 }
 

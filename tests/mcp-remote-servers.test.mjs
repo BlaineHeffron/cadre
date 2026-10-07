@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { runtimeStatePath } from '../modules/ops/runtime-state.mjs';
 import {
   REMOTE_MCP_AUTH,
   remoteMcpAvailability,
@@ -380,7 +381,11 @@ describe('image generation servers', () => {
         [standard]: 'override',
         DEFAULT_OUTPUT_DIR: '/work/tree/generated-images',
       });
-      assert.deepEqual(remoteMcpStdioEnv(server, { env: { [standard]: 'standard' } }), { ...pin, [standard]: 'standard' });
+      assert.deepEqual(remoteMcpStdioEnv(server, { env: { [standard]: 'standard' } }), {
+        ...pin,
+        [standard]: 'standard',
+        DEFAULT_OUTPUT_DIR: runtimeStatePath('generated-images'),
+      });
     });
   }
 });
