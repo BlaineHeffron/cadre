@@ -170,6 +170,7 @@ export async function githubAgentsPlugin(app, opts = {}) {
     listRooms: () => app.agentBusLifecycle?.listThreads?.({ status: 'open' }) || [],
     linkWorktreePr: (id, pr, branch) => app.agentBusLifecycle.linkWorktreePr(id, pr, branch),
     endThread: (id, options) => app.agentBusLifecycle.endThread(id, options),
+    sendRoomMessage: (input) => app.agentBusLifecycle.sendMessage(input),
     notifyWatch: async (target, text) => {
       const adapter = createAgentAdapters()[target?.kind];
       if (!adapter) { app.log.warn({ target }, 'PR watch target unavailable'); return; }

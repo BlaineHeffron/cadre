@@ -396,6 +396,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
       const metadata = store.getThread(id)?.thread.metadata?.worktree;
       if (metadata) await store.updateThreadMetadata(id, { worktree: await linkManagedWorktreePr(metadata, pr, branch) });
     },
+    sendMessage: (input) => send(input),
     endThread: (id, options) => endRoom({ params: { threadId: id }, body: options }, {
       code(statusCode) { return { send(payload) { throw Object.assign(new Error(payload.error), { statusCode, code: payload.code }); } }; },
     }),
