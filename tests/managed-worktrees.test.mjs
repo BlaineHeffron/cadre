@@ -1,12 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, mkdir, writeFile, readFile, stat, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, stat, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { exec } from '../lib/exec.mjs';
-import { createManagedWorktree, cleanupManagedWorktree, sweepManagedWorktrees, linkManagedWorktreePr } from '../modules/agent-bus/managed-worktrees.mjs';
+import { createManagedWorktree, cleanupManagedWorktree, sweepManagedWorktrees } from '../modules/agent-bus/managed-worktrees.mjs';
 import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
-import { GithubAgentPoller } from '../modules/integrations/github-agents.mjs';
 
 async function git(path, ...args) {
   const result = await exec('git', ['-C', path, ...args], { env: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
@@ -32,14 +31,8 @@ async function fixture(t, setup = '', config = {}) {
   await writeFile(resolve(metadata.path, 'file'), 'changed\n');
   await git(metadata.path, 'commit', '-am', 'change');
   const head = await git(metadata.path, 'rev-parse', 'HEAD');
-  await git(repo, 'push', 'origin', `${head}:refs/pull/1/head`);
-  let pr = { merged: true, number: 1, head: { sha: head } };
-  const poller = new GithubAgentPoller({ repoStore: { getRepo: async () => ({ owner: 'test', repo: 'repo' }) },
-    config: { env: {} }, fetchImpl: async () => ({ ok: true, status: 200, json: async () => pr }) });
-  await linkManagedWorktreePr(metadata, { repo: 'test/repo', number: 1 });
-  metadata.pr = { repo: 'test/repo', number: 1 };
-  const options = { baseDir, getPr: (value) => poller.getWorktreePr(value) };
-  return { root, repo, metadata, head, options, setPr: (value) => { pr = value; } };
+  await git(repo, 'push', 'origin', 'topic');
+  return { root, repo, metadata, head, options: { baseDir } };
 }
 async function pushConfig(f, text) {
   if (text === undefined) await git(f.repo, 'rm', '-q', '--cached', '.cadre/worktree.json');
@@ -51,8 +44,9 @@ const exists = async (path) => !!await stat(path).catch(() => null);
 for (const [name, change, reason] of [
   ['dirty', async (f) => writeFile(resolve(f.metadata.path, 'file'), 'dirty'), 'dirty or untracked files: file'],
   ['untracked with hidden user configuration', async (f) => { await git(f.repo, 'config', 'status.showUntrackedFiles', 'no'); await writeFile(resolve(f.metadata.path, 'untracked'), 'data'); }, 'dirty or untracked files: untracked'],
-  ['unpushed', async (f) => { await writeFile(resolve(f.metadata.path, 'file'), 'extra'); await git(f.metadata.path, 'commit', '-am', 'extra'); }, 'unpushed commits not in PR'],
-  ['not merged', async (f) => f.setPr({ merged: false, number: 1, head: { sha: f.head } }), 'PR not merged'],
+  ['unpushed', async (f) => { await writeFile(resolve(f.metadata.path, 'file'), 'extra'); await git(f.metadata.path, 'commit', '-am', 'extra'); }, 'unpushed commits'],
+  ['unpushed on a switched branch', async (f) => { await git(f.metadata.path, 'checkout', '-q', '-b', 'next'); await writeFile(resolve(f.metadata.path, 'file'), 'next'); await git(f.metadata.path, 'commit', '-am', 'next'); }, 'unpushed commits'],
+  ['failed fetch', async (f) => git(f.repo, 'remote', 'set-url', 'origin', resolve(f.root, 'missing')), 'git fetch failed'],
   ['untracked .agent_bus notes', async (f) => { await mkdir(resolve(f.metadata.path, '.agent_bus/hooks'), { recursive: true }); await writeFile(resolve(f.metadata.path, '.agent_bus/notes'), 'precious'); }, 'dirty or untracked files: .agent_bus/notes'],
   ['many untracked', async (f) => { for (const name of ['u1', 'u2', 'u3', 'u4', 'u5']) await writeFile(resolve(f.metadata.path, name), 'data'); }, 'dirty or untracked files: u1, u2, u3, ... +2 more'],
   ['staged rename', async (f) => git(f.metadata.path, 'mv', 'file', 'moved'), 'dirty or untracked files: file, moved'],
@@ -60,9 +54,6 @@ for (const [name, change, reason] of [
   ['shared room', async (f) => { f.options.rooms = [{ id: 'other', status: 'open', metadata: { worktree: { path: resolve(f.metadata.path, 'subdir') } } }]; }, 'shared with another room or live session'],
   ['interrupted session', async (f) => { f.options.sessions = [{ lifecycle: 'interrupted', workDir: f.metadata.path }]; }, 'shared with another room or live session'],
   ['shared session', async (f) => { f.options.sessions = [{ workDir: resolve(f.metadata.path, 'subdir') }]; }, 'shared with another room or live session'],
-  ['missing PR head', async (f) => f.setPr({ merged: true, number: 1 }), 'PR not merged'],
-  ['GitHub failure', async (f) => { f.options.getPr = async () => { throw new Error('GitHub unavailable'); }; }, 'GitHub unavailable'],
-  ['branch changed', async (f) => git(f.metadata.path, 'checkout', '-q', '-b', 'next'), 'branch changed from topic to next'],
   ['marker missing', async (f) => rm(resolve(f.metadata.path, await git(f.metadata.path, 'rev-parse', '--git-dir'), 'cadre-room.json')), 'marker missing'],
   ['marker mismatch', async (f) => { f.metadata = { ...f.metadata, baseHead: f.head }; }, 'marker mismatch: baseHead'],
   ['disposable mismatch', async (f) => { f.metadata = { ...f.metadata, disposable: ['dist/**'] }; }, 'marker mismatch: disposable'],
@@ -72,28 +63,32 @@ for (const [name, change, reason] of [
   const result = await cleanupManagedWorktree(f.metadata, f.options);
   assert.equal(result.reason, reason); assert.equal(result.removed, false);
   assert.equal(await exists(f.metadata.path), true);
-  assert.equal(await git(f.repo, 'rev-parse', 'topic'), await git(f.metadata.path, 'rev-parse', 'HEAD'));
 });
 
-test('merged and clean removes worktree and branch', async (t) => {
+test('pushed and clean removes worktree and branch', async (t) => {
   const f = await fixture(t);
-  await git(f.repo, 'merge', '--ff-only', 'topic');
   const result = await cleanupManagedWorktree(f.metadata, f.options);
   assert.equal(result.removed, true); assert.equal(result.branchKept, false);
   assert.equal(await exists(f.metadata.path), false);
   assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/topic'])).code, 128);
 });
 
-test('patch-id containment removes worktree but retains unmerged branch tip', async (t) => {
+for (const recorded of ['pushed', 'unpushed']) test(`a worktree switched to another pushed branch is removed; a ${recorded} recorded branch is ${recorded === 'pushed' ? 'deleted' : 'kept'}`, async (t) => {
   const f = await fixture(t);
-  await git(f.repo, 'merge', '--squash', 'topic'); await git(f.repo, 'commit', '-m', 'squashed');
-  const squash = await git(f.repo, 'rev-parse', 'HEAD');
-  await git(f.repo, 'push', 'origin', `+${squash}:refs/pull/1/head`);
-  f.setPr({ merged: true, number: 1, head: { sha: squash } });
+  await git(f.metadata.path, 'checkout', '-q', '-b', 'next');
+  await writeFile(resolve(f.metadata.path, 'file'), 'next\n'); await git(f.metadata.path, 'commit', '-qam', 'next');
+  await git(f.metadata.path, 'push', '-q', 'origin', 'next');
+  const local = await git(f.repo, 'commit-tree', '-p', 'topic', '-m', 'local only', 'topic^{tree}');
+  if (recorded === 'unpushed') await git(f.repo, 'branch', '-f', 'topic', local);
   const result = await cleanupManagedWorktree(f.metadata, f.options);
-  assert.equal(result.removed, true); assert.equal(result.branchKept, true);
-  assert.match(result.report, /branch kept/); assert.equal(await exists(f.metadata.path), false);
-  assert.equal(await git(f.repo, 'rev-parse', 'topic'), f.head);
+  assert.equal(result.removed, true); assert.equal(await exists(f.metadata.path), false);
+  if (recorded === 'pushed') {
+    assert.equal(result.report, 'worktree: removed');
+    assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/topic'])).code, 128);
+  } else {
+    assert.equal(result.report, 'worktree: removed (branch kept: unpushed commits)');
+    assert.equal(await git(f.repo, 'rev-parse', 'topic'), local);
+  }
 });
 
 test('baseline external node_modules symlink is unlinked without touching target', async (t) => {
@@ -101,14 +96,14 @@ test('baseline external node_modules symlink is unlinked without touching target
   const target = resolve(f.root, 'shared'); await writeFile(resolve(target, 'precious'), 'keep');
   // The baseline was recorded while the link was dangling; git still lists the ignored symlink.
   assert.ok(f.metadata.ignoredBaseline.includes('node_modules'));
-  await git(f.repo, 'merge', '--ff-only', 'topic');
+
   const result = await cleanupManagedWorktree(f.metadata, f.options);
   assert.equal(result.removed, true); assert.equal(await exists(f.metadata.path), false);
   assert.equal(await readFile(resolve(target, 'precious'), 'utf8'), 'keep');
 });
 
 test('cleanup uses the base ref policy recorded at creation, not the local checkout', async (t) => {
-  const f = await fixture(t); await git(f.repo, 'merge', '--ff-only', 'topic');
+  const f = await fixture(t);
   assert.equal(f.metadata.cleanup, 'on-merge');
   await rm(resolve(f.repo, '.cadre'), { recursive: true });
   assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, true);
@@ -125,7 +120,7 @@ test('base ref cleanup off keeps the worktree despite local on-merge config', as
 });
 
 test('legacy metadata without a recorded cleanup policy is kept', async (t) => {
-  const f = await fixture(t); await git(f.repo, 'merge', '--ff-only', 'topic');
+  const f = await fixture(t);
   const { cleanup, ...legacy } = f.metadata;
   const marker = resolve(f.repo, '.git/worktrees/repo/cadre-room.json');
   const { cleanup: recorded, ...legacyMarker } = JSON.parse(await readFile(marker, 'utf8'));
@@ -150,7 +145,7 @@ test('config only in the local checkout rejects the worktree request', async (t)
 });
 
 test('orphan sweep only removes marked closed-room worktrees', async (t) => {
-  const f = await fixture(t); await git(f.repo, 'merge', '--ff-only', 'topic');
+  const f = await fixture(t);
   const unmanaged = resolve(f.options.baseDir, 'thr_unmanaged/repo');
   await mkdir(resolve(f.options.baseDir, 'thr_unmanaged'));
   await git(f.repo, 'worktree', 'add', '-b', 'unmanaged', unmanaged);
@@ -198,22 +193,15 @@ for (const mode of ['managed', 'stale local config', 'setup failure', 'launch fa
   assert.equal(h.createdSessions.codex[0].workDir, metadata.path);
   assert.equal(h.createdSessions.claude[0].workDir, metadata.path);
   if (mode === 'stale local config') return;
-  await h.app.agentBusLifecycle.linkWorktreePr(metadata.roomId, { repo: 'test/repo', number: 1 });
   await git(metadata.path, 'merge', '--ff-only', f.head);
-  await git(f.repo, 'merge', '--ff-only', f.head);
-  h.app.agentBusLifecycle.getWorktreePr = f.options.getPr;
   const ended = await h.app.inject({ method: 'POST', url: `/api/agent-bus/threads/${metadata.roomId}/end`, headers: h.authHeaders, payload: {} });
   assert.equal(ended.statusCode, 200, ended.body);
   assert.equal(ended.json().worktree.removed, true, ended.body);
   assert.equal(await exists(metadata.path), false);
 });
 
-for (const mode of ['then merged', 'already merged', 'with explicit watch', 'after branch switch', 'reviewer report', 'reviewer deadline after restart', 'reviewer after branch switch']) test(`room PR found by branch ${mode}`, async (t) => {
-  const reviewer = mode.startsWith('reviewer');
-  const f = await fixture(t, '', reviewer ? { merge: 'reviewer' } : {});
-  await git(f.repo, 'config', `url.${resolve(f.root, 'remote')}.insteadOf`, 'https://github.com/test/repo.git');
-  await git(f.repo, 'config', '--add', `url.${resolve(f.root, 'remote')}.insteadOf`, 'git@github.com:test/repo.git');
-  await git(f.repo, 'remote', 'set-url', 'origin', 'https://github.com/test/repo.git');
+for (const merge of ['operator', 'reviewer']) test(`${merge}-merge room: merges only notify, room_end removes a multi-PR worktree`, async (t) => {
+  const f = await fixture(t, '', { merge });
   const commands = [];
   const h = await createAgentBusHarness({ beforeReady: async (app, dir) => {
     app.get('/api/codex-app-server/sessions', async () => ({ sessions: [] }));
@@ -226,162 +214,51 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
       enqueueSessionCommand: async (kind, sessionId, input) => commands.push({ kind, sessionId, ...input }) });
   } }); t.after(() => h.cleanup());
   const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload: {
-    title: 'Auto', worktree: { repo: f.repo, branch: 'auto', base: 'origin/main' },
+    title: 'Multi', worktree: { repo: f.repo, branch: 'auto', base: 'origin/main' },
     participants: [{ kind: 'codex', create: true }, { kind: 'claude', create: true }],
   } });
   assert.equal(response.statusCode, 200, response.body);
-  // Collab rooms are owned by the coordinator agent, which receives the merge notification.
-  const room = await h.store.transferThread(response.json().thread.id, { kind: 'pi', sessionId: 'pi-1' });
-  await git(room.metadata.worktree.path, 'merge', '--ff-only', f.head);
-  await git(f.repo, 'push', 'origin', `${f.head}:refs/pull/2/head`);
-  const stale = { number: 1, created_at: new Date(room.createdAt - 60000).toISOString() };
-  let pulls = [], pr = { number: 2, state: 'open', merged: false, head: { sha: f.head, ref: 'auto' } };
-  const urls = [];
+  // Collab rooms are owned by the coordinator agent, which receives merge notifications and results.
+  const owner = { kind: 'pi', sessionId: 'pi-1' };
+  const room = await h.store.transferThread(response.json().thread.id, owner);
+  const { path } = room.metadata.worktree;
+  const prs = {};
   const poller = h.app.githubAgents.poller;
   poller.config = { enabled: true, env: { TEST_GITHUB_TOKEN: 'test-only' } };
   poller.fetchImpl = async (url) => {
-    urls.push(url); const { pathname } = new URL(url);
-    return new Response(JSON.stringify(pathname.endsWith('/pulls') ? pulls : pathname.endsWith('/reviews') ? [] : pr), { status: 200 });
+    const { pathname } = new URL(url);
+    return new Response(JSON.stringify(pathname.endsWith('/reviews') ? [] : prs[pathname.split('/').at(-1)]), { status: 200 });
   };
-  await poller.pollOnce();
-  assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
-  pulls = [{ number: 2, created_at: new Date(Math.floor(room.createdAt / 1000) * 1000).toISOString() }, stale];
-  for (const url of ['https://notgithub.com/test/repo.git', 'git@github.com.evil:test/repo.git']) {
-    await git(f.repo, 'remote', 'set-url', 'origin', url);
+  for (const [number, branch] of [[2, 'auto'], [3, 'auto-next']]) {
+    if (branch !== 'auto') await git(path, 'checkout', '-q', '-b', branch);
+    await writeFile(resolve(path, 'file'), `${branch}\n`); await git(path, 'commit', '-qam', branch);
+    await git(path, 'push', '-q', 'origin', branch);
+    const sha = await git(path, 'rev-parse', 'HEAD');
+    await h.app.githubAgents.repoStore.putWatch({ repo: 'test/repo', number, thread_id: room.id }, owner);
+    prs[number] = { number, state: 'closed', merged: true, merge_commit_sha: sha, head: { sha, ref: branch } };
     await poller.pollOnce();
-  }
-  assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
-  assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
-  await git(f.repo, 'remote', 'set-url', 'origin', mode === 'already merged' ? 'git@github.com:test/repo.git' : 'https://github.com/test/repo.git');
-  if (mode === 'with explicit watch') {
-    const other = await h.store.createThread({ title: 'Other', participants: [], createdBy: { kind: 'pi', sessionId: 'pi-1' } });
-    const explicit = await h.app.githubAgents.repoStore.putWatch({ repo: 'test/repo', number: 2, thread_id: other.id }, { kind: 'pi', sessionId: 'pi-1' });
-    await poller.pollOnce();
-    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), [explicit]);
-    assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
-    return;
-  }
-  if (mode.endsWith('after branch switch')) {
-    await poller.pollOnce();
-    assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
-    // The room moves to a follow-up branch before its first PR merges.
-    const path = room.metadata.worktree.path;
-    // Without head.ref the recorded branch stands in, so the switched room still continues.
-    pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head, head: { sha: f.head } };
-    // An unknown branch neither ends the room nor consumes the watch.
-    await git(path, 'checkout', '-q', '--detach');
-    await poller.pollOnce();
-    assert.equal(h.store.getThread(room.id).thread.status, 'open');
-    assert.deepEqual((await h.app.githubAgents.repoStore.listWatches()).map((watch) => watch.number), [2]);
-    assert.deepEqual(commands, []);
-    await git(path, 'checkout', '-q', '-b', 'auto-next');
-    await writeFile(resolve(path, 'file'), 'next\n'); await git(path, 'commit', '-qam', 'next');
-    const next = await git(path, 'rev-parse', 'HEAD');
-    await git(f.repo, 'push', 'origin', `${next}:refs/pull/3/head`, `${next}:refs/heads/auto-next`);
-    // A marker already re-pointed by an attempt whose room save failed is retried, not treated as a mismatch.
-    await linkManagedWorktreePr(h.store.getThread(room.id).thread.metadata.worktree, undefined, 'auto-next');
-    await poller.pollOnce();
+    assert.equal(commands.at(-1).text, `[PR_WATCH] PR test/repo#${number} merged (${sha.slice(0, 7)})`);
+    assert.equal(commands.at(-1).sessionId, owner.sessionId);
     assert.equal(h.store.getThread(room.id).thread.status, 'open');
     assert.deepEqual(Object.values(h.deletedSessions).flat(), []);
-    assert.equal(h.store.getThread(room.id).thread.metadata.worktree.branch, 'auto-next');
-    assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
-    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
-    assert.match(commands.at(-1).text, /^\[PR_WATCH\] PR test\/repo#2 merged \(.*\) · room continues on auto-next$/);
-    // Branch-follow takes precedence over the reviewer grace period.
-    if (reviewer) return assert.deepEqual(h.store.getThread(room.id).messages.filter((item) => item.from.sessionId === 'pr_watch'), []);
-    const prs = { 2: pr, 3: { number: 3, state: 'open', merged: false, head: { sha: next, ref: 'auto-next' } } };
-    poller.fetchImpl = async (url) => {
-      const { pathname, searchParams } = new URL(url);
-      const body = pathname.endsWith('/pulls')
-        ? (searchParams.get('head') === 'test:auto-next' ? [{ number: 3, created_at: new Date().toISOString() }] : pulls)
-        : pathname.endsWith('/reviews') ? [] : prs[pathname.split('/').at(-1)];
-      return new Response(JSON.stringify(body), { status: 200 });
-    };
-    await poller.pollOnce();
-    assert.deepEqual((await h.app.githubAgents.repoStore.listWatches()).map((watch) => [watch.number, watch.thread_id]), [[3, room.id]]);
-    assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 3 });
-    prs[3] = { ...prs[3], state: 'closed', merged: true, merge_commit_sha: next };
-    await git(f.repo, 'merge', '--ff-only', next);
-    await poller.pollOnce();
-    assert.equal(h.store.getThread(room.id).thread.status, 'closed');
-    assert.equal(await exists(path), false);
-    assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/auto-next'])).code, 128);
-    assert.match(commands.at(-1).text, /^\[PR_WATCH\] PR test\/repo#3 merged .* · ended room .* · worktree: removed$/);
-    return;
   }
-  if (mode === 'then merged') {
-    // A read-only marker makes the real link write fail after the watch is stored.
-    const marker = resolve(room.metadata.worktree.path, await git(room.metadata.worktree.path, 'rev-parse', '--git-dir'), 'cadre-room.json');
-    await chmod(marker, 0o444);
-    await poller.pollOnce();
-    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
-    assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
-    await chmod(marker, 0o644);
-    // A read-only store directory makes the real watch save fail after the in-memory insert.
-    await chmod(resolve(h.stateDir, 'github'), 0o555);
-    await poller.pollOnce().catch(() => {});
-    await chmod(resolve(h.stateDir, 'github'), 0o755);
-    assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
-    assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
-    await poller.pollOnce();
-    const [watch] = await h.app.githubAgents.repoStore.listWatches();
-    assert.deepEqual([watch.number, watch.thread_id, watch.creator], [2, room.id, { kind: 'codex', sessionId: room.participants[0].sessionId }]);
-    assert.equal(h.store.getThread(room.id).thread.status, 'open');
-  }
-  // A merge payload without head.ref ends the room rather than keeping it alive.
-  let mergedAt = Date.now();
-  if (mode === 'reviewer deadline after restart') {
-    // A result from before the merge is not the report; the merge lands just before the 7-day watch expiry.
-    const early = await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
-      payload: { threadId: room.id, from: room.participants[0], type: 'result', body: 'ready for merge' } });
-    mergedAt = early.json().message.createdAt + 1000;
-    await poller.pollOnce();
-    const [{ createdAtMs }] = await h.app.githubAgents.repoStore.listWatches();
-    poller.now = () => createdAtMs + 7 * 24 * 60 * 60 * 1000 - 1000;
-  }
-  pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head, merged_at: new Date(mergedAt).toISOString(), head: mode === 'already merged' ? { sha: f.head } : pr.head };
-  await git(f.repo, 'merge', '--ff-only', f.head);
-  await poller.pollOnce();
-  if (reviewer) {
-    // The reviewer merged; the room waits for its report and nudges the participants once.
-    await poller.pollOnce();
-    const snapshot = h.store.getThread(room.id);
-    const nudges = snapshot.messages.filter((item) => item.from.kind === 'system' && item.from.sessionId === 'pr_watch');
-    assert.deepEqual(nudges.map((item) => [item.body, snapshot.deliveries.filter((delivery) => delivery.messageId === item.id).length]),
-      [['PR #2 merged. Post your terminal result now; this room ends in 10 minutes.', 2]]);
-    assert.equal(h.store.getThread(room.id).thread.status, 'open');
-    assert.deepEqual(commands, []);
-    const [{ graceUntilMs }] = await h.app.githubAgents.repoStore.listWatches();
-    if (mode === 'reviewer report') {
-      const posted = await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
-        payload: { threadId: room.id, from: room.participants[0], type: 'result', body: 'DIRECTOR REPORT: merged' } });
-      assert.equal(posted.statusCode, 200, posted.body);
-    } else {
-      // A restarted server reloads the persisted deadline: it neither ends the room early nor nudges again.
-      const { buildGithubAgentRepoStore } = await import('../modules/integrations/github-agents.mjs');
-      poller.repoStore = buildGithubAgentRepoStore({ storeFile: resolve(h.stateDir, 'github/repos.json'), env: { APP_STATE_STORAGE: 'file' } });
-      h.app.githubAgents.repoStore = poller.repoStore;
-      // Watch expiry passes mid-grace; the persisted deadline still decides.
-      poller.now = () => graceUntilMs - 1;
-      await poller.pollOnce();
-      assert.equal(h.store.getThread(room.id).thread.status, 'open');
-      assert.equal((await poller.repoStore.listWatches())[0].graceUntilMs, graceUntilMs);
-      poller.now = () => graceUntilMs;
-    }
-    await poller.pollOnce();
-    assert.equal(h.store.getThread(room.id).messages.filter((item) => item.from.sessionId === 'pr_watch').length, 1);
-  }
-  assert.equal(new URL(urls[0]).searchParams.get('head'), 'test:auto');
-  assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
-  assert.equal(h.store.getThread(room.id).thread.status, 'closed');
-  assert.equal(await exists(room.metadata.worktree.path), false);
   assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
-  assert.deepEqual(commands.map((item) => item.sessionId), ['pi-1']);
-  assert.match(commands[0].text, /^\[PR_WATCH\] PR test\/repo#2 merged .* · ended room .* · worktree: removed$/);
+  if (merge === 'reviewer') {
+    // The reviewer merged; its later report still reaches the owner because the merge did not end the room.
+    const posted = await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
+      payload: { threadId: room.id, from: room.participants[0], type: 'result', summary: 'merged · PR #3 · done', body: 'DIRECTOR REPORT: merged' } });
+    assert.equal(posted.statusCode, 200, posted.body);
+    assert.ok(posted.json().deliveries.some((delivery) => delivery.target.sessionId === owner.sessionId && delivery.status !== 'failed'), posted.body);
+  }
+  const ended = await h.app.inject({ method: 'POST', url: `/api/agent-bus/threads/${room.id}/end`, headers: h.authHeaders, payload: {} });
+  assert.equal(ended.statusCode, 200, ended.body);
+  assert.equal(ended.json().worktree.report, 'worktree: removed', ended.body);
+  assert.equal(await exists(path), false);
+  assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/auto'])).code, 128);
 });
 
 test('ended sessions do not block removal', async (t) => {
-  const f = await fixture(t); await git(f.repo, 'merge', '--ff-only', 'topic');
+  const f = await fixture(t);
   f.options.sessions = [{ lifecycle: 'ended', workDir: f.metadata.path }];
   assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, true);
 });
@@ -415,9 +292,7 @@ test('tracked external symlink is safely removed by git without modifying its ta
   await writeFile(resolve(target, 'precious'), 'keep');
   await symlink(target, resolve(f.metadata.path, 'docs'));
   await git(f.metadata.path, 'add', 'docs'); await git(f.metadata.path, 'commit', '-m', 'tracked link');
-  const head = await git(f.metadata.path, 'rev-parse', 'HEAD');
-  await git(f.repo, 'push', 'origin', `+${head}:refs/pull/1/head`);
-  f.setPr({ merged: true, number: 1, head: { sha: head } }); await git(f.repo, 'merge', '--ff-only', 'topic');
+  await git(f.metadata.path, 'push', 'origin', 'topic');
   assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, true);
   assert.equal(await readFile(resolve(target, 'precious'), 'utf8'), 'keep');
 });
@@ -499,22 +374,6 @@ test('bootstrap injects the merge policy from the base-ref config', async (t) =>
   }
 });
 
-for (const [name, change, reason] of [
-  ['mismatching marker', async (marker) => ({ ...marker, roomId: 'thr_other' }), 'marker mismatch: roomId'],
-  ['mismatching marker branch', async (marker) => ({ ...marker, branch: 'other' }), 'marker mismatch: branch'],
-  ['missing marker', async () => null, 'marker missing'],
-]) test(`re-pointing the branch keeps a ${name} failing cleanup`, async (t) => {
-  const f = await fixture(t);
-  const file = resolve(f.metadata.path, await git(f.metadata.path, 'rev-parse', '--git-dir'), 'cadre-room.json');
-  const marker = await change(JSON.parse(await readFile(file, 'utf8')));
-  if (marker) await writeFile(file, JSON.stringify(marker)); else await rm(file);
-  await git(f.metadata.path, 'checkout', '-q', '-b', 'next');
-  const next = await linkManagedWorktreePr(f.metadata, { repo: 'test/repo', number: 1 }, 'next');
-  assert.equal(next.branch, 'next');
-  assert.equal((await cleanupManagedWorktree(next, f.options)).reason, reason);
-  assert.equal(await exists(f.metadata.path), true);
-});
-
 test('invalid config and missing metadata fail closed', async (t) => {
   const f = await fixture(t);
   assert.equal((await cleanupManagedWorktree({ ...f.metadata, ignoredBaseline: undefined }, f.options)).reason, 'metadata missing ignoredBaseline');
@@ -527,19 +386,6 @@ test('invalid config and missing metadata fail closed', async (t) => {
   }
 });
 
-test('failed PR fetch keeps worktree even when head object exists', async (t) => {
-  const f = await fixture(t); await git(f.repo, 'push', 'origin', ':refs/pull/1/head');
-  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'git fetch failed');
-  assert.equal(await exists(f.metadata.path), true);
-});
-
-test('pushed local commits outside PR remain kept', async (t) => {
-  const f = await fixture(t); await writeFile(resolve(f.metadata.path, 'file'), 'extra');
-  await git(f.metadata.path, 'commit', '-am', 'extra'); await git(f.metadata.path, 'push', 'origin', 'topic');
-  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).reason, 'local commits not in PR');
-  assert.equal(await exists(f.metadata.path), true);
-});
-
 test('shared working directory through a symlink blocks removal', async (t) => {
   const f = await fixture(t); const alias = resolve(f.root, 'alias'); await symlink(f.metadata.path, alias);
   f.options.sessions = [{ workDir: alias }];
@@ -547,7 +393,7 @@ test('shared working directory through a symlink blocks removal', async (t) => {
 });
 
 test('sweep ignores marked worktrees outside the managed base', async (t) => {
-  const f = await fixture(t); await git(f.repo, 'merge', '--ff-only', 'topic');
+  const f = await fixture(t);
   const outsideBase = resolve(f.root, 'outside');
   const metadata = await createManagedWorktree({ repo: f.repo, branch: 'outside', base: 'origin/main', roomId: 'thr_outside', baseDir: outsideBase });
   await sweepManagedWorktrees({ baseDir: f.options.baseDir, getRoom: () => null, cleanup: (m) => cleanupManagedWorktree(m, f.options) });
@@ -581,9 +427,7 @@ test('ignored Cadre .agent_bus state alone does not block cleanup', async (t) =>
   const f = await fixture(t);
   await writeFile(resolve(f.metadata.path, '.gitignore'), 'node_modules/\ncache/\n.agent_bus/\n');
   await git(f.metadata.path, 'commit', '-am', 'ignore agent bus');
-  const head = await git(f.metadata.path, 'rev-parse', 'HEAD');
-  await git(f.repo, 'push', 'origin', `+${head}:refs/pull/1/head`);
-  f.setPr({ merged: true, number: 1, head: { sha: head } });
+  await git(f.metadata.path, 'push', 'origin', 'topic');
   await mkdir(resolve(f.metadata.path, '.agent_bus/hooks'), { recursive: true });
   await writeFile(resolve(f.metadata.path, '.agent_bus/hooks/codex-session.jsonl'), 'hook');
   await writeFile(resolve(f.metadata.path, '.agent_bus/session.json'), 'state');

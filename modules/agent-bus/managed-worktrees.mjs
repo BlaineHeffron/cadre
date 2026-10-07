@@ -85,7 +85,7 @@ async function rollbackManagedWorktree({ repo, path, branch, baseHead }) {
   await git(repo, ['worktree', 'prune']);
 }
 
-export async function cleanupManagedWorktree(metadata, { getPr, rooms = [], sessions = [], baseDir = managedWorktreeBase, spawnFailed = false } = {}) {
+export async function cleanupManagedWorktree(metadata, { rooms = [], sessions = [], baseDir = managedWorktreeBase, spawnFailed = false } = {}) {
   const keep = (reason) => ({ removed: false, reason, report: `worktree: kept (${reason})` });
   const keepFiles = (reason, files) => keep(`${reason}: ${files.slice(0, 3).join(', ')}${files.length > 3 ? `, ... +${files.length - 3} more` : ''}`);
   try {
@@ -96,40 +96,14 @@ export async function cleanupManagedWorktree(metadata, { getPr, rooms = [], sess
     const marker = JSON.parse(await readFile(await markerPath(path), 'utf8').catch((error) => { throw error.code === 'ENOENT' ? new Error('marker missing') : error; }));
     const mismatch = ['path', 'repo', 'branch', 'roomId', 'cleanup', 'baseHead', 'ignoredBaseline', 'disposable'].find((key) => JSON.stringify(marker[key]) !== JSON.stringify(metadata[key]));
     if (mismatch) return keep(`marker mismatch: ${mismatch}`);
-    const current = await git(path, ['branch', '--show-current']);
-    if (current !== branch) return keep(`branch changed from ${branch} to ${current || 'detached HEAD'}`);
     // Undoing an untouched failed spawn is independent of the policy recorded at creation; legacy metadata has none and is kept.
     if (!spawnFailed && cleanup !== 'on-merge') return keep(cleanup ? 'cleanup off' : 'cleanup policy not recorded');
-    const head = await git(path, ['rev-parse', 'HEAD']);
     if (spawnFailed) {
-      if (head !== baseHead) return keep('local commits after failed spawn');
+      if (await git(path, ['rev-parse', 'HEAD']) !== baseHead) return keep('local commits after failed spawn');
     } else {
-      const pr = await getPr?.(metadata);
-      if (!pr?.merged || !pr.head?.sha || !pr.number) return keep('PR not merged');
-      await git(repo, ['fetch', 'origin', `pull/${pr.number}/head`]);
-      const prHead = await git(repo, ['rev-parse', '--verify', `${pr.head.sha}^{commit}`]);
-      if (await git(repo, ['rev-parse', 'FETCH_HEAD']) !== prHead) return keep('PR head changed during fetch');
-      const ancestor = await exec('git', ['-C', repo, 'merge-base', '--is-ancestor', head, prHead]);
-      if (![0, 1].includes(ancestor.code)) throw new Error('ancestry check failed');
-      let contained = ancestor.code === 0;
-      if (!contained) {
-        const commits = (await git(path, ['rev-list', `${baseHead}..HEAD`])).split('\n').filter(Boolean);
-        const patches = async (commits) => {
-          const ids = [];
-          for (const commit of commits) {
-            const patch = await git(repo, ['show', '--pretty=format:', '--no-ext-diff', commit]);
-            const id = (await git(repo, ['patch-id', '--stable'], patch)).split(' ')[0];
-            if (!id) throw new Error('commit has no patch id');
-            ids.push(id);
-          }
-          return ids;
-        };
-        const prCommits = (await git(repo, ['rev-list', `${baseHead}..${prHead}`])).split('\n').filter(Boolean);
-        const prIds = new Set(await patches(prCommits));
-        contained = commits.length > 0 && (await patches(commits)).every((id) => prIds.has(id));
-      }
-      const unpushed = await git(path, ['log', '--format=%H', 'HEAD', '--not', '--remotes']);
-      if (!contained) return keep(unpushed ? 'unpushed commits not in PR' : 'local commits not in PR');
+      // Any branch may be checked out; every commit reachable from HEAD must be on some remote-tracking ref.
+      await git(repo, ['fetch', '--no-prune', 'origin']);
+      if (await git(path, ['log', '--format=%H', 'HEAD', '--not', '--remotes'])) return keep('unpushed commits');
     }
     const busDir = await lstat(resolve(path, '.agent_bus')).catch((error) => { if (error.code !== 'ENOENT') throw error; });
     const ownedBus = (!busDir || (busDir.isDirectory() && !busDir.isSymbolicLink())) && !await git(path, ['ls-files', '--', '.agent_bus']);
@@ -166,7 +140,10 @@ export async function cleanupManagedWorktree(metadata, { getPr, rooms = [], sess
       await git(repo, ['worktree', 'lock', '--reason', `cadre room ${roomId}`, path]);
       throw error;
     }
-    const deletion = await exec('git', ['-C', repo, ...(spawnFailed ? ['update-ref', '-d', `refs/heads/${branch}`, baseHead] : ['branch', '-d', branch])]);
+    // The recorded branch is deleted only when fully on a remote (or still the untouched base after a failed spawn).
+    const local = !spawnFailed && await exec('git', ['-C', repo, 'log', '--format=%H', `refs/heads/${branch}`, '--not', '--remotes']);
+    const deletion = spawnFailed ? await exec('git', ['-C', repo, 'update-ref', '-d', `refs/heads/${branch}`, baseHead])
+      : local.code !== 0 ? local : local.stdout ? { code: 1, stderr: 'unpushed commits' } : await exec('git', ['-C', repo, 'branch', '-D', branch]);
     await git(repo, ['worktree', 'prune']);
     return { removed: true, branchKept: deletion.code !== 0, report: `worktree: removed${deletion.code !== 0 ? ` (branch kept: ${deletion.stderr.trim()})` : ''}` };
   } catch (error) { return keep(error.message); }
@@ -201,16 +178,4 @@ async function unlinkExternalLinks(path) {
     if ((await lstat(file)).isSymbolicLink() && !inside(path, await realpath(file))
       && !await git(path, ['ls-files', '-z', '--', entry])) await unlink(file);
   }
-}
-
-export async function linkManagedWorktreePr(metadata, pr, branch = metadata.branch) {
-  // Patch only the PR and branch so a missing or mismatching marker still keeps the worktree at cleanup.
-  // The marker branch moves only from the recorded branch, or stays if a prior attempt moved it before the room save failed.
-  const file = await markerPath(metadata.path);
-  const text = await readFile(file, 'utf8').catch((error) => { if (error.code !== 'ENOENT') throw error; return null; });
-  if (text !== null) {
-    const marker = JSON.parse(text);
-    await writeFile(file, JSON.stringify({ ...marker, pr, branch: [metadata.branch, branch].includes(marker.branch) ? branch : marker.branch }));
-  }
-  return { ...metadata, branch, pr };
 }
