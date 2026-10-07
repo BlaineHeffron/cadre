@@ -19,7 +19,8 @@ export function appendTranscript(current, text, max = Infinity) {
 // One hold at a time: `busy` spans mic acquisition, recording, and transcription, so neither the
 // button nor the hotkey can start over a previous hold. `open()` resolves to a capture session whose
 // finish(keep) stops it, releases the mic, and resolves to the text ('' when the hold ended early).
-export function holdToTalk({ open, onStatus, onText, onError, maxMs = MAX_RECORD_MS }) {
+// onEmpty fires when a kept recording transcribes to no speech.
+export function holdToTalk({ open, onStatus, onText, onEmpty, onError, maxMs = MAX_RECORD_MS }) {
   let busy = false;
   let release = null;
   async function start() {
@@ -39,7 +40,9 @@ export function holdToTalk({ open, onStatus, onText, onError, maxMs = MAX_RECORD
         onStatus('transcribing');
       }
       release = null;
-      onText(await session.finish(keep));
+      const text = await session.finish(keep);
+      if (keep && !text?.trim()) onEmpty();
+      onText(text);
     } catch (error) {
       onError(error);
     } finally {
@@ -117,6 +120,7 @@ export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
     })),
     onStatus: setStatus,
     onText: (text) => { if (text) onResultRef.current?.(text); },
+    onEmpty: () => addToast('No speech detected — check your microphone input', 'warning'),
     onError: (error) => {
       const fallback = error.statusCode === 503 && Boolean(SpeechRecognition) && !useBrowserSpeech;
       if (fallback) useBrowserSpeech = true;

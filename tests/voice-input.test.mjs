@@ -47,12 +47,13 @@ function fakeMic({ failConstruct, failStart, chunks = [new Blob(['clip'], { type
 }
 
 function holdWith(open, maxMs) {
-  const log = { statuses: [], texts: [], errors: [] };
+  const log = { statuses: [], texts: [], errors: [], empties: 0 };
   const hold = holdToTalk({
     open,
     maxMs,
     onStatus: (s) => log.statuses.push(s),
     onText: (t) => log.texts.push(t),
+    onEmpty: () => { log.empties += 1; },
     onError: (e) => log.errors.push(e.message),
   });
   return { hold, log };
@@ -70,7 +71,19 @@ describe('voice input hold-to-talk lifecycle', () => {
     assert.equal(mic.tracks[0].live, false);
     assert.deepEqual(mic.transcribed, ['clip']);
     assert.deepEqual(log.texts, ['heard']);
+    assert.equal(log.empties, 0);
     assert.deepEqual(log.statuses, ['recording', 'transcribing', 'idle']);
+  });
+
+  it('reports no speech when a kept recording transcribes to blank text', async () => {
+    for (const heard of ['', '  \n', undefined]) {
+      const mic = fakeMic();
+      mic.transcribe = async () => heard;
+      const { hold, log } = holdWith(() => openRecorder(mic), 1);
+      await hold.start();
+      assert.equal(log.empties, 1);
+      assert.deepEqual(log.errors, []);
+    }
   });
 
   it('types the clip from its chunks after the recorder clears its mimeType', async () => {
@@ -121,6 +134,7 @@ describe('voice input hold-to-talk lifecycle', () => {
     assert.equal(mic.tracks[0].live, false);
     assert.deepEqual(mic.transcribed, []);
     assert.deepEqual(log.texts, ['']);
+    assert.equal(log.empties, 0);
     assert.deepEqual(log.statuses, ['recording', 'idle']);
   });
 
