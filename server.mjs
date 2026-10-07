@@ -20,7 +20,7 @@ import { deepseekSessionsPlugin, getDeepSeekProviderHealth } from './modules/ses
 import { agentInterfacePlugin } from './modules/agent/interface.mjs';
 import { agentBusPlugin } from './modules/agent-bus/index.mjs';
 import { opsObservabilityPlugin } from './modules/ops/observability.mjs';
-import { commandCenterAIPlugin } from './modules/integrations/command-center-ai.mjs';
+import { commandCenterAIPlugin, onHumanQueueChange } from './modules/integrations/command-center-ai.mjs';
 import { agentProviderPreferencesPlugin } from './modules/agent/provider-preferences.mjs';
 import { fleetPlugin } from './modules/fleet/index.mjs';
 import { githubAgentsPlugin } from './modules/integrations/github-agents-plugin.mjs';
@@ -646,6 +646,7 @@ function startTelegramBridge() {
     sender: buildTelegramSender({ stateDir, logger: app.log, ttsAvailable: speechSynthesisAvailable }),
     listSessions: listTelegramSessions,
     requestImpl: internalRequest,
+    watchQueue: onHumanQueueChange,
     logger: app.log,
   });
   const started = telegramBridge.start();

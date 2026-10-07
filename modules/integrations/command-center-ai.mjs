@@ -326,8 +326,16 @@ export async function serializeWorkQueue({ status = 'open' } = {}) {
   return serializeWorkQueueSync({ status });
 }
 
-function broadcastWorkQueue(wsManager, type = 'updated') {
+const workQueueListeners = new Set();
+
+export function onHumanQueueChange(listener) {
+  workQueueListeners.add(listener);
+  return () => workQueueListeners.delete(listener);
+}
+
+function broadcastWorkQueue(wsManager, type, item) {
   wsManager?.broadcast?.('command-center:work-queue', type, serializeWorkQueueSync({ status: 'all' }));
+  for (const listener of workQueueListeners) listener(item);
 }
 
 export async function addHumanQueueItem(input = {}, { wsManager, persist = true, principal } = {}) {
@@ -382,7 +390,7 @@ export async function addHumanQueueItem(input = {}, { wsManager, persist = true,
   humanWorkQueue.unshift(item);
   if (humanWorkQueue.length > 200) humanWorkQueue.length = 200;
   if (persist) await persistHumanWorkQueue();
-  broadcastWorkQueue(wsManager, 'item_created');
+  broadcastWorkQueue(wsManager, 'item_created', item);
   return item;
 }
 
@@ -496,7 +504,7 @@ export async function answerHumanQueueItem(id, input = {}, {
     item.updatedAt = item.answer.answeredAt;
   }
   if (persist) await persistHumanWorkQueue();
-  broadcastWorkQueue(wsManager, item.status === 'routed' ? 'item_routed' : item.status === 'delivery_failed' ? 'item_delivery_failed' : 'item_answered');
+  broadcastWorkQueue(wsManager, item.status === 'routed' ? 'item_routed' : item.status === 'delivery_failed' ? 'item_delivery_failed' : 'item_answered', item);
 
   if (activeSupervisorSession?.sessionName && item.answer.delivery?.routed !== true) {
     const routeNote = item.answer.delivery?.error ? ` Delivery note: ${item.answer.delivery.error}.` : '';
@@ -535,7 +543,7 @@ export async function acknowledgeHumanQueueItem(id, input = {}, { wsManager, per
   item.updatedAt = acknowledgedAt;
   item.events.push(queueEvent('acknowledged'));
   if (persist) await persistHumanWorkQueue();
-  broadcastWorkQueue(wsManager, 'item_acknowledged');
+  broadcastWorkQueue(wsManager, 'item_acknowledged', item);
   return item;
 }
 
@@ -580,7 +588,7 @@ export async function updateHumanQueueItem(id, input = {}, { wsManager, principa
   item.updatedAt = new Date().toISOString();
   item.events.push(queueEvent('updated'));
   if (persist) await persistHumanWorkQueue();
-  broadcastWorkQueue(wsManager, 'updated');
+  broadcastWorkQueue(wsManager, 'updated', item);
   return item;
 }
 
@@ -604,7 +612,7 @@ export async function dismissHumanQueueItem(id, { wsManager, sendSessionInput, p
   item.updatedAt = item.dismissedAt;
   item.events.push(queueEvent(item.status));
   if (persist) await persistHumanWorkQueue();
-  broadcastWorkQueue(wsManager, 'item_dismissed');
+  broadcastWorkQueue(wsManager, 'item_dismissed', item);
   return item;
 }
 
