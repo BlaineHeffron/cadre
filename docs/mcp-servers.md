@@ -52,6 +52,7 @@ workspace-global `.mcp.json`, `.codex/config.toml`, or `.claude/settings.local.j
 | `rea` | stdio | none | [`rea-agents`](https://github.com/morluto/rea) (MIT; pinned npm dependency, runs `rea mcp`); decompiled output is untrusted |
 | `bevy_brp` | stdio | none | [`bevy_brp_mcp`](https://github.com/natepiano/bevy_brp) 0.22.x for Bevy 0.19; operator runs `cargo install bevy_brp_mcp` |
 | `pixellab` | http | `DM_MCP_PIXELLAB_API_KEY` / `PIXELLAB_API_KEY` | PixelLab's official `https://api.pixellab.ai/mcp` |
+| `grok-imagine`, `gpt-image` | stdio | `DM_MCP_XAI_API_KEY` / `XAI_API_KEY`, `DM_MCP_OPENAI_API_KEY` / `OPENAI_API_KEY` (forwarded) | [`image-router-mcp`](https://github.com/JiaDians/image-router-mcp) (MIT; pinned npm dependency) |
 | `filesystem`, `git`, `fetch`, `memory`, `sequential-thinking`, `time` | stdio | none | maintained MCP reference servers |
 | `espocrm`, `invoice-ninja` | http | API key env | self-hosted; endpoint must be supplied |
 | `seodata` | stdio | none (optional `SEODATA_API_KEY`) | locally built [`seodata-mcp`](https://github.com/BlaineHeffron/seodata-mcp) |
@@ -83,6 +84,20 @@ only. No send scope is requested anywhere.
   `MESHY_API_KEY` is forwarded into the stdio server, so it lands in the
   `0600` Claude/Pi launch config and in Codex `-c` (visible in `ps`).
   `pixellab` stays on the loopback proxy; the agent never sees the token.
+- `grok-imagine` and `gpt-image` spend paid credits per image, require explicit
+  selection, and are in no profile. Both IDs run the same pinned package and
+  each receives only its own provider key, renamed to `XAI_API_KEY` or
+  `OPENAI_API_KEY`. Like `MESHY_API_KEY`, that key lands in the `0600`
+  Claude/Pi launch config and in Codex `-c` (visible in `ps`). `grok-imagine`
+  pins `grok-imagine-image-2.0`, overriding any model the agent passes.
+  `gpt-image` defaults to `gpt-image-2.5-flare`, and an agent can still request
+  `gpt-image-2.5-sunburst` per call. Each ID exposes all three upstream tools
+  (OpenAI, Google, xAI); only the selected provider's key is forwarded
+  explicitly, but there is no provider isolation: a key the agent runtime
+  already inherits can still reach the other tools. Images are written to
+  `<session work dir>/generated-images/` (the Cadre state dir's
+  `generated-images/` when a session has no work dir) unless the agent passes
+  an `output_path`.
 - `rea` and `bevy_brp` require explicit selection and are in no profile.
   REA reads JS/Electron trees and ASARs, .NET assemblies, and loopback
   browser/Electron targets with only Node. Native analysis needs Ghidra or
@@ -146,6 +161,8 @@ DM_MCP_GITHUB_TOKEN=...
 DM_MCP_EXA_API_KEY=...
 DM_MCP_PIXELLAB_API_KEY=...                           # pixellab.ai account API token
 MESHY_API_KEY=...                                     # forwarded into the meshy stdio server (agent-visible)
+DM_MCP_XAI_API_KEY=...                                # or XAI_API_KEY; forwarded into grok-imagine (agent-visible)
+DM_MCP_OPENAI_API_KEY=...                             # or OPENAI_API_KEY; forwarded into gpt-image (agent-visible)
 DM_MCP_HUGGINGFACE_TOKEN=...
 DM_MCP_ESPOCRM_TOKEN=...
 DM_MCP_INVOICE_NINJA_TOKEN=...

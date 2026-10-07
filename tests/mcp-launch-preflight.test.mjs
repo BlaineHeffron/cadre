@@ -481,6 +481,38 @@ describe('MCP launch preflight', () => {
     assert.ok(result.preflight.rea.toolCount > 0);
   });
 
+  it('launches the pinned image server with the key, model pin, and worktree output dir', { timeout: 60000 }, async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'dueno-image-preflight-'));
+    tempDirs.push(stateDir);
+    process.env.CADRE_STATE_DIR = stateDir;
+    const expected = {
+      DEFAULT_XAI_IMAGE_MODEL: 'grok-imagine-image-2.0',
+      XAI_API_KEY: 'test-key',
+      DEFAULT_OUTPUT_DIR: '/work/tree/generated-images',
+    };
+    for (const backendType of ['codex', 'pi', 'claude']) {
+      // Real initialize + tools/list against the pinned upstream; the dummy key is never used to generate.
+      const result = await prepareMcpCapabilityLaunch({
+        resolved: resolved(['grok-imagine'], backendType, backendType),
+        backendType,
+        sessionId: `grok-imagine-${backendType}`,
+        workDir: '/work/tree',
+        sourceConfig: sourceConfig(),
+        credentialStore: credentialStore(),
+        stdioEnv: { DM_MCP_XAI_API_KEY: 'test-key', OPENAI_API_KEY: 'other' },
+      });
+      assert.deepEqual(result.preflight['grok-imagine'], { state: 'ready', toolCount: 3 });
+      if (backendType === 'codex') {
+        const env = Object.entries(expected).map(([key, value]) => `${key}="${value}"`).join(', ');
+        assert.equal(result.prepared.codexArgs.includes(`mcp_servers.grok-imagine.env={${env}}`), true);
+      } else {
+        const path = backendType === 'pi' ? result.prepared.piConfigPath : result.prepared.claudeConfigPath;
+        const configFile = JSON.parse(await readFile(path, 'utf8'));
+        assert.deepEqual(configFile.mcpServers['grok-imagine'].env, expected);
+      }
+    }
+  });
+
   it('rejects a selected stdio server when MCP initialize fails', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'dueno-stdio-preflight-'));
     tempDirs.push(stateDir);

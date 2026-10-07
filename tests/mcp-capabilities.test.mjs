@@ -51,7 +51,7 @@ describe('MCP capability catalog', () => {
       'google-docs', 'google-sheets', 'google-slides', 'google-calendar', 'google-chat', 'google-contacts',
       'github', 'sentry', 'linear', 'vercel', 'supabase', 'cloudflare-observability',
       'notion', 'atlassian', 'exa', 'huggingface', 'deepwiki', 'wolfram',
-      'playwright', 'meshy', 'rea', 'bevy_brp', 'pixellab', 'filesystem', 'git', 'fetch', 'memory', 'sequential-thinking', 'time',
+      'playwright', 'meshy', 'rea', 'bevy_brp', 'pixellab', 'grok-imagine', 'gpt-image', 'filesystem', 'git', 'fetch', 'memory', 'sequential-thinking', 'time',
       'invoice-ninja',
     ]);
     const serialized = JSON.stringify(value);
@@ -62,7 +62,7 @@ describe('MCP capability catalog', () => {
     assert.equal(value.servers.find((entry) => entry.id === 'dueno').required, true);
     assert.equal(value.servers.find((entry) => entry.id === 'businessos').required, false);
     assert.equal(value.servers.find((entry) => entry.id === 'businessos').requiresExplicitSelection, true);
-    for (const id of ['meshy', 'pixellab', 'rea', 'bevy_brp']) {
+    for (const id of ['meshy', 'pixellab', 'grok-imagine', 'gpt-image', 'rea', 'bevy_brp']) {
       const entry = value.servers.find((server) => server.id === id);
       assert.equal(entry.requiresExplicitSelection, true);
       assert.equal(entry.alwaysLoad, false);

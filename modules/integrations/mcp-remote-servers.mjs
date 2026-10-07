@@ -9,9 +9,10 @@
 
 import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { delimiter, dirname, join } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { config } from '../../config.mjs';
 import { readEnv } from '../platform/cadre-env.mjs';
+import { runtimeStatePath } from '../ops/runtime-state.mjs';
 
 export const REMOTE_MCP_AUTH = Object.freeze({
   /** Reachable with no credential. */
@@ -32,9 +33,20 @@ function remote(value) {
     scopes: Object.freeze([...(value.scopes || [])]),
     args: Object.freeze([...(value.args || [])]),
     envKeys: Object.freeze([...(value.envKeys || [])]),
+    env: Object.freeze({ ...value.env }),
     headerEnv: Object.freeze(headerEnv),
     requiredHeaders: Object.freeze([...(value.requiredHeaders || [])]),
     oauthHeader: text(value.oauthHeader),
+  });
+}
+
+function imageRouter(value) {
+  return remote({
+    transport: 'stdio',
+    command: process.execPath,
+    args: [join(dirname(createRequire(import.meta.url).resolve('image-router-mcp/package.json')), 'dist/index.js')],
+    outputDirEnv: 'DEFAULT_OUTPUT_DIR',
+    ...value,
   });
 }
 
@@ -281,6 +293,20 @@ const DEFINITIONS = Object.freeze({
   }),
   // Installed by the operator with `cargo install bevy_brp_mcp`; resolved from PATH, then ~/.cargo/bin.
   bevy_brp: remote({ transport: 'stdio', binary: 'bevy_brp_mcp' }),
+  // One pinned package serves both providers; each ID forwards only its own key and pins its model.
+  // Keys are read per call, so the server starts without one; availability checks secretEnv instead.
+  'grok-imagine': imageRouter({
+    secretEnv: ['DM_MCP_XAI_API_KEY', 'XAI_API_KEY'],
+    secretEnvName: 'XAI_API_KEY',
+    // Overrides the per-call model argument.
+    env: { DEFAULT_XAI_IMAGE_MODEL: 'grok-imagine-image-2.0' },
+  }),
+  'gpt-image': imageRouter({
+    secretEnv: ['DM_MCP_OPENAI_API_KEY', 'OPENAI_API_KEY'],
+    secretEnvName: 'OPENAI_API_KEY',
+    // Default only: a per-call model argument still wins.
+    env: { DEFAULT_OPENAI_IMAGE_MODEL: 'gpt-image-2.5-flare' },
+  }),
   pixellab: remote({
     url: 'https://api.pixellab.ai/mcp',
     auth: REMOTE_MCP_AUTH.apiKeyEnv,
@@ -450,11 +476,17 @@ export function remoteMcpServerIds() {
  * Environment a stdio server needs, taken from the fleet process. Absent keys
  * are omitted so the server falls back to its own defaults.
  */
-export function remoteMcpStdioEnv(server, { env = process.env } = {}) {
-  const result = {};
+export function remoteMcpStdioEnv(server, { env = process.env, workDir = '' } = {}) {
+  const result = { ...server?.env };
   for (const key of server?.envKeys || []) {
     const value = text(env[key]);
     if (value) result[key] = value;
+  }
+  const secret = server?.secretEnvName ? firstEnv(server.secretEnv || [], env) : '';
+  if (secret) result[server.secretEnvName] = secret;
+  // Absolute, so the server never falls back to its own cwd.
+  if (server?.outputDirEnv) {
+    result[server.outputDirEnv] = text(workDir) ? resolve(text(workDir), 'generated-images') : runtimeStatePath('generated-images');
   }
   return result;
 }
