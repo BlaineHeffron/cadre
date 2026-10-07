@@ -374,7 +374,7 @@ describe('image generation servers', () => {
       for (const key of [override, standard]) {
         assert.equal(remoteMcpAvailability(id, { sourceConfig, env: { [key]: 'k' } }).configured, true);
       }
-      // The DM_MCP_* override wins, and the other provider's key never reaches this server.
+      // The DM_MCP_* override wins, and the other provider's key is not explicitly forwarded.
       const env = { OPENAI_API_KEY: 'other', XAI_API_KEY: 'other', [override]: 'override', [standard]: 'standard' };
       assert.deepEqual(remoteMcpStdioEnv(server, { env, workDir: '/work/tree' }), {
         ...pin,
@@ -386,6 +386,10 @@ describe('image generation servers', () => {
         [standard]: 'standard',
         DEFAULT_OUTPUT_DIR: runtimeStatePath('generated-images'),
       });
+      assert.equal(
+        remoteMcpStdioEnv(server, { env: {}, workDir: 'rel/tree' }).DEFAULT_OUTPUT_DIR,
+        join(process.cwd(), 'rel/tree/generated-images'),
+      );
     });
   }
 });
