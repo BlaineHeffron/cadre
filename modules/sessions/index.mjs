@@ -161,6 +161,15 @@ export async function validatePiCliContract(binary, {
 
 export { stripCodexIndent };
 
+// Telegram is an interactive operator channel; providers such as Codex can
+// accept additional prompts while a turn is active and queue them in the
+// harness itself, so do not strand those prompts waiting for an idle state that
+// may never be observed. Codex steers room messages into the running turn and
+// Claude Code queues them for its next tool boundary.
+export function allowsActiveQueue(source, providerId) {
+  return source === 'telegram_answer' || (source === 'agent_bus' && ['codex', 'claude'].includes(providerId));
+}
+
 export function isTmuxMissingSessionError(stderr = '') {
   return /can't find (?:session|pane)|no such (?:session|pane)|(?:session|pane) not found|error connecting to .+\(No such file or directory\)|no server running on \S+/i.test(String(stderr || ''));
 }
@@ -2920,12 +2929,7 @@ async function sessionsPlugin(app, {
         operation: enter === false ? 'terminal_text' : 'message',
         text: resolvedText,
         enter,
-        // Telegram is an interactive operator channel. Providers such as
-        // Codex can accept additional prompts while a turn is active and
-        // queue them in the harness itself; do not strand those prompts in
-        // Dueno waiting for an idle state that may never be observed.
-        // Codex and Claude room messages steer or queue into the running turn the same way.
-        allowActiveQueue: source === 'telegram_answer' || (source === 'agent_bus' && ['codex', 'claude'].includes(config.id)),
+        allowActiveQueue: allowsActiveQueue(source, config.id),
         resolveOnAwaiting: true,
         deadlineAt,
       });

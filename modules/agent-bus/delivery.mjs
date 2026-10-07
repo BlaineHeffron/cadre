@@ -50,23 +50,27 @@ export function createAgentBusDelivery({ app, store, adapters, wsManager, observ
     return updated;
   }
 
-  // Tell the room owner once per episode when a delivery sits behind a blocking dialog.
-  async function trackBlockedHold(message, delivery, state) {
-    const latest = store.getDelivery(delivery.id) || delivery;
-    if (state?.status !== 'blocked') {
-      if (latest.blockedSince) await store.updateDelivery(delivery.id, { blockedSince: null, blockedOwnerNotifiedAt: null });
-      return;
-    }
-    if (!latest.blockedSince) return store.updateDelivery(delivery.id, { blockedSince: Date.now() });
-    if (latest.blockedOwnerNotifiedAt || Date.now() - latest.blockedSince < BLOCKED_NOTIFY_MS) return;
-    await store.updateDelivery(delivery.id, { blockedOwnerNotifiedAt: Date.now() });
+  // Tell the room owner once per room+target episode when deliveries sit behind
+  // a blocking dialog. In memory: a restart starts a new episode.
+  const blockedEpisodes = new Map();
+  async function trackBlockedHold(message, target, state) {
+    const key = `${message.threadId}|${target.kind}:${target.sessionId}`;
+    if (state?.status !== 'blocked') return void blockedEpisodes.delete(key);
+    const episode = blockedEpisodes.get(key);
+    if (!episode) return void blockedEpisodes.set(key, { since: Date.now(), notified: false });
+    if (episode.notified || Date.now() - episode.since < BLOCKED_NOTIFY_MS) return;
     const owner = store.getThread(message.threadId)?.thread.createdBy;
-    const target = delivery.target;
     if (!adapters?.[owner?.kind] || (owner.kind === target.kind && owner.sessionId === target.sessionId)) return;
-    const minutes = Math.floor((Date.now() - latest.blockedSince) / 60_000);
-    await store.createMessage({ threadId: message.threadId, from: { kind: 'system', sessionId: 'agent-bus' },
-      targets: [{ kind: owner.kind, sessionId: owner.sessionId }], createdBy: 'agent-bus', replyTo: message.id,
-      body: `Delivery to ${target.kind}:${target.sessionId} held ${minutes} min on a blocking ${state.interaction?.kind || 'unknown'} interaction. That session needs an operator answer.` });
+    const minutes = Math.floor((Date.now() - episode.since) / 60_000);
+    try {
+      const notice = await store.createMessage({ threadId: message.threadId, from: { kind: 'system', sessionId: 'agent-bus' },
+        targets: [{ kind: owner.kind, sessionId: owner.sessionId }], createdBy: 'agent-bus', replyTo: message.id,
+        body: `Delivery to ${target.kind}:${target.sessionId} held ${minutes} min on a blocking ${state.interaction?.kind || 'unknown'} interaction. That session needs an operator answer.` });
+      episode.notified = true;
+      broadcast(wsManager, `agent-bus:thread:${message.threadId}`, 'message_created', notice);
+    } catch (err) {
+      app.log?.warn?.({ threadId: message.threadId, target, err: err.message }, 'Blocked-delivery owner notice failed');
+    }
   }
 
   async function deliverMessage(message, delivery) {
@@ -83,14 +87,13 @@ export function createAgentBusDelivery({ app, store, adapters, wsManager, observ
     try {
       const adapter = await resolveAgentSession(target);
       const session = await adapter.getSession(app, target.sessionId);
+      await trackBlockedHold(message, target, session?.state);
       if (!canDeliverNow(target.kind, session?.state)) {
         const holdReason = holdReasonFor(session);
-        const held = await markHold(message, delivery, {
+        return markHold(message, delivery, {
           holdReason,
           holdDetail: session?.state?.reason || session?.state?.status || holdReason,
         });
-        if (held.status === 'queued') await trackBlockedHold(message, held, session?.state);
-        return held;
       }
       let content = '';
       try { content = await adapter.captureSession(app, target.sessionId); } catch {}

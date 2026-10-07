@@ -114,16 +114,21 @@ function paneState(fixture, extra = []) {
   ]);
 }
 
-function deliveryHarness(kind, state) {
-  const message = { id: 'msg_3', threadId: 'thr_1', from: { kind: 'claude', sessionId: 'a1' }, body: 'hello' };
-  let delivery = { id: 'del_3', messageId: 'msg_3', target: { kind, sessionId: 'c1' }, status: 'queued', attempts: 0 };
+function deliveryHarness(kind, initialState) {
+  let state = initialState;
+  const deliveries = new Map();
   const created = [];
+  let failCreate = false;
   const store = {
     getThread: () => ({ thread: { status: 'open', createdBy: { kind: 'codex', sessionId: 'owner' } } }),
-    getDelivery: () => delivery,
+    getDelivery: (id) => deliveries.get(id),
     getMessage: () => null,
-    async updateDelivery(_id, patch) { delivery = { ...delivery, ...patch }; return delivery; },
-    async createMessage(input) { created.push(input); return { message: input, deliveries: [] }; },
+    async updateDelivery(id, patch) { deliveries.set(id, { ...deliveries.get(id), ...patch }); return deliveries.get(id); },
+    async createMessage(input) {
+      if (failCreate) throw new Error('store down');
+      created.push(input);
+      return { message: input, deliveries: [] };
+    },
   };
   let injected = 0;
   const { deliverMessage } = createAgentBusDelivery({
@@ -146,8 +151,13 @@ function deliveryHarness(kind, state) {
   });
   return {
     created,
-    async deliver() {
-      const updated = await deliverMessage(message, delivery);
+    setState(next) { state = next; },
+    failCreate(value) { failCreate = value; },
+    async deliver(n = 3) {
+      const message = { id: `msg_${n}`, threadId: 'thr_1', from: { kind: 'claude', sessionId: 'a1' }, body: 'hello' };
+      const id = `del_${n}`;
+      if (!deliveries.has(id)) deliveries.set(id, { id, messageId: message.id, target: { kind, sessionId: 'c1' }, status: 'queued', attempts: 0 });
+      const updated = await deliverMessage(message, deliveries.get(id));
       return { injected, status: updated.status, holdReason: updated.holdReason };
     },
   };
@@ -181,23 +191,41 @@ test('delivers to a working or thinking Claude pane, which queues input for the 
   }
 });
 
-test('holds Claude delivery behind a permission dialog and tells the owner once after five minutes', async (t) => {
-  const state = paneState('claude-reconstructed-permission');
-  assert.equal(state.status, 'blocked');
-  const clock = t.mock.timers;
-  clock.enable({ apis: ['Date'], now: 1_000_000 });
-  const harness = deliveryHarness('claude', state);
-  assert.deepEqual(await harness.deliver(), { injected: 0, status: 'queued', holdReason: 'target_busy' });
-  clock.tick(5 * 60_000 - 1);
-  await harness.deliver();
+test('holds Claude delivery behind a permission dialog and tells the owner once per episode after five minutes', async (t) => {
+  const blocked = paneState('claude-2-1-293-permission');
+  assert.equal(blocked.status, 'blocked');
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  const harness = deliveryHarness('claude', blocked);
+  assert.deepEqual(await harness.deliver(1), { injected: 0, status: 'queued', holdReason: 'target_busy' });
+  t.mock.timers.tick(5 * 60_000 - 1);
+  await harness.deliver(2);
   assert.equal(harness.created.length, 0);
-  clock.tick(1);
-  await harness.deliver();
-  clock.tick(10 * 60_000);
-  assert.deepEqual(await harness.deliver(), { injected: 0, status: 'queued', holdReason: 'target_busy' });
+
+  // A notice that fails to persist is retried on the next attempt.
+  t.mock.timers.tick(1);
+  harness.failCreate(true);
+  await harness.deliver(1);
+  harness.failCreate(false);
+  assert.equal(harness.created.length, 0);
+
+  // Both deliveries to the blocked target share one episode and one notice.
+  await harness.deliver(1);
+  await harness.deliver(2);
+  t.mock.timers.tick(10 * 60_000);
+  assert.deepEqual(await harness.deliver(2), { injected: 0, status: 'queued', holdReason: 'target_busy' });
   assert.equal(harness.created.length, 1);
   assert.deepEqual(harness.created[0].targets, [{ kind: 'codex', sessionId: 'owner' }]);
-  assert.match(harness.created[0].body, /claude:c1 held 5 min on a blocking permission interaction/);
+  assert.match(harness.created[0].body, /claude:c1 held 5 min on a blocking selection interaction/);
+
+  // The dialog clears, then a new one blocks: a new episode notifies again.
+  harness.setState(paneState('claude-f609b0f7-idle'));
+  assert.deepEqual(await harness.deliver(1), { injected: 1, status: 'injected', holdReason: null });
+  harness.setState(paneState('claude-reconstructed-permission'));
+  await harness.deliver(2);
+  t.mock.timers.tick(5 * 60_000);
+  await harness.deliver(2);
+  assert.equal(harness.created.length, 2);
+  assert.match(harness.created[1].body, /blocking permission interaction/);
 });
 
 test('holds Claude delivery while a prior send to the working pane awaits response', async () => {

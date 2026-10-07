@@ -17,7 +17,7 @@ Only content above that chrome was shortened, then scanned for secrets.
 | `live-derived` | Live chrome with one injected **content** line |
 | `reconstructed` | Rare state that was not on host. Characterization only — never `knownDefect` |
 
-`permission-prompt` and `exited` are reconstructed-only. Do not grow that
+`exited` is reconstructed-only. Do not grow that
 allowlist; shrink it when a live capture exists.
 
 Same-session idle+active pairs:
