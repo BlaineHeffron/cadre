@@ -8,6 +8,7 @@ import { legacyRootStatePath, runtimeStatePath } from '../ops/runtime-state.mjs'
 const DEFAULT_STORE_FILE = runtimeStatePath('github_agent_repos.json');
 const LEGACY_STORE_FILE = legacyRootStatePath('github_agent_repos.json');
 const DEFAULT_TIMEOUT_MS = 10_000;
+const MERGE_REPORT_GRACE_MS = 10 * 60 * 1000;
 const DEFAULT_MAX_SPAWNS_PER_POLL = 5;
 const MAX_SPAWNED_ITEM_KEYS = 500;
 const SPAWN_BACKOFF_BASE_MS = 60_000;
@@ -561,6 +562,7 @@ export class GithubAgentPoller {
     listRooms = () => [],
     linkWorktreePr = async () => {},
     endThread = null,
+    sendRoomMessage = async () => {},
     notifyWatch = async () => {},
     log = null,
   } = {}) {
@@ -585,6 +587,7 @@ export class GithubAgentPoller {
     this.listRooms = listRooms;
     this.linkWorktreePr = linkWorktreePr;
     this.endThread = endThread;
+    this.sendRoomMessage = sendRoomMessage;
     this.notifyWatch = notifyWatch;
     this.log = log;
     this.timer = null;
@@ -755,6 +758,17 @@ export class GithubAgentPoller {
             await this.linkWorktreePr(watch.thread_id, undefined, branch);
             suffix = ` · room continues on ${branch}`;
           } else if (pr.merged && thread?.status === 'open' && this.endThread) {
+            // A reviewer-merge room gets a grace period to post its report; GitHub timestamps have second precision.
+            const mergedAtMs = Math.floor(Date.parse(pr.merged_at) / 1000) * 1000;
+            const reported = this.getThread(watch.thread_id)?.messages?.some((item) => item.type === 'result' && item.createdAt >= mergedAtMs);
+            if (thread.metadata?.worktree?.merge === 'reviewer' && !reported && !(this.now() >= watch.graceUntilMs)) {
+              if (!watch.graceUntilMs) {
+                await this.sendRoomMessage({ threadId: watch.thread_id, from: { kind: 'system', sessionId: 'pr_watch' },
+                  body: `PR #${watch.number} merged. Post your terminal result now; this room ends in ${MERGE_REPORT_GRACE_MS / 60000} minutes.` });
+                await this.repoStore.updateWatch(repo.id, watch.number, { graceUntilMs: this.now() + MERGE_REPORT_GRACE_MS });
+              }
+              continue;
+            }
             try {
               const result = await this.endThread(watch.thread_id, { reason: 'PR merged' });
               suffix = ` · ended room ${watch.thread_id}: ${result.results.filter((item) => item.status === 'terminated').length} sessions terminated${result.worktree ? ` · ${result.worktree.report}` : ''}`;
