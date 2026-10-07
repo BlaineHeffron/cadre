@@ -34,6 +34,7 @@ function isActiveThread(thread) {
 
 const INITIAL_LINES = 200;
 const FULL_LINES = 2000;
+const TRANSCRIPT_PAGE_MESSAGES = 100;
 
 async function loadImageDataUrl(file) {
   const original = await new Promise((resolve, reject) => {
@@ -173,15 +174,26 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
   async function loadRawTranscript(sessionId, activeDescriptor = descriptor) {
     transcriptRaw.value = { status: 'loading', text: '', error: '' };
     try {
-      const data = await api.get(`${activeDescriptor.apiBase}/sessions/${sessionId}/transcript`);
+      const data = await api.get(`${activeDescriptor.apiBase}/sessions/${sessionId}/transcript?limit=${TRANSCRIPT_PAGE_MESSAGES}`);
       if (sessionId !== id) return;
       const text = String(data?.text || '');
       transcriptRaw.value = text
-        ? { status: 'ok', text, error: '' }
+        ? { status: 'ok', text, error: '', messages: data.messages || null, start: data.start || 0 }
         : { status: 'error', text: '', error: 'session log held no conversation text' };
     } catch (error) {
       if (sessionId !== id) return;
       transcriptRaw.value = { status: 'error', text: '', error: error?.message || 'request failed' };
+    }
+  }
+
+  async function loadEarlierTranscript(sessionId, activeDescriptor = descriptor) {
+    const current = transcriptRaw.value;
+    try {
+      const data = await api.get(`${activeDescriptor.apiBase}/sessions/${sessionId}/transcript?limit=${TRANSCRIPT_PAGE_MESSAGES}&before=${current.start}`);
+      if (sessionId !== id || transcriptRaw.value !== current) return;
+      transcriptRaw.value = { ...current, messages: [...(data.messages || []), ...current.messages], start: data.start || 0 };
+    } catch (e) {
+      addToast(`Failed to load earlier messages: ${e.message}`, 'error');
     }
   }
 
@@ -643,6 +655,9 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
           content: transcriptRaw.value.status === 'ok'
             ? transcriptRaw.value.text
             : stripAnsi(content.value).replace(/\r/g, ''),
+          messages: transcriptRaw.value.status === 'ok' ? transcriptRaw.value.messages : null,
+          start: transcriptRaw.value.start,
+          onLoadEarlier: () => loadEarlierTranscript(id),
         }))
       : h(Terminal, {
         content: content.value,

@@ -159,8 +159,8 @@ test('the pane command is byte-identical to main without a sandbox', () => {
   const { paneCommand } = renderAgentSessionLaunch({ backendType: 'codex', sessionBinary: '/bin/codex', launchLogPath: '/state/launch.log',
     sessionId: 'abcd1234', provider: 'openai', buildOptions: { workDir: '/work', initialPromptFile: '/state/prompt.txt',
       mcpLaunch: { codexArgs: ['-c', 'mcp_servers={}'], credentialPath: '/state/cred', credentialEnvVar: 'DUENO_AGENT_BUS_TOKEN' } } });
-  // Rendered by origin/main at 72ad164 with the same inputs.
-  assert.equal(paneCommand, "export CADRE_SESSION_ID='abcd1234'; export DUENO_SESSION_ID='abcd1234'; export CADRE_PROVIDER='openai'; export DUENO_PROVIDER='openai'; export CODEX_INTERNAL_ORIGINATOR_OVERRIDE='dueno-abcd1234'; export DUENO_AGENT_BUS_TOKEN=\"$(< '/state/cred')\"; export CADRE_AGENT_BUS_TOKEN=\"$DUENO_AGENT_BUS_TOKEN\"; '/bin/codex' '--dangerously-bypass-approvals-and-sandbox' '--cd' '/work' '-c' 'model_provider=\"openai\"' '-c' 'features.hooks=true' '-c' 'projects.\"/work\".trust_level=\"trusted\"' '-c' 'plugins.\"browser@openai-bundled\".enabled=false' '-c' 'mcp_servers={}' -- \"$(< '/state/prompt.txt')\" 2> >(tee -a '/state/launch.log' >&2)");
+  // Rendered by origin/main at 72ad164 with the same inputs, plus --no-alt-screen.
+  assert.equal(paneCommand, "export CADRE_SESSION_ID='abcd1234'; export DUENO_SESSION_ID='abcd1234'; export CADRE_PROVIDER='openai'; export DUENO_PROVIDER='openai'; export CODEX_INTERNAL_ORIGINATOR_OVERRIDE='dueno-abcd1234'; export DUENO_AGENT_BUS_TOKEN=\"$(< '/state/cred')\"; export CADRE_AGENT_BUS_TOKEN=\"$DUENO_AGENT_BUS_TOKEN\"; '/bin/codex' '--dangerously-bypass-approvals-and-sandbox' '--cd' '/work' '-c' 'model_provider=\"openai\"' '-c' 'features.hooks=true' '-c' 'projects.\"/work\".trust_level=\"trusted\"' '-c' 'plugins.\"browser@openai-bundled\".enabled=false' '--no-alt-screen' '-c' 'mcp_servers={}' -- \"$(< '/state/prompt.txt')\" 2> >(tee -a '/state/launch.log' >&2)");
 });
 
 test('seedClaudeWorkspaceTrust writes to an explicit config path', async (t) => {

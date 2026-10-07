@@ -95,7 +95,7 @@ function renderConversation(messages = []) {
     .join('\n\n---\n\n');
 }
 
-export function extractClaudeConversationText(content = '') {
+export function extractClaudeConversationMessages(content = '') {
   const messages = [];
   for (const record of parseJsonLines(content)) {
     const message = record?.message && typeof record.message === 'object' ? record.message : record;
@@ -105,7 +105,11 @@ export function extractClaudeConversationText(content = '') {
     const text = textFromClaudeContent(body).trim();
     if (text) messages.push({ role, text });
   }
-  return renderConversation(messages);
+  return messages;
+}
+
+export function extractClaudeConversationText(content = '') {
+  return renderConversation(extractClaudeConversationMessages(content));
 }
 
 export function extractClaudeAssistantText(content = '') {
@@ -148,7 +152,7 @@ export function extractCodexAssistantText(content = '') {
   return messages.join('\n\n');
 }
 
-export function extractCodexConversationText(content = '') {
+export function extractCodexConversationMessages(content = '') {
   const messages = [];
   for (const record of parseJsonLines(content)) {
     const payload = record?.payload || {};
@@ -157,7 +161,81 @@ export function extractCodexConversationText(content = '') {
     const text = textFromCodexContent(payload.content).trim();
     if (text) messages.push({ role: payload.role, text });
   }
-  return renderConversation(messages);
+  return messages;
+}
+
+export function extractCodexConversationText(content = '') {
+  return renderConversation(extractCodexConversationMessages(content));
+}
+
+export const MAX_PAGE_RECORD_BYTES = 4 * 1024 * 1024;
+export const MAX_PAGE_TEXT_CHARS = 1_000_000;
+
+// Reads conversation messages backward from byte offset `before` (default EOF)
+// until `limit` messages or MAX_PAGE_TEXT_CHARS, holding at most one record at
+// a time, so a page never loads the whole log. `start` is the byte offset of
+// the earliest line read; pass it back as `before` for the previous page.
+// Records over MAX_PAGE_RECORD_BYTES are skipped.
+export async function readConversationPage(filePath, runtime = 'claude', { before, limit } = {}) {
+  const extract = String(runtime || '').toLowerCase() === 'codex'
+    ? extractCodexConversationMessages
+    : extractClaudeConversationMessages;
+  const { size } = await stat(filePath);
+  const parsedBefore = Number.parseInt(before, 10);
+  const end = Number.isFinite(parsedBefore) ? Math.min(Math.max(parsedBefore, 0), size) : size;
+  const maxMessages = Math.max(Number.parseInt(limit, 10) || 0, 1);
+  const messages = [];
+  let chars = 0;
+  let start = end;
+  let pending = [];
+  let pendingBytes = 0;
+  let oversized = false;
+  const addPart = (part) => {
+    if (oversized) return;
+    pendingBytes += part.length;
+    if (pendingBytes > MAX_PAGE_RECORD_BYTES) {
+      oversized = true;
+      pending = [];
+      return;
+    }
+    pending.unshift(part);
+  };
+  const takeLine = (lineStart) => {
+    if (!oversized) {
+      const found = extract(Buffer.concat(pending).toString('utf8'));
+      messages.unshift(...found);
+      chars += found.reduce((sum, message) => sum + message.text.length, 0);
+    }
+    pending = [];
+    pendingBytes = 0;
+    oversized = false;
+    start = lineStart;
+    return messages.length >= maxMessages || chars >= MAX_PAGE_TEXT_CHARS;
+  };
+
+  const handle = await open(filePath, 'r');
+  try {
+    let cursor = end;
+    let full = false;
+    while (cursor > 0 && !full) {
+      const chunkStart = Math.max(cursor - 64 * 1024, 0);
+      const chunk = Buffer.alloc(cursor - chunkStart);
+      await handle.read(chunk, 0, chunk.length, chunkStart);
+      let lineEnd = chunk.length;
+      for (let index = chunk.length - 1; index >= 0 && !full; index -= 1) {
+        if (chunk[index] !== 0x0a) continue;
+        addPart(chunk.subarray(index + 1, lineEnd));
+        full = takeLine(chunkStart + index + 1);
+        lineEnd = index;
+      }
+      if (!full) addPart(chunk.subarray(0, lineEnd));
+      cursor = chunkStart;
+    }
+    if (!full) takeLine(0);
+  } finally {
+    await handle.close();
+  }
+  return { messages, text: renderConversation(messages), start, chars };
 }
 
 export async function readTranscriptDelta(filePath, prevOffset = 0, runtime = 'claude') {
