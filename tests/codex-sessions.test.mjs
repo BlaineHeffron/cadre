@@ -1684,6 +1684,7 @@ describe('Codex Sessions module', () => {
     assert.ok(launchArgs.includes('gpt-5.4'));
     assert.ok(launchArgs.includes('model_reasoning_effort="high"'));
     assert.ok(launchArgs.includes('plugins."browser@openai-bundled".enabled=false'));
+    assert.ok(launchArgs.includes('--no-alt-screen'), 'Codex panes need tmux scrollback');
     assert.equal(launchArgs.at(-1), 'Initial prompt text');
     assert.deepEqual(launchArgs, buildAgentRuntimeLaunchArgs({
       runtime: 'codex',

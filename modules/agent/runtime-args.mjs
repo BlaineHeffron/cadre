@@ -128,6 +128,8 @@ class CodexRuntimeHarness extends AgentRuntimeHarness {
       '-c',
       trustedCodexProjectConfig(resolvedWorkDir),
       ...buildCodexPluginConfigArgs(codexPlugins),
+      // Inline mode keeps tmux scrollback; alt-screen panes have no history.
+      '--no-alt-screen',
     ];
     if (model) nextArgs.push('--model', model);
     if (thinkingLevel) nextArgs.push('-c', `model_reasoning_effort="${thinkingLevel}"`);

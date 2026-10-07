@@ -32,6 +32,7 @@ import { latestFreshPaneExecution, nextTranscriptIdleSince, shouldAutoCloseSessi
 import {
   extractClaudeConversationText,
   extractCodexConversationText,
+  readConversationPage,
 } from '../telegram/transcript.mjs';
 import { resolveBinding } from '../telegram/binding.mjs';
 import { createTmuxCommandExecutor, sessionCommandGate } from '../session-state/command-gate.mjs';
@@ -3147,8 +3148,12 @@ async function sessionsPlugin(app, {
         });
       }
 
-      const content = await readFile(binding.path, 'utf8');
       const filePath = binding.path;
+      // The rendered view pages with `limit`; unpaged callers get the whole log.
+      if (req.query?.limit) {
+        return { id, runtime, filePath, ...(await readConversationPage(filePath, runtime, req.query)) };
+      }
+      const content = await readFile(binding.path, 'utf8');
       const text = runtime === 'codex'
         ? extractCodexConversationText(content)
         : extractClaudeConversationText(content);

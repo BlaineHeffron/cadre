@@ -9,6 +9,7 @@ import {
   extractClaudeOperatorQuestion,
   extractCodexAssistantText,
   extractCodexConversationText,
+  readConversationPage,
   readTranscriptDelta,
 } from '../modules/telegram/transcript.mjs';
 
@@ -93,6 +94,60 @@ describe('telegram transcript extraction', () => {
       extractCodexConversationText(content),
       '## User\n\nquestion\n\n---\n\n## AI\n\nanswer',
     );
+  });
+});
+
+describe('conversation paging', () => {
+  const codexMessage = (index, text) => ({
+    type: 'response_item',
+    payload: { type: 'message', role: index % 2 ? 'assistant' : 'user', content: [{ type: 'output_text', text }] },
+  });
+
+  it('pages a log longer than the render cap back to its earliest message', async () => {
+    await withTempDir(async (dir) => {
+      const path = join(dir, 'rollout.jsonl');
+      const records = Array.from({ length: 400 }, (_, index) => codexMessage(index, `message ${index} ${'x'.repeat(1000)}`));
+      records.splice(200, 0, { type: 'response_item', payload: { type: 'function_call_output', output: 'y'.repeat(5 * 1024 * 1024) } });
+      await writeFile(path, `${jsonl(records)}{"partial":`);
+      const full = extractCodexConversationText(await readFile(path, 'utf8'));
+      assert.ok(full.length > 200_000);
+
+      const newest = await readConversationPage(path, 'codex', { limit: '100' });
+      assert.equal(newest.messages.length, 100);
+      assert.match(newest.messages.at(-1).text, /^message 399 /);
+      assert.equal(newest.text, full.slice(-newest.text.length));
+
+      const seen = [...newest.messages];
+      let { start } = newest;
+      while (start > 0) {
+        const page = await readConversationPage(path, 'codex', { before: String(start), limit: '100' });
+        assert.ok(page.start < start);
+        seen.unshift(...page.messages);
+        ({ start } = page);
+      }
+      assert.equal(seen.length, 400);
+      assert.deepEqual(seen.map((message) => message.text.split(' ')[1]), records.flatMap((record, index) => (
+        record.payload.type === 'message' ? [String(index > 200 ? index - 1 : index)] : []
+      )));
+    });
+  });
+
+  it('returns a message record over 4 MiB whole, on its own page, and clamps bad cursors', async () => {
+    await withTempDir(async (dir) => {
+      const path = join(dir, 'session.jsonl');
+      const huge = `huge-start ${'z'.repeat(5 * 1024 * 1024)} huge-end`;
+      await writeFile(path, jsonl([
+        { message: { role: 'user', content: 'a' } },
+        { message: { role: 'assistant', content: huge } },
+        { message: { role: 'assistant', content: 'b' } },
+      ]));
+      const newest = await readConversationPage(path, 'claude', { limit: '10' });
+      assert.deepEqual(newest.messages, [{ role: 'assistant', text: huge }, { role: 'assistant', text: 'b' }]);
+      const earliest = await readConversationPage(path, 'claude', { before: String(newest.start), limit: '10' });
+      assert.deepEqual([earliest.messages, earliest.start], [[{ role: 'user', text: 'a' }], 0]);
+      assert.deepEqual((await readConversationPage(path, 'claude', { before: '-5', limit: '10' })).messages, []);
+      assert.equal((await readConversationPage(path, 'claude', { before: '999999999999', limit: '1' })).messages[0].text, 'b');
+    });
   });
 });
 
