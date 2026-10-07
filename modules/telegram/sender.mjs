@@ -312,6 +312,14 @@ export class TelegramSender {
     });
   }
 
+  async editMessageText(messageId, text, { buttons } = {}) {
+    return this.telegramPost('editMessageText', {
+      message_id: Number(messageId),
+      text: String(text ?? ''),
+      reply_markup: { inline_keyboard: telegramButtons(buttons) || [] },
+    });
+  }
+
   async createForumTopic(name) {
     const result = await this.telegramPost('createForumTopic', {
       name: String(name || 'session').slice(0, 128),

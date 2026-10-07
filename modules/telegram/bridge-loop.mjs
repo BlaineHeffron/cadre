@@ -9,6 +9,7 @@ const DEFAULT_STATE_DIR = join(homedir(), '.claude/telegram');
 const DEFAULT_POLL_TIMEOUT_SEC = 5;
 const DEFAULT_ERROR_BACKOFF_MS = 2000;
 const MAX_UPDATE_ATTEMPTS = 3;
+const QUEUE_ROUTE = { key: 'queue:command', name: 'Command Queue', scopeType: 'queue', scopeId: 'command', sessionId: 'command-queue' };
 const BLOCKING_INTERACTION_KINDS = new Set([
   'permission', 'confirmation', 'selection', 'trust', 'guardrail', 'update', 'unknown_blocking',
 ]);
@@ -43,6 +44,25 @@ function callbackText(data = '') {
 
 function isAnswerCallback(callback = null) {
   return String(callback?.data || '').trim().startsWith('answer:');
+}
+
+function clip(value, limit) {
+  const chars = Array.from(String(value ?? '').trim());
+  return chars.length > limit ? `${chars.slice(0, limit - 1).join('')}…` : chars.join('');
+}
+
+// One message per queue item; stays under the sender's default page size so it is never split.
+function queueItemText(item = {}) {
+  const body = clip([
+    `❓ ${item.title} [${item.priority}]`,
+    item.sessionId ? `From: ${item.sessionKind}:${item.sessionId}` : '',
+    item.question !== item.title ? item.question : '',
+    item.details,
+  ].filter(Boolean).join('\n\n'), 2500);
+  let footer = item.operatorAction ? 'Approve or reject this action in the dashboard.'
+    : item.allowFreeform ? 'Reply to this message to answer in your own words.' : '';
+  if (item.status !== 'open') footer = `Status: ${item.status}${item.answer?.text ? ` · ${clip(item.answer.text, 300)}` : ''}`;
+  return footer ? `${body}\n\n${footer}` : body;
 }
 
 function updateMessage(update = {}) {
@@ -129,6 +149,7 @@ export class TelegramBridgeLoop {
     stateDir = DEFAULT_STATE_DIR,
     listSessions = () => listSessionsFromRegistry(),
     requestImpl,
+    watchQueue = null,
     sendSessionInput = (input) => defaultSendSessionInput({ ...input, requestImpl }),
     sentStore = buildSentStore({ stateDir }),
     synthesizeSpeech: synthesizeSpeechImpl = synthesizeSpeech,
@@ -138,6 +159,10 @@ export class TelegramBridgeLoop {
     logger = console,
   } = {}) {
     this.sender = sender;
+    this.requestImpl = requestImpl;
+    this.watchQueue = watchQueue;
+    this.unwatchQueue = null;
+    this.queueSync = Promise.resolve();
     this.stateDir = stateDir;
     this.listSessions = listSessions;
     this.sendSessionInput = sendSessionInput;
@@ -177,6 +202,10 @@ export class TelegramBridgeLoop {
     return join(this.stateDir, 'message_routes.json');
   }
 
+  queueMessagesPath() {
+    return join(this.stateDir, 'queue_messages.json');
+  }
+
   statePath() {
     return join(this.stateDir, 'bridge_state.json');
   }
@@ -213,6 +242,7 @@ export class TelegramBridgeLoop {
   start() {
     if (this.running) return false;
     this.running = true;
+    this.unwatchQueue = this.watchQueue?.((item) => this.queueChanged(item)) || null;
     this.loadOffset()
       .catch((error) => {
         this.lastError = error.message || String(error);
@@ -225,6 +255,8 @@ export class TelegramBridgeLoop {
   stop() {
     if (!this.running) return false;
     this.running = false;
+    this.unwatchQueue?.();
+    this.unwatchQueue = null;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     return true;
@@ -307,6 +339,17 @@ export class TelegramBridgeLoop {
     const actualChatId = normalizeChatId(message.chat?.id);
     if (expectedChatId && (!actualChatId || actualChatId !== expectedChatId)) {
       return this.ignoreUpdate(updateId, 'wrong_chat', { chatId: actualChatId || null });
+    }
+
+    const queueMessages = await readJsonFile(this.queueMessagesPath(), {});
+    const [queueTag, queueItemId, optionIndex] = String(callback?.data || '').split(':');
+    if (queueTag === 'q') {
+      return this.handleQueueAnswer({ updateId, processed, message, callback, itemId: queueItemId, optionIndex: Number(optionIndex) });
+    }
+    const repliedQueueItemId = !callback && Object.keys(queueMessages)
+      .find((itemId) => queueMessages[itemId] === Number(message.reply_to_message?.message_id));
+    if (repliedQueueItemId) {
+      return this.handleQueueAnswer({ updateId, processed, message, itemId: repliedQueueItemId, text: String(message.text || '').trim() });
     }
 
     if (callback && String(callback.data || '').trim() === 'tts') {
@@ -463,6 +506,56 @@ export class TelegramBridgeLoop {
       ...extra,
     };
     return false;
+  }
+
+  // Answers go through the same HTTP route as the dashboard, so routing and operator-action auth are unchanged.
+  async handleQueueAnswer({ updateId, processed, message, callback = null, itemId, optionIndex, text }) {
+    let note = 'Answered';
+    try {
+      const queue = await this.requestImpl('/api/command-center/work-queue?status=all');
+      const item = queue?.items?.find((entry) => entry.id === itemId);
+      const option = callback ? item?.options?.[optionIndex] : null;
+      if (!item) throw new Error('Queue item not found');
+      if (callback ? !option : !item.allowFreeform || !text) throw new Error('Choose one of the options');
+      await this.requestImpl(`/api/command-center/work-queue/${encodeURIComponent(itemId)}/answer`, {
+        method: 'POST',
+        body: option ? { optionId: option.id } : { answer: text },
+      });
+    } catch (error) {
+      note = error.message || String(error);
+      this.logger?.warn?.(`telegram queue answer failed for ${itemId}: ${note}`);
+    }
+    processed[String(updateId)] = { update_id: updateId, message_id: message.message_id, queue_item_id: itemId, ts: this.now() / 1000 };
+    await writeJsonAtomic(this.processedPath(), processed);
+    if (callback?.id) {
+      await this.sender.answerCallbackQuery(callback.id, note).catch((error) => {
+        this.logger?.warn?.(`telegram callback ack failed: ${error.message || error}`);
+      });
+    }
+    return note === 'Answered' || this.ignoreUpdate(updateId, 'queue_answer_failed', { itemId, error: note });
+  }
+
+  // Never blocks or fails the queue operation: Telegram errors are logged after the sender's retries.
+  queueChanged(item) {
+    this.queueSync = this.queueSync.then(() => this.syncQueueItem(item)).catch((error) => {
+      this.logger?.warn?.(`telegram queue sync failed for ${item?.id}: ${error.message || error}`);
+    });
+    return this.queueSync;
+  }
+
+  async syncQueueItem(item) {
+    const messages = await readJsonFile(this.queueMessagesPath(), {});
+    const text = queueItemText(item);
+    const buttons = item.status === 'open' && !item.operatorAction
+      ? item.options.map((option, index) => ({ text: option.label, callback_data: `q:${item.id}:${index}` }))
+      : [];
+    if (messages[item.id]) return this.sender.editMessageText(messages[item.id], text, { buttons });
+    if (item.status !== 'open') return null;
+    const { threadId } = await this.sender.resolveTopic(QUEUE_ROUTE);
+    messages[item.id] = await this.sender.sendMessage(text, { threadId, buttons });
+    // The queue keeps at most 200 items.
+    await writeJsonAtomic(this.queueMessagesPath(), Object.fromEntries(Object.entries(messages).slice(-200)));
+    return messages[item.id];
   }
 
   async handleTtsCallback({ updateId, callback, processed }) {
