@@ -3392,7 +3392,7 @@ body:has(.tmux-pane-page) {
   min-width: 44px;
 }
 
-/* Hold-to-talk mic: no long-press selection, callout, or scroll gesture while held. */
+/* Click-to-talk mic: no long-press selection, callout, or scroll gesture on the button. */
 .voice-ptt {
   user-select: none;
   -webkit-user-select: none;

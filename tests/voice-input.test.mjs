@@ -226,9 +226,13 @@ describe('voice input button', () => {
       assert.deepEqual(await page.evaluate(() => window.results), ['hello']);
 
       replies.push('');
-      await page.keyboard.press('Control+Space');
-      await page.waitForFunction(() => document.querySelector('button.voice-ptt').textContent.trim() === 'Rec');
+      await page.keyboard.down('Control');
+      await page.keyboard.down('Space');
+      await page.keyboard.down('Space'); // auto-repeat does not toggle again
+      await page.keyboard.up('Space');
+      await page.keyboard.up('Control');
       await page.waitForTimeout(300);
+      assert.equal((await button.textContent()).trim(), 'Rec');
       await page.keyboard.press('Control+Space');
       await page.waitForFunction(() => window.toastLog.length > 0);
       assert.deepEqual(await page.evaluate(() => window.toastLog), ['No speech detected — check your microphone input']);

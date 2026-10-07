@@ -152,6 +152,8 @@ export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
 
   if (!canRecord && !SpeechRecognition) return null;
 
+  // pointerdown preventDefault keeps focus in the draft being dictated into; keyboard activation still clicks.
+
   return html`
     <button
       type="button"
