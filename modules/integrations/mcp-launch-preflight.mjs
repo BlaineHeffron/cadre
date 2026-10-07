@@ -506,7 +506,7 @@ export async function prepareMcpCapabilityLaunch({
       const remote = remoteMcpServer(id, { sourceConfig });
       if (remote?.transport === 'stdio' && text(remote.command)) {
         const args = [...remote.args, ...(remote.appendWorkDir && text(workDir) ? [text(workDir)] : [])];
-        const serverEnv = remoteMcpStdioEnv(remote, { env: stdioEnv });
+        const serverEnv = remoteMcpStdioEnv(remote, { env: stdioEnv, workDir });
         const hasEnv = Object.keys(serverEnv).length > 0;
         if (backendType === 'codex') codexArgs.push(...codexStdioServerArgs(id, remote.command, args, serverEnv));
         if (backendType === 'claude') claudeServers[id] = { command: remote.command, args, ...(hasEnv ? { env: serverEnv } : {}) };

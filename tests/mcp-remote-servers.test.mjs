@@ -355,6 +355,36 @@ describe('paid-credit servers', () => {
   });
 });
 
+describe('image generation servers', () => {
+  for (const [id, override, standard, pin] of [
+    ['grok-imagine', 'DM_MCP_XAI_API_KEY', 'XAI_API_KEY', { DEFAULT_XAI_IMAGE_MODEL: 'grok-imagine-image-2.0' }],
+    ['gpt-image', 'DM_MCP_OPENAI_API_KEY', 'OPENAI_API_KEY', { DEFAULT_OPENAI_IMAGE_MODEL: 'gpt-image-2.5-flare' }],
+  ]) {
+    it(`keeps ${id} unavailable until its key is set, then forwards it pinned`, () => {
+      const sourceConfig = testConfig();
+      const server = remoteMcpServer(id, { sourceConfig });
+      assert.equal(server.command, process.execPath);
+      assert.equal(server.args.length, 1);
+      assert.match(server.args[0], /image-router-mcp[/\\]dist[/\\]index\.js$/);
+      assert.deepEqual(
+        remoteMcpAvailability(id, { sourceConfig, env: {} }),
+        { configured: false, reasonCode: 'credential_missing' },
+      );
+      for (const key of [override, standard]) {
+        assert.equal(remoteMcpAvailability(id, { sourceConfig, env: { [key]: 'k' } }).configured, true);
+      }
+      // The DM_MCP_* override wins, and the other provider's key never reaches this server.
+      const env = { OPENAI_API_KEY: 'other', XAI_API_KEY: 'other', [override]: 'override', [standard]: 'standard' };
+      assert.deepEqual(remoteMcpStdioEnv(server, { env, workDir: '/work/tree' }), {
+        ...pin,
+        [standard]: 'override',
+        DEFAULT_OUTPUT_DIR: '/work/tree/generated-images',
+      });
+      assert.deepEqual(remoteMcpStdioEnv(server, { env: { [standard]: 'standard' } }), { ...pin, [standard]: 'standard' });
+    });
+  }
+});
+
 describe('reverse-engineering servers', () => {
   it('launches the installed rea-agents bin as an MCP server', () => {
     const server = remoteMcpServer('rea', { sourceConfig: testConfig() });

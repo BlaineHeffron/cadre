@@ -481,6 +481,29 @@ describe('MCP launch preflight', () => {
     assert.ok(result.preflight.rea.toolCount > 0);
   });
 
+  it('launches the pinned image server with the key, model pin, and worktree output dir', { timeout: 30000 }, async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'dueno-image-preflight-'));
+    tempDirs.push(stateDir);
+    process.env.CADRE_STATE_DIR = stateDir;
+    const result = await prepareMcpCapabilityLaunch({
+      resolved: resolved(['gpt-image'], 'claude', 'claude'),
+      backendType: 'claude',
+      sessionId: 'gpt-image-preflight',
+      workDir: '/work/tree',
+      sourceConfig: sourceConfig(),
+      credentialStore: credentialStore(),
+      stdioEnv: { DM_MCP_OPENAI_API_KEY: 'test-key' },
+    });
+    assert.equal(result.preflight['gpt-image'].state, 'ready');
+    assert.equal(result.preflight['gpt-image'].toolCount, 3);
+    const configFile = JSON.parse(await readFile(result.prepared.claudeConfigPath, 'utf8'));
+    assert.deepEqual(configFile.mcpServers['gpt-image'].env, {
+      DEFAULT_OPENAI_IMAGE_MODEL: 'gpt-image-2.5-flare',
+      OPENAI_API_KEY: 'test-key',
+      DEFAULT_OUTPUT_DIR: '/work/tree/generated-images',
+    });
+  });
+
   it('rejects a selected stdio server when MCP initialize fails', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'dueno-stdio-preflight-'));
     tempDirs.push(stateDir);
