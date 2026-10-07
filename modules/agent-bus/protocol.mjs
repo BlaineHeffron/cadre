@@ -32,7 +32,7 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
     'Rooms: room_list() (owned/subscribed) or room_list(scope="all") (all open non-DM) · Archive: room_close(thread_id="<room id>")',
     'Owners may room_end(thread_id="<room id>") or room_transfer(thread_id="<room id>", to={kind, session_id}). Claim a room for yourself when its owner is gone. Other participants post type=result and stop.',
     'Direct message: agent_dm(kind="<kind>", session_id="<session id>", body="...")',
-    'Managed-worktree rooms watch the PR for their branch automatically. Otherwise, after opening a PR, the room owner may call watch_pr({repo, number, thread_id}). Cadre watches transitions and ends the linked room on merge; Cadre never merges.',
+    'After opening a PR, the room owner may call watch_pr({repo, number, thread_id}) to be notified of reviews, conflicts, merge or close; Cadre never merges. The owner ends the room with room_end after the work lands; Cadre cleans a managed worktree at room end when all its commits are on the remote.',
     'Directory: agent_directory()',
   ].join('\n');
 }

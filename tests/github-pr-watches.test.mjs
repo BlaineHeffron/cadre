@@ -107,20 +107,15 @@ test('reviews and conflicts notify once, re-arm, ignore comments, and follow roo
   assert.equal(s.commands.length, 4);
 });
 
-test('merge ends room, preserves shared participants, reports counts and removes watch', async (t) => {
+test('merge notifies the room owner, leaves the room open and removes the watch', async (t) => {
   const s = await setup(t);
-  await s.h.store.createThread({ title: 'Shared', participants: [participants[1]], createdBy: creator });
-  await s.h.store.createMessage({ threadId: s.thread.id, from: creator, targets: [participants[0]], body: 'queued' });
   await s.watch();
   s.setPr({ merged: true, state: 'closed', merge_commit_sha: '123456789' });
   await s.poller.pollOnce();
   await s.poller.pollOnce();
-  assert.equal(s.h.store.getThread(s.thread.id).thread.status, 'closed');
-  assert.deepEqual(s.h.deletedSessions.claude, ['claude-1']);
-  assert.deepEqual(s.h.deletedSessions.codex, []);
-  assert.equal(s.commands.length, 1);
-  assert.equal(s.commands[0].sessionId, creator.sessionId);
-  assert.equal(s.commands[0].text, `[PR_WATCH] PR octo/demo#1 merged (1234567) · ended room ${s.thread.id}: 1 sessions terminated`);
+  assert.equal(s.h.store.getThread(s.thread.id).thread.status, 'open');
+  assert.deepEqual(s.h.deletedSessions.claude, []);
+  assert.deepEqual(s.commands.map((item) => [item.sessionId, item.text]), [[creator.sessionId, '[PR_WATCH] PR octo/demo#1 merged (1234567)']]);
   assert.deepEqual(await s.store.listWatches(), []);
 });
 
@@ -175,7 +170,7 @@ test('one watch fetch error does not abort other watches', async (t) => {
 });
 
 
-test('merge still notifies and deletes watch when linked room is missing, closed, or a DM', async (t) => {
+test('merge notifies and deletes watch when linked room is missing, closed, or a DM', async (t) => {
   const s = await setup(t);
   const dm = await s.h.store.createThread({ title: 'DM', participants, createdBy: creator });
   const missing = await s.h.store.createThread({ title: 'Deleted later', participants, createdBy: creator });
@@ -191,7 +186,7 @@ test('merge still notifies and deletes watch when linked room is missing, closed
   assert.equal(s.commands.length, 3);
   assert.match(s.commands[0].text, /#1 merged/);
   assert.match(s.commands[1].text, /#2 merged/);
-  assert.match(s.commands[2].text, /not ended: 400$/);
+  assert.match(s.commands[2].text, /#3 merged/);
   assert.equal(s.h.store.getThread(dm.id).thread.status, 'open');
   assert.deepEqual(s.h.deletedSessions.claude, []);
   assert.deepEqual(await s.store.listWatches(), []);
@@ -245,39 +240,4 @@ test('watch linking, rewatching and removal require creator or current room owne
   await s.watch(2, null);
   await s.requestImpl('/api/agents/github/watches', { method: 'DELETE', body: { repo: 'octo/demo', number: 2 } });
   assert.deepEqual(await s.store.listWatches(), []);
-});
-
-test('merge ends the room while a delivery is in flight', { timeout: 5000 }, async (t) => {
-  const s = await setup(t);
-  await s.watch();
-  s.setPr({ merged: true, state: 'closed' });
-  let release, entered;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const started = new Promise((resolve) => { entered = resolve; });
-  s.h.inputResponders.claude = async () => { entered(); await gate; return { statusCode: 200, payload: { ok: true } }; };
-  const sending = s.requestImpl('/api/agent-bus/messages', { method: 'POST', body: {
-    threadId: s.thread.id, from: participants[1], body: 'Delivery in flight', deliveryMode: 'wait',
-  } });
-  await started;
-  try {
-    await s.poller.pollOnce();
-    assert.equal(s.commands.length, 1);
-    assert.equal((await s.store.listWatches()).length, 0);
-    assert.equal(s.h.store.getThread(s.thread.id).thread.status, 'closed');
-  } finally { release(); }
-  await sending;
-  await s.poller.pollOnce();
-  assert.equal(s.commands.length, 1);
-  assert.match(s.commands[0].text, /merged .*2 sessions terminated$/);
-  assert.equal(s.h.store.getThread(s.thread.id).thread.status, 'closed');
-  assert.deepEqual(await s.store.listWatches(), []);
-});
-
-test('merge notification includes fail-closed worktree outcome', async (t) => {
-  const s = await setup(t); await s.watch();
-  await s.h.store.updateThreadMetadata(s.thread.id, { worktree: {} });
-  s.setPr({ merged: true, state: 'closed', merge_commit_sha: '123456789' });
-  await s.poller.pollOnce();
-  assert.equal(s.commands.length, 1);
-  assert.match(s.commands[0].text, / · worktree: kept \([^)]+\)$/);
 });

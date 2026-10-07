@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { createManagedWorktree, linkManagedWorktreePr, cleanupManagedWorktree, sweepManagedWorktrees } from './managed-worktrees.mjs';
+import { createManagedWorktree, cleanupManagedWorktree, sweepManagedWorktrees } from './managed-worktrees.mjs';
 import { listCodexModels } from '../sessions/codex-models.mjs';
 import { listProviderModels } from '../sessions/model-catalog.mjs';
 import { listPiModels, PI_FALLBACK_MODELS, PI_PROVIDER_DEFINITIONS } from '../sessions/pi-model-catalog.mjs';
@@ -62,19 +62,6 @@ function threadMatchesQuery(snapshot, needle) {
   return haystack.includes(needle);
 }
 
-// "<verdict> · PR #n" from the summary plus the one SHA labeled "head" in the body; null when missing or ambiguous.
-function resultOutcome(summary, body) {
-  const verdict = /^\s*([\w-]+)\s*·\s*PR #(\d+)/.exec(summary || '');
-  const heads = [...String(body || '').matchAll(/\bhead(?: sha)?\W{1,6}([0-9a-f]{7,40})\b/gi)].map((match) => match[1].toLowerCase());
-  const head = heads.reduce((longest, item) => (item.length > longest.length ? item : longest), '');
-  if (!verdict || !head || heads.some((item) => !head.startsWith(item))) return null;
-  return { verdict: `${verdict[1].toLowerCase()} #${verdict[2]}`, head };
-}
-function sameOutcome(left, right) {
-  return Boolean(left && right && left.verdict === right.verdict
-    && (left.head.startsWith(right.head) || right.head.startsWith(left.head)));
-}
-
 function createdByFromRequest(req) {
   const principal = req?.duenoAuth?.principal;
   if (!principal?.kind || !principal.sessionId) return null;
@@ -104,8 +91,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
           sessions.push({ workDir });
         } catch (error) { if (error.statusCode !== 404) throw error; }
       }
-      return cleanupManagedWorktree(metadata, { rooms: store.listThreads(), sessions, baseDir: managedWorktreeBaseDir, spawnFailed,
-        getPr: (value) => app.agentBusLifecycle.getWorktreePr?.(value) });
+      return cleanupManagedWorktree(metadata, { rooms: store.listThreads(), sessions, baseDir: managedWorktreeBaseDir, spawnFailed });
     } catch (error) { return { removed: false, reason: error.message, report: `worktree: kept (${error.message})` }; }
   }
   app.agentBusLifecycle.sweepWorktrees = () => sweepManagedWorktrees({
@@ -359,7 +345,8 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     return { ok: true, status: 'open', thread: normalizeThreadSummary(await enrichThread(thread)) };
   });
 
-  async function endRoom(req, reply) {
+  app.post('/api/agent-bus/threads/:threadId/end', { schema: { params: params({ threadId: string(ID_MAX, 1) }),
+    body: bodySchema({ reason: string(512) }) } }, async (req, reply) => {
     const snapshot = store.getThread(req.params.threadId); if (!snapshot) return reply.code(404).send({ error: 'Thread not found' });
     await authorizeLifecycle(req, snapshot.thread, 'end');
     if (snapshot.thread.metadata?.dm) return reply.code(400).send({ error: 'DM rooms may only be closed' });
@@ -387,24 +374,9 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     const worktree = thread.metadata?.worktree ? await cleanupWorktree(thread.metadata.worktree) : undefined;
     return { ...(worktree ? { worktree } : {}), ok: results.every((item) => item.status !== 'failed'), status: 'ended', thread: normalizeThreadSummary(await enrichThread(thread)), results, skipped };
     } finally { endingThreads.delete(snapshot.thread.id); }
-  }
+  });
 
-  Object.assign(app.agentBusLifecycle, {
-    getThread: (id) => store.getThread(id),
-    listThreads: (filters) => store.listThreads(filters),
-    linkWorktreePr: async (id, pr, branch) => {
-      const metadata = store.getThread(id)?.thread.metadata?.worktree;
-      if (metadata) await store.updateThreadMetadata(id, { worktree: await linkManagedWorktreePr(metadata, pr, branch) });
-    },
-    sendMessage: (input) => send(input),
-    endThread: (id, options) => endRoom({ params: { threadId: id }, body: options }, {
-      code(statusCode) { return { send(payload) { throw Object.assign(new Error(payload.error), { statusCode, code: payload.code }); } }; },
-    }),
-  });
-  app.post('/api/agent-bus/threads/:threadId/end', { schema: { params: params({ threadId: string(ID_MAX, 1) }),
-    body: bodySchema({ reason: string(512) }) } }, async (req, reply) => {
-    return endRoom(req, reply);
-  });
+  app.agentBusLifecycle.getThread = (id) => store.getThread(id);
 
   app.delete('/api/agent-bus/threads/:threadId', { schema: { params: params({ threadId: string(ID_MAX, 1) }) } }, async (req, reply) => {
     const snapshot = store.getThread(req.params.threadId); if (!snapshot) return reply.code(404).send({ error: 'Thread not found' });
@@ -439,18 +411,11 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (duplicate) {
       return { statusCode: 200, payload: { message: duplicate, deliveries: (snapshot.deliveries || []).filter((item) => item.messageId === duplicate.id), deduped: true } };
     }
-    let targets = snapshot.thread.participants.filter((item) => adapters[item.kind]
+    const targets = snapshot.thread.participants.filter((item) => adapters[item.kind]
       && participantKey(item) !== participantKey(from)).map(participantRef);
     const owner = snapshot.thread.createdBy;
-    if (resolvedType === 'result' && adapters[owner?.kind] && participantKey(owner) !== participantKey(from)) {
-      // One result per outcome: skip a result that repeats the last one the owner was sent.
-      const last = [...(snapshot.messages || [])].reverse().find((item) => item.type === 'result'
-        && (snapshot.deliveries || []).some((delivery) => delivery.messageId === item.id
-          && participantKey(delivery.target) === participantKey(owner) && ['queued', 'injected'].includes(delivery.status)));
-      const repeat = sameOutcome(resultOutcome(summary, body), last && resultOutcome(last.metadata?.summary, last.body));
-      targets = targets.filter((item) => participantKey(item) !== participantKey(owner));
-      if (!repeat) targets.push(participantRef(owner));
-    }
+    if (resolvedType === 'result' && adapters[owner?.kind] && !threadHasParticipant(snapshot.thread, owner)
+      && participantKey(owner) !== participantKey(from)) targets.push(participantRef(owner));
     const record = await store.createMessage({ threadId, from: participantRef(from), targets, type: resolvedType, body,
       replyTo, metadata: { ...(metadata || {}), ...(summary !== undefined ? { summary } : {}), ...(snapshot.thread.metadata?.dm ? { dm: true } : {}) } });
     broadcast(wsManager, `agent-bus:thread:${threadId}`, 'message_created', { message: record.message, deliveries: record.deliveries });

@@ -29,7 +29,7 @@ A room contains an ID, title, optional project key, participants, metadata, time
 
 There are no blocked, failed, completed, or controller-driven room states. Message text and participant session state do not change room status.
 
-A normal room has at least two unique participants. Its messages are broadcast: one immutable message is stored, then one delivery is created for every other adapter-backed participant. Any authenticated agent may read or send in a non-DM room without becoming a participant. Membership is a subscription to pushes. The owner (`createdBy`) also receives `type=result` messages when it is neither the sender nor a participant. The owner gets one result per outcome, whether or not it is a participant: a result is not pushed to the owner when its summary verdict and PR (`<verdict> · PR #n`) and its body's `Head: <sha>` match the last result the owner was sent (queued or injected). So an implementer's result that repeats the reviewer's DIRECTOR REPORT for the same head is stored but not pushed to the owner, while a changed verdict, a new head, or a result with no or conflicting head labels is still delivered.
+A normal room has at least two unique participants. Its messages are broadcast: one immutable message is stored, then one delivery is created for every other adapter-backed participant. Any authenticated agent may read or send in a non-DM room without becoming a participant. Membership is a subscription to pushes. The owner (`createdBy`) also receives `type=result` messages when it is neither the sender nor a participant.
 
 ### Direct-message rooms
 
@@ -202,29 +202,26 @@ Setup failure removes the fresh worktree before launching any participants.
 Room metadata and a marker in git metadata preserve the path, repo, branch, base,
 room id, cleanup and merge policies, disposable globs and ignored-file baseline.
 
-When the repo's `origin` is a configured GitHub repo, the poller finds the PR
-whose head is the room branch (opened after the room) and watches it as if the
-owner had called `watch_pr({ repo, number, thread_id })`, so a PR merged before
-the first poll still ends the room. Room end and the PR
-merge notification report `worktree: removed` or `worktree: kept (<reason>)`.
+A PR merge or close never ends a room; `watch_pr` only notifies the watch owner.
+The owner ends the room with `room_end` after the work lands, and the end
+response reports `worktree: removed` or `worktree: kept (<reason>)`.
 Cleanup keeps worktrees when cleanup is off; metadata is missing or invalid;
-the linked PR is absent, unmerged or missing its head; local commits are not
-in the merged PR (including unpushed commits); tracked or untracked files are
+after a non-pruning `git fetch origin`, any commit reachable from the worktree's
+HEAD (on whatever branch it has checked out) is on no remote-tracking ref; tracked or untracked files are
 dirty; ignored files outside `disposable` appear beyond the setup baseline; another open room or
-live session uses the directory; or a GitHub, git, filesystem or session lookup
+live session uses the directory; or a git, filesystem or session lookup
 fails. User git settings cannot hide untracked files. `node_modules` is exempt
 only when present in the baseline. When `.agent_bus` contains no tracked files
 and is a physical directory, Cadre owns only its `hooks/` and `state/` contents:
 these are excluded from the status check and removed after all checks pass,
 and every ignored file under `.agent_bus` is exempt from the ignored-files check.
-Untracked, non-ignored files outside `hooks/` and `state/` such as `.agent_bus/notes` still block cleanup. Ancestry or containment of every local
-commit's stable patch-id proves landing, including rewritten PR commits.
+Untracked, non-ignored files outside `hooks/` and `state/` such as `.agent_bus/notes` still block cleanup.
 
 Removal unlocks, unlinks external top-level symlinks without following them,
 leaves tracked symlinks for git to remove safely,
-uses plain `git worktree remove`, attempts `git branch -d`, and prunes. If safe
-branch deletion refuses (for example after squash merge), the worktree is
-removed but its branch and tip are retained, with the git reason reported.
+uses plain `git worktree remove`, and prunes. It deletes the recorded branch
+only when every commit on it is on a remote-tracking ref; otherwise the
+branch and tip are retained, with the reason reported.
 After a partial spawn failure, cleanup removes only an unchanged base HEAD
 with clean files, the setup baseline, and no shared users; otherwise it reports
 why it kept the worktree. Only rollback inside fresh creation uses forced worktree removal; its branch
