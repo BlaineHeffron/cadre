@@ -208,7 +208,7 @@ for (const mode of ['managed', 'stale local config', 'setup failure', 'launch fa
   assert.equal(await exists(metadata.path), false);
 });
 
-for (const mode of ['then merged', 'already merged', 'with explicit watch', 'after branch switch', 'reviewer report', 'reviewer deadline after restart']) test(`room PR found by branch ${mode}`, async (t) => {
+for (const mode of ['then merged', 'already merged', 'with explicit watch', 'after branch switch', 'reviewer report', 'reviewer deadline after restart', 'reviewer after branch switch']) test(`room PR found by branch ${mode}`, async (t) => {
   const reviewer = mode.startsWith('reviewer');
   const f = await fixture(t, '', reviewer ? { merge: 'reviewer' } : {});
   await git(f.repo, 'config', `url.${resolve(f.root, 'remote')}.insteadOf`, 'https://github.com/test/repo.git');
@@ -261,7 +261,7 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
     assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
     return;
   }
-  if (mode === 'after branch switch') {
+  if (mode.endsWith('after branch switch')) {
     await poller.pollOnce();
     assert.deepEqual(h.store.getThread(room.id).thread.metadata.worktree.pr, { repo: 'test/repo', number: 2 });
     // The room moves to a follow-up branch before its first PR merges.
@@ -287,6 +287,8 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
     assert.equal(h.store.getThread(room.id).thread.metadata.worktree.pr, undefined);
     assert.deepEqual(await h.app.githubAgents.repoStore.listWatches(), []);
     assert.match(commands.at(-1).text, /^\[PR_WATCH\] PR test\/repo#2 merged \(.*\) · room continues on auto-next$/);
+    // Branch-follow takes precedence over the reviewer grace period.
+    if (reviewer) return assert.deepEqual(h.store.getThread(room.id).messages.filter((item) => item.from.sessionId === 'pr_watch'), []);
     const prs = { 2: pr, 3: { number: 3, state: 'open', merged: false, head: { sha: next, ref: 'auto-next' } } };
     poller.fetchImpl = async (url) => {
       const { pathname, searchParams } = new URL(url);
@@ -327,7 +329,17 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
     assert.equal(h.store.getThread(room.id).thread.status, 'open');
   }
   // A merge payload without head.ref ends the room rather than keeping it alive.
-  pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head, merged_at: new Date().toISOString(), head: mode === 'already merged' ? { sha: f.head } : pr.head };
+  let mergedAt = Date.now();
+  if (mode === 'reviewer deadline after restart') {
+    // A result from before the merge is not the report; the merge lands just before the 7-day watch expiry.
+    const early = await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
+      payload: { threadId: room.id, from: room.participants[0], type: 'result', body: 'ready for merge' } });
+    mergedAt = early.json().message.createdAt + 1000;
+    await poller.pollOnce();
+    const [{ createdAtMs }] = await h.app.githubAgents.repoStore.listWatches();
+    poller.now = () => createdAtMs + 7 * 24 * 60 * 60 * 1000 - 1000;
+  }
+  pr = { ...pr, state: 'closed', merged: true, merge_commit_sha: f.head, merged_at: new Date(mergedAt).toISOString(), head: mode === 'already merged' ? { sha: f.head } : pr.head };
   await git(f.repo, 'merge', '--ff-only', f.head);
   await poller.pollOnce();
   if (reviewer) {
@@ -349,6 +361,8 @@ for (const mode of ['then merged', 'already merged', 'with explicit watch', 'aft
       const { buildGithubAgentRepoStore } = await import('../modules/integrations/github-agents.mjs');
       poller.repoStore = buildGithubAgentRepoStore({ storeFile: resolve(h.stateDir, 'github/repos.json'), env: { APP_STATE_STORAGE: 'file' } });
       h.app.githubAgents.repoStore = poller.repoStore;
+      // Watch expiry passes mid-grace; the persisted deadline still decides.
+      poller.now = () => graceUntilMs - 1;
       await poller.pollOnce();
       assert.equal(h.store.getThread(room.id).thread.status, 'open');
       assert.equal((await poller.repoStore.listWatches())[0].graceUntilMs, graceUntilMs);

@@ -726,7 +726,8 @@ export class GithubAgentPoller {
         };
         const label = `PR ${repo.id}#${watch.number}`;
         const notify = (line, recipient = target()) => this.notifyWatch(recipient, `[PR_WATCH] ${label} ${line}`);
-        if (this.now() - watch.createdAtMs >= 7 * 24 * 60 * 60 * 1000) {
+        // A watch in its merge-report grace period finishes through the deadline, not expiry.
+        if (!watch.graceUntilMs && this.now() - watch.createdAtMs >= 7 * 24 * 60 * 60 * 1000) {
           await notify('watch expired after 7 days');
           await this.repoStore.updateWatch(repo.id, watch.number);
           continue;
@@ -763,7 +764,7 @@ export class GithubAgentPoller {
             const reported = this.getThread(watch.thread_id)?.messages?.some((item) => item.type === 'result' && item.createdAt >= mergedAtMs);
             if (thread.metadata?.worktree?.merge === 'reviewer' && !reported && !(this.now() >= watch.graceUntilMs)) {
               if (!watch.graceUntilMs) {
-                await this.sendRoomMessage({ threadId: watch.thread_id, from: { kind: 'system', sessionId: 'pr_watch' },
+                await this.sendRoomMessage({ threadId: watch.thread_id, from: { kind: 'system', sessionId: 'pr_watch' }, deliveryMode: 'enqueue',
                   body: `PR #${watch.number} merged. Post your terminal result now; this room ends in ${MERGE_REPORT_GRACE_MS / 60000} minutes.` });
                 await this.repoStore.updateWatch(repo.id, watch.number, { graceUntilMs: this.now() + MERGE_REPORT_GRACE_MS });
               }
