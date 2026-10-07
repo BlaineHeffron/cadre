@@ -530,9 +530,10 @@ export async function prepareMcpCapabilityLaunch({
         const serverEnv = remoteMcpStdioEnv(remote, { env: stdioEnv, workDir });
         const hasEnv = Object.keys(serverEnv).length > 0;
         if (backendType === 'codex') {
-          // Names Codex reads for itself (OPENAI_API_KEY) stay inline so a server key never replaces Codex's own.
-          const forwardedKeys = [...remote.envKeys, remote.secretEnvName]
-            .filter((key) => key && serverEnv[key] && !CODEX_APP_SERVER_ENV_ALLOWLIST.includes(key));
+          // A name Codex reads for itself (OPENAI_API_KEY) goes by name only when it already holds that value;
+          // a differing DM_MCP_* alias stays inline so it never replaces Codex's own key.
+          const forwardedKeys = [...remote.envKeys, remote.secretEnvName].filter((key) => key && serverEnv[key]
+            && (!CODEX_APP_SERVER_ENV_ALLOWLIST.includes(key) || text(stdioEnv[key]) === serverEnv[key]));
           codexArgs.push(...codexStdioServerArgs(id, remote.command, args, serverEnv, forwardedKeys));
           for (const key of forwardedKeys) codexEnv[key] = serverEnv[key];
         }

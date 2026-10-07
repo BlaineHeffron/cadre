@@ -88,9 +88,11 @@ only. No send scope is requested anywhere.
   selection, and are in no profile. Both IDs run the same pinned package and
   each receives only its own provider key, renamed to `XAI_API_KEY` or
   `OPENAI_API_KEY`. Like `MESHY_API_KEY`, that key lands in the `0600`
-  Claude/Pi launch config. Codex gets `XAI_API_KEY` by name, but
-  `OPENAI_API_KEY` is Codex's own credential variable, so gpt-image's key
-  stays an inline Codex `-c` override (visible in `ps`). `grok-imagine`
+  Claude/Pi launch config; Codex gets it by name. `OPENAI_API_KEY` is also
+  Codex's own credential variable, so gpt-image goes by name only when the key
+  equals the fleet's `OPENAI_API_KEY`. A differing `DM_MCP_OPENAI_API_KEY` stays
+  an inline Codex `-c` override (visible in `ps`) rather than replace Codex's
+  key. `grok-imagine`
   pins `grok-imagine-image-2.0`, overriding any model the agent passes.
   `gpt-image` defaults to `gpt-image-2.5-flare`, and an agent can still request
   `gpt-image-2.5-sunburst` per call. Each ID exposes all three upstream tools
