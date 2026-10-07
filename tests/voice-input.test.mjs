@@ -1,6 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendTranscript, holdToTalk, openRecorder } from '../public/components/voice-input.mjs';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
+import { chromium } from 'playwright-core';
+import { appendTranscript, clickToTalk, openRecorder } from '../public/components/voice-input.mjs';
 
 describe('voice input transcript append', () => {
   it('appends dictated text after the draft with one separating space', () => {
@@ -46,9 +52,9 @@ function fakeMic({ failConstruct, failStart, chunks = [new Blob(['clip'], { type
   return mic;
 }
 
-function holdWith(open, maxMs) {
+function takeWith(open, maxMs) {
   const log = { statuses: [], texts: [], errors: [], empties: 0 };
-  const hold = holdToTalk({
+  const take = clickToTalk({
     open,
     maxMs,
     onStatus: (s) => log.statuses.push(s),
@@ -56,17 +62,17 @@ function holdWith(open, maxMs) {
     onEmpty: () => { log.empties += 1; },
     onError: (e) => log.errors.push(e.message),
   });
-  return { hold, log };
+  return { take, log };
 }
 
-describe('voice input hold-to-talk lifecycle', () => {
-  it('records while held, releases the mic, and transcribes on release', async () => {
+describe('voice input click-to-talk lifecycle', () => {
+  it('records from one click, then releases the mic and transcribes on the next', async () => {
     const mic = fakeMic();
-    const { hold, log } = holdWith(() => openRecorder(mic));
-    const run = hold.start();
+    const { take, log } = takeWith(() => openRecorder(mic));
+    const run = take.toggle();
     await new Promise((r) => setTimeout(r, 5));
     assert.equal(mic.tracks[0].live, true);
-    hold.end();
+    take.toggle();
     await run;
     assert.equal(mic.tracks[0].live, false);
     assert.deepEqual(mic.transcribed, ['clip']);
@@ -79,8 +85,8 @@ describe('voice input hold-to-talk lifecycle', () => {
     for (const heard of ['', '  \n', undefined]) {
       const mic = fakeMic();
       mic.transcribe = async () => heard;
-      const { hold, log } = holdWith(() => openRecorder(mic), 1);
-      await hold.start();
+      const { take, log } = takeWith(() => openRecorder(mic), 1);
+      await take.toggle();
       assert.equal(log.empties, 1);
       assert.deepEqual(log.errors, []);
     }
@@ -88,47 +94,52 @@ describe('voice input hold-to-talk lifecycle', () => {
 
   it('types the clip from its chunks after the recorder clears its mimeType', async () => {
     const mic = fakeMic({ chunks: [new Blob(['ogg'], { type: 'audio/ogg; codecs=opus' })] });
-    const { hold } = holdWith(() => openRecorder(mic), 1);
-    await hold.start();
+    const { take } = takeWith(() => openRecorder(mic), 1);
+    await take.toggle();
     assert.deepEqual(mic.types, ['audio/ogg; codecs=opus']);
   });
 
   it('reports an empty recording without transcribing it', async () => {
     for (const chunks of [[], [new Blob([], { type: 'audio/webm' })]]) {
       const mic = fakeMic({ chunks });
-      const { hold, log } = holdWith(() => openRecorder(mic), 1);
-      await hold.start();
+      const { take, log } = takeWith(() => openRecorder(mic), 1);
+      await take.toggle();
       assert.deepEqual(mic.transcribed, []);
       assert.deepEqual(log.errors, ['No audio captured']);
       assert.equal(mic.tracks[0].live, false);
     }
   });
 
-  it('ignores new holds from any input until acquisition, recording, and transcription finish', async () => {
+  it('ignores clicks while transcribing and starts a new take after', async () => {
     const mic = fakeMic();
     let finishTranscribe;
     mic.transcribe = () => new Promise((r) => { finishTranscribe = r; });
-    const { hold, log } = holdWith(() => openRecorder(mic));
-    const run = hold.start();
-    hold.start(); // second press while the mic request is pending
+    const { take, log } = takeWith(() => openRecorder(mic));
+    const run = take.toggle();
     await new Promise((r) => setTimeout(r, 5));
-    hold.end();
+    take.toggle();
     await new Promise((r) => setTimeout(r, 5));
-    hold.start(); // hotkey press while the first clip is transcribing
+    take.toggle(); // click while the first clip is transcribing
     finishTranscribe('first');
     await run;
     assert.equal(mic.grants, 1);
     assert.deepEqual(log.texts, ['first']);
-    await Promise.all([hold.start(), hold.end()]);
+    assert.deepEqual(log.statuses, ['recording', 'transcribing', 'idle']);
+    mic.transcribe = async () => 'second';
+    const next = take.toggle();
+    await new Promise((r) => setTimeout(r, 5));
+    take.toggle();
+    await next;
     assert.equal(mic.grants, 2);
+    assert.deepEqual(log.texts, ['first', 'second']);
   });
 
-  it('stops the mic without transcribing when released before the mic was granted', async () => {
+  it('discards the take when stopped before the mic was granted', async () => {
     const mic = fakeMic();
     let grant;
-    const { hold, log } = holdWith(() => new Promise((r) => { grant = r; }).then(() => openRecorder(mic)));
-    const run = hold.start();
-    hold.end();
+    const { take, log } = takeWith(() => new Promise((r) => { grant = r; }).then(() => openRecorder(mic)));
+    const run = take.toggle();
+    take.toggle();
     grant();
     await run;
     assert.equal(mic.tracks[0].live, false);
@@ -141,30 +152,91 @@ describe('voice input hold-to-talk lifecycle', () => {
   it('releases the mic when the recorder cannot be built or started', async () => {
     for (const failure of [{ failConstruct: true }, { failStart: true }]) {
       const mic = fakeMic(failure);
-      const { hold, log } = holdWith(() => openRecorder(mic));
-      await hold.start();
+      const { take, log } = takeWith(() => openRecorder(mic));
+      await take.toggle();
       assert.equal(mic.tracks[0].live, false);
       assert.equal(log.errors.length, 1);
       assert.deepEqual(log.statuses, ['recording', 'idle']);
     }
   });
 
-  it('ends a hold that is never released at the recording limit', async () => {
+  it('stops and transcribes a take that is never stopped at the recording limit', async () => {
     const mic = fakeMic();
-    const { hold, log } = holdWith(() => openRecorder(mic), 10);
-    await hold.start();
+    const { take, log } = takeWith(() => openRecorder(mic), 10);
+    await take.toggle();
     assert.equal(mic.tracks[0].live, false);
     assert.deepEqual(log.texts, ['heard']);
   });
 
-  it('reports transcription failures and frees the hold for the next attempt', async () => {
+  it('reports transcription failures and frees the mic for the next take', async () => {
     const mic = fakeMic();
     mic.transcribe = async () => { throw Object.assign(new Error('unavailable'), { statusCode: 503 }); };
-    const { hold, log } = holdWith(() => openRecorder(mic), 1);
-    await hold.start();
+    const { take, log } = takeWith(() => openRecorder(mic), 1);
+    await take.toggle();
     assert.deepEqual(log.errors, ['unavailable']);
     assert.equal(mic.tracks[0].live, false);
-    await hold.start();
+    await take.toggle();
     assert.equal(mic.grants, 2);
+  });
+});
+
+describe('voice input button', () => {
+  it('toggles recording by click and Ctrl+Space, ignores presses while transcribing, and toasts no speech', { skip: !process.env.CHROMIUM_BIN }, async () => {
+    const root = fileURLToPath(new URL('../', import.meta.url));
+    const app = Fastify();
+    await app.register(fastifyStatic, { root: join(root, 'public'), prefix: '/' });
+    await app.register(fastifyStatic, { root: join(root, 'node_modules'), prefix: '/vendor/npm/', decorateReply: false });
+    const index = await readFile(join(root, 'public/index.html'), 'utf8');
+    app.get('/voice-fixture', async (_req, reply) => reply.type('text/html').send(index.replace(
+      '<script type="module" src="/app/app.mjs"></script>',
+      `<script type="module">
+        import { h, render } from 'preact'; import { effect } from '@preact/signals';
+        import { toasts } from '/app/state.mjs'; import { VoiceInput } from '/components/voice-input.mjs';
+        window.results = []; window.toastLog = [];
+        effect(() => toasts.value.forEach((t) => { if (!window.toastLog.includes(t.message)) window.toastLog.push(t.message); }));
+        render(h(VoiceInput, { hotkey: true, onResult: (text) => window.results.push(text) }), document.getElementById('app'));
+      </script>`,
+    )));
+    const replies = [];
+    let gate;
+    app.post('/api/audio/transcribe', async () => { await gate; return { text: replies.shift() }; });
+    const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+    const browser = await chromium.launch({
+      executablePath: process.env.CHROMIUM_BIN, headless: true,
+      args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+    });
+    try {
+      const page = await browser.newPage();
+      await page.goto(`${origin}/voice-fixture`);
+      const button = page.locator('button.voice-ptt');
+      assert.equal(await button.getAttribute('title'), 'Click to talk (Ctrl+Space)');
+
+      let open;
+      gate = new Promise((r) => { open = r; });
+      replies.push('hello');
+      await button.click();
+      await page.waitForFunction(() => document.querySelector('button.voice-ptt').textContent.trim() === 'Rec');
+      assert.equal(await button.getAttribute('title'), 'Click to stop (Ctrl+Space)');
+      await page.waitForTimeout(300);
+      await button.click();
+      await page.waitForFunction(() => document.querySelector('button.voice-ptt').textContent.trim() === '...');
+      await page.keyboard.press('Control+Space'); // ignored while transcribing
+      open();
+      await page.waitForFunction(() => document.querySelector('button.voice-ptt').textContent.trim() === 'Mic');
+      assert.deepEqual(await page.evaluate(() => window.results), ['hello']);
+
+      replies.push('');
+      await page.keyboard.press('Control+Space');
+      await page.waitForFunction(() => document.querySelector('button.voice-ptt').textContent.trim() === 'Rec');
+      await page.waitForTimeout(300);
+      await page.keyboard.press('Control+Space');
+      await page.waitForFunction(() => window.toastLog.length > 0);
+      assert.deepEqual(await page.evaluate(() => window.toastLog), ['No speech detected — check your microphone input']);
+      assert.deepEqual(await page.evaluate(() => window.results), ['hello']);
+      assert.equal(replies.length, 0);
+    } finally {
+      await browser.close();
+      await app.close();
+    }
   });
 });

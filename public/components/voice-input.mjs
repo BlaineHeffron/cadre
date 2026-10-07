@@ -6,7 +6,7 @@ import { addToast } from '../app/state.mjs';
 const MAX_RECORD_MS = 120000;
 const SpeechRecognition = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
 const canRecord = typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia) && typeof MediaRecorder !== 'undefined';
-// Flipped when the server reports no transcriber; later holds use live browser speech instead.
+// Flipped when the server reports no transcriber; later takes use live browser speech instead.
 let useBrowserSpeech = !canRecord;
 
 export function appendTranscript(current, text, max = Infinity) {
@@ -16,15 +16,14 @@ export function appendTranscript(current, text, max = Infinity) {
   return `${base}${base && !/\s$/.test(base) ? ' ' : ''}${trimmed}`.slice(0, max);
 }
 
-// One hold at a time: `busy` spans mic acquisition, recording, and transcription, so neither the
-// button nor the hotkey can start over a previous hold. `open()` resolves to a capture session whose
-// finish(keep) stops it, releases the mic, and resolves to the text ('' when the hold ended early).
-// onEmpty fires when a kept recording transcribes to no speech.
-export function holdToTalk({ open, onStatus, onText, onEmpty, onError, maxMs = MAX_RECORD_MS }) {
+// One take at a time: `busy` spans mic acquisition, recording, and transcription. toggle() starts a
+// take or stops the recording; it is ignored while transcribing, and a stop before the mic is granted
+// discards the take. `open()` resolves to a capture session whose finish(keep) stops it, releases the
+// mic, and resolves to the text ('' when discarded). onEmpty fires when a kept take has no speech.
+export function clickToTalk({ open, onStatus, onText, onEmpty, onError, maxMs = MAX_RECORD_MS }) {
   let busy = false;
   let release = null;
   async function start() {
-    if (busy) return;
     busy = true;
     let held = true;
     release = () => { held = false; };
@@ -51,7 +50,8 @@ export function holdToTalk({ open, onStatus, onText, onEmpty, onError, maxMs = M
       onStatus('idle');
     }
   }
-  return { start, end: () => release?.() };
+  const stop = () => release?.();
+  return { toggle: () => (busy ? stop() : start()), stop };
 }
 
 export async function openRecorder({ getUserMedia, Recorder, transcribe }) {
@@ -106,13 +106,13 @@ async function transcribeBlob(blob) {
   return (await api.post('/audio/transcribe', { audio })).text;
 }
 
-// Hold to talk: records while pressed (or while Ctrl+Space is held when `hotkey` is set),
-// transcribes on release, and hands the text to onResult.
+// Click to talk: a click (or Ctrl+Space when `hotkey` is set) starts recording, the next one
+// transcribes, and the text goes to onResult. Hiding the page stops and transcribes the take.
 export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
   const [status, setStatus] = useState('idle');
   const onResultRef = useRef(onResult);
   onResultRef.current = onResult;
-  const [hold] = useState(() => holdToTalk({
+  const [take] = useState(() => clickToTalk({
     open: () => (useBrowserSpeech ? openBrowserSpeech() : openRecorder({
       getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
       Recorder: MediaRecorder,
@@ -124,19 +124,16 @@ export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
     onError: (error) => {
       const fallback = error.statusCode === 503 && Boolean(SpeechRecognition) && !useBrowserSpeech;
       if (fallback) useBrowserSpeech = true;
-      addToast(fallback ? 'Server speech-to-text unavailable; hold again to use browser speech' : `Voice input failed: ${error.message}`, 'error');
+      addToast(fallback ? 'Server speech-to-text unavailable; click again to use browser speech' : `Voice input failed: ${error.message}`, 'error');
     },
   }));
 
   useEffect(() => {
-    // Once the page loses focus the matching keyup/pointerup may never arrive; stop listening.
-    const onHidden = () => { if (document.hidden) hold.end(); };
-    window.addEventListener('blur', hold.end);
+    const onHidden = () => { if (document.hidden) take.stop(); };
     document.addEventListener('visibilitychange', onHidden);
     return () => {
-      window.removeEventListener('blur', hold.end);
       document.removeEventListener('visibilitychange', onHidden);
-      hold.end();
+      take.stop();
     };
   }, []);
 
@@ -147,15 +144,10 @@ export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
       if (!e.ctrlKey || e.code !== 'Space') return;
       e.preventDefault();
       e.stopPropagation();
-      if (!e.repeat) hold.start();
+      if (!e.repeat) take.toggle();
     };
-    const up = (e) => { if (e.code === 'Space' || e.key === 'Control') hold.end(); };
     window.addEventListener('keydown', down, true);
-    window.addEventListener('keyup', up, true);
-    return () => {
-      window.removeEventListener('keydown', down, true);
-      window.removeEventListener('keyup', up, true);
-    };
+    return () => window.removeEventListener('keydown', down, true);
   }, [hotkey]);
 
   if (!canRecord && !SpeechRecognition) return null;
@@ -164,14 +156,11 @@ export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
     <button
       type="button"
       class="${className} voice-ptt ${status !== 'idle' ? 'btn-danger' : ''}"
-      title=${`Hold to talk${hotkey ? ' (Ctrl+Space)' : ''}`}
+      title=${`${status === 'recording' ? 'Click to stop' : 'Click to talk'}${hotkey ? ' (Ctrl+Space)' : ''}`}
       aria-pressed=${status === 'recording'}
       disabled=${status === 'transcribing'}
-      onpointerdown=${(e) => { e.preventDefault(); hold.start(); }}
-      onpointerup=${hold.end}
-      onpointerleave=${hold.end}
-      onpointercancel=${hold.end}
-      oncontextmenu=${(e) => e.preventDefault()}
+      onpointerdown=${(e) => e.preventDefault()}
+      onclick=${() => take.toggle()}
     >
       ${status === 'recording' ? 'Rec' : status === 'transcribing' ? '...' : 'Mic'}
     </button>
