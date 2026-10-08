@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+main() {
 if (( $# == 0 )); then
   echo "Usage: bash scripts/verify-heads.sh <sha>..." >&2
   exit 2
@@ -42,3 +43,5 @@ else
   grep -E '^# (pass|fail|skipped) ' "$scratch/tests.log" || true
 fi
 exit "$status"
+}
+main "$@"

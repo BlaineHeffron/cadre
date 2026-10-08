@@ -18,6 +18,8 @@ import { CLAUDE_STREAM_JSON_E2E_VERSION, claudeStreamJsonBusE2eEvidence } from '
 
 const roots = [];
 const apps = [];
+// Exercise real MCP initialization without launching the host's uvx/fetch server.
+const fetchOverride = { command: process.execPath, args: [new URL('./fixtures/mcp/stdio-tools-server.mjs', import.meta.url).pathname] };
 afterEach(async () => {
   await Promise.allSettled(apps.splice(0).map((app) => app.close()));
   while (roots.length) await rm(roots.pop(), { recursive: true, force: true });
@@ -160,7 +162,10 @@ describe('Claude stream-json sessions', () => {
       streamJsonEnabled: true,
       sessionRoot: join(root, 'sessions'),
       credentialStore,
-      sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
+      sourceConfig: {
+        agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' },
+        mcpCredentials: { overrides: { fetch: fetchOverride } },
+      },
       mcpDiscovery: async ({ token }) => {
         issuedTokens.push(token);
         return { authenticated: true, discoveredToolCount: 8 };
@@ -351,7 +356,10 @@ describe('Claude stream-json sessions', () => {
     apps.push(app);
     await app.register(claudeSessionsPlugin, {
       streamJsonEnabled: true, sessionRoot,
-      credentialStore, sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
+      credentialStore, sourceConfig: {
+        agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' },
+        mcpCredentials: { overrides: { fetch: fetchOverride } },
+      },
       mcpDiscovery: async ({ token }) => { issuedToken = token; throw new Error('discovery failed'); },
     });
     const response = await app.inject({
