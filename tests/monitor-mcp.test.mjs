@@ -536,6 +536,7 @@ describe('Monitor MCP server', () => {
       thinkingLevel: 'high',
       initialPrompt: 'Start here',
       skills: ['tdd'],
+      returnResults: true,
     });
 
     assert.deepEqual(requests, [{
@@ -557,6 +558,21 @@ describe('Monitor MCP server', () => {
       },
     }]);
     assert.deepEqual(result, { thread_id: null, participants: [{ kind: 'claude', session_id: 'claude_10', display_name: 'claude-10' }] });
+  });
+
+  it('only requests result return when spawn_session gets returnResults on a parentless claude spawn', async () => {
+    const bodies = [];
+    const server = buildMonitorMcpServer({
+      async requestImpl(path, opts = {}) { if (path === '/api/agents/sessions') bodies.push(opts.body); return { id: 'claude_10', provider: 'claude', backendType: 'claude' }; },
+    });
+    const spawn = (args) => server.handleToolCall('spawn_session', { workDir: '/tmp/project', ...args });
+    await spawn({ provider: 'claude' });
+    await spawn({ provider: 'claude', returnResults: false });
+    await spawn({ provider: 'codex', returnResults: true });
+    await spawn({ provider: 'claude', returnResults: true, parentThreadId: 'thr_x' }).catch(() => {});
+    assert.deepEqual(bodies.map((body) => body.metadata), [undefined, undefined, undefined, undefined]);
+    await spawn({ provider: 'claude', returnResults: true });
+    assert.deepEqual(bodies.at(-1).metadata, { returnToSpawner: true });
   });
 
   it('accepts parentThreadId on spawn_session and attaches the participant best-effort', async () => {
