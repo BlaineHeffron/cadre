@@ -146,3 +146,22 @@ test('only an authenticated agent that opts in becomes the spawner', () => {
   // A caller cannot name its own spawner.
   assert.equal({ spawnedBy: { kind: 'claude', sessionId: 'victim' }, ...spawnerMetadata(null, {}) }.spawnedBy, undefined);
 });
+
+for (const [name, args, count] of [['omitted', {}, 0], ['false', { returnResults: false }, 0], ['true', { returnResults: true }, 2]]) {
+  test(`spawn_session with returnResults ${name} returns ${count} results`, async (t) => {
+    let body;
+    // Imported late: a static import changes the harness's auth setup for the earlier tests.
+    const { buildMonitorMcpServer } = await import('../modules/platform/monitor-mcp.mjs');
+    const mcp = buildMonitorMcpServer({ async requestImpl(path, opts) { body = opts.body; return { id: 'claude-2', provider: 'claude', backendType: 'claude' }; } });
+    await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir: '/tmp/project', ...args });
+    const metadata = spawnerMetadata({ type: 'agent', kind: 'codex', sessionId: 'codex-1' }, body.metadata);
+    assert.equal(Boolean(metadata.spawnedBy), count > 0);
+    const { turn, results, delivered } = await setup(t, metadata);
+    await turn('first');
+    await turn('second');
+    if (count) assert.equal(await settle(() => results().length === 2 && delivered('first') === 1 && delivered('second') === 1), true);
+    await delay(200);
+    assert.equal(results().length, count);
+    assert.equal(delivered('first') + delivered('second'), count);
+  });
+}

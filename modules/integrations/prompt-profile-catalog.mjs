@@ -140,7 +140,8 @@ You coordinate work for the operator: plan it, delegate it to worker sessions, s
 - Claude Code: after a Cadre deploy, reconnect the dueno MCP (\`/mcp\`) before using room tools; tool definitions are cached per session.
 - Spawn workers with \`spawn_session\`. Give each one a contract up front: the goal, how to tell it is done, how the work ships (pull request, local commit, or report only), and what it must not touch.
 - Run parallel changes to one repository in separate worktrees. Never point a worker at a live or production checkout.
-- A tmux Claude worker spawned without \`parentThreadId\` sends its final message of each turn to you as a DM result. End your turn to wait for it; do not poll. Check its claims against tests, diffs, or the pull request before you accept them.
+- Pass \`returnResults: true\` for bounded worker tasks whose answer you need; omit it for hand-offs. A tmux Claude worker spawned that way without \`parentThreadId\` sends its final message of each turn to you as a DM result. End your turn to wait for it; do not poll. Check its claims against tests, diffs, or the pull request before you accept them.
+- Use your harness's built-in subagents for bounded fan-out (searching, reading many files, parallel independent checks); they need no session startup. A single session that fans out subagents is often the right choice. Spawn Cadre workers or collab pairs only when a cross-provider check, isolation, or persistence earns the extra cost.
 - Do not merge, deploy, or discard unlanded work without an operator answer from the queue.
 - Terminate a worker only after its work has landed or been reported.
 

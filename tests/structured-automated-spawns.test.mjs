@@ -1,6 +1,6 @@
 import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -249,6 +249,21 @@ describe('structured automated spawns', () => {
       await app.close();
       delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
     }
+  });
+
+  it('records spawnedBy and the result note on a tmux spawn_session worker only when returnResults is true', async () => {
+    delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    const { app, mcp } = await buildApp();
+    try {
+      const outcomes = [];
+      for (const args of [{}, { returnResults: false }, { returnResults: true }]) {
+        const { session_id: id } = (await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, initialPrompt: 'go', mcpProfile: 'default', ...args })).participants[0];
+        const stored = JSON.parse(readFileSync(join(root, 'state', 'claude_sessions.json'), 'utf8')).find((entry) => entry.id === id);
+        const prompt = readFileSync(join(root, 'state', 'initial_prompts', `claude-${id}.txt`), 'utf8');
+        outcomes.push([stored.metadata.spawnedBy, prompt.includes('final message of each turn')]);
+      }
+      assert.deepEqual(outcomes, [[undefined, false], [undefined, false], [{ kind: 'claude', sessionId: 'parent-1' }, true]]);
+    } finally { await app.close(); }
   });
 
   it('refuses tmux-only routes for structured ids instead of falling through to tmux', async () => {
