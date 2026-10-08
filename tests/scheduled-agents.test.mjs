@@ -263,6 +263,37 @@ describe('scheduled agents', () => {
     }]);
   });
 
+  it('records the spawn_session participant id and skips the next tick while it is working', async () => {
+    const store = memoryStore({ now: () => 1000 });
+    await store.register(baseTask({ id: 'sched_spawn_result', provider: 'xai' }));
+    let launches = 0;
+    const lookups = [];
+    const deps = {
+      store,
+      sessionLauncher: async () => {
+        launches += 1;
+        return {
+          thread_id: null,
+          participants: [{ kind: 'pi', session_id: 'sess_xai', display_name: 'Scheduled xai' }],
+        };
+      },
+      lookupSessionState: async (sessionId) => {
+        lookups.push(sessionId);
+        return { status: 'working', capabilities: { autoClose: false } };
+      },
+    };
+
+    const launched = await stepDue(1000, deps);
+    assert.equal(launched.spawned, 1);
+    assert.equal(launched.tasks[0].sessionId, 'sess_xai');
+    assert.equal((await store.get('sched_spawn_result')).lastSessionId, 'sess_xai');
+    const next = await stepDue(16000, deps);
+    assert.equal(next.skippedRunning, 1);
+    assert.equal(next.spawned, 0);
+    assert.deepEqual(lookups, ['sess_xai']);
+    assert.equal(launches, 1);
+  });
+
   it('marks maxIterations-reached tasks completed without spawning', async () => {
     const store = memoryStore({ now: () => 2000 });
     await store.register(baseTask({
