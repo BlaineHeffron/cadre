@@ -69,6 +69,11 @@ it('verifies merged heads with shared dependencies and a lock, propagates failur
     assert.equal(failed.status, 1, failed.stdout + failed.stderr);
     assert.match(failed.stdout, /# fail 1/);
     assertClean();
+    git('checkout', 'one');
+    const relativeHead = run('HEAD');
+    assert.equal(relativeHead.status, 1, relativeHead.stdout + relativeHead.stderr);
+    assert.match(relativeHead.stdout, /# fail 1/);
+    assertClean();
     assert.notEqual(run('nonexistent-head').status, 0);
     assertClean();
     assert.equal(run().status, 2);

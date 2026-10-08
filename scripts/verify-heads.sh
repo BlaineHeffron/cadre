@@ -19,9 +19,13 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 git -C "$repo" fetch -q origin main
+heads=()
+for head in "$@"; do
+  heads+=("$(git -C "$repo" rev-parse --verify "$head^{commit}")")
+done
 git -C "$repo" worktree add --detach "$worktree" origin/main
 cd "$worktree"
-for head in "$@"; do
+for head in "${heads[@]}"; do
   git -c user.name='Cadre verification' -c user.email='verify@localhost' merge --no-edit -- "$head"
 done
 ln -s "$dev_clone/node_modules" node_modules
