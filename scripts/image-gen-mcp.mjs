@@ -11,6 +11,9 @@ export function createImageGenServer(generate = generateImage) {
     inputSchema: {
       provider: z.enum(['openai', 'google', 'xai']), prompt: z.string().min(1),
       output_path: z.string().min(1).optional(),
+      aspect_ratio: z.string().min(1).optional().describe('Provider-supported ratio such as 1:1, 16:9, or 9:16. OpenAI uses a prompt hint and verifies the output ratio.'),
+      size: z.string().min(1).optional().describe('Google only: 512, 1K, 2K, or 4K. Other subscription tools expose no size control.'),
+      background: z.enum(['transparent', 'opaque']).optional().describe('Transparent is supported only by OpenAI and requires PNG alpha output.'),
     },
   }, async (input) => {
     try {

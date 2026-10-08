@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -9,6 +9,11 @@ import { generateImage, GOOGLE_IMAGE_MODEL, GROK_IMAGE_ARGS, runImageCli } from 
 import { createImageGenServer } from '../scripts/image-gen-mcp.mjs';
 
 const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
+// Real PNG fixtures: 3x2 RGBA/RGB, 1x1 gray-alpha and palette transparency.
+const landscape = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAC0lEQVR4nGNgwAUAABoAAbw84EEAAAAASUVORK5CYII=', 'base64');
+const opaque = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAC0lEQVR4nGNgwAQAABQAAX3+Hu4AAAAASUVORK5CYII=', 'base64');
+const grayAlpha = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAAbitOmMAAAAASUVORK5CYII=', 'base64');
+const paletteAlpha = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEUAAACnej3aAAAAAXRSTlMAQObYZgAAAApJREFUeJxjYAAAAAIAAUivpHEAAAAASUVORK5CYII=', 'base64');
 const dirs = [];
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
 async function outputEnv() {
@@ -18,6 +23,70 @@ async function outputEnv() {
 }
 
 describe('subscription image generation', () => {
+  it('rejects unsupported options before invoking providers or reading credentials', async () => {
+    const env = await outputEnv();
+    const options = { env, run: () => assert.fail('must not spend quota'), readKey: () => assert.fail('must not read credentials') };
+    for (const provider of ['openai', 'google', 'xai']) {
+      for (const input of [{ aspect_ratio: 'bad' }, { size: 'bad' }, { background: 'bad' }, { aspect_ratio: null }]) {
+        await assert.rejects(generateImage({ provider, prompt: 'test', ...input }, options), /does not support/);
+      }
+    }
+    for (const provider of ['openai', 'xai']) {
+      await assert.rejects(generateImage({ provider, prompt: 'test', size: '1K' }, options), /subscription tool exposes no control/);
+      await assert.rejects(generateImage({ provider, prompt: 'test', aspect_ratio: '4:3' }, options), /does not support aspect_ratio/);
+    }
+    for (const provider of ['google', 'xai']) {
+      await assert.rejects(generateImage({ provider, prompt: 'test', background: 'transparent' }, options), /does not support background/);
+    }
+  });
+
+  it('passes Codex ratio hints and transparency and verifies PNG output before saving', async () => {
+    const env = await outputEnv();
+    for (const [bytes, aspect_ratio] of [[landscape, '3:2'], [grayAlpha, '1:1'], [paletteAlpha, '1:1']]) {
+      const result = await generateImage({ provider: 'openai', prompt: 'icon', aspect_ratio, background: 'transparent' }, { env,
+        run: async (_command, args, { cwd }) => {
+          assert.ok(args.at(-1).includes('transparent_background=true'));
+          assert.ok(args.at(-1).includes(`Required output aspect ratio: ${aspect_ratio}`));
+          await writeFile(join(cwd, 'image.png'), bytes);
+        },
+      });
+      assert.deepEqual(await readFile(result.path), bytes);
+    }
+    await generateImage({ provider: 'openai', prompt: 'icon', background: 'opaque' }, { env,
+      run: async (_command, args, { cwd }) => {
+        assert.ok(args.at(-1).includes('transparent_background=false'));
+        await writeFile(join(cwd, 'image.png'), opaque);
+      },
+    });
+    const before = await readdir(env.DEFAULT_OUTPUT_DIR);
+    for (const bytes of [opaque, png, Buffer.from([255, 216, 255])]) {
+      await assert.rejects(generateImage({ provider: 'openai', prompt: 'icon', background: 'transparent' }, { env,
+        run: async (_command, _args, { cwd }) => writeFile(join(cwd, 'image.png'), bytes),
+      }), /without an alpha channel/);
+    }
+    for (const bytes of [landscape, png, Buffer.from([255, 216, 255])]) {
+      await assert.rejects(generateImage({ provider: 'openai', prompt: 'icon', aspect_ratio: '2:3' }, { env,
+        run: async (_command, _args, { cwd }) => writeFile(join(cwd, 'image.png'), bytes),
+      }), /did not return the requested aspect_ratio/);
+    }
+    assert.deepEqual(await readdir(env.DEFAULT_OUTPUT_DIR), before);
+  });
+
+  it('maps Google ratio and resolution and rejects mismatched PNG dimensions', async () => {
+    const env = await outputEnv();
+    for (const size of ['512', '1K', '2K', '4K']) {
+      await generateImage({ provider: 'google', prompt: 'icon', aspect_ratio: '3:2', size, background: 'opaque' }, { env,
+        readKey: async () => 'dummy',
+        fetchImpl: async (_url, request) => {
+          assert.deepEqual(JSON.parse(request.body).generationConfig.imageConfig, { imageSize: size, aspectRatio: '3:2' });
+          return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: landscape.toString('base64') } }] } }] }) };
+        },
+      });
+    }
+    await assert.rejects(generateImage({ provider: 'google', prompt: 'icon', aspect_ratio: '9:16' }, { env,
+      readKey: async () => 'dummy', fetchImpl: async () => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: landscape.toString('base64') } }] } }] }) }),
+    }), /did not return the requested aspect_ratio/);
+  });
   it('runs isolated Codex with one framed prompt and saves verified output', async () => {
     const env = { ...await outputEnv(), HOME: '/home/test', PATH: '/bin', OPENAI_API_KEY: 'never-forward', CODEX_API_KEY: 'never-forward', CADRE_TOKEN: 'never-forward', DUENO_TOKEN: 'never-forward' };
     const prompt = 'a blue square; $(touch bad) `x` "quoted"\nsecond line';
@@ -160,11 +229,12 @@ describe('subscription image generation', () => {
     ]);
     const event = { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify({ type: 'ImageGen', path: imagePath }) }] } };
     const prompt = 'blue square $(shell)';
-    const result = await generateImage({ provider: 'xai', prompt }, { env,
+    const result = await generateImage({ provider: 'xai', prompt, aspect_ratio: '9:16', background: 'opaque' }, { env,
       run: async (command, args, options) => {
         assert.equal(command, 'grok');
         assert.deepEqual(args.slice(0, -1), ['--cwd', options.cwd, ...GROK_IMAGE_ARGS, '-p']);
         assert.ok(args.at(-1).includes(JSON.stringify(prompt)));
+        assert.ok(args.at(-1).includes('aspect_ratio="9:16"'));
         assert.deepEqual(options.env, { HOME: env.HOME, PATH: '/bin' });
         assert.equal(options.timeoutMs, 180_000);
         return `unrelated line\n${JSON.stringify(event)}\n`;
@@ -210,6 +280,7 @@ describe('subscription image generation', () => {
   it('exposes generation and provider errors through the MCP tool', async () => {
     const server = createImageGenServer(async (input) => {
       assert.equal(input.prompt, 'test');
+      if (input.provider === 'google') assert.deepEqual(input, { provider: 'google', prompt: 'test', aspect_ratio: '3:4', size: '2K', background: 'opaque' });
       if (input.provider === 'xai') throw new Error('not available on subscription');
       return { provider: input.provider, path: '/test.png', mimeType: 'image/png', bytes: 9 };
     });
@@ -219,7 +290,7 @@ describe('subscription image generation', () => {
       await server.connect(serverTransport);
       await client.connect(clientTransport);
       assert.deepEqual((await client.listTools()).tools.map((tool) => tool.name), ['generate_image']);
-      const result = await client.callTool({ name: 'generate_image', arguments: { provider: 'google', prompt: 'test' } });
+      const result = await client.callTool({ name: 'generate_image', arguments: { provider: 'google', prompt: 'test', aspect_ratio: '3:4', size: '2K', background: 'opaque' } });
       assert.equal(result.structuredContent.path, '/test.png');
       const unavailable = await client.callTool({ name: 'generate_image', arguments: { provider: 'xai', prompt: 'test' } });
       assert.equal(unavailable.isError, true);
