@@ -159,6 +159,24 @@ describe('agent hook events', () => {
     assert.ok(Number.isFinite(derived.ageMs));
   });
 
+  it('records a resumed Claude transcript size as its start offset, and nothing for Codex', async () => {
+    const repoDir = await makeRepo();
+    const transcriptPath = join(repoDir, 'resumed.jsonl');
+    await writeFile(transcriptPath, 'old history\n');
+    const startOffset = async (provider, source, eventPath = transcriptPath, eventName = 'SessionStart') => {
+      const { paths } = await recordHookPayload({
+        session_id: 'cli-r', cwd: repoDir, hook_event_name: eventName, source, transcript_path: eventPath,
+      }, { provider, duenoSessionId: `${provider}-1` });
+      return JSON.parse(await readFile(paths.statePath, 'utf8')).session.transcriptStartOffset;
+    };
+
+    assert.equal(await startOffset('claude', 'resume'), 12);
+    await writeFile(transcriptPath, 'old history\nnew output\n');
+    assert.equal(await startOffset('claude', undefined, transcriptPath, 'UserPromptSubmit'), 12, 'later hooks keep the boundary');
+    assert.equal(await startOffset('claude', 'clear', join(repoDir, 'fresh.jsonl')), 0);
+    assert.equal(await startOffset('codex', 'resume'), 0);
+  });
+
   it('keys genuine hook state by duenoSessionId when bound', async () => {
     const repoDir = await makeRepo();
     const result = await recordHookPayload({

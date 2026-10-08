@@ -29,7 +29,9 @@ async function relay($: any, e: any, next: any) {
     await report($, e).catch(() => {});
     return next(e);
   }
-  record($, e);
+  const recorded = record($, e);
+  // The recorder snapshots a resumed transcript's size as the relay's start; it must run before new output.
+  if (e.hook_event_name === 'SessionStart' && e.source === 'resume') await recorded;
   return next(e);
 }
 

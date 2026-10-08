@@ -382,7 +382,10 @@ async function resolveHook(session, deps) {
   if (!path) return null;
   const fileStat = await statOrNull(path);
   if (!fileStat) return null;
-  return bound(path, 'hook', { cliSessionId: text(metadata.cliSessionId), ino: fileStat.ino });
+  return {
+    ...bound(path, 'hook', { cliSessionId: text(metadata.cliSessionId), ino: fileStat.ino }),
+    startOffset: Number(metadata.transcriptStartOffset) || 0,
+  };
 }
 
 async function resolveEnv(session, deps) {
