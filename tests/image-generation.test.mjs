@@ -41,6 +41,28 @@ describe('subscription image generation', () => {
     await assert.rejects(readFile(join(workDir, 'image.png')), /ENOENT/);
   });
 
+  it('rejects absolute and traversal output escapes before invoking providers', async () => {
+    const env = await outputEnv();
+    for (const output_path of ['/tmp/outside.png', '../outside.png']) {
+      await assert.rejects(generateImage({ provider: 'openai', prompt: 'test', output_path }, {
+        env, run: () => assert.fail('invalid output must not spend quota'),
+      }), /must stay inside/);
+    }
+  });
+
+  it('rejects symlink escapes and existing output-file symlinks', async () => {
+    const env = await outputEnv();
+    const external = await outputEnv();
+    await symlink(external.DEFAULT_OUTPUT_DIR, join(env.DEFAULT_OUTPUT_DIR, 'linked'));
+    const run = async (_command, _args, { cwd }) => writeFile(join(cwd, 'image.png'), png);
+    await assert.rejects(generateImage({ provider: 'openai', prompt: 'test', output_path: 'linked/out.png' }, { env, run }), /must stay inside/);
+    const outside = join(external.DEFAULT_OUTPUT_DIR, 'outside.png');
+    await writeFile(outside, 'unchanged');
+    await symlink(outside, join(env.DEFAULT_OUTPUT_DIR, 'out.png'));
+    await assert.rejects(generateImage({ provider: 'openai', prompt: 'test', output_path: 'out.png' }, { env, run }), /EEXIST/);
+    assert.equal(await readFile(outside, 'utf8'), 'unchanged');
+  });
+
   it('rejects missing and invalid CLI output and propagates CLI failure', async () => {
     const env = await outputEnv();
     await assert.rejects(generateImage({ provider: 'openai', prompt: 'test' }, { env, run: async () => {} }), /without saving an image/);

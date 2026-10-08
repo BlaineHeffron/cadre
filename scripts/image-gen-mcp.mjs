@@ -7,7 +7,7 @@ import { generateImage } from '../modules/integrations/image-generation.mjs';
 export function createImageGenServer(generate = generateImage) {
   const server = new McpServer({ name: 'cadre-image-gen', version: '1.0.0' });
   server.registerTool('generate_image', {
-    description: 'Generate an image using subscriptions: ChatGPT via Codex, Google Nano Banana 2.1 via local CLIProxyAPI. xAI via Grok Build image_gen. Saves to the session generated-images directory unless output_path is supplied.',
+    description: 'Generate an image using subscriptions: ChatGPT via Codex, Google Nano Banana 2.1 via local CLIProxyAPI; xAI via Grok Build image_gen. Saves to the session generated-images directory with output_path confined to that directory.',
     inputSchema: {
       provider: z.enum(['openai', 'google', 'xai']), prompt: z.string().min(1),
       output_path: z.string().min(1).optional(),

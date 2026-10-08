@@ -114,7 +114,8 @@ only. No send scope is requested anywhere.
   missing binaries, login failures, unavailable models, and invalid image output.
   Images are saved under `<session work dir>/generated-images/` (the Cadre state
   dir's `generated-images/` without a work dir). Relative `output_path` values
-  resolve there; absolute paths are supported.
+  resolve there and must stay inside it. Symlink escapes and overwriting existing
+  output files are rejected.
 - `rea` and `bevy_brp` require explicit selection and are in no profile.
   REA reads JS/Electron trees and ASARs, .NET assemblies, and loopback
   browser/Electron targets with only Node. Native analysis needs Ghidra or

@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, lstat, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const TIMEOUT_MS = 180_000;
 export const GOOGLE_IMAGE_MODEL = 'gemini-nano-banana-2.1';
@@ -43,11 +43,23 @@ function imageType(bytes) {
   throw new Error('Image generation returned no valid PNG, JPEG, or WebP image.');
 }
 
+function outside(directory, path) {
+  const offset = relative(directory, path);
+  return offset === '..' || offset.startsWith('../') || isAbsolute(offset);
+}
+
 export async function generateImage({ provider, prompt, output_path }, {
   env = process.env, run = runImageCli, fetchImpl = fetch, readKey = readFile,
 } = {}) {
   if (!['openai', 'google', 'xai'].includes(provider)) throw new Error(`Unknown image provider: ${provider}`);
   if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('An image prompt is required.');
+  const outputDir = resolve(env.DEFAULT_OUTPUT_DIR || 'generated-images');
+  const requestedPath = output_path ? resolve(outputDir, output_path) : '';
+  if (requestedPath && (requestedPath === outputDir || outside(outputDir, requestedPath))) {
+    throw new Error('output_path must stay inside the generated-images directory.');
+  }
+  await mkdir(outputDir, { recursive: true });
+  if ((await lstat(outputDir)).isSymbolicLink()) throw new Error('The generated-images directory must not be a symlink.');
   let bytes;
   if (provider !== 'google') {
     const cwd = await mkdtemp(join(tmpdir(), 'cadre-image-'));
@@ -119,9 +131,12 @@ export async function generateImage({ provider, prompt, output_path }, {
     bytes = Buffer.from(part.inlineData.data, 'base64');
   }
   const [mimeType, extension] = imageType(bytes);
-  const outputDir = resolve(env.DEFAULT_OUTPUT_DIR || 'generated-images');
-  const path = output_path ? resolve(outputDir, output_path) : join(outputDir, `${provider}-${randomUUID()}.${extension}`);
+  const path = requestedPath || join(outputDir, `${provider}-${randomUUID()}.${extension}`);
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, bytes);
+  if (outside(await realpath(outputDir), await realpath(dirname(path)))) {
+    throw new Error('output_path must stay inside the generated-images directory.');
+  }
+  // Exclusive creation also rejects existing output-file symlinks.
+  await writeFile(path, bytes, { flag: 'wx' });
   return { provider, path, mimeType, bytes: bytes.length };
 }
