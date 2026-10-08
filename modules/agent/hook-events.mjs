@@ -16,6 +16,12 @@ export function registerHookSessionRegistry(provider, getSessions) {
   return () => hookSessionRegistries.delete(getSessions);
 }
 
+export function* knownSessions() {
+  for (const [getSessions, provider] of hookSessionRegistries) {
+    for (const [id, meta] of getSessions()) yield { ...meta, provider, id };
+  }
+}
+
 export async function removeSessionHookFiles(options) {
   const paths = await buildHookSessionPaths(options);
   if (!await isDirectory(join(paths.rootDir, '.agent_bus')) || !await isDirectory(paths.hooksDir)) return;
@@ -32,11 +38,6 @@ export function createHookEventRetention({ store, retentionDays = 7 } = {}) {
   let running = false;
   let closed = false;
   let finished;
-  function* knownSessions() {
-    for (const [getSessions, provider] of hookSessionRegistries) {
-      for (const [id, meta] of getSessions()) yield { ...meta, provider, id };
-    }
-  }
   function liveFiles() {
     const files = new Set();
     for (const session of knownSessions()) {

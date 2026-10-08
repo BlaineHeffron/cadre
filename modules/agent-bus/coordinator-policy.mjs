@@ -251,6 +251,13 @@ export function coordinatorOwnerMetadata(policy) {
   };
 }
 
+// The agent bus returns each finished turn of a spawn_session child to this authenticated spawner.
+// The caller only opts in; the identity always comes from the credential.
+export function spawnerMetadata(principal, metadata = {}) {
+  return { spawnedBy: principal?.type === 'agent' && metadata?.returnToSpawner === true
+    ? { kind: String(principal.kind), sessionId: String(principal.sessionId) } : undefined };
+}
+
 export function storedCoordinatorPolicy(metadata = {}) {
   const stored = metadata?.[COORDINATOR_SESSION_METADATA_KEY];
   if (stored?.issuedBy !== 'scheduled-agent-pump') return null;

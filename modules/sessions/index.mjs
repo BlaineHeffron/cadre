@@ -89,6 +89,7 @@ import { queueControlEvent } from '../ops/control-events.mjs';
 import { removeAgentSessionWorktree } from '../fleet/git-worktree.mjs';
 import {
   coordinatorOwnerMetadata,
+  spawnerMetadata,
   coordinatorSessionMetadata,
   loopRegistrationSessionMetadata,
   normalizeCredentialCoordinatorPolicy,
@@ -2524,6 +2525,7 @@ async function sessionsPlugin(app, {
         ? coordinatorSessionMetadata(requestCoordinatorPolicy)
         : (principal?.type === 'agent' ? coordinatorOwnerMetadata(requestCoordinatorPolicy) : {})),
       ...loopRegistrationSessionMetadata(loopRegistrationPolicy),
+      ...spawnerMetadata(principal, metadata),
     };
     queueSessionCreateAudit({
       req,
