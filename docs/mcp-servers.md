@@ -88,8 +88,27 @@ only. No send scope is requested anywhere.
   selection, and is in no built-in profile. The old IDs `grok-imagine` and
   `gpt-image` resolve to `image-gen` in session selections and custom profiles;
   only one server is registered. It exposes `generate_image` with `provider`
-  (`openai`, `google`, `xai`), `prompt`, and optional `output_path`.
-  - OpenAI uses Codex's built-in `image_generation` on the operator's ChatGPT
+  (`openai`, `google`, `xai`), `prompt`, and optional `output_path`,
+  `aspect_ratio`, `size`, and `background` (`transparent` or `opaque`).
+  Unsupported options fail before invoking a provider. Omitting options keeps
+  provider defaults (Google defaults to `1K`).
+
+  | Provider | Aspect ratios | Size | Background |
+  | --- | --- | --- | --- |
+  | OpenAI | `1:1`, `3:2`, `2:3` (prompt hint, verified) | No explicit size control | Transparent or opaque |
+  | Google | `1:1`, `3:2`, `2:3`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`, `9:21`, `1:4`, `4:1`, `1:8`, `8:1` | `512`, `1K`, `2K`, `4K` | Opaque only |
+  | xAI | `1:1`, `16:9`, `9:16`, `3:2`, `2:3` | No explicit size control | Opaque only |
+
+  PNG aspect ratios are checked within 2% to accommodate provider rounding.
+  OpenAI ratio requests require PNG output. Transparent requests require PNG
+  alpha (RGBA, gray-alpha, or a transparency chunk) before saving.
+  Google maps to `generationConfig.imageConfig.aspectRatio` and `imageSize`;
+  its [image configuration](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-1-flash-image)
+  exposes no transparency control. Codex and Grok options were checked against
+  their built-in tool schemas (Codex 0.161.0 and Grok 1.0.50), rather than paid
+  API schemas. Grok receives `aspect_ratio` as a tool argument; Codex receives
+  `transparent_background` as a tool argument and aspect ratio in the prompt.
+  - OpenAI uses Codex's built-in `image_gen` on the operator's ChatGPT
     login. Codex runs with user config disabled, a clean environment, a temporary
     workspace, a workspace-write sandbox, and a three-minute timeout. Timeout
     kills its process group. Paid API keys and Cadre session credentials are

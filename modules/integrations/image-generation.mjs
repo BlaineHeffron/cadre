@@ -6,6 +6,11 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const TIMEOUT_MS = 180_000;
 export const GOOGLE_IMAGE_MODEL = 'gemini-3.1-flash-image';
+const IMAGE_OPTIONS = {
+  openai: { aspect_ratio: ['1:1', '3:2', '2:3'], size: [], background: ['transparent', 'opaque'] },
+  google: { aspect_ratio: ['1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9', '9:21', '1:4', '4:1', '1:8', '8:1'], size: ['512', '1K', '2K', '4K'], background: ['opaque'] },
+  xai: { aspect_ratio: ['1:1', '16:9', '9:16', '3:2', '2:3'], size: [], background: ['opaque'] },
+};
 export const GROK_IMAGE_ARGS = Object.freeze([
   '--no-subagents', '--max-turns', '3', '--permission-mode', 'dontAsk', '--allow', 'image_gen',
   '--disallowed-tools', 'run_terminal_command,read_file,search_replace,list_dir,grep,write,spawn_subagent,scheduler_create,scheduler_delete,monitor,workflow,image_edit,image_to_video,reference_to_video',
@@ -43,16 +48,33 @@ function imageType(bytes) {
   throw new Error('Image generation returned no valid PNG, JPEG, or WebP image.');
 }
 
+function pngInfo(bytes) {
+  if (bytes.length < 33 || bytes.toString('ascii', 12, 16) !== 'IHDR') return null;
+  let alpha = [4, 6].includes(bytes[25]);
+  for (let offset = 8; offset + 12 <= bytes.length;) {
+    const length = bytes.readUInt32BE(offset);
+    if (offset + length + 12 > bytes.length) break;
+    if (bytes.toString('ascii', offset + 4, offset + 8) === 'tRNS' && length > 0) alpha = true;
+    offset += length + 12;
+  }
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20), alpha };
+}
+
 function outside(directory, path) {
   const offset = relative(directory, path);
   return offset === '..' || offset.startsWith('../') || isAbsolute(offset);
 }
 
-export async function generateImage({ provider, prompt, output_path }, {
+export async function generateImage({ provider, prompt, output_path, aspect_ratio, size, background }, {
   env = process.env, run = runImageCli, fetchImpl = fetch, readKey = readFile,
 } = {}) {
   if (!['openai', 'google', 'xai'].includes(provider)) throw new Error(`Unknown image provider: ${provider}`);
   if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('An image prompt is required.');
+  for (const [option, value] of Object.entries({ aspect_ratio, size, background })) {
+    if (value !== undefined && !IMAGE_OPTIONS[provider][option].includes(value)) {
+      throw new Error(`${provider} does not support ${option}=${JSON.stringify(value)}. Supported values: ${IMAGE_OPTIONS[provider][option].join(', ') || 'none (the subscription tool exposes no control)'}.`);
+    }
+  }
   const outputDir = resolve(env.DEFAULT_OUTPUT_DIR || 'generated-images');
   const requestedPath = output_path ? resolve(outputDir, output_path) : '';
   if (requestedPath && (requestedPath === outputDir || outside(outputDir, requestedPath))) {
@@ -70,14 +92,14 @@ export async function generateImage({ provider, prompt, output_path }, {
         await run('codex', [
           'exec', '--ignore-user-config', '--skip-git-repo-check', '--ephemeral',
           '--sandbox', 'workspace-write', '-C', cwd,
-          `Use the built-in image_generation tool to generate one image. Save it as ${join(cwd, 'image.png')}. Do not use API keys or external image services. The image description is: ${JSON.stringify(prompt)}`,
+          `Use the built-in image_gen tool to generate exactly one image. Save it as ${join(cwd, 'image.png')}. Do not use API keys or external image services.${background ? ` Set transparent_background=${background === 'transparent'}.` : ''} The image description is: ${JSON.stringify(aspect_ratio ? `${prompt}\nRequired output aspect ratio: ${aspect_ratio}.` : prompt)}`,
         ], { cwd, env: childEnv, timeoutMs: TIMEOUT_MS });
         try { bytes = await readFile(join(cwd, 'image.png')); }
         catch { throw new Error('Codex completed without saving an image.'); }
       } else {
         const output = await run('grok', [
           '--cwd', cwd, ...GROK_IMAGE_ARGS, '-p',
-          `Call the built-in image_gen tool exactly once. Do not read instructions, search for tools, or use other tools. Report the actual image file path from the tool result. The image description is: ${JSON.stringify(prompt)}`,
+          `Call the built-in image_gen tool exactly once.${aspect_ratio ? ` Set the tool argument aspect_ratio=${JSON.stringify(aspect_ratio)}.` : ''} Do not read instructions, search for tools, or use other tools. Report the actual image file path from the tool result. The image description is: ${JSON.stringify(prompt)}`,
         ], { cwd, env: childEnv, timeoutMs: TIMEOUT_MS });
         let imagePath;
         for (const line of String(output || '').split('\n')) {
@@ -118,7 +140,7 @@ export async function generateImage({ provider, prompt, output_path }, {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { imageSize: '1K' } },
+          generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { imageSize: size || '1K', ...(aspect_ratio ? { aspectRatio: aspect_ratio } : {}) } },
         }),
       });
     } catch { throw new Error('Google image generation could not reach local CLIProxyAPI or timed out.'); }
@@ -131,6 +153,17 @@ export async function generateImage({ provider, prompt, output_path }, {
     bytes = Buffer.from(part.inlineData.data, 'base64');
   }
   const [mimeType, extension] = imageType(bytes);
+  const info = mimeType === 'image/png' ? pngInfo(bytes) : null;
+  if (background === 'transparent' && !info?.alpha) {
+    throw new Error('Codex returned an image without an alpha channel for background=transparent.');
+  }
+  // Verify PNG ratios; Codex only gets a prompt hint.
+  if (aspect_ratio && (provider === 'openai' || mimeType === 'image/png')) {
+    const [width, height] = aspect_ratio.split(':').map(Number);
+    if (!info?.height || Math.abs(info.width / info.height / (width / height) - 1) > 0.02) {
+      throw new Error(`${provider} did not return the requested aspect_ratio=${aspect_ratio}.`);
+    }
+  }
   const path = requestedPath || join(outputDir, `${provider}-${randomUUID()}.${extension}`);
   await mkdir(dirname(path), { recursive: true });
   if (outside(await realpath(outputDir), await realpath(dirname(path)))) {
