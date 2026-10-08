@@ -427,6 +427,80 @@ describe('telegram relay loop', () => {
     });
   });
 
+  it('follows a Claude session to its new transcript after /clear without crossing a co-located session', async () => {
+    await withTempDir(async (stateDir) => {
+      const deliveries = [];
+      const workDir = join(stateDir, 'repo');
+      const projectsDir = join(stateDir, 'projects');
+      await mkdir(join(workDir, '.git'), { recursive: true });
+      const assistant = (text) => `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } })}\n`;
+      const transcript = (cliSessionId) => claudeTranscriptPath(projectsDir, workDir, cliSessionId);
+      const writeClearHook = (id, cliSessionId) => writeFile(
+        join(workDir, '.agent_bus/hooks/state', `claude-${id}.json`),
+        JSON.stringify({
+          session: { provider: 'claude', cliSessionId, duenoSessionId: id, cwd: workDir, transcriptPath: transcript(cliSessionId) },
+          hook: { lifecycle: 'running', activity: 'starting', last_event_name: 'SessionStart', source: 'hook' },
+        }),
+      );
+      const [pathA, pathB, pathC] = [transcript('cli-a'), transcript('cli-b'), transcript('cli-c')];
+      await mkdir(dirname(pathA), { recursive: true });
+      await mkdir(join(workDir, '.agent_bus/hooks/state'), { recursive: true });
+      await writeFile(pathA, assistant('before clear'));
+      await writeFile(pathC, assistant('neighbour output'));
+      const buildRelay = () => new TelegramRelayLoop({
+        config: { enabled: true, tickIntervalSec: 5 },
+        sender: {
+          async deliver(payload) {
+            deliveries.push([payload.route?.sessionId, payload.text]);
+            return { msgId: 900 + deliveries.length, threadId: 177, topicKey: payload.route?.key || '' };
+          },
+        },
+        sentStore: buildSentStore({ stateDir }),
+        bindingStore: buildBindingStore({ stateDir, now: () => 1000 }),
+        listSessions: async () => [
+          session({ id: 'claude-x', runtime: 'claude', tmuxSession: 'claude-x', workDir, cliSessionId: 'cli-a' }),
+          session({ id: 'claude-y', runtime: 'claude', tmuxSession: 'claude-y', workDir, cliSessionId: 'cli-c' }),
+        ],
+        readHookEvents: async () => ({ events: [], cursor: 0, path: '' }),
+        bindingDeps: { projectsDir },
+        agentBusStatePaths: [],
+        now: () => 1000,
+        logger: { warn() {} },
+      });
+
+      let loop = buildRelay();
+      await loop.step();
+      assert.deepEqual(deliveries.splice(0), [['claude-x', 'before clear'], ['claude-y', 'neighbour output']]);
+      assert.equal((await readJson(join(stateDir, 'bindings.json')))['claude-x'].anchor, 'cli_session_id');
+
+      // /clear: SessionStart moves the hook state to B, which already holds post-clear output.
+      await writeFile(pathB, assistant('after clear'));
+      await writeClearHook('claude-x', 'cli-b');
+      await writeFile(pathA, assistant('before clear') + assistant('stale old file'));
+      await loop.step();
+      assert.deepEqual(deliveries.splice(0), [['claude-x', 'after clear']]);
+      const bindings = await readJson(join(stateDir, 'bindings.json'));
+      assert.equal(bindings['claude-x'].transcript_path, pathB);
+      assert.equal(bindings['claude-x'].anchor, 'hook');
+      assert.equal(bindings['claude-y'].transcript_path, pathC);
+
+      const later = assistant('later');
+      await writeFile(pathB, assistant('after clear') + later.slice(0, 20));
+      await loop.step();
+      assert.deepEqual(deliveries.splice(0), []);
+      await writeFile(pathB, assistant('after clear') + later);
+      await loop.step();
+      assert.deepEqual(deliveries.splice(0), [['claude-x', 'later']]);
+
+      // A restarted relay keeps B rather than falling back to the registry's cliSessionId A.
+      loop = buildRelay();
+      await loop.step();
+      await writeFile(pathB, assistant('after clear') + later + assistant('after restart'));
+      await loop.step();
+      assert.deepEqual(deliveries.splice(0), [['claude-x', 'after restart']]);
+    });
+  });
+
   it('revalidates a stale hook-bound Codex transcript path before delivery', async () => {
     await withTempDir(async (stateDir) => {
       const deliveries = [];

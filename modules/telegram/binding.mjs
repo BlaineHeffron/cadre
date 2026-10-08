@@ -535,6 +535,11 @@ export async function resolveBinding(session = {}, { previous = null, liveTenant
   }
   const resolvedDeps = normalizeDeps(deps);
 
+  // `/clear` moves a Claude session to a new transcript; the old file and the registry's
+  // launch-time cliSessionId still name the old one, so the hook's live path wins.
+  const hooked = runtime === 'claude' ? await resolveHook(session, resolvedDeps) : null;
+  if (hooked && hooked.path !== text(previous?.transcript_path)) return hooked;
+
   const reused = await reusePrevious(previous, session);
   if (reused) return reused;
 
