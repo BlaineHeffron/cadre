@@ -28,6 +28,7 @@ class OpsMetricsRegistry {
   }
 
   reset() {
+    this.warnings = new Map();
     this.counters = new Map();
     this.timings = new Map();
     this.gauges = new Map();
@@ -40,6 +41,28 @@ class OpsMetricsRegistry {
     const entry = this.counters.get(key) || { name: metricName, labels, value: 0 };
     entry.value += Number(value || 0);
     this.counters.set(key, entry);
+  }
+
+  recordWarning(code) {
+    if (typeof code !== 'string' || !code.trim()) return;
+    const now = Date.now();
+    const day = new Date(now).toISOString().slice(0, 10);
+    const entry = this.warnings.get(code) || { times: [], escalatedDay: '' };
+    entry.times = entry.times.filter((time) => time > now - 600_000).slice(-100);
+    entry.times.push(now);
+    this.incrementCounter('warning_total', 1, { code });
+    if (entry.times.length > 100 && entry.escalatedDay !== day) {
+      entry.escalatedDay = day;
+      this.incrementCounter('warning_escalation_total', 1, { code });
+    }
+    this.warnings.set(code, entry);
+  }
+
+  warningHealth() {
+    const codes = [...this.warnings].filter(([, entry]) => (
+      entry.times.filter((time) => time > Date.now() - 600_000).length > 100
+    )).map(([code]) => code);
+    return { status: codes.length ? 'degraded' : 'ok', detail: codes.length ? 'repeated_warnings' : 'warnings_ok', data: { codes } };
   }
 
   recordTiming(name, durationMs, labels = {}) {
@@ -141,6 +164,11 @@ function formatPrometheusMetric(name, labels, value) {
 }
 
 const registry = new OpsMetricsRegistry();
+
+export function opsLogMethod(args, method, level) {
+  if (level === 40) registry.recordWarning(args[0]?.code || args[0]?.err?.code);
+  return method.apply(this, args);
+}
 
 export function getOpsMetricsRegistry() {
   return registry;

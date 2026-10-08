@@ -120,6 +120,8 @@ class CodexRuntimeHarness extends AgentRuntimeHarness {
       `model_provider=${JSON.stringify(modelProvider)}`,
       '-c',
       'features.hooks=true',
+      '-c',
+      'check_for_update_on_startup=false',
       ...buildCodexPluginConfigArgs(codexPlugins),
       // Inline mode keeps tmux scrollback; alt-screen panes have no history.
       '--no-alt-screen',
