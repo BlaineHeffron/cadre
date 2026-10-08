@@ -74,9 +74,9 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
     return withTimeout(ref, running);
   }
 
-  // A spawn_session child's finished turn goes to its spawner as one DM result, unless the child
-  // already wrote to that DM during the turn. Cursors live in memory; after a restart the DM check
-  // suppresses turns that were already returned.
+  // A spawn_session child's finished turn goes to its spawner as one DM result, keyed by its Stop
+  // record, unless the child wrote that DM itself during the turn. A failed send leaves the cursor in
+  // place to retry; after a restart the keys make the replay from the start a no-op.
   const spawnResultCursors = new Map();
   async function returnSpawnResults() {
     await Promise.allSettled([...knownSessions()].filter((session) => session.metadata?.spawnedBy).map(async (session) => {
@@ -84,17 +84,21 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
       const hookFile = { workDir: session.workDir, provider: session.provider, sessionId: session.id };
       const prior = spawnResultCursors.get(key) || { cursor: 0, turnStartedAt: 0, hookAt: '' };
       const hook = await readHookDerivedState(hookFile);
-      if (hook.last_hook_event_at === prior.hookAt || !['Stop', 'SessionEnd'].includes(hook.last_event_name)) return;
+      if (!hook.last_hook_event_at || hook.last_hook_event_at === prior.hookAt) return;
       const { events, cursor } = await readHookEventsSince({ ...hookFile, cursor: prior.cursor });
-      const next = { cursor, turnStartedAt: prior.turnStartedAt, hookAt: hook.last_hook_event_at };
-      spawnResultCursors.set(key, next);
+      let { turnStartedAt } = prior;
       for (const event of events) {
-        if (event.eventName === 'UserPromptSubmit') next.turnStartedAt = Date.parse(event.loggedAt);
+        const at = Date.parse(event.loggedAt);
+        if (event.eventName === 'UserPromptSubmit') turnStartedAt = at;
         if (event.eventName !== 'Stop' || !event.lastAssistantMessage?.trim()) continue;
         const result = await app.agentBusLifecycle.directMessage({ from: { kind: session.provider, sessionId: session.id },
-          target: session.metadata.spawnedBy, body: event.lastAssistantMessage, type: 'result', unlessSentSince: next.turnStartedAt });
-        if (result.statusCode !== 200) app.log.warn({ session: key, error: result.payload?.error }, 'Spawn result return failed');
+          target: session.metadata.spawnedBy, body: event.lastAssistantMessage, type: 'result',
+          idempotencyKey: `spawn-result:${key}:${event.loggedAt}`, skipIfSentBetween: [turnStartedAt, at] });
+        if (result.statusCode !== 200 && result.statusCode !== 410) {
+          return app.log.warn({ session: key, error: result.payload?.error }, 'Spawn result return failed; retrying');
+        }
       }
+      spawnResultCursors.set(key, { cursor, turnStartedAt, hookAt: hook.last_hook_event_at });
     }));
   }
 

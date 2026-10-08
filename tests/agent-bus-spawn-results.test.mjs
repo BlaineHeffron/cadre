@@ -50,6 +50,35 @@ test('a spawned child returns each finished turn to its spawner once', async (t)
   assert.equal(results().length, 3);
 });
 
+test('a Stop followed at once by a new prompt still returns', async (t) => {
+  const { hook, turn, results, delivered } = await setup(t, { spawnedBy: spawner });
+  await turn('Answer before next prompt');
+  await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'more' });
+  await hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash' });
+  assert.ok(await settle(() => delivered('Answer before next prompt') === 1));
+  await delay(150);
+  assert.equal(results().length, 1);
+});
+
+test('two turns finished between observer passes both return', async (t) => {
+  const { turn, delivered } = await setup(t, { spawnedBy: spawner });
+  await turn('Turn one');
+  await turn('Turn two');
+  assert.ok(await settle(() => delivered('Turn one') === 1 && delivered('Turn two') === 1));
+});
+
+test('a result waits while the spawner is unreachable and returns once it is back', async (t) => {
+  const { h, turn, results, delivered } = await setup(t, { spawnedBy: spawner });
+  h.sessionCatalog.codex.delete('codex-1');
+  await turn('Held answer');
+  await delay(300);
+  assert.equal(results().length, 0);
+  h.sessionCatalog.codex.add('codex-1');
+  assert.ok(await settle(() => delivered('Held answer') === 1));
+  await delay(150);
+  assert.equal(results().length, 1);
+});
+
 test('a long returned result arrives whole', async (t) => {
   const { turn, delivered, h } = await setup(t, { spawnedBy: spawner });
   await turn(`START ${'x'.repeat(1500)}`);

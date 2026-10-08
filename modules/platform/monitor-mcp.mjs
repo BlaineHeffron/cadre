@@ -26,8 +26,6 @@ import {
   filterCoordinatorThreads,
 } from '../agent-bus/coordinator-policy.mjs';
 
-const SPAWN_RESULT_NOTE = 'Cadre returns your final message of each turn to the agent that spawned you. End your turn with your answer; do not message it separately.';
-
 const MCP_SERVERS_SELECTION_SCHEMA = {
   type: 'object',
   properties: {
@@ -511,7 +509,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'spawn_session',
-      description: 'Spawn exactly one interactive session using a provider returned by monitor_list_agent_providers. Returns thread_id, participant ids/names and warnings. A Claude session spawned without parentThreadId returns the final message of each turn to you as a DM result; end your turn to wait for it instead of polling.',
+      description: 'Spawn exactly one interactive session using a provider returned by monitor_list_agent_providers. Returns thread_id, participant ids/names and warnings. A tmux Claude session spawned without parentThreadId returns the final message of each turn to you as a DM result; end your turn to wait for it instead of polling.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -534,8 +532,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         const result = await request('/api/agents/sessions', {
           method: 'POST',
           body: {
-            workDir, displayName, model, provider, thinkingLevel,
-            initialPrompt: returnToSpawner && initialPrompt ? `${initialPrompt}\n\n${SPAWN_RESULT_NOTE}` : initialPrompt,
+            workDir, displayName, model, provider, thinkingLevel, initialPrompt,
             ...(returnToSpawner ? { metadata: { returnToSpawner } } : {}),
             ...(skills !== undefined ? { skills } : {}),
             ...(mcpProfile !== undefined ? { mcpProfile } : {}),

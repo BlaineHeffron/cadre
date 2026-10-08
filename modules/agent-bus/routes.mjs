@@ -387,7 +387,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     broadcast(wsManager, 'agent-bus:threads', 'thread_deleted', { threadId: req.params.threadId }); return { ok: true };
   });
 
-  async function send({ threadId, from, body, summary, type = 'message', replyTo = null, metadata = null, deliveryMode = 'wait', dedupe = true }) {
+  async function send({ threadId, from, body, summary, type = 'message', replyTo = null, metadata = null, deliveryMode = 'wait', idempotencyKey = null }) {
     const snapshot = store.getThread(threadId); if (!snapshot) return { statusCode: 404, payload: { error: 'Thread not found' } };
     if (snapshot.thread.status !== 'open') return { statusCode: 409, payload: { error: 'Thread is closed' } };
     const managed = snapshot.thread.metadata?.task;
@@ -400,7 +400,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     const resolvedType = type === 'result' ? 'result' : (type || 'message');
     const history = [...(snapshot.messages || [])].reverse();
     // A repeated result is a duplicate only of the room's latest result, so a verdict that flips back still posts.
-    const duplicate = dedupe && (resolvedType === 'result' ? history.filter((item) => item.type === 'result').slice(0, 1) : history).find((item) => (
+    const duplicate = !idempotencyKey && (resolvedType === 'result' ? history.filter((item) => item.type === 'result').slice(0, 1) : history).find((item) => (
       participantKey(item.from) === participantKey(from)
       && item.body === body
       && item.metadata?.summary === summary
@@ -417,7 +417,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (resolvedType === 'result' && adapters[owner?.kind] && !threadHasParticipant(snapshot.thread, owner)
       && participantKey(owner) !== participantKey(from)) targets.push(participantRef(owner));
     const record = await store.createMessage({ threadId, from: participantRef(from), targets, type: resolvedType, body,
-      replyTo, metadata: { ...(metadata || {}), ...(summary !== undefined ? { summary } : {}), ...(snapshot.thread.metadata?.dm ? { dm: true } : {}) } });
+      replyTo, idempotencyKey, metadata: { ...(metadata || {}), ...(summary !== undefined ? { summary } : {}), ...(snapshot.thread.metadata?.dm ? { dm: true } : {}) } });
     broadcast(wsManager, `agent-bus:thread:${threadId}`, 'message_created', { message: record.message, deliveries: record.deliveries });
     if (deliveryMode === 'wait') await Promise.all(record.deliveries.map(async (delivery) => {
       try { return await deliverMessage(record.message, delivery); }
@@ -460,16 +460,17 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     return { statusCode: 404, payload: { error: `${label} agent not found`, code: 'session_not_found' } };
   }
 
-  // unlessSentSince skips the send when `from` already wrote to this DM at or after that time; that
-  // per-turn check replaces the content dedupe, so two turns with the same answer both arrive.
-  async function directMessage({ from, target, body, summary, replyTo, type, unlessSentSince = null }) {
+  // idempotencyKey replaces the content dedupe. skipIfSentBetween skips the send when `from` wrote its
+  // own (unkeyed) message to this DM in that [start, end] window.
+  async function directMessage({ from, target, body, summary, replyTo, type, idempotencyKey = null, skipIfSentBetween = null }) {
     if (participantKey(from) === participantKey(target)) return { statusCode: 400, payload: { error: 'Cannot create a DM with yourself' } };
     const refError = await knownDmRefError(from, 'Sender') || await knownDmRefError(target, 'Target');
     if (refError) return refError;
     const key = dmKey(from, target);
     let thread = store.listThreads().find((item) => item.metadata?.dmKey === key);
-    if (unlessSentSince !== null && thread && store.getThread(thread.id).messages
-      .some((item) => participantKey(item.from) === participantKey(from) && item.createdAt >= unlessSentSince)) {
+    if (skipIfSentBetween && thread && store.getThread(thread.id).messages.some((item) => !item.idempotencyKey
+      && participantKey(item.from) === participantKey(from)
+      && item.createdAt >= skipIfSentBetween[0] && item.createdAt <= skipIfSentBetween[1])) {
       return { statusCode: 200, payload: { skipped: 'already_sent' } };
     }
     if (!thread) thread = await store.createThread({ title: `DM: ${key}`, projectKey: '',
@@ -480,7 +481,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     }
     thread.participants.forEach((participant) => observedSessions.add(participantKey(participant)));
     const result = await send({ threadId: thread.id, from, body, summary, replyTo, type, metadata: { dm: true },
-      dedupe: unlessSentSince === null });
+      idempotencyKey });
     return { statusCode: result.statusCode, payload: { thread: normalizeThreadSummary(await enrichThread(thread)), ...result.payload } };
   }
   app.agentBusLifecycle.directMessage = directMessage;

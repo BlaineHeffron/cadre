@@ -587,7 +587,7 @@ describe('Monitor MCP server', () => {
             model: 'claude-opus-4-8',
             provider: 'claude',
           thinkingLevel: 'high',
-          initialPrompt: 'Start here\n\nCadre returns your final message of each turn to the agent that spawned you. End your turn with your answer; do not message it separately.',
+          initialPrompt: 'Start here',
           metadata: { returnToSpawner: true },
           skills: ['tdd'],
           mcpProfile: 'dueno',
