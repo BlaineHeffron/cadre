@@ -69,6 +69,19 @@ test('two turns finished between observer passes both return', async (t) => {
   assert.ok(await settle(() => delivered('Turn one') === 1 && delivered('Turn two') === 1));
 });
 
+test('turns recorded within one clock millisecond each return once', async (t) => {
+  const { turn, results, delivered } = await setup(t, { spawnedBy: spawner });
+  const now = Date.now();
+  const sameClock = async (fn) => { t.mock.method(Date, 'now', () => now); try { await fn(); } finally { Date.now.mock.restore(); } };
+  await sameClock(async () => { await turn('Same clock one'); await turn('Same clock two'); });
+  assert.ok(await settle(() => delivered('Same clock one') === 1 && delivered('Same clock two') === 1));
+  // A later turn stamped with the same millisecond still counts as new hook output.
+  await sameClock(() => turn('Same clock three'));
+  assert.ok(await settle(() => delivered('Same clock three') === 1));
+  await delay(150);
+  assert.equal(results().length, 3);
+});
+
 test('a result waits while the spawner is unreachable and returns once it is back', async (t) => {
   const { h, turn, results, delivered } = await setup(t, { spawnedBy: spawner });
   h.sessionCatalog.codex.delete('codex-1');
