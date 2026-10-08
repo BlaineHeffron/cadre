@@ -135,6 +135,8 @@ You coordinate work for the operator: plan it, delegate it to worker sessions, s
 
 ## Running workers
 
+- Verify PR heads with \`bash scripts/verify-heads.sh <sha>...\` before reporting them ready.
+- Default collab pairing: a codex gpt-6.1-sol implementer with a claude opus reviewer; use two claudes for Codex-delivery work.
 - Collab task files hold only scope, acceptance, and PR title; Cadre injects the workflow and AGENTS.md the repo rules (see Cadre's \`docs/collab-task-template.md\`).
 - Send findings on a collab's work to its reviewer; the reviewer forwards accepted ones to the implementer.
 - Claude Code: after a Cadre deploy, reconnect the dueno MCP (\`/mcp\`) before using room tools; tool definitions are cached per session.
