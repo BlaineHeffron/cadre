@@ -24,11 +24,12 @@ describe('Internal bypass request logging', () => {
     });
     app = Fastify({
       logger: { level: 'info', stream },
-      logController: new Fastify.LogController({ disableRequestLogging: auth.isInternalBypassRequest }),
+      logController: new auth.InternalQuietLogController(),
     });
     await app.register(auth.authPlugin);
     await app.after();
     app.get('/api/health', async () => ({ status: 'ok' }));
+    app.get('/api/boom', async () => { throw new Error('boom'); });
     app.get('/api/claude/sessions/abc', async () => ({ ok: true }));
   });
 
@@ -50,6 +51,14 @@ describe('Internal bypass request logging', () => {
     });
     assert.equal(res.statusCode, 200);
     assert.deepEqual(msgs(), []);
+  });
+
+  it('still logs errors from internal bypass requests', async () => {
+    lines.length = 0;
+    const res = await app.inject({ method: 'GET', url: '/api/boom', headers: buildInternalBypassHeaders() });
+    assert.equal(res.statusCode, 500);
+    assert.ok(lines.some((l) => l.level >= 50));
+    assert.ok(!lines.some((l) => l.level === 30));
   });
 
   it('still logs external requests', async () => {
