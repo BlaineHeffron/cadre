@@ -5,7 +5,7 @@ import fastifyRateLimit from '@fastify/rate-limit';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { assertDistinctAuthSecrets, config, loadTlsOptions } from './config.mjs';
-import { authPlugin, buildInternalBypassHeaders, evaluateInternalBypass, trustProxyHop, verifyBrowserSessionRequest, verifyToken } from './modules/platform/auth.mjs';
+import { authPlugin, buildInternalBypassHeaders, evaluateInternalBypass, isInternalBypassRequest, trustProxyHop, verifyBrowserSessionRequest, verifyToken } from './modules/platform/auth.mjs';
 import { summarizeReadiness } from './modules/ops/health-controls.mjs';
 import { WsManager } from './modules/platform/ws-manager.mjs';
 import { tmuxPlugin } from './modules/platform/tmux.mjs';
@@ -85,6 +85,7 @@ if (sideEffectLoopsSuppressed) {
 
 const app = Fastify({
   logger: { level: config.logLevel },
+  logController: new Fastify.LogController({ disableRequestLogging: isInternalBypassRequest }),
   bodyLimit: 12 * 1024 * 1024,
   // agentBusPlugin loads a large state file at startup and can exceed Fastify's 10s default.
   pluginTimeout: 180_000,

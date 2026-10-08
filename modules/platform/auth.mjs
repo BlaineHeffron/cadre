@@ -274,6 +274,9 @@ export function evaluateInternalBypass(request, {
   return { allowed: true, reason: 'ok', ip, ageMs };
 }
 
+// Fastify disableRequestLogging predicate: only a fully valid bypass is quiet, so spoofed headers still log.
+export const isInternalBypassRequest = (request) => evaluateInternalBypass(request).allowed;
+
 function authPluginImpl(app, opts = {}, done) {
   const authToken = opts.token || currentAuthToken();
   const internalBypassToken = opts.internalBypassToken || currentInternalBypassToken();
@@ -395,7 +398,7 @@ function authPluginImpl(app, opts = {}, done) {
         automationPolicy: mcpAuth ? '' : automationPolicy,
         source: mcpAuth ? 'agent_bus_mcp' : 'internal',
       };
-      request.log.info({
+      request.log.debug({
         control_event: {
           type: 'internal_bypass_used',
           path,
