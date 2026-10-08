@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { recordHookPayload, registerHookSessionRegistry } from '../modules/agent/hook-events.mjs';
@@ -50,6 +50,36 @@ test('a spawned child returns each finished turn to its spawner once', async (t)
   await turn('Second answer');
   assert.ok(await settle(() => delivered('Second answer') === 2));
   assert.equal(results().length, 3);
+});
+
+test('the benchmark worker returns only its 25:30 answer after background work finishes', async (t) => {
+  // Reconstructed hooks: worker f832e1d3's hook log was deleted on termination.
+  // Answers, Stop times and task IDs come from the real 7c1d0fdf-4b62-45c4-adbb-32feb9fe44a0
+  // exp2/s4 transcript; background_tasks uses Claude 2.1.294's native in-flight snapshot shape.
+  const stops = JSON.parse(await readFile(new URL('./fixtures/agent-bus/spawn-background-stops.json', import.meta.url), 'utf8'));
+  const first = await setup(t, { spawnedBy: spawner });
+  await first.hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' });
+  for (const stop of stops.slice(0, -1)) {
+    await first.hook(stop);
+    await delay(150);
+    assert.equal(first.results().length, 0);
+  }
+  // Replay must not return the skipped Stops, either.
+  const second = await first.restart();
+  await second.hook(stops.at(-1));
+  assert.ok(await settle(() => second.delivered('All three tasks are done') === 1));
+  await delay(150);
+  assert.deepEqual(second.results().map((message) => message.body), [stops.at(-1).last_assistant_message]);
+});
+
+test('an empty background snapshot still returns every turn', async (t) => {
+  const { hook, results, delivered } = await setup(t, { spawnedBy: spawner });
+  for (const answer of ['Empty snapshot one', 'Empty snapshot two']) {
+    await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' });
+    await hook({ hook_event_name: 'Stop', last_assistant_message: answer, background_tasks: [] });
+  }
+  assert.ok(await settle(() => delivered('Empty snapshot one') === 1 && delivered('Empty snapshot two') === 1));
+  assert.equal(results().length, 2);
 });
 
 test('a Stop followed at once by a new prompt still returns', async (t) => {
