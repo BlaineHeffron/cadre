@@ -15,18 +15,6 @@ export const MCP_PROVIDER_SCHEMA = Object.freeze({
   description: 'Agent provider ID from monitor_list_agent_providers.',
 });
 
-export const MCP_CODEX_MODEL_SCHEMA = Object.freeze({
-  type: 'string',
-  enum: MCP_CODEX_MODELS,
-  description: 'Codex model.',
-});
-
-export const MCP_CLAUDE_MODEL_SCHEMA = Object.freeze({
-  type: 'string',
-  enum: MCP_CLAUDE_MODELS,
-  description: 'Claude model.',
-});
-
 export const MCP_AGENT_MODEL_SCHEMA = Object.freeze({
   type: 'string',
   description: 'Model ID from the server model catalog for the selected provider.',
