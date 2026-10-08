@@ -1603,7 +1603,7 @@ describe('Codex Sessions module', () => {
     assert.match(source, /prompt_launch_override_forbidden/);
   });
 
-  it('marks spawned Codex workspaces trusted before passing the prompt', async () => {
+  it('passes the workspace and prompt to spawned Codex sessions', async () => {
     const workDir = await mkdtemp(join(tmpdir(), 'dueno-codex-workdir-'));
     tempDirs.push(workDir);
     const tmuxArgs = await runCreateCommandScenario({ workDir });
@@ -1612,7 +1612,6 @@ describe('Codex Sessions module', () => {
     assert.match(tmuxArgs, /export DUENO_SESSION_ID='[a-f0-9]+'/);
     assert.match(tmuxArgs, /export DUENO_PROVIDER='codex'/);
     assert.match(tmuxArgs, new RegExp(`'--cd' '${workDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`));
-    assert.match(tmuxArgs, new RegExp(`projects\\."${workDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"\\.trust_level="trusted"`));
     assert.match(tmuxArgs, /Initial prompt text/);
     assert.match(tmuxArgs, /'mcp_servers=\{\}'/);
     assert.match(tmuxArgs, /plugins\."browser@openai-bundled"\.enabled=false/);
@@ -1661,7 +1660,7 @@ describe('Codex Sessions module', () => {
     assert.match(tmuxArgs, /research agent/);
   });
 
-  it('builds Codex trust config from the shared agent runtime harness layer', async () => {
+  it('builds Codex launch args from the shared agent runtime harness layer', async () => {
     const workDir = await mkdtemp(join(tmpdir(), 'dueno-codex-runtime-'));
     tempDirs.push(workDir);
     const {
@@ -1669,7 +1668,6 @@ describe('Codex Sessions module', () => {
       buildClaudeLaunchArgs,
       buildCodexLaunchArgs,
       buildCodexPluginConfigArgs,
-      trustedCodexProjectConfig,
     } = await import('../modules/agent/runtime-args.mjs');
 
     const launchArgs = buildCodexLaunchArgs({
@@ -1679,7 +1677,6 @@ describe('Codex Sessions module', () => {
       args: ['Initial prompt text'],
     });
 
-    assert.ok(launchArgs.includes(trustedCodexProjectConfig(workDir)));
     assert.deepEqual(launchArgs.slice(0, 3), ['--dangerously-bypass-approvals-and-sandbox', '--cd', workDir]);
     assert.ok(launchArgs.includes('gpt-5.4'));
     assert.ok(launchArgs.includes('model_reasoning_effort="high"'));

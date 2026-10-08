@@ -70,7 +70,18 @@ test('pushed and clean removes worktree and branch', async (t) => {
   const result = await cleanupManagedWorktree(f.metadata, f.options);
   assert.equal(result.removed, true); assert.equal(result.branchKept, false);
   assert.equal(await exists(f.metadata.path), false);
+  await assert.rejects(stat(resolve(f.options.baseDir, f.metadata.roomId)), { code: 'ENOENT' });
+  assert.equal(await exists(f.options.baseDir), true);
   assert.equal((await exec('git', ['-C', f.repo, 'show-ref', '--verify', 'refs/heads/topic'])).code, 128);
+});
+
+test('removing a worktree keeps a non-empty room directory', async (t) => {
+  const f = await fixture(t);
+  const sibling = resolve(f.options.baseDir, f.metadata.roomId, 'keep.txt');
+  await writeFile(sibling, 'keep');
+  assert.equal((await cleanupManagedWorktree(f.metadata, f.options)).removed, true);
+  assert.equal(await exists(f.metadata.path), false);
+  assert.equal(await readFile(sibling, 'utf8'), 'keep');
 });
 
 for (const recorded of ['pushed', 'unpushed']) test(`a worktree switched to another pushed branch is removed; a ${recorded} recorded branch is ${recorded === 'pushed' ? 'deleted' : 'kept'}`, async (t) => {
@@ -388,6 +399,7 @@ test('setup timeout terminates child writers before rollback', async (t) => {
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.equal(await exists(escaped), false);
   assert.equal(await exists(resolve(f.options.baseDir, 'thr_timeout/repo')), false);
+  await assert.rejects(stat(resolve(f.options.baseDir, 'thr_timeout')), { code: 'ENOENT' });
 });
 
 test('bootstrap injects the merge policy from the base-ref config', async (t) => {
