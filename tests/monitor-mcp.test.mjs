@@ -493,42 +493,7 @@ describe('Monitor MCP server', () => {
     assert.deepEqual(requests, []);
   });
 
-  it('forwards initialPrompt when spawning a single session', async () => {
-    const requests = [];
-    const server = buildMonitorMcpServer({
-      async requestImpl(path, opts = {}) {
-        requests.push({ path, opts });
-        if (path === '/api/claude/sessions') {
-          return { id: 'claude_9', sessionName: 'claude-9', initialPromptInjected: true, initialPromptError: null };
-        }
-        throw new Error(`Unexpected path: ${path}`);
-      },
-    });
-
-    const result = await server.handleToolCall('monitor_spawn_claude', {
-      workDir: '/tmp/project',
-      displayName: 'Coordinator',
-      model: 'claude-opus-4-8',
-      initialPrompt: '/skill-name',
-    });
-
-    assert.deepEqual(requests, [{
-      path: '/api/claude/sessions',
-      opts: {
-        method: 'POST',
-        body: {
-          workDir: '/tmp/project',
-          displayName: 'Coordinator',
-          model: 'claude-opus-4-8',
-          initialPrompt: '/skill-name',
-          mcpProfile: 'dueno',
-        },
-      },
-    }]);
-    assert.deepEqual(result, { thread_id: null, participants: [{ kind: 'claude', session_id: 'claude_9', display_name: 'claude-9' }] });
-  });
-
-  it('passes Codex plugin opt-in through legacy and unified single-session entry points', async () => {
+  it('passes Codex plugin opt-in through the spawn_session entry point', async () => {
     const requests = [];
     const server = buildMonitorMcpServer({
       async requestImpl(path, opts = {}) {
@@ -538,21 +503,17 @@ describe('Monitor MCP server', () => {
     });
     const codexPlugins = { add: ['browser@openai-bundled'] };
 
-    await server.handleToolCall('monitor_spawn_codex', { codexPlugins });
     await server.handleToolCall('spawn_session', { provider: 'codex', codexPlugins });
 
     assert.deepEqual(requests.map(({ path, opts }) => ({ path, codexPlugins: opts.body.codexPlugins })), [
-      { path: '/api/codex/sessions', codexPlugins },
       { path: '/api/agents/sessions', codexPlugins },
     ]);
-    for (const name of ['monitor_spawn_codex', 'spawn_session']) {
-      const schema = server.listTools().find((tool) => tool.name === name).inputSchema.properties.codexPlugins;
-      assert.equal(schema.additionalProperties, false);
-      assert.match(schema.description, /Separate from Fleet skills and mcpServers/);
-    }
+    const schema = server.listTools().find((tool) => tool.name === 'spawn_session').inputSchema.properties.codexPlugins;
+    assert.equal(schema.additionalProperties, false);
+    assert.match(schema.description, /Separate from Fleet skills and mcpServers/);
 
     await server.handleToolCall('spawn_session', { provider: 'claude', codexPlugins });
-    assert.equal(Object.hasOwn(requests[2].opts.body, 'codexPlugins'), false);
+    assert.equal(Object.hasOwn(requests[1].opts.body, 'codexPlugins'), false);
   });
 
   it('routes spawn_session through the Claude backend', async () => {
@@ -1099,7 +1060,7 @@ describe('Monitor MCP server', () => {
     const baseUrl = `http://127.0.0.1:${listener.address().port}`;
     await new Promise((resolve) => listener.close(resolve));
     const server = buildMonitorMcpServer({ requestImpl: buildAgentBusMcpRequest({ baseUrl }) });
-    await assert.rejects(server.handleToolCall('monitor_spawn_claude', { workDir: '/tmp/project', initialPrompt: 'hi' }),
+    await assert.rejects(server.handleToolCall('spawn_session', { provider: 'claude', workDir: '/tmp/project', initialPrompt: 'hi' }),
       { code: 'server_restarting', message: 'Cadre server is restarting; retry in a few seconds' });
   });
 });
