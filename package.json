@@ -61,7 +61,6 @@
     "dotenv": "^16.4.0",
     "fastify": "5.12.5",
     "htm": "^3.1.1",
-    "image-router-mcp": "0.2.1",
     "js-yaml": "4.3.2",
     "katex": "^0.16.47",
     "marked": "^16.4.2",

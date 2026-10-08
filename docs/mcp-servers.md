@@ -52,7 +52,7 @@ workspace-global `.mcp.json`, `.codex/config.toml`, or `.claude/settings.local.j
 | `rea` | stdio | none | [`rea-agents`](https://github.com/morluto/rea) (MIT; pinned npm dependency, runs `rea mcp`); decompiled output is untrusted |
 | `bevy_brp` | stdio | none | [`bevy_brp_mcp`](https://github.com/natepiano/bevy_brp) 0.22.x for Bevy 0.19; operator runs `cargo install bevy_brp_mcp` |
 | `pixellab` | http | `DM_MCP_PIXELLAB_API_KEY` / `PIXELLAB_API_KEY` | PixelLab's official `https://api.pixellab.ai/mcp` |
-| `grok-imagine`, `gpt-image` | stdio | `DM_MCP_XAI_API_KEY` / `XAI_API_KEY`, `DM_MCP_OPENAI_API_KEY` / `OPENAI_API_KEY` (forwarded) | [`image-router-mcp`](https://github.com/JiaDians/image-router-mcp) (MIT; pinned npm dependency) |
+| `image-gen` | stdio | ChatGPT login (Codex), Google login (local CLIProxyAPI); key-file path only | Cadre-owned `scripts/image-gen-mcp.mjs` |
 | `filesystem`, `git`, `fetch`, `memory`, `sequential-thinking`, `time` | stdio | none | maintained MCP reference servers |
 | `espocrm`, `invoice-ninja` | http | API key env | self-hosted; endpoint must be supplied |
 | `seodata` | stdio | none (optional `SEODATA_API_KEY`) | locally built [`seodata-mcp`](https://github.com/BlaineHeffron/seodata-mcp) |
@@ -84,24 +84,41 @@ only. No send scope is requested anywhere.
   `MESHY_API_KEY` is forwarded into the stdio server: in the `0600` Claude/Pi
   launch config, and to Codex by name (see the secret forwarding note below).
   `pixellab` stays on the loopback proxy; the agent never sees the token.
-- `grok-imagine` and `gpt-image` spend paid credits per image, require explicit
-  selection, and are in no profile. Both IDs run the same pinned package and
-  each receives only its own provider key, renamed to `XAI_API_KEY` or
-  `OPENAI_API_KEY`. Like `MESHY_API_KEY`, that key lands in the `0600`
-  Claude/Pi launch config; Codex gets it by name. `OPENAI_API_KEY` is also
-  Codex's own credential variable, so gpt-image goes by name only when the key
-  equals the fleet's `OPENAI_API_KEY`. A differing `DM_MCP_OPENAI_API_KEY` stays
-  an inline Codex `-c` override (visible in `ps`) rather than replace Codex's
-  key. `grok-imagine`
-  pins `grok-imagine-image-2.0`, overriding any model the agent passes.
-  `gpt-image` defaults to `gpt-image-2.5-flare`, and an agent can still request
-  `gpt-image-2.5-sunburst` per call. Each ID exposes all three upstream tools
-  (OpenAI, Google, xAI); only the selected provider's key is forwarded
-  explicitly, but there is no provider isolation: a key the agent runtime
-  already inherits can still reach the other tools. Images are written to
-  `<session work dir>/generated-images/` (the Cadre state dir's
-  `generated-images/` when a session has no work dir) unless the agent passes
-  an `output_path`.
+- `image-gen` is a Cadre-owned subscription image server, requires explicit
+  selection, and is in no built-in profile. The old IDs `grok-imagine` and
+  `gpt-image` resolve to `image-gen` in session selections and custom profiles;
+  only one server is registered. It exposes `generate_image` with `provider`
+  (`openai`, `google`, `xai`), `prompt`, and optional `output_path`.
+  - OpenAI uses Codex's built-in `image_generation` on the operator's ChatGPT
+    login. Codex runs with user config disabled, a clean environment, a temporary
+    workspace, a workspace-write sandbox, and a three-minute timeout. Timeout
+    kills its process group. Paid API keys and Cadre session credentials are
+    omitted from the child environment. The server verifies PNG/JPEG/WebP
+    signature bytes before saving the output.
+  - Google requests
+    `gemini-3.1-flash-image` (Nano Banana 2)
+    through local CLIProxyAPI's Gemini-native endpoint on `127.0.0.1:8317`.
+    Nano Banana 2.1 exists as `gemini-nano-banana-2.1`, but this Antigravity
+    channel does not serve it yet; the Google model is one constant to update
+    when subscription access becomes available.
+    The operator manages the proxy and its Google subscription login. The server
+    reads the local client key file at call time; only its path is configured
+    (`IMAGE_GEN_PROXY_KEY_FILE`, default
+    `~/.dueno-fleet/cliproxyapi/local-api-key`). The key is never placed in argv
+    or agent launch configuration. Provider model availability can differ from
+    Google's public API catalog; unavailable models fail clearly.
+  - xAI uses Grok Build's built-in `image_gen` with the SuperGrok login.
+    It runs with `dontAsk` permissions, explicitly allows `image_gen`, disables
+    shell/file writes, web search and subagents, and limits turns and runtime.
+    The server takes the output path only from an `ImageGen` tool-result event,
+    resolves symlinks, and requires a real image under `~/.grok/sessions/`.
+    Provider logins are handled by their CLIs. No paid API fallback is used.
+  The MCP server can initialize without provider logins; generation reports
+  missing binaries, login failures, unavailable models, and invalid image output.
+  Images are saved under `<session work dir>/generated-images/` (the Cadre state
+  dir's `generated-images/` without a work dir). Relative `output_path` values
+  resolve there and must stay inside it. Symlink escapes and overwriting existing
+  output files are rejected.
 - `rea` and `bevy_brp` require explicit selection and are in no profile.
   REA reads JS/Electron trees and ASARs, .NET assemblies, and loopback
   browser/Electron targets with only Node. Native analysis needs Ghidra or
@@ -126,8 +143,8 @@ only. No send scope is requested anywhere.
   so nothing reaches a spawned server by inheritance. For Claude and Pi the
   value lands in the `0600` launch config. Keep genuinely sensitive
   credentials on the HTTP proxy path instead, where the agent never sees them.
-- Secret forwarding to Codex: forwarded keys stay off the Codex command line,
-  except a differing `DM_MCP_OPENAI_API_KEY` for `gpt-image` (above). Cadre writes them to a `0600` per-session file, the tmux pane exports
+- Secret forwarding to Codex: forwarded keys stay off the Codex command line.
+  Cadre writes them to a `0600` per-session file, the tmux pane exports
   them without echoing a value (app-server Codex gets them in its process
   environment), and `mcp_servers.<id>.env_vars=[...]` tells Codex to copy them
   by name into the server. The forwarded value is still agent-visible: the
@@ -173,9 +190,8 @@ DM_MCP_GITHUB_TOKEN=...
 DM_MCP_EXA_API_KEY=...
 DM_MCP_PIXELLAB_API_KEY=...                           # pixellab.ai account API token
 MESHY_API_KEY=...                                     # forwarded into the meshy stdio server (agent-visible)
+IMAGE_GEN_PROXY_KEY_FILE=/path/to/local-api-key       # optional path only; default ~/.dueno-fleet/cliproxyapi/local-api-key
 SEMANTIC_SCHOLAR_API_KEY=...                          # optional; also ADS_API_KEY, OPENALEX_EMAIL, UNPAYWALL_EMAIL for paper-search
-DM_MCP_XAI_API_KEY=...                                # or XAI_API_KEY; forwarded into grok-imagine (agent-visible)
-DM_MCP_OPENAI_API_KEY=...                             # or OPENAI_API_KEY; forwarded into gpt-image (agent-visible)
 DM_MCP_HUGGINGFACE_TOKEN=...
 DM_MCP_ESPOCRM_TOKEN=...
 DM_MCP_INVOICE_NINJA_TOKEN=...

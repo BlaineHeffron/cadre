@@ -11,6 +11,7 @@ import {
   remoteMcpProviderScopes,
   remoteMcpSecret,
   remoteMcpServer,
+  remoteMcpServerIds,
   remoteMcpStdioEnv,
 } from '../modules/integrations/mcp-remote-servers.mjs';
 import {
@@ -356,42 +357,32 @@ describe('paid-credit servers', () => {
   });
 });
 
-describe('image generation servers', () => {
-  for (const [id, override, standard, pin] of [
-    ['grok-imagine', 'DM_MCP_XAI_API_KEY', 'XAI_API_KEY', { DEFAULT_XAI_IMAGE_MODEL: 'grok-imagine-image-2.0' }],
-    ['gpt-image', 'DM_MCP_OPENAI_API_KEY', 'OPENAI_API_KEY', { DEFAULT_OPENAI_IMAGE_MODEL: 'gpt-image-2.5-flare' }],
-  ]) {
-    it(`keeps ${id} unavailable until its key is set, then forwards it pinned`, () => {
-      const sourceConfig = testConfig();
-      const server = remoteMcpServer(id, { sourceConfig });
-      assert.equal(server.command, process.execPath);
-      assert.equal(server.args.length, 1);
-      assert.match(server.args[0], /image-router-mcp[/\\]dist[/\\]index\.js$/);
-      assert.deepEqual(
-        remoteMcpAvailability(id, { sourceConfig, env: {} }),
-        { configured: false, reasonCode: 'credential_missing' },
-      );
-      for (const key of [override, standard]) {
-        assert.equal(remoteMcpAvailability(id, { sourceConfig, env: { [key]: 'k' } }).configured, true);
-      }
-      // The DM_MCP_* override wins, and the other provider's key is not explicitly forwarded.
-      const env = { OPENAI_API_KEY: 'other', XAI_API_KEY: 'other', [override]: 'override', [standard]: 'standard' };
-      assert.deepEqual(remoteMcpStdioEnv(server, { env, workDir: '/work/tree' }), {
-        ...pin,
-        [standard]: 'override',
-        DEFAULT_OUTPUT_DIR: '/work/tree/generated-images',
-      });
-      assert.deepEqual(remoteMcpStdioEnv(server, { env: { [standard]: 'standard' } }), {
-        ...pin,
-        [standard]: 'standard',
-        DEFAULT_OUTPUT_DIR: runtimeStatePath('generated-images'),
-      });
-      assert.equal(
-        remoteMcpStdioEnv(server, { env: {}, workDir: 'rel/tree' }).DEFAULT_OUTPUT_DIR,
-        join(process.cwd(), 'rel/tree/generated-images'),
-      );
+describe('image generation server', () => {
+  it('launches the owned subscription server without forwarding paid API keys', () => {
+    const sourceConfig = testConfig();
+    const server = remoteMcpServer('image-gen', { sourceConfig });
+    assert.equal(server.command, process.execPath);
+    assert.deepEqual(server.args, [new URL('../scripts/image-gen-mcp.mjs', import.meta.url).pathname]);
+    assert.deepEqual(remoteMcpAvailability('image-gen', { sourceConfig, env: {} }), { configured: true });
+    assert.deepEqual(remoteMcpStdioEnv(server, { env: {
+      XAI_API_KEY: 'not-forwarded', OPENAI_API_KEY: 'not-forwarded', GOOGLE_API_KEY: 'not-forwarded',
+      DM_MCP_OPENAI_API_KEY: 'not-forwarded', IMAGE_GEN_PROXY_KEY_FILE: '/proxy/key-file',
+    }, workDir: '/work/tree' }), {
+      IMAGE_GEN_PROXY_KEY_FILE: '/proxy/key-file', DEFAULT_OUTPUT_DIR: '/work/tree/generated-images',
     });
-  }
+    assert.deepEqual(remoteMcpStdioEnv(server, { env: {} }), {
+      DEFAULT_OUTPUT_DIR: runtimeStatePath('generated-images'),
+    });
+  });
+
+  it('resolves legacy IDs without registering duplicate servers', () => {
+    const server = remoteMcpServer('image-gen', { sourceConfig: testConfig() });
+    for (const id of ['grok-imagine', 'gpt-image']) {
+      assert.equal(remoteMcpServer(id, { sourceConfig: testConfig() }), server);
+      assert.equal(remoteMcpServerIds().includes(id), false);
+    }
+    assert.equal(remoteMcpServerIds().filter((id) => id === 'image-gen').length, 1);
+  });
 });
 
 describe('reverse-engineering servers', () => {

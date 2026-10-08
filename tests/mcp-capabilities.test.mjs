@@ -51,7 +51,7 @@ describe('MCP capability catalog', () => {
       'google-docs', 'google-sheets', 'google-slides', 'google-calendar', 'google-chat', 'google-contacts',
       'github', 'sentry', 'linear', 'vercel', 'supabase', 'cloudflare-observability',
       'notion', 'atlassian', 'exa', 'huggingface', 'deepwiki', 'wolfram',
-      'playwright', 'meshy', 'rea', 'bevy_brp', 'pixellab', 'grok-imagine', 'gpt-image', 'filesystem', 'git', 'fetch', 'memory', 'sequential-thinking', 'time',
+      'playwright', 'meshy', 'rea', 'bevy_brp', 'pixellab', 'image-gen', 'filesystem', 'git', 'fetch', 'memory', 'sequential-thinking', 'time',
       'invoice-ninja',
     ]);
     const serialized = JSON.stringify(value);
@@ -62,7 +62,7 @@ describe('MCP capability catalog', () => {
     assert.equal(value.servers.find((entry) => entry.id === 'dueno').required, true);
     assert.equal(value.servers.find((entry) => entry.id === 'businessos').required, false);
     assert.equal(value.servers.find((entry) => entry.id === 'businessos').requiresExplicitSelection, true);
-    for (const id of ['meshy', 'pixellab', 'grok-imagine', 'gpt-image', 'rea', 'bevy_brp']) {
+    for (const id of ['meshy', 'pixellab', 'image-gen', 'rea', 'bevy_brp']) {
       const entry = value.servers.find((server) => server.id === id);
       assert.equal(entry.requiresExplicitSelection, true);
       assert.equal(entry.alwaysLoad, false);
@@ -88,6 +88,23 @@ describe('MCP capability catalog', () => {
       () => catalog({ mcpCapabilities: { profiles: { bad: [' dueno'] } } }),
       /Invalid MCP server ID/
     );
+  });
+
+  it('canonicalizes legacy image IDs in profiles and session selections', () => {
+    const value = catalog({
+      mcpCapabilities: { profiles: { images: ['grok-imagine', 'gpt-image'] } },
+      availabilityById: { 'image-gen': true },
+    });
+    assert.deepEqual(value.profiles.find((entry) => entry.id === 'images').serverIds, ['image-gen']);
+    for (const request of [
+      { mcpProfile: 'images' },
+      { mcpServers: { add: ['grok-imagine', 'gpt-image', 'image-gen'] } },
+    ]) assert.deepEqual(resolve(request, { catalog: value }).serverIds, ['image-gen']);
+    assert.deepEqual(resolve({}, { catalog: value, inherited: { serverIds: ['gpt-image'] } }).serverIds, ['image-gen']);
+    assert.deepEqual(resolve({ mcpServers: { remove: ['grok-imagine'] } }, {
+      catalog: value, inherited: { serverIds: ['image-gen'] },
+    }).serverIds, []);
+    assert.deepEqual(resolve({}, { catalog: value, require: ['gpt-image'] }).serverIds, ['image-gen']);
   });
 
   it('produces a deterministic digest independent of object key order', () => {

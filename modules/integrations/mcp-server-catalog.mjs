@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { config } from '../../config.mjs';
 import { hashJson, stableStringify } from '../ops/state-utils.mjs';
-import { remoteMcpAvailability, remoteMcpServer } from './mcp-remote-servers.mjs';
+import { canonicalMcpServerId, remoteMcpAvailability, remoteMcpServer } from './mcp-remote-servers.mjs';
 import { configuredOauthProvidersSync, connectedOauthProvidersSync } from './mcp-oauth.mjs';
 
 export const MCP_CATALOG_VERSION = 1;
@@ -405,9 +405,9 @@ const SERVER_DEFINITIONS = Object.freeze([
     permissions: 'Spends paid PixelLab credits with the operator API key.',
   }),
   server({
-    id: 'grok-imagine',
-    label: 'Grok Imagine',
-    description: 'xAI Grok Imagine Image 2.0 image generation and editing.',
+    id: 'image-gen',
+    label: 'Image generation',
+    description: 'Subscription image generation through Codex, Google Nano Banana, and Grok Build.',
     category: 'creative',
     providers: NATIVE_MCP_PROVIDERS,
     runtimes: NATIVE_MCP_RUNTIMES,
@@ -415,20 +415,7 @@ const SERVER_DEFINITIONS = Object.freeze([
     required: false,
     requiresExplicitSelection: true,
     alwaysLoad: false,
-    permissions: 'Spends paid xAI credits per image with the operator API key.',
-  }),
-  server({
-    id: 'gpt-image',
-    label: 'GPT Image',
-    description: 'OpenAI GPT Image 2.5 image generation and editing.',
-    category: 'creative',
-    providers: NATIVE_MCP_PROVIDERS,
-    runtimes: NATIVE_MCP_RUNTIMES,
-    transport: 'stdio',
-    required: false,
-    requiresExplicitSelection: true,
-    alwaysLoad: false,
-    permissions: 'Spends paid OpenAI credits per image with the operator API key.',
+    permissions: 'Uses the operator subscription image quotas and writes generated images.',
   }),
   server({
     id: 'filesystem',
@@ -548,7 +535,7 @@ function server(input) {
 }
 
 function profile(input) {
-  return deepFreeze({ ...input, serverIds: [...input.serverIds] });
+  return deepFreeze({ ...input, serverIds: [...new Set(input.serverIds)] });
 }
 
 function text(value) {
@@ -642,7 +629,7 @@ function normalizeCustomProfile(id, value) {
     if (typeof serverId !== 'string' || !serverId.trim() || serverId !== serverId.trim()) {
       throw new TypeError(`Invalid MCP server ID in profile ${profileId}`);
     }
-    return serverId;
+    return canonicalMcpServerId(serverId);
   });
   return profile({
     id: profileId,
