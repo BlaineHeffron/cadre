@@ -10,14 +10,16 @@ import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
 const spawner = { kind: 'codex', sessionId: 'codex-1' };
 const settle = async (done) => { for (let i = 0; i < 200 && !done(); i++) await delay(20); return done(); };
 
-async function setup(t, metadata) {
-  const h = await createAgentBusHarness({ pollMs: 20 });
+async function setup(t, metadata, stateDir = null) {
+  const h = await createAgentBusHarness({ pollMs: 20, stateDir });
   // Hook files live under the nearest git root, so pin it to this test's directory.
-  await mkdir(join(h.stateDir, '.git'));
+  await mkdir(join(h.stateDir, '.git'), { recursive: true });
   h.sessionCatalog.claude.add('claude-2');
   const sessions = new Map([['claude-2', { workDir: h.stateDir, metadata }]]);
   const unregister = registerHookSessionRegistry('claude', () => sessions);
-  t.after(async () => { unregister(); await h.cleanup(); });
+  let closed = false;
+  t.after(async () => { unregister(); if (!closed) await h.cleanup(); });
+  const restart = async () => { closed = true; unregister(); await h.app.close(); return setup(t, metadata, h.stateDir); };
   const hook = (payload) => recordHookPayload({ session_id: 'cli-2', cwd: h.stateDir, ...payload },
     { provider: 'claude', duenoSessionId: 'claude-2' });
   const turn = async (answer) => {
@@ -26,7 +28,7 @@ async function setup(t, metadata) {
   };
   const results = () => h.store.listMessages().filter((message) => message.type === 'result');
   const delivered = (text) => h.injected.codex.filter((item) => item.includes(text)).length;
-  return { h, hook, turn, results, delivered };
+  return { h, hook, turn, results, delivered, restart };
 }
 
 test('a spawned child returns each finished turn to its spawner once', async (t) => {
@@ -77,6 +79,20 @@ test('a result waits while the spawner is unreachable and returns once it is bac
   assert.ok(await settle(() => delivered('Held answer') === 1));
   await delay(150);
   assert.equal(results().length, 1);
+});
+
+test('a restarted agent bus replays hook history without returning a turn twice', async (t) => {
+  const first = await setup(t, { spawnedBy: spawner });
+  // Two turns, so replaying the first is not caught by the latest-result content dedupe.
+  await first.turn('Before restart');
+  await first.turn('Also before restart');
+  assert.ok(await settle(() => first.delivered('Also before restart') === 1));
+  const second = await first.restart();
+  await second.turn('After restart');
+  assert.ok(await settle(() => second.delivered('After restart') === 1));
+  await delay(150);
+  assert.equal(second.delivered('Before restart'), 0);
+  assert.deepEqual(second.results().map((message) => message.body), ['Before restart', 'Also before restart', 'After restart']);
 });
 
 test('a long returned result arrives whole', async (t) => {
