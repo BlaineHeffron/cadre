@@ -233,8 +233,6 @@ describe('ordinary Dueno child-session authority E2E', () => {
     );
     const names = new Set(listed.result.tools.map((tool) => tool.name));
     for (const name of [
-      'monitor_spawn_claude',
-      'monitor_spawn_codex',
       'spawn_session',
       'monitor_run_agent_task',
       'register_scheduled_agent',
@@ -243,8 +241,7 @@ describe('ordinary Dueno child-session authority E2E', () => {
     ]) assert.equal(names.has(name), true, `${name} should be discoverable`);
 
     const cases = [
-      ['monitor_spawn_claude', { workDir: childDir, model: 'claude-opus-5' }],
-      ['monitor_spawn_codex', { workDir: childDir, model: 'gpt-5.6-sol' }],
+      ['spawn_session', { provider: 'claude', workDir: childDir, model: 'claude-opus-5' }],
       ['spawn_session', { provider: 'codex', workDir: childDir, model: 'gpt-5.6-sol' }],
       ['monitor_run_agent_task', { provider: 'codex', prompt: 'bounded task', workDir: childDir, model: 'gpt-5.6-sol' }],
       ['register_scheduled_agent', { prompt: 'bounded loop tick', workDir: childDir, provider: 'codex', model: 'gpt-5.6-sol' }],
@@ -281,11 +278,8 @@ describe('ordinary Dueno child-session authority E2E', () => {
     assert.equal(calls.some((entry) => entry.path === '/api/agents/scheduled'), true);
     assert.equal(calls.filter((entry) => entry.path === '/api/agent-bus/bootstrap').length, 2);
     assert.equal(calls.filter((entry) => [
-      '/api/claude/sessions', '/api/codex/sessions', '/api/agents/sessions',
-      '/api/agents/tasks', '/api/agents/scheduled', '/api/agent-bus/bootstrap',
+      '/api/agents/sessions', '/api/agents/tasks', '/api/agents/scheduled', '/api/agent-bus/bootstrap',
     ].includes(entry.path)).every((entry) => entry.options.body.mcpProfile === 'dueno'), true);
-    const inheritedClaude = calls.find((entry) => entry.path === '/api/claude/sessions');
-    assert.ok(inheritedClaude);
     const businessCollab = calls.find((entry) => (
       entry.path === '/api/agent-bus/bootstrap'
       && entry.options.body?.title === 'collaboration'

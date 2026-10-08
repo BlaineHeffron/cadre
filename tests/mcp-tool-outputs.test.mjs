@@ -77,11 +77,9 @@ async function setup(t) {
 test('real MCP actions return ids only while REST retains records and reads expose text', async (t) => {
   const { h, call, requestImpl, context, repos } = await setup(t);
   const spawnKeys = ['thread_id', 'participants'];
-  for (const name of ['monitor_spawn_claude', 'monitor_spawn_codex', 'spawn_session']) {
-    const spawned = await call(name, { ...(name === 'spawn_session' ? { provider: 'codex' } : {}), initialPrompt: marker, workDir: h.stateDir }, spawnKeys);
-    assert.ok(spawned.participants[0].session_id);
-    assert.deepEqual(Object.keys(spawned.participants[0]).sort(), ['kind', 'session_id', 'display_name'].sort());
-  }
+  const spawned = await call('spawn_session', { provider: 'codex', initialPrompt: marker, workDir: h.stateDir }, spawnKeys);
+  assert.ok(spawned.participants[0].session_id);
+  assert.deepEqual(Object.keys(spawned.participants[0]).sort(), ['kind', 'session_id', 'display_name'].sort());
   const pairArgs = { title: 'Pair', workDir: h.stateDir, initialTask: marker, participants: [{ provider: 'claude', display_name: 'Reviewer' }, { provider: 'codex', display_name: 'Implementer' }] };
   const pair = await call('spawn_collab_session', pairArgs, spawnKeys);
   const conference = await call('spawn_conference_session', { ...pairArgs, title: 'Conference' }, spawnKeys);

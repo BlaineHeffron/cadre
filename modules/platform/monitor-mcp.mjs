@@ -12,8 +12,6 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { normalizeAgentProvider, resolveAgentProviderSelection } from '../agent/provider-interface.mjs';
 import {
   MCP_AGENT_MODEL_SCHEMA,
-  MCP_CLAUDE_MODEL_SCHEMA,
-  MCP_CODEX_MODEL_SCHEMA,
   MCP_PROVIDER_SCHEMA,
   assertMcpProviderModel,
 } from './mcp-model-schemas.mjs';
@@ -454,58 +452,6 @@ export function buildMonitorMcpServer({ requestImpl }) {
         additionalProperties: false,
       },
       handler: async (args = {}) => listSessions('/api/pi/sessions', args),
-    },
-    {
-      name: 'monitor_spawn_claude',
-      description: 'Legacy low-level tool. Spawn one Claude session in tmux. Prefer `spawn_session` for new agent flows. Returns thread_id and participant ids/names.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          workDir: { type: 'string', description: 'Working directory for the session' },
-          displayName: { type: 'string', description: 'Display name for the session' },
-          model: MCP_CLAUDE_MODEL_SCHEMA,
-          initialPrompt: { type: 'string', description: 'Optional prompt to inject after the session starts' },
-          ...MCP_SELECTION_SCHEMA_PROPERTIES,
-        },
-        additionalProperties: false,
-      },
-      handler: async ({ workDir, displayName, model, initialPrompt, mcpProfile = 'dueno', mcpServers, promptProfile, skills }) => {
-        assertMcpProviderModel('claude', model);
-        return spawnResult(await request('/api/claude/sessions', { method: 'POST', body: {
-          workDir, displayName, model, initialPrompt,
-          ...(skills !== undefined ? { skills } : {}),
-          ...(mcpProfile !== undefined ? { mcpProfile } : {}),
-          ...(mcpServers !== undefined ? { mcpServers } : {}),
-          ...(promptProfile !== undefined ? { promptProfile } : {}),
-        } }), { kind: 'claude', displayName });
-      },
-    },
-    {
-      name: 'monitor_spawn_codex',
-      description: 'Legacy low-level tool. Spawn one Codex session in tmux. Prefer `spawn_session` for new agent flows. Returns thread_id and participant ids/names.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          workDir: { type: 'string', description: 'Working directory for the session' },
-          displayName: { type: 'string', description: 'Display name for the session' },
-          model: MCP_CODEX_MODEL_SCHEMA,
-          initialPrompt: { type: 'string', description: 'Optional prompt to inject after the session starts' },
-          ...MCP_SELECTION_SCHEMA_PROPERTIES,
-          codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
-        },
-        additionalProperties: false,
-      },
-      handler: async ({ workDir, displayName, model, initialPrompt, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills }) => {
-        assertMcpProviderModel('codex', model);
-        return spawnResult(await request('/api/codex/sessions', { method: 'POST', body: {
-          workDir, displayName, model, initialPrompt,
-          ...(skills !== undefined ? { skills } : {}),
-          ...(mcpProfile !== undefined ? { mcpProfile } : {}),
-          ...(mcpServers !== undefined ? { mcpServers } : {}),
-          ...(codexPlugins !== undefined ? { codexPlugins } : {}),
-          ...(promptProfile !== undefined ? { promptProfile } : {}),
-        } }), { kind: 'codex', displayName });
-      },
     },
     {
       name: 'spawn_session',
@@ -1400,8 +1346,6 @@ export function buildMonitorMcpServer({ requestImpl }) {
     'monitor_list_claude_sessions',
     'monitor_list_codex_sessions',
     'monitor_list_pi_sessions',
-    'monitor_spawn_claude',
-    'monitor_spawn_codex',
     'spawn_session',
     'monitor_terminate_session',
     'monitor_list_agent_providers',

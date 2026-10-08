@@ -19,8 +19,6 @@ export const AGENT_SPAWN_TOOL_SCOPES = Object.freeze([
   'spawn_session',
   'spawn_collab_session',
   'spawn_conference_session',
-  'monitor_spawn_claude',
-  'monitor_spawn_codex',
   'monitor_run_agent_task',
   'register_scheduled_agent',
   'spawn_loop_session',
