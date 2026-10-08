@@ -43,7 +43,7 @@ live_sha() {
 show_health() {
     sleep 3
     echo -n "ready: "
-    curl -s "$HEALTH_URL" 2>/dev/null | sed -E 's/.*"ready":(true|false).*/\1/' || echo "(no response)"
+    curl -s "$HEALTH_URL" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s),d=r.components?.dependencies;console.log(r.ready+(d?.status==="degraded"?" ("+d.detail+")":""))})' 2>/dev/null || echo "(no response)"
 }
 
 sync_live() {
