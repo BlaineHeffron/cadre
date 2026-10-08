@@ -1,4 +1,4 @@
-import { cp, lstat, mkdir, readFile, readdir, realpath, rm, unlink, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, readFile, readdir, realpath, rm, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { exec } from '../../lib/exec.mjs';
@@ -83,6 +83,13 @@ async function rollbackManagedWorktree({ repo, path, branch, baseHead }) {
   await git(repo, ['worktree', 'remove', '--force', path]);
   await git(repo, ['update-ref', '-d', `refs/heads/${branch}`, baseHead]);
   await git(repo, ['worktree', 'prune']);
+  await removeEmptyParent(path);
+}
+
+async function removeEmptyParent(path) {
+  await rmdir(dirname(path)).catch((error) => {
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+  });
 }
 
 export async function cleanupManagedWorktree(metadata, { rooms = [], sessions = [], baseDir = managedWorktreeBase, spawnFailed = false } = {}) {
@@ -149,6 +156,7 @@ export async function cleanupManagedWorktree(metadata, { rooms = [], sessions = 
       : worktrees.stdout.split('\n').includes(`branch refs/heads/${branch}`) ? 'checked out in another worktree' : '';
     const deletion = kept ? { code: 1, stderr: kept } : await exec('git', ['-C', repo, 'update-ref', '-d', `refs/heads/${branch}`, tip]);
     await git(repo, ['worktree', 'prune']);
+    await removeEmptyParent(path);
     return { removed: true, branchKept: deletion.code !== 0, report: `worktree: removed${deletion.code !== 0 ? ` (branch kept: ${deletion.stderr.trim()})` : ''}` };
   } catch (error) { return keep(error.message); }
 }

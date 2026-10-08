@@ -17,11 +17,6 @@ export function tomlQuotedKeySegment(value) {
   return `"${String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-export function trustedCodexProjectConfig(workDir = '') {
-  const trustedWorkDir = resolve(workDir || '.');
-  return `projects.${tomlQuotedKeySegment(trustedWorkDir)}.trust_level="trusted"`;
-}
-
 export function normalizeHarnessWorkDir(workDir = '') {
   return resolve(String(workDir || '').trim() || '.');
 }
@@ -125,8 +120,6 @@ class CodexRuntimeHarness extends AgentRuntimeHarness {
       `model_provider=${JSON.stringify(modelProvider)}`,
       '-c',
       'features.hooks=true',
-      '-c',
-      trustedCodexProjectConfig(resolvedWorkDir),
       ...buildCodexPluginConfigArgs(codexPlugins),
       // Inline mode keeps tmux scrollback; alt-screen panes have no history.
       '--no-alt-screen',
