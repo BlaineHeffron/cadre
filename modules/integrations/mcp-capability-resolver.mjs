@@ -1,3 +1,4 @@
+import { canonicalMcpServerId } from './mcp-remote-servers.mjs';
 import {
   buildMcpCapabilityCatalog,
   digestMcpConfiguration,
@@ -45,9 +46,10 @@ function normalizeIdList(value, field) {
     if (typeof raw !== 'string' || !raw.trim() || raw !== raw.trim()) {
       throw new McpCapabilityError('mcp_server_id_invalid', `${field} contains an invalid server ID`, { field });
     }
-    if (!seen.has(raw)) {
-      seen.add(raw);
-      result.push(raw);
+    const id = canonicalMcpServerId(raw);
+    if (!seen.has(id)) {
+      seen.add(id);
+      result.push(id);
     }
   }
   return result;

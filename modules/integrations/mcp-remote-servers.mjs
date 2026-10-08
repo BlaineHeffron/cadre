@@ -26,6 +26,8 @@ export const REMOTE_MCP_AUTH = Object.freeze({
 function remote(value) {
   const headerEnv = Object.fromEntries(Object.entries(value.headerEnv || {})
     .map(([name, keys]) => [name, Object.freeze([...keys])]));
+  const credentialEnv = Object.fromEntries(Object.entries(value.credentialEnv || {})
+    .map(([name, keys]) => [name, Object.freeze([...keys])]));
   return Object.freeze({
     transport: 'http',
     auth: REMOTE_MCP_AUTH.none,
@@ -35,9 +37,17 @@ function remote(value) {
     envKeys: Object.freeze([...(value.envKeys || [])]),
     env: Object.freeze({ ...value.env }),
     headerEnv: Object.freeze(headerEnv),
+    credentialEnv: Object.freeze(credentialEnv),
+    secretEnv: Object.freeze([...(value.secretEnv || Object.values(credentialEnv).flat())]),
     requiredHeaders: Object.freeze([...(value.requiredHeaders || [])]),
     oauthHeader: text(value.oauthHeader),
   });
+}
+
+const SERVER_ALIASES = Object.freeze({ 'grok-imagine': 'image-gen', 'gpt-image': 'image-gen' });
+
+export function canonicalMcpServerId(id) {
+  return Object.hasOwn(SERVER_ALIASES, id) ? SERVER_ALIASES[id] : id;
 }
 
 function imageRouter(value) {
@@ -293,19 +303,20 @@ const DEFINITIONS = Object.freeze({
   }),
   // Installed by the operator with `cargo install bevy_brp_mcp`; resolved from PATH, then ~/.cargo/bin.
   bevy_brp: remote({ transport: 'stdio', binary: 'bevy_brp_mcp' }),
-  // One pinned package serves both providers; each ID forwards only its own key and pins its model.
+  // One pinned package serves all three providers with whichever keys are configured.
   // Keys are read per call, so the server starts without one; availability checks secretEnv instead.
-  'grok-imagine': imageRouter({
-    secretEnv: ['DM_MCP_XAI_API_KEY', 'XAI_API_KEY'],
-    secretEnvName: 'XAI_API_KEY',
-    // Overrides the per-call model argument.
-    env: { DEFAULT_XAI_IMAGE_MODEL: 'grok-imagine-image-2.0' },
-  }),
-  'gpt-image': imageRouter({
-    secretEnv: ['DM_MCP_OPENAI_API_KEY', 'OPENAI_API_KEY'],
-    secretEnvName: 'OPENAI_API_KEY',
-    // Default only: a per-call model argument still wins.
-    env: { DEFAULT_OPENAI_IMAGE_MODEL: 'gpt-image-2.5-flare' },
+  'image-gen': imageRouter({
+    credentialEnv: {
+      XAI_API_KEY: ['DM_MCP_XAI_API_KEY', 'XAI_API_KEY'],
+      OPENAI_API_KEY: ['DM_MCP_OPENAI_API_KEY', 'OPENAI_API_KEY'],
+      GOOGLE_API_KEY: ['DM_MCP_GOOGLE_API_KEY', 'GOOGLE_API_KEY', 'GEMINI_API_KEY'],
+    },
+    // xAI and Google override per-call models; OpenAI supplies a default.
+    env: {
+      DEFAULT_XAI_IMAGE_MODEL: 'grok-imagine-image-2.0',
+      DEFAULT_OPENAI_IMAGE_MODEL: 'gpt-image-2.5-flare',
+      DEFAULT_GOOGLE_IMAGE_MODEL: 'gemini-nano-banana-2.1',
+    },
   }),
   pixellab: remote({
     url: 'https://api.pixellab.ai/mcp',
@@ -448,7 +459,7 @@ function withBinary(server, env) {
 
 /** Definition with operator overrides (url/command/args) applied, or null. */
 export function remoteMcpServer(id, { sourceConfig = config, env = process.env } = {}) {
-  const serverId = text(id);
+  const serverId = canonicalMcpServerId(text(id));
   const defined = GOOGLE_LOCAL_SERVICES[serverId] && googleLocalMode(sourceConfig)
     ? localGoogleServer(serverId, sourceConfig)
     : serverId === 'google-ads'
@@ -458,7 +469,7 @@ export function remoteMcpServer(id, { sourceConfig = config, env = process.env }
         : DEFINITIONS[serverId];
   const base = withBinary(withEntryPath(defined, sourceConfig), env);
   if (!base) return null;
-  const override = overrideFor(text(id), sourceConfig);
+  const override = overrideFor(serverId, sourceConfig);
   if (!Object.keys(override).length) return base;
   return Object.freeze({
     ...base,
@@ -482,8 +493,10 @@ export function remoteMcpStdioEnv(server, { env = process.env, workDir = '' } = 
     const value = text(env[key]);
     if (value) result[key] = value;
   }
-  const secret = server?.secretEnvName ? firstEnv(server.secretEnv || [], env) : '';
-  if (secret) result[server.secretEnvName] = secret;
+  for (const [name, keys] of Object.entries(server?.credentialEnv || {})) {
+    const value = firstEnv(keys, env);
+    if (value) result[name] = value;
+  }
   // Absolute, so the server never falls back to its own cwd.
   if (server?.outputDirEnv) {
     result[server.outputDirEnv] = text(workDir) ? resolve(text(workDir), 'generated-images') : runtimeStatePath('generated-images');

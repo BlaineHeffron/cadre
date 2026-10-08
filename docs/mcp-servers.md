@@ -52,7 +52,7 @@ workspace-global `.mcp.json`, `.codex/config.toml`, or `.claude/settings.local.j
 | `rea` | stdio | none | [`rea-agents`](https://github.com/morluto/rea) (MIT; pinned npm dependency, runs `rea mcp`); decompiled output is untrusted |
 | `bevy_brp` | stdio | none | [`bevy_brp_mcp`](https://github.com/natepiano/bevy_brp) 0.22.x for Bevy 0.19; operator runs `cargo install bevy_brp_mcp` |
 | `pixellab` | http | `DM_MCP_PIXELLAB_API_KEY` / `PIXELLAB_API_KEY` | PixelLab's official `https://api.pixellab.ai/mcp` |
-| `grok-imagine`, `gpt-image` | stdio | `DM_MCP_XAI_API_KEY` / `XAI_API_KEY`, `DM_MCP_OPENAI_API_KEY` / `OPENAI_API_KEY` (forwarded) | [`image-router-mcp`](https://github.com/JiaDians/image-router-mcp) (MIT; pinned npm dependency) |
+| `image-gen` | stdio | `DM_MCP_XAI_API_KEY` / `XAI_API_KEY`, `DM_MCP_OPENAI_API_KEY` / `OPENAI_API_KEY`, `DM_MCP_GOOGLE_API_KEY` / `GOOGLE_API_KEY` / `GEMINI_API_KEY` (forwarded) | [`image-router-mcp`](https://github.com/JiaDians/image-router-mcp) (MIT; pinned npm dependency) |
 | `filesystem`, `git`, `fetch`, `memory`, `sequential-thinking`, `time` | stdio | none | maintained MCP reference servers |
 | `espocrm`, `invoice-ninja` | http | API key env | self-hosted; endpoint must be supplied |
 | `seodata` | stdio | none (optional `SEODATA_API_KEY`) | locally built [`seodata-mcp`](https://github.com/BlaineHeffron/seodata-mcp) |
@@ -84,21 +84,30 @@ only. No send scope is requested anywhere.
   `MESHY_API_KEY` is forwarded into the stdio server: in the `0600` Claude/Pi
   launch config, and to Codex by name (see the secret forwarding note below).
   `pixellab` stays on the loopback proxy; the agent never sees the token.
-- `grok-imagine` and `gpt-image` spend paid credits per image, require explicit
-  selection, and are in no profile. Both IDs run the same pinned package and
-  each receives only its own provider key, renamed to `XAI_API_KEY` or
-  `OPENAI_API_KEY`. Like `MESHY_API_KEY`, that key lands in the `0600`
-  Claude/Pi launch config; Codex gets it by name. `OPENAI_API_KEY` is also
-  Codex's own credential variable, so gpt-image goes by name only when the key
-  equals the fleet's `OPENAI_API_KEY`. A differing `DM_MCP_OPENAI_API_KEY` stays
-  an inline Codex `-c` override (visible in `ps`) rather than replace Codex's
-  key. `grok-imagine`
-  pins `grok-imagine-image-2.0`, overriding any model the agent passes.
-  `gpt-image` defaults to `gpt-image-2.5-flare`, and an agent can still request
-  `gpt-image-2.5-sunburst` per call. Each ID exposes all three upstream tools
-  (OpenAI, Google, xAI); only the selected provider's key is forwarded
-  explicitly, but there is no provider isolation: a key the agent runtime
-  already inherits can still reach the other tools. Images are written to
+- `image-gen` runs the pinned `image-router-mcp` package, spends paid provider
+  credits per image, requires explicit selection, and is in no built-in profile.
+  It is available when any of `XAI_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`,
+  or `GEMINI_API_KEY` (or their `DM_MCP_*` overrides) is configured.
+  `DM_MCP_XAI_API_KEY` and
+  `DM_MCP_OPENAI_API_KEY` override their standard keys. Google forwards
+  `DM_MCP_GOOGLE_API_KEY`, `GOOGLE_API_KEY`, or `GEMINI_API_KEY` (in that order)
+  as `GOOGLE_API_KEY`. All configured provider keys are forwarded; absent
+  keys are omitted. A tool without its provider key
+  reports the missing environment variable (keys inherited by the agent runtime
+  can also reach the tools).
+  The old IDs `grok-imagine` and `gpt-image` resolve to `image-gen` in session
+  selections and custom profiles; only one server is registered.
+  Like `MESHY_API_KEY`, keys land in the `0600` Claude/Pi launch config; Codex
+  gets them by name. `OPENAI_API_KEY` is also Codex's own credential variable,
+  so it goes by name only when it equals the fleet's `OPENAI_API_KEY`. A differing
+  `DM_MCP_OPENAI_API_KEY` stays an inline Codex `-c` override (visible in `ps`).
+  xAI pins `grok-imagine-image-2.0`; OpenAI defaults to `gpt-image-2.5-flare`
+  and accepts per-call model overrides. Google pins
+  [`gemini-nano-banana-2.1`](https://ai.google.dev/gemini-api/docs/models/gemini-nano-banana-2.1)
+  (Nano Banana 2.1), overriding per-call models. The existing package accepts
+  this model ID without a dependency upgrade; its upstream tool description
+  still says Nano Banana 2. Nano Banana 2.1 does not support 512px images.
+  The server exposes OpenAI, Google, and xAI generation tools. Images are written to
   `<session work dir>/generated-images/` (the Cadre state dir's
   `generated-images/` when a session has no work dir) unless the agent passes
   an `output_path`.
@@ -127,7 +136,7 @@ only. No send scope is requested anywhere.
   value lands in the `0600` launch config. Keep genuinely sensitive
   credentials on the HTTP proxy path instead, where the agent never sees them.
 - Secret forwarding to Codex: forwarded keys stay off the Codex command line,
-  except a differing `DM_MCP_OPENAI_API_KEY` for `gpt-image` (above). Cadre writes them to a `0600` per-session file, the tmux pane exports
+  except a differing `DM_MCP_OPENAI_API_KEY` for `image-gen` (above). Cadre writes them to a `0600` per-session file, the tmux pane exports
   them without echoing a value (app-server Codex gets them in its process
   environment), and `mcp_servers.<id>.env_vars=[...]` tells Codex to copy them
   by name into the server. The forwarded value is still agent-visible: the
@@ -174,8 +183,9 @@ DM_MCP_EXA_API_KEY=...
 DM_MCP_PIXELLAB_API_KEY=...                           # pixellab.ai account API token
 MESHY_API_KEY=...                                     # forwarded into the meshy stdio server (agent-visible)
 SEMANTIC_SCHOLAR_API_KEY=...                          # optional; also ADS_API_KEY, OPENALEX_EMAIL, UNPAYWALL_EMAIL for paper-search
-DM_MCP_XAI_API_KEY=...                                # or XAI_API_KEY; forwarded into grok-imagine (agent-visible)
-DM_MCP_OPENAI_API_KEY=...                             # or OPENAI_API_KEY; forwarded into gpt-image (agent-visible)
+DM_MCP_XAI_API_KEY=...                                # or XAI_API_KEY; forwarded into image-gen (agent-visible)
+DM_MCP_OPENAI_API_KEY=...                             # or OPENAI_API_KEY; forwarded into image-gen (agent-visible)
+DM_MCP_GOOGLE_API_KEY=...                             # or GOOGLE_API_KEY / GEMINI_API_KEY; forwarded into image-gen (agent-visible)
 DM_MCP_HUGGINGFACE_TOKEN=...
 DM_MCP_ESPOCRM_TOKEN=...
 DM_MCP_INVOICE_NINJA_TOKEN=...

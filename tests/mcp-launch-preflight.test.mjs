@@ -546,32 +546,35 @@ describe('MCP launch preflight', () => {
     process.env.CADRE_STATE_DIR = stateDir;
     const expected = {
       DEFAULT_XAI_IMAGE_MODEL: 'grok-imagine-image-2.0',
+      DEFAULT_OPENAI_IMAGE_MODEL: 'gpt-image-2.5-flare',
+      DEFAULT_GOOGLE_IMAGE_MODEL: 'gemini-nano-banana-2.1',
       XAI_API_KEY: 'test-key',
+      GOOGLE_API_KEY: 'google-test-key',
       DEFAULT_OUTPUT_DIR: '/work/tree/generated-images',
     };
     for (const backendType of ['codex', 'pi', 'claude']) {
       // Real initialize + tools/list against the pinned upstream; the dummy key is never used to generate.
       const result = await prepareMcpCapabilityLaunch({
-        resolved: resolved(['grok-imagine'], backendType, backendType),
+        resolved: resolved(['image-gen'], backendType, backendType),
         backendType,
-        sessionId: `grok-imagine-${backendType}`,
+        sessionId: `image-gen-${backendType}`,
         workDir: '/work/tree',
         sourceConfig: sourceConfig(),
         credentialStore: credentialStore(),
-        stdioEnv: { DM_MCP_XAI_API_KEY: 'test-key', OPENAI_API_KEY: 'other' },
+        stdioEnv: { DM_MCP_XAI_API_KEY: 'test-key', GOOGLE_API_KEY: 'google-test-key' },
       });
-      assert.deepEqual(result.preflight['grok-imagine'], { state: 'ready', toolCount: 3 });
+      assert.deepEqual(result.preflight['image-gen'], { state: 'ready', toolCount: 3 });
       if (backendType === 'codex') {
-        const { XAI_API_KEY, ...inline } = expected;
+        const { XAI_API_KEY, GOOGLE_API_KEY, ...inline } = expected;
         const env = Object.entries(inline).map(([key, value]) => `${key}="${value}"`).join(', ');
-        assert.equal(result.prepared.codexArgs.includes(`mcp_servers.grok-imagine.env={${env}}`), true);
-        assert.equal(result.prepared.codexArgs.includes('mcp_servers.grok-imagine.env_vars=["XAI_API_KEY"]'), true);
+        assert.equal(result.prepared.codexArgs.includes(`mcp_servers.image-gen.env={${env}}`), true);
+        assert.equal(result.prepared.codexArgs.includes('mcp_servers.image-gen.env_vars=["XAI_API_KEY", "GOOGLE_API_KEY"]'), true);
         assert.equal(JSON.stringify(result.prepared.codexArgs).includes(XAI_API_KEY), false);
-        assert.deepEqual(result.codexEnv, { XAI_API_KEY });
+        assert.deepEqual(result.codexEnv, { XAI_API_KEY, GOOGLE_API_KEY });
       } else {
         const path = backendType === 'pi' ? result.prepared.piConfigPath : result.prepared.claudeConfigPath;
         const configFile = JSON.parse(await readFile(path, 'utf8'));
-        assert.deepEqual(configFile.mcpServers['grok-imagine'].env, expected);
+        assert.deepEqual(configFile.mcpServers['image-gen'].env, expected);
       }
     }
   });
@@ -598,13 +601,13 @@ describe('MCP launch preflight', () => {
       // Meshy validates its key against the live API at startup, so its command runs the stdio fixture.
       const configured = { ...sourceConfig(), mcpCredentials: { overrides: { meshy: { command: process.execPath, args: [fixture] } } } };
       const result = await prepareMcpCapabilityLaunch({
-        resolved: resolved(['meshy', 'gpt-image', ...(byName.includes('XAI_API_KEY') ? ['grok-imagine'] : [])]), backendType: 'codex', sessionId, workDir: stateDir,
+        resolved: resolved(['meshy', 'image-gen']), backendType: 'codex', sessionId, workDir: stateDir,
         sourceConfig: configured, credentialStore: credentials, stdioEnv,
       });
       assert.equal(result.preflight.meshy.state, 'ready');
-      assert.equal(result.preflight['gpt-image'].state, 'ready');
+      assert.equal(result.preflight['image-gen'].state, 'ready');
       assert.equal(result.prepared.codexArgs.includes('mcp_servers.meshy.env_vars=["MESHY_API_KEY"]'), true);
-      assert.equal(result.prepared.codexArgs.includes('mcp_servers.gpt-image.env_vars=["OPENAI_API_KEY"]'),
+      assert.equal(result.prepared.codexArgs.includes('mcp_servers.image-gen.env_vars=["XAI_API_KEY", "OPENAI_API_KEY"]'),
         byName.includes('OPENAI_API_KEY'));
       assert.deepEqual(Object.keys(result.codexEnv).sort(), [...byName].sort());
       const rendered = renderAgentSessionLaunch({
