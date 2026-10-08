@@ -455,7 +455,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'spawn_session',
-      description: 'Spawn exactly one interactive session using a provider returned by monitor_list_agent_providers. Returns thread_id, participant ids/names and warnings.',
+      description: 'Spawn exactly one interactive session using a provider returned by monitor_list_agent_providers. Returns thread_id, participant ids/names and warnings. A tmux Claude session spawned without parentThreadId returns the final message of each turn to you as a DM result; end your turn to wait for it instead of polling.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -474,10 +474,12 @@ export function buildMonitorMcpServer({ requestImpl }) {
       },
       handler: async ({ provider, workDir, displayName, model, thinkingLevel, initialPrompt, parentThreadId, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills }) => {
         assertMcpProviderModel(provider, model);
+        const returnToSpawner = provider === 'claude' && !parentThreadId;
         const result = await request('/api/agents/sessions', {
           method: 'POST',
           body: {
             workDir, displayName, model, provider, thinkingLevel, initialPrompt,
+            ...(returnToSpawner ? { metadata: { returnToSpawner } } : {}),
             ...(skills !== undefined ? { skills } : {}),
             ...(mcpProfile !== undefined ? { mcpProfile } : {}),
             ...(mcpServers !== undefined ? { mcpServers } : {}),

@@ -89,6 +89,8 @@ import { queueControlEvent } from '../ops/control-events.mjs';
 import { removeAgentSessionWorktree } from '../fleet/git-worktree.mjs';
 import {
   coordinatorOwnerMetadata,
+  SPAWN_RESULT_NOTE,
+  spawnerMetadata,
   coordinatorSessionMetadata,
   loopRegistrationSessionMetadata,
   normalizeCredentialCoordinatorPolicy,
@@ -2524,6 +2526,7 @@ async function sessionsPlugin(app, {
         ? coordinatorSessionMetadata(requestCoordinatorPolicy)
         : (principal?.type === 'agent' ? coordinatorOwnerMetadata(requestCoordinatorPolicy) : {})),
       ...loopRegistrationSessionMetadata(loopRegistrationPolicy),
+      ...spawnerMetadata(principal, metadata),
     };
     queueSessionCreateAudit({
       req,
@@ -2545,7 +2548,8 @@ async function sessionsPlugin(app, {
     }
 
     try {
-      const launchSourcePrompt = composeLaunchSourcePrompt({ skillIds: skills, initialPrompt });
+      const launchSourcePrompt = composeLaunchSourcePrompt({ skillIds: skills,
+        initialPrompt: trustedMetadata.spawnedBy && initialPrompt ? `${initialPrompt}\n\n${SPAWN_RESULT_NOTE}` : initialPrompt });
       // Resolve before tmux/session creation so malformed nested launch skills
       // cannot leave an orphaned process behind.
       resolveHarnessUserText(launchSourcePrompt);

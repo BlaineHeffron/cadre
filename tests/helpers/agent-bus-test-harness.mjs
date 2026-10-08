@@ -174,6 +174,8 @@ export async function createAgentBusHarness({
   credentialStore = null,
   sessionDeleteTimeoutMs = undefined,
   beforeReady = async () => {},
+  // Reuse a closed harness's directory to restart the agent bus over its persisted state.
+  stateDir: reusedStateDir = null,
 } = {}) {
   process.env.AUTH_TOKEN = authToken;
   process.env.APP_STATE_STORAGE = 'file';
@@ -182,7 +184,7 @@ export async function createAgentBusHarness({
   process.env.AGENT_BUS_ACK_TIMEOUT_MS = String(ackTimeoutMs);
   process.env.AGENT_BUS_REPLY_TIMEOUT_MS = String(replyTimeoutMs);
 
-  const stateDir = await mkdtemp(join(tmpdir(), 'agent-bus-'));
+  const stateDir = reusedStateDir || await mkdtemp(join(tmpdir(), 'agent-bus-'));
   const providerPreferencesFile = join(stateDir, 'agent-provider-preferences.json');
   process.env.AGENT_BUS_STATE_DIR = stateDir;
   process.env.AGENT_PROVIDER_PREFERENCES_FILE = providerPreferencesFile;

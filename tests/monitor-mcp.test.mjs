@@ -549,6 +549,7 @@ describe('Monitor MCP server', () => {
             provider: 'claude',
           thinkingLevel: 'high',
           initialPrompt: 'Start here',
+          metadata: { returnToSpawner: true },
           skills: ['tdd'],
           mcpProfile: 'dueno',
           structured: true,

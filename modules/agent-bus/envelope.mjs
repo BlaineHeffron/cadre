@@ -41,7 +41,8 @@ export function renderBusEnvelope(message, parent = null) {
     'Reply only if this is new work. Do not reply to delayed copies or courtesy acks.'
   ].join('\n');
   const body = String(message.body || '');
-  const content = body.length > 1200 && message.type !== 'startup_prompt'
+  // A returned spawn result arrives whole, like a subagent's answer.
+  const content = body.length > 1200 && message.type !== 'startup_prompt' && !(dm && message.type === 'result')
     ? `Summary: ${messageSummary(message)}\nBody length: ${body.length} characters\nFull body: room_context(thread_id="${message.threadId}", message_id="${message.id}")`
     : body.trim();
   const type = message.type && message.type !== 'message' ? `Type: ${message.type}` : null;

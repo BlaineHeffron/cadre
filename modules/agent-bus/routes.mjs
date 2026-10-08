@@ -387,7 +387,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     broadcast(wsManager, 'agent-bus:threads', 'thread_deleted', { threadId: req.params.threadId }); return { ok: true };
   });
 
-  async function send({ threadId, from, body, summary, type = 'message', replyTo = null, metadata = null, deliveryMode = 'wait' }) {
+  async function send({ threadId, from, body, summary, type = 'message', replyTo = null, metadata = null, deliveryMode = 'wait', idempotencyKey = null }) {
     const snapshot = store.getThread(threadId); if (!snapshot) return { statusCode: 404, payload: { error: 'Thread not found' } };
     if (snapshot.thread.status !== 'open') return { statusCode: 409, payload: { error: 'Thread is closed' } };
     const managed = snapshot.thread.metadata?.task;
@@ -400,7 +400,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     const resolvedType = type === 'result' ? 'result' : (type || 'message');
     const history = [...(snapshot.messages || [])].reverse();
     // A repeated result is a duplicate only of the room's latest result, so a verdict that flips back still posts.
-    const duplicate = (resolvedType === 'result' ? history.filter((item) => item.type === 'result').slice(0, 1) : history).find((item) => (
+    const duplicate = !idempotencyKey && (resolvedType === 'result' ? history.filter((item) => item.type === 'result').slice(0, 1) : history).find((item) => (
       participantKey(item.from) === participantKey(from)
       && item.body === body
       && item.metadata?.summary === summary
@@ -417,7 +417,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (resolvedType === 'result' && adapters[owner?.kind] && !threadHasParticipant(snapshot.thread, owner)
       && participantKey(owner) !== participantKey(from)) targets.push(participantRef(owner));
     const record = await store.createMessage({ threadId, from: participantRef(from), targets, type: resolvedType, body,
-      replyTo, metadata: { ...(metadata || {}), ...(summary !== undefined ? { summary } : {}), ...(snapshot.thread.metadata?.dm ? { dm: true } : {}) } });
+      replyTo, idempotencyKey, metadata: { ...(metadata || {}), ...(summary !== undefined ? { summary } : {}), ...(snapshot.thread.metadata?.dm ? { dm: true } : {}) } });
     broadcast(wsManager, `agent-bus:thread:${threadId}`, 'message_created', { message: record.message, deliveries: record.deliveries });
     if (deliveryMode === 'wait') await Promise.all(record.deliveries.map(async (delivery) => {
       try { return await deliverMessage(record.message, delivery); }
@@ -443,47 +443,54 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     return reply.code(result.statusCode).send(result.payload);
   });
 
-  async function assertKnownDmRef(ref, label, reply) {
-    if (isDashboardUser(ref)) return true;
+  async function knownDmRefError(ref, label) {
+    if (isDashboardUser(ref)) return null;
     const adapter = adapters[ref.kind];
-    if (!adapter) { await reply.code(404).send({ error: `kind must be the ${label.toLowerCase()}'s provider (${Object.keys(adapters).join(', ')}), got '${ref.kind}'` }); return false; }
+    if (!adapter) return { statusCode: 404, payload: { error: `kind must be the ${label.toLowerCase()}'s provider (${Object.keys(adapters).join(', ')}), got '${ref.kind}'` } };
     try {
       await resolveAgentSession(ref);
-      return true;
+      return null;
     } catch (err) {
-      if (err.code === 'session_kind_mismatch') {
-        await reply.code(404).send({ error: err.message, code: err.code });
-        return false;
-      }
+      if (err.code === 'session_kind_mismatch') return { statusCode: 404, payload: { error: err.message, code: err.code } };
       if (err.payload?.sessionEnded === true || err.payload?.state?.status === 'ended') {
-        await reply.code(410).send({ error: `${label} session ended`, code: 'session_ended', sessionEnded: true });
-        return false;
+        return { statusCode: 410, payload: { error: `${label} session ended`, code: 'session_ended', sessionEnded: true } };
       }
       if (err.statusCode !== 404 && err.code !== 'session_not_found') throw err;
     }
-    await reply.code(404).send({ error: `${label} agent not found`, code: 'session_not_found' });
-    return false;
+    return { statusCode: 404, payload: { error: `${label} agent not found`, code: 'session_not_found' } };
   }
 
-  app.post('/api/agent-bus/dm', { schema: { body: bodySchema({ from: agentRef, target: agentRef,
-    body: string(BODY_MAX, 1), summary: string(200), replyTo: string(ID_MAX) }, ['from', 'target', 'body']) } }, async (req, reply) => {
-    if (participantKey(req.body.from) === participantKey(req.body.target)) {
-      return reply.code(400).send({ error: 'Cannot create a DM with yourself' });
-    }
-    if (!await assertKnownDmRef(req.body.from, 'Sender', reply)) return;
-    if (!await assertKnownDmRef(req.body.target, 'Target', reply)) return;
-    const key = dmKey(req.body.from, req.body.target);
+  // idempotencyKey replaces the content dedupe. skipIfSentBetween skips the send when `from` wrote its
+  // own (unkeyed) message to this DM in that [start, end] window.
+  async function directMessage({ from, target, body, summary, replyTo, type, idempotencyKey = null, skipIfSentBetween = null }) {
+    if (participantKey(from) === participantKey(target)) return { statusCode: 400, payload: { error: 'Cannot create a DM with yourself' } };
+    const refError = await knownDmRefError(from, 'Sender') || await knownDmRefError(target, 'Target');
+    if (refError) return refError;
+    const key = dmKey(from, target);
     let thread = store.listThreads().find((item) => item.metadata?.dmKey === key);
+    if (skipIfSentBetween && thread && store.getThread(thread.id).messages.some((item) => !item.idempotencyKey
+      && participantKey(item.from) === participantKey(from)
+      && item.createdAt >= skipIfSentBetween[0] && item.createdAt <= skipIfSentBetween[1])) {
+      return { statusCode: 200, payload: { skipped: 'already_sent' } };
+    }
     if (!thread) thread = await store.createThread({ title: `DM: ${key}`, projectKey: '',
-      participants: uniqueAgentRefs([req.body.from, req.body.target]), metadata: { dm: true, dmKey: key } });
+      participants: uniqueAgentRefs([from, target]), metadata: { dm: true, dmKey: key } });
     else if (thread.status !== 'open') {
-      if (endingThreads.has(thread.id)) return reply.code(409).send({ error: 'Room is ending', code: 'room_ending' });
+      if (endingThreads.has(thread.id)) return { statusCode: 409, payload: { error: 'Room is ending', code: 'room_ending' } };
       thread = await store.reopenThread(thread.id);
     }
     thread.participants.forEach((participant) => observedSessions.add(participantKey(participant)));
-    const result = await send({ threadId: thread.id, from: req.body.from, body: req.body.body, summary: req.body.summary, replyTo: req.body.replyTo,
-      metadata: { dm: true } });
-    return reply.code(result.statusCode).send({ thread: normalizeThreadSummary(await enrichThread(thread)), ...result.payload });
+    const result = await send({ threadId: thread.id, from, body, summary, replyTo, type, metadata: { dm: true },
+      idempotencyKey });
+    return { statusCode: result.statusCode, payload: { thread: normalizeThreadSummary(await enrichThread(thread)), ...result.payload } };
+  }
+  app.agentBusLifecycle.directMessage = directMessage;
+
+  app.post('/api/agent-bus/dm', { schema: { body: bodySchema({ from: agentRef, target: agentRef,
+    body: string(BODY_MAX, 1), summary: string(200), replyTo: string(ID_MAX) }, ['from', 'target', 'body']) } }, async (req, reply) => {
+    const { from, target, body, summary, replyTo } = req.body;
+    const result = await directMessage({ from, target, body, summary, replyTo });
+    return reply.code(result.statusCode).send(result.payload);
   });
 
   app.get('/api/agent-bus/messages/:messageId/context', async (req, reply) => {
