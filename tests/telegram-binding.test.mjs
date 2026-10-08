@@ -496,6 +496,27 @@ describe('transcript binding resolvers', () => {
     });
   });
 
+  it('keeps a reused binding when hook metadata naming another session points elsewhere', async () => {
+    await withTempDir(async (dir) => {
+      const projectsDir = join(dir, 'projects');
+      const boundPath = await writeClaudeTranscript(projectsDir, 'bound.jsonl', claudeLines(), LIVE_MS);
+      const otherPath = await writeClaudeTranscript(projectsDir, 'other.jsonl', claudeLines(), NEWER_MS);
+      const { ino } = await stat(boundPath);
+
+      const result = await resolveBinding(claudeSession('aaaa1111'), {
+        previous: { transcript_path: boundPath, anchor: 'cli_session_id', ino, cli_session_id: 'bound' },
+        liveTenantCount: 2,
+        deps: {
+          projectsDir,
+          readHookSessionMetadata: async () => ({ duenoSessionId: 'bbbb2222', transcriptPath: otherPath, cliSessionId: 'other' }),
+        },
+      });
+
+      assert.equal(result.path, boundPath);
+      assert.equal(result.reused, true);
+    });
+  });
+
   it('binds a codex session by its DUENO_SESSION_ID env marker, ignoring a newer same-cwd rollout', async () => {
     await withTempDir(async (dir) => {
       const codexSessionsDir = join(dir, 'codex');

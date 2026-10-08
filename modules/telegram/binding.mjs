@@ -382,7 +382,10 @@ async function resolveHook(session, deps) {
   if (!path) return null;
   const fileStat = await statOrNull(path);
   if (!fileStat) return null;
-  return bound(path, 'hook', { cliSessionId: text(metadata.cliSessionId), ino: fileStat.ino });
+  return {
+    ...bound(path, 'hook', { cliSessionId: text(metadata.cliSessionId), ino: fileStat.ino }),
+    startOffset: Number(metadata.transcriptStartOffset) || 0,
+  };
 }
 
 async function resolveEnv(session, deps) {
@@ -534,6 +537,11 @@ export async function resolveBinding(session = {}, { previous = null, liveTenant
     return refused('unsupported_session');
   }
   const resolvedDeps = normalizeDeps(deps);
+
+  // `/clear` moves a Claude session to a new transcript; the old file and the registry's
+  // launch-time cliSessionId still name the old one, so the hook's live path wins.
+  const hooked = runtime === 'claude' ? await resolveHook(session, resolvedDeps) : null;
+  if (hooked && hooked.path !== text(previous?.transcript_path)) return hooked;
 
   const reused = await reusePrevious(previous, session);
   if (reused) return reused;

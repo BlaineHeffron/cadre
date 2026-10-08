@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildSentStore, listSessionsFromRegistry, TelegramRelayLoop } from '../modules/telegram/relay.mjs';
 import { buildBindingStore, claudeTranscriptPath } from '../modules/telegram/binding.mjs';
+import { recordHookPayload } from '../modules/agent/hook-events.mjs';
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), 'dueno-telegram-relay-'));
@@ -424,6 +425,106 @@ describe('telegram relay loop', () => {
       assert.equal(bindings['claude-cli'].anchor, 'cli_session_id');
       assert.equal(bindings['claude-cli'].cli_session_id, cliSessionId);
       assert.equal(bindings['claude-cli'].transcript_path, transcriptPath);
+    });
+  });
+
+  describe('Claude transcript switches recorded by SessionStart', () => {
+    const assistant = (text) => `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } })}\n`;
+
+    async function fixture(stateDir) {
+      const deliveries = [];
+      const workDir = join(stateDir, 'repo');
+      const projectsDir = join(stateDir, 'projects');
+      await mkdir(join(workDir, '.git'), { recursive: true });
+      const transcript = (cliSessionId) => claudeTranscriptPath(projectsDir, workDir, cliSessionId);
+      await mkdir(dirname(transcript('cli-a')), { recursive: true });
+      const sessionStart = (duenoSessionId, cliSessionId, source) => recordHookPayload({
+        hook_event_name: 'SessionStart', source, session_id: cliSessionId, cwd: workDir, transcript_path: transcript(cliSessionId),
+      }, { provider: 'claude', duenoSessionId });
+      const buildRelay = () => new TelegramRelayLoop({
+        config: { enabled: true, tickIntervalSec: 5 },
+        sender: {
+          async deliver(payload) {
+            deliveries.push([payload.route?.sessionId, payload.text]);
+            return { msgId: 900 + deliveries.length, threadId: 177, topicKey: payload.route?.key || '' };
+          },
+        },
+        sentStore: buildSentStore({ stateDir }),
+        bindingStore: buildBindingStore({ stateDir, now: () => 1000 }),
+        listSessions: async () => [
+          session({ id: 'claude-x', runtime: 'claude', tmuxSession: 'claude-x', workDir, cliSessionId: 'cli-a' }),
+          session({ id: 'claude-y', runtime: 'claude', tmuxSession: 'claude-y', workDir, cliSessionId: 'cli-c' }),
+        ],
+        readHookEvents: async () => ({ events: [], cursor: 0, path: '' }),
+        bindingDeps: { projectsDir },
+        agentBusStatePaths: [],
+        now: () => 1000,
+        logger: { warn() {} },
+      });
+      await writeFile(transcript('cli-a'), assistant('before switch'));
+      await writeFile(transcript('cli-c'), assistant('neighbour output'));
+      const loop = buildRelay();
+      await loop.step();
+      assert.deepEqual(deliveries.splice(0), [['claude-x', 'before switch'], ['claude-y', 'neighbour output']]);
+      assert.equal((await readJson(join(stateDir, 'bindings.json')))['claude-x'].anchor, 'cli_session_id');
+      return { deliveries, transcript, sessionStart, buildRelay, loop };
+    }
+
+    it('follows a Claude session to its new transcript after /clear without crossing a co-located session', async () => {
+      await withTempDir(async (stateDir) => {
+        const { deliveries, transcript, sessionStart, buildRelay, loop } = await fixture(stateDir);
+        const [pathA, pathB] = [transcript('cli-a'), transcript('cli-b')];
+
+        await sessionStart('claude-x', 'cli-b', 'clear');
+        // B already holds post-clear output before the relay notices; /clear relays B from its start.
+        await writeFile(pathB, assistant('after clear'));
+        await writeFile(pathA, assistant('before switch') + assistant('stale old file'));
+        await loop.step();
+        assert.deepEqual(deliveries.splice(0), [['claude-x', 'after clear']]);
+        const bindings = await readJson(join(stateDir, 'bindings.json'));
+        assert.equal(bindings['claude-x'].transcript_path, pathB);
+        assert.equal(bindings['claude-x'].anchor, 'hook');
+        assert.equal(bindings['claude-y'].transcript_path, transcript('cli-c'));
+
+        const later = assistant('later');
+        await writeFile(pathB, assistant('after clear') + later.slice(0, 20));
+        await loop.step();
+        assert.deepEqual(deliveries.splice(0), []);
+        await writeFile(pathB, assistant('after clear') + later);
+        await loop.step();
+        assert.deepEqual(deliveries.splice(0), [['claude-x', 'later']]);
+
+        // A restarted relay keeps B rather than falling back to the registry's cliSessionId A.
+        const restarted = buildRelay();
+        await restarted.step();
+        await writeFile(pathB, assistant('after clear') + later + assistant('after restart'));
+        await restarted.step();
+        assert.deepEqual(deliveries.splice(0), [['claude-x', 'after restart']]);
+      });
+    });
+
+    it('relays only post-resume output from a resumed transcript', async () => {
+      await withTempDir(async (stateDir) => {
+        const { deliveries, transcript, sessionStart, buildRelay, loop } = await fixture(stateDir);
+        const pathR = transcript('cli-r');
+        const history = assistant('old history');
+        await writeFile(pathR, history);
+
+        await sessionStart('claude-x', 'cli-r', 'resume');
+        await writeFile(pathR, history + assistant('after resume'));
+        await recordHookPayload({
+          hook_event_name: 'Stop', session_id: 'cli-r', cwd: join(stateDir, 'repo'), transcript_path: pathR,
+        }, { provider: 'claude', duenoSessionId: 'claude-x' });
+        await loop.step();
+        assert.deepEqual(deliveries.splice(0), [['claude-x', 'after resume']]);
+
+        const restarted = buildRelay();
+        await restarted.step();
+        assert.deepEqual(deliveries.splice(0), []);
+        await writeFile(pathR, history + assistant('after resume') + assistant('after restart'));
+        await restarted.step();
+        assert.deepEqual(deliveries.splice(0), [['claude-x', 'after restart']]);
+      });
     });
   });
 

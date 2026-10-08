@@ -220,13 +220,18 @@ function mergeStateSlot(priorState = {}, slotName = '', slotValue = {}) {
 
 function mergeSessionMetadata(priorState = {}, event = {}) {
   const prior = priorState?.session && typeof priorState.session === 'object' ? priorState.session : {};
+  const transcriptPath = normalizeText(event.transcriptPath) || prior.transcriptPath || '';
   const next = {
     ...prior,
     provider: normalizeText(event.provider) || prior.provider || '',
     cliSessionId: normalizeText(event.sessionId) || prior.cliSessionId || '',
     duenoSessionId: normalizeText(event.duenoSessionId) || prior.duenoSessionId || '',
     cwd: normalizeText(event.cwd) || prior.cwd || '',
-    transcriptPath: normalizeText(event.transcriptPath) || prior.transcriptPath || '',
+    transcriptPath,
+    // Where this session's output begins in its transcript; only a resumed transcript holds older history.
+    transcriptStartOffset: event.eventName === 'SessionStart' || transcriptPath !== prior.transcriptPath
+      ? event.transcriptStartOffset || 0
+      : prior.transcriptStartOffset || 0,
     model: normalizeText(event.model) || prior.model || '',
     updatedAt: event.loggedAt || new Date().toISOString(),
   };
@@ -259,6 +264,9 @@ export async function recordHookPayload(payload = {}, {
       turnId: normalizeText(payload.turn_id || payload.tool_use_id || ''),
       cwd: workDir,
       transcriptPath: normalizeText(payload.transcript_path || ''),
+      transcriptStartOffset: normalizeText(provider || payload.provider) === 'claude' && eventName === 'SessionStart' && payload.source === 'resume'
+        ? (await stat(normalizeText(payload.transcript_path)).catch(() => null))?.size || 0
+        : 0,
       model: normalizeText(payload.model || ''),
       prompt: eventName === 'UserPromptSubmit' ? prompt : '',
       lastAssistantMessage: eventName === 'Stop' ? lastAssistantMessage : '',

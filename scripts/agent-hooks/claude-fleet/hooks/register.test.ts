@@ -29,6 +29,24 @@ test('relays each classic event to the reporter, in order', async ($, on) => {
   expect(start?.argv.slice(2)).toEqual(['--provider', 'claude']);
 });
 
+test('a resumed SessionStart waits for its reporter before the session goes on', async ($, on) => {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const reported = engine(on, async (e) => {
+    if (JSON.parse(e.init.stdin).source === 'resume') await held;
+    return ran;
+  });
+  let resumed = false;
+  const resume = $.classic.SessionStart({ source: 'resume' }).then(() => { resumed = true; });
+  await $.classic.SessionStart({ source: 'clear' });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(resumed).toBe(false);
+  release();
+  await resume;
+  await $.classic.SessionEnd({ reason: 'other' });
+  expect(reported().map((r) => r.payload.source ?? r.payload.hook_event_name)).toEqual(['resume', 'clear', 'SessionEnd']);
+});
+
 test('fills the classic base fields for PreToolUse', async ($, on) => {
   const reported = engine(on);
   on('tool.call', () => ({ result: { stdout: 'hi', stderr: '', interrupted: false } }));

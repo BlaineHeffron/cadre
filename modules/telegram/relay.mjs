@@ -578,7 +578,7 @@ export class TelegramRelayLoop {
     if (!binding.reused) {
       const offset = previousBinding?.transcript_path === binding.path
         ? Number(previousBinding.offset) || 0
-        : 0;
+        : Number(binding.startOffset) || 0;
       await this.bindingStore.bind(session.id, {
         path: binding.path,
         anchor: binding.anchor,
