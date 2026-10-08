@@ -5,6 +5,7 @@
  * Register on the Fastify instance:
  *   await app.register(authPlugin);
  */
+import { LogController } from 'fastify';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { config } from '../../config.mjs';
 import { isProtectedRoutePath } from './static-cache.mjs';
@@ -274,6 +275,17 @@ export function evaluateInternalBypass(request, {
   return { allowed: true, reason: 'ok', ip, ageMs };
 }
 
+// Mutes only the info request lines for valid bypasses (forged headers still log); warn/error paths stay untouched.
+export class InternalQuietLogController extends LogController {
+  incomingRequest(request, reply) {
+    if (!evaluateInternalBypass(request).allowed) super.incomingRequest(request, reply);
+  }
+
+  requestCompleted(error, request, reply) {
+    if (error || !evaluateInternalBypass(request).allowed) super.requestCompleted(error, request, reply);
+  }
+}
+
 function authPluginImpl(app, opts = {}, done) {
   const authToken = opts.token || currentAuthToken();
   const internalBypassToken = opts.internalBypassToken || currentInternalBypassToken();
@@ -395,7 +407,7 @@ function authPluginImpl(app, opts = {}, done) {
         automationPolicy: mcpAuth ? '' : automationPolicy,
         source: mcpAuth ? 'agent_bus_mcp' : 'internal',
       };
-      request.log.info({
+      request.log.debug({
         control_event: {
           type: 'internal_bypass_used',
           path,
