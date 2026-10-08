@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildHookSessionPaths, recordHookPayload, recordRuntimeHookEvent, readHookEventsSince } from '../modules/agent/hook-events.mjs';
@@ -122,6 +122,21 @@ describe('agent hook events', () => {
     const state = JSON.parse(await readFile(recorded.paths.statePath, 'utf8'));
     assert.equal(state.runtime.source, 'runtime');
     assert.equal(state.runtime.activity, 'prompt_ready');
+  });
+
+  it('leaves a partly written line for the next incremental read', async () => {
+    const workDir = await makeRepo();
+    const target = { workDir, provider: 'claude', sessionId: 'torn-1' };
+    await recordHookPayload({ session_id: 'cli', cwd: workDir, hook_event_name: 'UserPromptSubmit', prompt: 'go' },
+      { provider: 'claude', duenoSessionId: 'torn-1' });
+    const { eventsPath } = await buildHookSessionPaths(target);
+    const line = JSON.stringify({ eventName: 'Stop', lastAssistantMessage: 'whole answer' });
+    await appendFile(eventsPath, line.slice(0, 20));
+    const first = await readHookEventsSince(target);
+    assert.deepEqual(first.events.map((event) => event.eventName), ['UserPromptSubmit']);
+    await appendFile(eventsPath, `${line.slice(20)}\n`);
+    const second = await readHookEventsSince({ ...target, cursor: first.cursor });
+    assert.deepEqual(second.events.map((event) => event.lastAssistantMessage), ['whole answer']);
   });
 
   it('persists derived hook state under a hook namespace', async () => {

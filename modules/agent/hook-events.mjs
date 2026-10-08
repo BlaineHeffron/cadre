@@ -329,11 +329,12 @@ export async function readHookEventsSince({ workDir = '', provider = '', session
   try {
     const content = await readFile(paths.eventsPath, 'utf8');
     const safeCursor = Number.isFinite(Number(cursor)) ? Math.max(0, Number(cursor)) : 0;
-    const nextCursor = content.length;
+    // Stop at the last complete line, so a line still being appended is read whole on a later call.
+    const nextCursor = content.lastIndexOf('\n') + 1;
     if (safeCursor >= nextCursor) {
       return { events: [], cursor: nextCursor, path: paths.eventsPath };
     }
-    const slice = content.slice(safeCursor);
+    const slice = content.slice(safeCursor, nextCursor);
     const events = slice
       .split('\n')
       .map((line) => line.trim())
