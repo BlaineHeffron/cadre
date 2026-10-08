@@ -43,6 +43,11 @@ test('a spawned child returns each finished turn to its spawner once', async (t)
   await delay(150);
   assert.equal(results().length, 2);
   assert.equal(delivered('First answer'), 1);
+
+  // A repeated answer is a new turn's result, not a duplicate.
+  await turn('Second answer');
+  assert.ok(await settle(() => delivered('Second answer') === 2));
+  assert.equal(results().length, 3);
 });
 
 test('a long returned result arrives whole', async (t) => {
