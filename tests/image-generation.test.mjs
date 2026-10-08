@@ -75,6 +75,7 @@ describe('subscription image generation', () => {
   });
 
   it('reads the proxy key at call time and constructs a loopback Gemini request', async () => {
+    assert.equal(GOOGLE_IMAGE_MODEL, 'gemini-3.1-flash-image');
     const env = await outputEnv();
     let calls = 0;
     const options = { env,

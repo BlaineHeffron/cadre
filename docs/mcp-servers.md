@@ -96,8 +96,11 @@ only. No send scope is requested anywhere.
     omitted from the child environment. The server verifies PNG/JPEG/WebP
     signature bytes before saving the output.
   - Google requests
-    [`gemini-nano-banana-2.1`](https://ai.google.dev/gemini-api/docs/models/gemini-nano-banana-2.1)
+    `gemini-3.1-flash-image` (Nano Banana 2)
     through local CLIProxyAPI's Gemini-native endpoint on `127.0.0.1:8317`.
+    Nano Banana 2.1 exists as `gemini-nano-banana-2.1`, but this Antigravity
+    channel does not serve it yet; the Google model is one constant to update
+    when subscription access becomes available.
     The operator manages the proxy and its Google subscription login. The server
     reads the local client key file at call time; only its path is configured
     (`IMAGE_GEN_PROXY_KEY_FILE`, default

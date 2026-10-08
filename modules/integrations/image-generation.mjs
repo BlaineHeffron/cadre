@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const TIMEOUT_MS = 180_000;
-export const GOOGLE_IMAGE_MODEL = 'gemini-nano-banana-2.1';
+export const GOOGLE_IMAGE_MODEL = 'gemini-3.1-flash-image';
 export const GROK_IMAGE_ARGS = Object.freeze([
   '--no-subagents', '--max-turns', '3', '--permission-mode', 'dontAsk', '--allow', 'image_gen',
   '--disallowed-tools', 'run_terminal_command,read_file,search_replace,list_dir,grep,write,spawn_subagent,scheduler_create,scheduler_delete,monitor,workflow,image_edit,image_to_video,reference_to_video',
