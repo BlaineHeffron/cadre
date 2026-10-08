@@ -485,14 +485,20 @@ export async function stepDue(nowMs = Date.now(), {
         ),
       });
     } catch (error) {
-      if (task.type === 'inject') {
+      if (task.type === 'inject' || error?.code === 'mcp_invalid_arguments' || error?.statusCode === 400) {
         delete claimMetadata.runClaim;
+        if (task.type === 'spawn') {
+          claimMetadata.lastError = { code: error?.code || 'invalid_arguments', message: error?.message || 'Launch failed' };
+        }
         const updated = await store.update(task.id, {
           nextRunAtEpochMs: advanceNextRunAt(task, nowMs),
-          tickLog: appendTick(task, nowMs, 'failed', error?.message),
+          ...(task.type === 'inject' ? { tickLog: appendTick(task, nowMs, 'failed', error?.message) } : {}),
           metadata: claimMetadata,
           updatedAt: nowMs,
         });
+        if (task.type === 'spawn' && logger?.warn) {
+          logger.warn({ taskId: task.id, ...claimMetadata.lastError }, 'Scheduled agent launch failed');
+        }
         tasks.push({ id: task.id, action: 'failed', task: updated });
         continue;
       }
@@ -599,7 +605,7 @@ export class SchedulerLoop {
     const intervalSec = Math.min(Math.max(Number(this.config.tickIntervalSec || 5), 1), 60);
     this.timer = setInterval(() => {
       void this.step().catch((error) => {
-        if (this.logger?.warn) this.logger.warn({ code: error?.code || error?.message || 'unknown' }, 'Scheduled agent loop failed');
+        if (this.logger?.warn) this.logger.warn({ code: error?.code || 'unknown', message: error?.message }, 'Scheduled agent loop failed');
       });
     }, intervalSec * 1000);
     if (typeof this.timer.unref === 'function') this.timer.unref();

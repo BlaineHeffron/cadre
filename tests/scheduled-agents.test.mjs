@@ -17,6 +17,61 @@ import {
 } from '../modules/agent-bus/coordinator-policy.mjs';
 
 describe('scheduled agents', () => {
+  for (const failure of [
+    { code: 'mcp_invalid_arguments' },
+    { statusCode: 400 },
+  ]) {
+    it(`defers deterministic spawn failures until the next scheduled slot (${JSON.stringify(failure)})`, async () => {
+      let saved = null;
+      const stateStore = {
+        load: async () => saved,
+        save: async (data) => { saved = structuredClone(data); },
+      };
+      const store = buildScheduledAgentStore({ stateStore, now: () => 1000 });
+      await store.register(baseTask({ id: 'sched_invalid', intervalSeconds: 15, nextRunAtEpochMs: 1000 }));
+      let launches = 0;
+      const warnings = [];
+      const deps = {
+        store,
+        sessionLauncher: async () => {
+          launches += 1;
+          throw Object.assign(new Error('spawn_session: argument "parentThreadId" must be string'), failure);
+        },
+        logger: { warn: (...args) => warnings.push(args) },
+      };
+
+      const result = await stepDue(32000, deps);
+      assert.equal(result.tasks[0].action, 'failed');
+      assert.equal(result.spawned, 0);
+      const reloaded = buildScheduledAgentStore({ stateStore, now: () => 32000 });
+      const task = await reloaded.get('sched_invalid');
+      assert.equal(task.nextRunAtEpochMs, 46000);
+      assert.equal(task.currentIteration, 0);
+      assert.equal(task.metadata.runClaim, undefined);
+      assert.equal(task.metadata.lastError.message, 'spawn_session: argument "parentThreadId" must be string');
+      assert.equal(warnings[0][0].message, task.metadata.lastError.message);
+      assert.equal(warnings[0][0].taskId, task.id);
+      deps.store = reloaded;
+      assert.equal((await stepDue(37000, deps)).checked, 0);
+      assert.equal(launches, 1);
+      assert.equal(warnings.length, 1);
+      await stepDue(46000, deps);
+      assert.equal(launches, 2);
+    });
+  }
+
+  it('releases a failed spawn claim for retry after a transient error', async () => {
+    const store = memoryStore({ now: () => 1000 });
+    await store.register(baseTask({ id: 'sched_transient', nextRunAtEpochMs: 1000 }));
+    const error = Object.assign(new Error('service unavailable'), { statusCode: 503 });
+    await assert.rejects(stepDue(1000, { store, sessionLauncher: async () => { throw error; } }), error);
+    const task = await store.get('sched_transient');
+    assert.equal(task.nextRunAtEpochMs, 1000);
+    assert.equal(task.metadata.runClaim, undefined);
+    const result = await stepDue(6000, { store, sessionLauncher: async () => ({ id: 'recovered' }) });
+    assert.equal(result.spawned, 1);
+  });
+
   it('validates inject tasks and preserves them across store reload', async () => {
     let saved = null;
     const stateStore = {

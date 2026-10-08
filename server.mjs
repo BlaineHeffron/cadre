@@ -311,9 +311,9 @@ async function launchScheduledAgentSession({
     provider,
     workDir,
     displayName,
-    model,
+    ...(model ? { model } : {}),
     initialPrompt: prompt,
-    parentThreadId,
+    ...(parentThreadId ? { parentThreadId } : {}),
     mcpProfile,
     mcpServers,
   }, authContext ? { authContext } : null);
