@@ -523,7 +523,7 @@ export async function stepDue(nowMs = Date.now(), {
       currentIteration: nextIteration,
       lastSessionId: task.type === 'inject'
         ? task.targetSession.sessionId
-        : normalizeText(session?.id || session?.sessionId) || null,
+        : normalizeText(session?.id || session?.sessionId || session?.participants?.[0]?.session_id) || null,
       lastSpawnAtEpochMs: nowMs,
       consecutiveSkips: 0,
       nextRunAtEpochMs: advanceNextRunAt(task, nowMs),
