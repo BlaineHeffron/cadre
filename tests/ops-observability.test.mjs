@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import {
   getOpsMetricsRegistry,
   incrementOpsCounter,
+  opsLogMethod,
   opsObservabilityPlugin,
   recordOpsTiming,
 } from '../modules/ops/observability.mjs';
@@ -24,6 +25,59 @@ describe('ops observability', () => {
     while (tempDirs.length > 0) {
       await rm(tempDirs.pop(), { recursive: true, force: true });
     }
+  });
+
+  it('captures coded warnings through real root and child loggers, escalating once per day', async (t) => {
+    let now = Date.parse('2026-10-08T12:00:00Z');
+    t.mock.method(Date, 'now', () => now);
+    const logs = [];
+    const app = Fastify({ logger: { level: 'debug', hooks: { logMethod: opsLogMethod }, stream: { write: (line) => logs.push(JSON.parse(line)) } } });
+    t.after(() => app.close());
+    const registry = getOpsMetricsRegistry();
+    const child = app.log.child({ component: 'test' });
+    const count = (name, code) => registry.snapshot().counters.find((item) => item.name === name && item.labels.code === code)?.value || 0;
+    for (let i = 0; i < 100; i++) child.warn({ code: 'spawn_failed' }, 'Spawn failed');
+    assert.equal(registry.warningHealth().status, 'ok');
+    assert.equal(count('warning_escalation_total', 'spawn_failed'), 0);
+    app.log.warn({ code: 'spawn_failed' }, 'Spawn failed');
+    assert.deepEqual(registry.warningHealth(), { status: 'degraded', detail: 'repeated_warnings', data: { codes: ['spawn_failed'] } });
+    for (let i = 0; i < 100; i++) child.warn({ err: Object.assign(new Error('Spawn failed'), { code: 'spawn_failed' }) }, 'Spawn failed');
+    assert.equal(count('warning_total', 'spawn_failed'), 201);
+    assert.equal(count('warning_escalation_total', 'spawn_failed'), 1);
+    assert.equal(logs.length, 201);
+    assert.equal(logs[0].msg, 'Spawn failed');
+    assert.equal(logs[0].level, 40);
+    assert.equal(logs.at(-1).err.code, 'spawn_failed');
+    now += 600_000;
+    assert.equal(registry.warningHealth().status, 'ok');
+    for (let i = 0; i < 101; i++) child.warn({ code: 'spawn_failed' }, 'Spawn failed');
+    assert.equal(count('warning_escalation_total', 'spawn_failed'), 1);
+    now += 86_400_000;
+    for (let i = 0; i < 101; i++) child.warn({ code: 'spawn_failed' }, 'Spawn failed');
+    assert.equal(count('warning_escalation_total', 'spawn_failed'), 2);
+    for (let i = 0; i < 101; i++) child.warn({ code: 'different' }, 'Another warning');
+    assert.equal(count('warning_escalation_total', 'different'), 1);
+    app.log.info({ code: 'ignored' }, 'Info');
+    app.log.error({ code: 'ignored' }, 'Error');
+    app.log.warn('Warning without a code');
+    assert.equal(count('warning_total', 'ignored'), 0);
+  });
+
+  it('uses a rolling window rather than lifetime counts or fixed buckets', async (t) => {
+    let now = Date.parse('2026-10-08T12:00:00Z');
+    t.mock.method(Date, 'now', () => now);
+    const app = Fastify({ logger: { hooks: { logMethod: opsLogMethod }, stream: { write() {} } } });
+    t.after(() => app.close());
+    const registry = getOpsMetricsRegistry();
+    for (let i = 0; i < 60; i++) app.log.warn({ code: 'rolling' });
+    now += 599_999;
+    for (let i = 0; i < 41; i++) app.log.warn({ code: 'rolling' });
+    assert.equal(registry.warningHealth().status, 'degraded');
+    now += 1;
+    assert.equal(registry.warningHealth().status, 'ok');
+    now += 600_000;
+    for (let i = 0; i < 100; i++) app.log.warn({ code: 'rolling' });
+    assert.equal(registry.warningHealth().status, 'ok');
   });
 
   it('captures counters and timings in JSON and Prometheus formats', async () => {

@@ -5,6 +5,15 @@ import { buildAgentRuntimeLaunchArgs, buildAgentRuntimeResumeArgs } from '../mod
 import { validatePiCliContract } from '../modules/sessions/index.mjs';
 
 describe('codex launch identity', () => {
+  it('disables update dialogs for launches and resumes', () => {
+    for (const build of [buildAgentRuntimeLaunchArgs, buildAgentRuntimeResumeArgs]) {
+      const args = build({ runtime: 'codex', workDir: '/tmp', cliSessionId: 'uuid-1' });
+      const index = args.indexOf('check_for_update_on_startup=false');
+      assert.ok(index > 0);
+      assert.equal(args[index - 1], '-c');
+    }
+  });
+
   it('stamps the dueno session id into the codex originator', () => {
     const prefix = buildLaunchEnvPrefix('84325d24', 'codex');
     assert.match(prefix, /export DUENO_SESSION_ID='?84325d24'?/);

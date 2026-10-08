@@ -21,7 +21,7 @@ import { getPiProviderHealth, piSessionsPlugin } from './modules/sessions/pi-ses
 import { deepseekSessionsPlugin, getDeepSeekProviderHealth } from './modules/sessions/deepseek-sessions.mjs';
 import { agentInterfacePlugin } from './modules/agent/interface.mjs';
 import { agentBusPlugin } from './modules/agent-bus/index.mjs';
-import { opsObservabilityPlugin } from './modules/ops/observability.mjs';
+import { getOpsMetricsRegistry, opsLogMethod, opsObservabilityPlugin } from './modules/ops/observability.mjs';
 import { commandCenterAIPlugin, onHumanQueueChange } from './modules/integrations/command-center-ai.mjs';
 import { agentProviderPreferencesPlugin } from './modules/agent/provider-preferences.mjs';
 import { fleetPlugin } from './modules/fleet/index.mjs';
@@ -86,7 +86,7 @@ if (sideEffectLoopsSuppressed) {
 }
 
 const app = Fastify({
-  logger: { level: config.logLevel },
+  logger: { level: config.logLevel, hooks: { logMethod: opsLogMethod } },
   logController: new InternalQuietLogController(),
   bodyLimit: 12 * 1024 * 1024,
   // agentBusPlugin loads a large state file at startup and can exceed Fastify's 10s default.
@@ -447,6 +447,7 @@ async function getReadinessReport() {
     getDependencyHealth(),
   ]);
   return summarizeReadiness({
+    warnings: getOpsMetricsRegistry().warningHealth(),
     storage,
     agentBusMcp,
     piProvider,
