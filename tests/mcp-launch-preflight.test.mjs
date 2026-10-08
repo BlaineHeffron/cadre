@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -112,7 +113,11 @@ describe('MCP launch preflight', () => {
       if (backendType === 'codex') {
         assert.equal(rendered.allArgs.some((arg) => arg === 'mcp_servers.seodata.command="node"'), true);
         assert.equal(rendered.allArgs.some((arg) => arg.includes(fixture)), true);
-        assert.equal(rendered.allArgs.some((arg) => arg.includes(`SEODATA_API_KEY="${secret}"`)), true);
+        assert.equal(rendered.allArgs.includes('mcp_servers.seodata.env_vars=["SEODATA_API_KEY"]'), true);
+        assert.equal(JSON.stringify(rendered.allArgs).includes(secret), false);
+        assert.equal(rendered.paneCommand.includes(secret), false);
+        assert.equal(rendered.paneCommand.includes(result.prepared.envPath), true);
+        assert.equal(await readFile(result.prepared.envPath, 'utf8'), `SEODATA_API_KEY=${secret}\0`);
       } else {
         const configPath = backendType === 'pi' ? result.prepared.piConfigPath : result.prepared.claudeConfigPath;
         const configFile = JSON.parse(await readFile(configPath, 'utf8'));
@@ -262,6 +267,60 @@ describe('MCP launch preflight', () => {
       backendType: 'codex', sessionId: 'codex-test', sourceConfig: sourceConfig(), credentialStore: credentials,
     });
     await assert.rejects(stat(result.prepared.credentialPath), /ENOENT/);
+  });
+
+  it('forwards paper-search keys by name to Codex and by value in Claude and Pi configs', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'dueno-paper-search-env-'));
+    tempDirs.push(stateDir);
+    process.env.CADRE_STATE_DIR = stateDir;
+    const configured = sourceConfig();
+    configured.researchWorkbench.paperSearchPath = join(stateDir, 'paper-search');
+    await writeFile(configured.researchWorkbench.paperSearchPath, '');
+    const keys = {
+      SEMANTIC_SCHOLAR_API_KEY: 'dummy-s2-key',
+      ADS_API_KEY: 'dummy-ads-key',
+      OPENALEX_EMAIL: 'openalex@example.test',
+      UNPAYWALL_EMAIL: 'unpaywall@example.test',
+    };
+
+    for (const [stdioEnv, forwarded] of [[{ ...keys, UNRELATED_SECRET: 'dummy-unrelated-secret' }, keys], [{ UNRELATED_SECRET: 'dummy-unrelated-secret' }, {}]]) {
+      for (const [backendType, provider] of [['codex', 'codex'], ['claude', 'claude'], ['pi', 'xai']]) {
+        const sessionId = `${backendType}-paper-search-${Object.keys(forwarded).length}`;
+        const credentials = credentialStore();
+        const result = await prepareMcpCapabilityLaunch({
+          resolved: resolved(['paper-search'], provider, backendType),
+          backendType, sessionId, sourceConfig: configured, credentialStore: credentials, stdioEnv,
+        });
+        assert.deepEqual(result.preflight['paper-search'], { state: 'ready' });
+        const rendered = renderAgentSessionLaunch({
+          backendType, sessionBinary: `/opt/bin/${backendType}`, sessionId, provider,
+          buildOptions: { workDir: stateDir, runtime: backendType, provider, mcpLaunch: result.prepared },
+        });
+        for (const value of Object.values(stdioEnv)) {
+          assert.equal(JSON.stringify(rendered.allArgs).includes(value), false);
+          assert.equal(rendered.paneCommand.includes(value), false);
+        }
+        if (backendType === 'codex') {
+          const envVars = rendered.allArgs.filter((arg) => arg.startsWith('mcp_servers.paper-search.env'));
+          assert.deepEqual(envVars, Object.keys(forwarded).length
+            ? [`mcp_servers.paper-search.env_vars=${JSON.stringify(Object.keys(forwarded)).replaceAll(',', ', ')}`]
+            : []);
+          assert.deepEqual(result.codexEnv, forwarded);
+          if (Object.keys(forwarded).length) {
+            assert.equal((await stat(result.prepared.envPath)).mode & 0o777, 0o600);
+            assert.equal(rendered.paneCommand.includes(result.prepared.envPath), true);
+          } else {
+            assert.equal(result.prepared.envPath, '');
+          }
+        } else {
+          const path = backendType === 'pi' ? result.prepared.piConfigPath : result.prepared.claudeConfigPath;
+          const server = JSON.parse(await readFile(path, 'utf8')).mcpServers['paper-search'];
+          assert.deepEqual(server.env, Object.keys(forwarded).length ? forwarded : undefined);
+        }
+        await cleanupMcpCapabilityLaunch({ backendType, sessionId, sourceConfig: configured, credentialStore: credentials });
+        if (result.prepared.envPath) await assert.rejects(stat(result.prepared.envPath), /ENOENT/);
+      }
+    }
   });
 
   it('identifies the missing research path when an optional server is selected', async () => {
@@ -503,13 +562,67 @@ describe('MCP launch preflight', () => {
       });
       assert.deepEqual(result.preflight['grok-imagine'], { state: 'ready', toolCount: 3 });
       if (backendType === 'codex') {
-        const env = Object.entries(expected).map(([key, value]) => `${key}="${value}"`).join(', ');
+        const { XAI_API_KEY, ...inline } = expected;
+        const env = Object.entries(inline).map(([key, value]) => `${key}="${value}"`).join(', ');
         assert.equal(result.prepared.codexArgs.includes(`mcp_servers.grok-imagine.env={${env}}`), true);
+        assert.equal(result.prepared.codexArgs.includes('mcp_servers.grok-imagine.env_vars=["XAI_API_KEY"]'), true);
+        assert.equal(JSON.stringify(result.prepared.codexArgs).includes(XAI_API_KEY), false);
+        assert.deepEqual(result.codexEnv, { XAI_API_KEY });
       } else {
         const path = backendType === 'pi' ? result.prepared.piConfigPath : result.prepared.claudeConfigPath;
         const configFile = JSON.parse(await readFile(path, 'utf8'));
         assert.deepEqual(configFile.mcpServers['grok-imagine'].env, expected);
       }
+    }
+  });
+
+  it('exports meshy and image-server keys to the Codex pane by name, values intact', { timeout: 60000 }, async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'dueno-codex-pane-env-'));
+    tempDirs.push(stateDir);
+    process.env.CADRE_STATE_DIR = stateDir;
+    const meshy = 'dummy meshy "quoted" $(touch pwned) `x`\nsecond line';
+    const openai = "dummy-openai 'single' $HOME";
+    const xai = 'dummy xai\ttab';
+    const fixture = new URL('./fixtures/mcp/stdio-tools-server.mjs', import.meta.url).pathname;
+    const reportPath = join(stateDir, 'env.json');
+    const fakeCodex = join(stateDir, 'fake-codex');
+    await writeFile(fakeCodex, `#!${process.execPath}\nrequire('fs').writeFileSync(${JSON.stringify(reportPath)}, JSON.stringify(process.env));\n`, { mode: 0o700 });
+
+    for (const [stdioEnv, byName] of [
+      [{ MESHY_API_KEY: meshy, OPENAI_API_KEY: openai, DM_MCP_XAI_API_KEY: xai }, ['MESHY_API_KEY', 'OPENAI_API_KEY', 'XAI_API_KEY']],
+      // Deferred: a differing alias stays inline rather than replace Codex's own OPENAI_API_KEY.
+      [{ MESHY_API_KEY: meshy, OPENAI_API_KEY: 'codex-own', DM_MCP_OPENAI_API_KEY: openai }, ['MESHY_API_KEY']],
+    ]) {
+      const sessionId = `codex-pane-env-${byName.length}`;
+      const credentials = credentialStore();
+      // Meshy validates its key against the live API at startup, so its command runs the stdio fixture.
+      const configured = { ...sourceConfig(), mcpCredentials: { overrides: { meshy: { command: process.execPath, args: [fixture] } } } };
+      const result = await prepareMcpCapabilityLaunch({
+        resolved: resolved(['meshy', 'gpt-image', ...(byName.includes('XAI_API_KEY') ? ['grok-imagine'] : [])]), backendType: 'codex', sessionId, workDir: stateDir,
+        sourceConfig: configured, credentialStore: credentials, stdioEnv,
+      });
+      assert.equal(result.preflight.meshy.state, 'ready');
+      assert.equal(result.preflight['gpt-image'].state, 'ready');
+      assert.equal(result.prepared.codexArgs.includes('mcp_servers.meshy.env_vars=["MESHY_API_KEY"]'), true);
+      assert.equal(result.prepared.codexArgs.includes('mcp_servers.gpt-image.env_vars=["OPENAI_API_KEY"]'),
+        byName.includes('OPENAI_API_KEY'));
+      assert.deepEqual(Object.keys(result.codexEnv).sort(), [...byName].sort());
+      const rendered = renderAgentSessionLaunch({
+        backendType: 'codex', sessionBinary: fakeCodex, sessionId, provider: 'codex',
+        buildOptions: { workDir: stateDir, runtime: 'codex', provider: 'codex', mcpLaunch: result.prepared },
+      });
+      assert.equal(JSON.stringify(rendered.allArgs).includes(meshy), false);
+      assert.equal(rendered.paneCommand.includes(meshy), false);
+      assert.equal(JSON.stringify(rendered.allArgs).includes(xai), false);
+      assert.equal(JSON.stringify(rendered.allArgs).includes(openai), !byName.includes('OPENAI_API_KEY'));
+
+      await rm(reportPath, { force: true });
+      const run = spawnSync('bash', ['-c', rendered.paneCommand], { cwd: stateDir, env: { PATH: process.env.PATH } });
+      assert.equal(run.status, 0, String(run.stderr));
+      const seen = JSON.parse(await readFile(reportPath, 'utf8'));
+      for (const key of byName) assert.equal(seen[key], key === 'XAI_API_KEY' ? xai : stdioEnv[key]);
+      await assert.rejects(stat(join(stateDir, 'pwned')), /ENOENT/);
+      await cleanupMcpCapabilityLaunch({ backendType: 'codex', sessionId, sourceConfig: sourceConfig(), credentialStore: credentials });
     }
   });
 

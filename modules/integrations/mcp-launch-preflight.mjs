@@ -6,6 +6,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { config } from '../../config.mjs';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { buildAgentBusMcpUrl } from '../platform/mcp-seed.mjs';
+import { CODEX_APP_SERVER_ENV_ALLOWLIST } from '../agent/codex-app-server-transport.mjs';
 import {
   AGENT_BUS_AGENT_TOOL_SCOPES,
   AGENT_SPAWN_TOOL_SCOPES,
@@ -22,6 +23,7 @@ import {
   prepareBusinessOsMcpForSession,
 } from './businessos-mcp.mjs';
 import {
+  PAPER_SEARCH_ENV_KEYS,
   PAPER_SEARCH_READ_TOOLS,
   RESEARCH_PLUGIN_REF,
   researchProfilePaths,
@@ -110,6 +112,10 @@ export function mcpClientCredentialPath(backendType, sessionId) {
   return runtimeStatePath(`mcp_client_configs/${text(backendType)}-${text(sessionId)}.token`);
 }
 
+export function mcpClientEnvPath(backendType, sessionId) {
+  return runtimeStatePath(`mcp_client_configs/${text(backendType)}-${text(sessionId)}.env`);
+}
+
 function codexHttpServerArgs(id, url, { bearerTokenEnvVar = '' } = {}) {
   return [
     '-c', `mcp_servers.${id}.type="http"`,
@@ -121,21 +127,27 @@ function codexHttpServerArgs(id, url, { bearerTokenEnvVar = '' } = {}) {
   ];
 }
 
-function codexStdioServerArgs(id, command, args, env = {}) {
-  const envEntries = Object.entries(env);
+// Codex copies these from its own environment, so secret values never reach its argv.
+function codexEnvVarsArgs(id, names) {
+  return names.length ? ['-c', `mcp_servers.${id}.env_vars=[${names.map(toml).join(', ')}]`] : [];
+}
+
+function codexStdioServerArgs(id, command, args, env = {}, forwardedKeys = []) {
+  const envEntries = Object.entries(env).filter(([key]) => !forwardedKeys.includes(key));
   return [
     '-c', `mcp_servers.${id}.command=${toml(command)}`,
     ...(args.length ? ['-c', `mcp_servers.${id}.args=[${args.map(toml).join(', ')}]`] : []),
     ...(envEntries.length
       ? ['-c', `mcp_servers.${id}.env={${envEntries.map(([key, value]) => `${key}=${toml(value)}`).join(', ')}}`]
       : []),
+    ...codexEnvVarsArgs(id, Object.keys(env).filter((key) => forwardedKeys.includes(key))),
     '-c', `mcp_servers.${id}.enabled=true`,
     '-c', `mcp_servers.${id}.startup_timeout_sec=30`,
     '-c', `mcp_servers.${id}.tool_timeout_sec=60`,
   ];
 }
 
-function codexResearchServerArgs(id, paths) {
+function codexResearchServerArgs(id, paths, env) {
   if (id === 'zotero') {
     return [
       '-c', 'mcp_servers.zotero.command="node"',
@@ -164,6 +176,7 @@ function codexResearchServerArgs(id, paths) {
       '-c', 'mcp_servers.paper-search.default_tools_approval_mode="writes"',
       '-c', 'mcp_servers.paper-search.startup_timeout_sec=30',
       '-c', 'mcp_servers.paper-search.tool_timeout_sec=60',
+      ...codexEnvVarsArgs('paper-search', Object.keys(env)),
     ];
     for (const tool of PAPER_SEARCH_READ_TOOLS) {
       args.push('-c', `mcp_servers.paper-search.tools.${tool}.approval_mode="approve"`);
@@ -173,7 +186,7 @@ function codexResearchServerArgs(id, paths) {
   return [];
 }
 
-function claudeResearchServer(id, paths) {
+function claudeResearchServer(id, paths, env) {
   if (id === 'zotero') return { command: 'node', args: [paths.zotero] };
   if (id === 'nodus') {
     return {
@@ -182,7 +195,9 @@ function claudeResearchServer(id, paths) {
       env: { NODUS_MCP_TOKEN_FILE: paths.nodusTokenFile },
     };
   }
-  if (id === 'paper-search') return { command: paths.paperSearch, args: [] };
+  if (id === 'paper-search') {
+    return { command: paths.paperSearch, args: [], ...(Object.keys(env).length ? { env } : {}) };
+  }
   return null;
 }
 
@@ -306,12 +321,11 @@ async function writePiConfig(sessionId, mcpServers) {
   return configPath;
 }
 
-async function writeCredentialFile(backendType, sessionId, token) {
-  const credentialPath = mcpClientCredentialPath(backendType, sessionId);
-  await mkdir(dirname(credentialPath), { recursive: true });
-  await writeFile(credentialPath, `${String(token)}\n`, { mode: 0o600 });
-  await chmod(credentialPath, 0o600).catch(() => {});
-  return credentialPath;
+async function writePrivateFile(path, content) {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content, { mode: 0o600 });
+  await chmod(path, 0o600).catch(() => {});
+  return path;
 }
 
 export async function prepareAgentBusCredentialLaunch({
@@ -395,6 +409,7 @@ export async function prepareMcpCapabilityLaunch({
   const codexArgs = ['-c', 'mcp_servers={}'];
   const claudeServers = {};
   const piServers = {};
+  const codexEnv = {};
   const paths = researchProfilePaths(sourceConfig.researchWorkbench || {});
   let businessOsPrepared = false;
   let remotePrepared = false;
@@ -496,9 +511,15 @@ export async function prepareMcpCapabilityLaunch({
           preflight[id] = { state: 'degraded', reasonCode: 'health_check_failed' };
           continue;
         }
-        if (backendType === 'codex') codexArgs.push(...codexResearchServerArgs(id, paths));
-        if (backendType === 'claude') claudeServers[id] = claudeResearchServer(id, paths);
-        if (backendType === 'pi') piServers[id] = claudeResearchServer(id, paths);
+        const serverEnv = id === 'paper-search'
+          ? remoteMcpStdioEnv({ envKeys: PAPER_SEARCH_ENV_KEYS }, { env: stdioEnv })
+          : {};
+        if (backendType === 'codex') {
+          codexArgs.push(...codexResearchServerArgs(id, paths, serverEnv));
+          Object.assign(codexEnv, serverEnv);
+        }
+        if (backendType === 'claude') claudeServers[id] = claudeResearchServer(id, paths, serverEnv);
+        if (backendType === 'pi') piServers[id] = claudeResearchServer(id, paths, serverEnv);
         preflight[id] = { state: 'ready' };
         continue;
       }
@@ -508,7 +529,14 @@ export async function prepareMcpCapabilityLaunch({
         const args = [...remote.args, ...(remote.appendWorkDir && text(workDir) ? [text(workDir)] : [])];
         const serverEnv = remoteMcpStdioEnv(remote, { env: stdioEnv, workDir });
         const hasEnv = Object.keys(serverEnv).length > 0;
-        if (backendType === 'codex') codexArgs.push(...codexStdioServerArgs(id, remote.command, args, serverEnv));
+        if (backendType === 'codex') {
+          // A name Codex reads for itself (OPENAI_API_KEY) goes by name only when it already holds that value;
+          // a differing DM_MCP_* alias stays inline so it never replaces Codex's own key.
+          const forwardedKeys = [...remote.envKeys, remote.secretEnvName].filter((key) => key && serverEnv[key]
+            && (!CODEX_APP_SERVER_ENV_ALLOWLIST.includes(key) || text(stdioEnv[key]) === serverEnv[key]));
+          codexArgs.push(...codexStdioServerArgs(id, remote.command, args, serverEnv, forwardedKeys));
+          for (const key of forwardedKeys) codexEnv[key] = serverEnv[key];
+        }
         if (backendType === 'claude') claudeServers[id] = { command: remote.command, args, ...(hasEnv ? { env: serverEnv } : {}) };
         if (backendType === 'pi') piServers[id] = { command: remote.command, args, ...(hasEnv ? { env: serverEnv } : {}) };
         const stdioReady = await stdioServerReady(remote.command, args, serverEnv);
@@ -555,11 +583,17 @@ export async function prepareMcpCapabilityLaunch({
       ? await writePiConfig(sessionId, piServers)
       : '';
     const credentialPath = backendType === 'codex' && serverIds.includes('dueno') && busCredential?.token
-      ? await writeCredentialFile(backendType, sessionId, busCredential.token)
+      ? await writePrivateFile(mcpClientCredentialPath(backendType, sessionId), `${String(busCredential.token)}\n`)
+      : '';
+    // NUL-delimited NAME=value records; the tmux pane exports them without echoing a value.
+    const envPath = Object.keys(codexEnv).length
+      ? await writePrivateFile(mcpClientEnvPath(backendType, sessionId),
+        Object.entries(codexEnv).map(([key, value]) => `${key}=${value}\0`).join(''))
       : '';
     return {
       preflight,
       credentialToken: duenoCredentialEnvVar && serverIds.includes('dueno') ? busCredential?.token || '' : '',
+      codexEnv,
       prepared: {
         codexArgs,
         claudeConfigPath: preparedClaudeConfigPath,
@@ -569,6 +603,7 @@ export async function prepareMcpCapabilityLaunch({
           : '',
         credentialPath,
         credentialEnvVar: credentialPath ? 'DUENO_AGENT_BUS_TOKEN' : '',
+        envPath,
         credential: busCredential?.credential || null,
       },
     };
@@ -580,6 +615,7 @@ export async function prepareMcpCapabilityLaunch({
       await clearRemoteMcpServersForSession({ backendType, sessionId, sourceConfig }).catch(() => {});
     }
     await rm(claudeConfigPath || mcpClientConfigPath(backendType, sessionId), { force: true }).catch(() => {});
+    await rm(mcpClientEnvPath(backendType, sessionId), { force: true }).catch(() => {});
     await cleanupAgentBusCredentialLaunch({
       backendType, sessionId, credentialProfile, credentialStore, reason: 'launch_failed',
     });
@@ -604,6 +640,7 @@ export async function cleanupMcpCapabilityLaunch({
   });
   await Promise.all([
     rm(claudeConfigPath || mcpClientConfigPath(backendType, sessionId), { force: true }).catch(() => {}),
+    rm(mcpClientEnvPath(backendType, sessionId), { force: true }).catch(() => {}),
     cleanupAgentBusCredentialLaunch({ backendType, sessionId, credentialProfile, credentialStore, reason }),
     ...(!selected || selected.includes('businessos')
       ? [clearBusinessOsMcpForSession({ backendType, sessionId, sourceConfig }).catch(() => {})] : []),

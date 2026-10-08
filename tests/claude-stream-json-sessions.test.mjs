@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { AsyncEventQueue, createBaseCapabilities, createTransportEvent } from '../modules/agent/agent-transport.mjs';
+import { buildSupervisedEnv } from '../modules/agent/process-supervisor.mjs';
 import { AgentBusCredentialStore } from '../modules/agent-bus/mcp-auth.mjs';
 import { buildMcpCapabilityCatalog } from '../modules/integrations/mcp-server-catalog.mjs';
 import { claudeSessionsPlugin, isClaudeStreamJsonEnabled } from '../modules/sessions/claude-sessions.mjs';
@@ -548,6 +549,42 @@ describe('Claude stream-json sessions', () => {
     }
     assert.deepEqual(clients.slice(2).map((client) => [client.startSpec.permissionMode, client.startSpec.approvalPolicy]),
       [['danger-full-access', 'never'], ['read-only', 'untrusted']]);
+  });
+
+  it('forwards paper-search keys to app-server Codex by name, never on its argv', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dueno-codex-structured-paper-search-'));
+    roots.push(root);
+    const workDir = join(root, 'work');
+    await mkdir(workDir);
+    const paperSearchPath = join(root, 'paper-search');
+    await writeFile(paperSearchPath, '');
+    const dummy = 'dummy-semantic-scholar-key';
+    const previous = process.env.SEMANTIC_SCHOLAR_API_KEY;
+    process.env.SEMANTIC_SCHOLAR_API_KEY = dummy;
+    try {
+      const clients = [];
+      const app = Fastify({ logger: false });
+      apps.push(app);
+      await app.register(codexSessionsPlugin, {
+        appServerEnabled: true, sessionRoot: join(root, 'sessions'),
+        sourceConfig: {
+          agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' },
+          researchWorkbench: { paperSearchPath },
+        },
+        transportFactory() { const client = new FakeTransport('codex'); clients.push(client); return client; },
+      });
+      const res = await app.inject({ method: 'POST', url: '/api/codex/sessions', payload: {
+        workDir, mcpServers: { add: ['paper-search'] },
+      } });
+      assert.equal(res.statusCode, 200, res.body);
+      const { args, env, allowedEnvKeys } = clients[0].startSpec;
+      assert.equal(args.includes('mcp_servers.paper-search.env_vars=["SEMANTIC_SCHOLAR_API_KEY"]'), true);
+      assert.equal(args.join(' ').includes(dummy), false);
+      assert.equal(buildSupervisedEnv(env, allowedEnvKeys).SEMANTIC_SCHOLAR_API_KEY, dummy);
+    } finally {
+      if (previous === undefined) delete process.env.SEMANTIC_SCHOLAR_API_KEY;
+      else process.env.SEMANTIC_SCHOLAR_API_KEY = previous;
+    }
   });
 
   it('keeps interactive Codex on the tmux provider unless opted in', () => {

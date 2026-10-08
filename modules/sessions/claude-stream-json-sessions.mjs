@@ -4,7 +4,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { AttachmentStore } from '../agent/attachment-store.mjs';
 import { ClaudeStreamJsonTransport } from '../agent/claude-stream-json-transport.mjs';
-import { CodexAppServerTransport } from '../agent/codex-app-server-transport.mjs';
+import { CODEX_APP_SERVER_ENV_ALLOWLIST, CodexAppServerTransport } from '../agent/codex-app-server-transport.mjs';
 import { ProcessSupervisor } from '../agent/process-supervisor.mjs';
 import { buildCodexPluginConfigArgs } from '../agent/runtime-args.mjs';
 import { resolveMcpCapabilities } from '../integrations/mcp-capability-resolver.mjs';
@@ -167,7 +167,10 @@ export async function claudeStreamJsonSessionsPlugin(app, {
     if (!claude) {
       // Read-only Codex asks before untrusted commands; full access never asks, matching the tmux runtime.
       const approvalPolicy = { 'read-only': 'untrusted', 'danger-full-access': 'never' }[permissionMode] || 'on-request';
-      return { env, preflight: mcpPreparation.preflight, approvalPolicy,
+      // MCP server secrets reach Codex by name through its environment, never its argv.
+      const { codexEnv } = mcpPreparation;
+      return { env: { ...env, ...codexEnv }, preflight: mcpPreparation.preflight, approvalPolicy,
+        allowedEnvKeys: [...CODEX_APP_SERVER_ENV_ALLOWLIST, ...Object.keys(codexEnv)],
         args: [...headroom.args, ...pluginArgs, ...mcpPreparation.prepared.codexArgs, ...promptArgs,
         ...(headroom.modelProvider ? ['-c', `model_provider=${JSON.stringify(headroom.modelProvider)}`] : [])] };
     }
