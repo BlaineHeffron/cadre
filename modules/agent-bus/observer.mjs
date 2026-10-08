@@ -74,7 +74,7 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
     return withTimeout(ref, running);
   }
 
-  // A spawn_session child's finished turn goes to its spawner as one DM result, keyed by the Stop
+  // A spawn_session child's turn with no background work goes to its spawner as one DM result, keyed by the Stop
   // record's position in the append-only hook log, unless the child wrote that DM itself during the
   // turn. A failed send leaves the cursor in place to retry; after a restart the keys make the replay
   // from the start a no-op.
@@ -92,6 +92,7 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
         const at = Date.parse(event.loggedAt);
         if (event.eventName === 'UserPromptSubmit') turnStartedAt = at;
         if (event.eventName !== 'Stop' || !event.lastAssistantMessage?.trim()) continue;
+        if (Array.isArray(event.payload?.background_tasks) && event.payload.background_tasks.length) continue;
         const result = await app.agentBusLifecycle.directMessage({ from: { kind: session.provider, sessionId: session.id },
           target: session.metadata.spawnedBy, body: event.lastAssistantMessage, type: 'result',
           idempotencyKey: `spawn-result:${key}:${prior.index + offset}`, skipIfSentBetween: [turnStartedAt, at] });
