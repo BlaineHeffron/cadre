@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { runtimeStatePath } from '../modules/ops/runtime-state.mjs';
 import {
   REMOTE_MCP_AUTH,
@@ -360,61 +358,21 @@ describe('paid-credit servers', () => {
 });
 
 describe('image generation server', () => {
-  const defaults = {
-    DEFAULT_XAI_IMAGE_MODEL: 'grok-imagine-image-2.0',
-    DEFAULT_OPENAI_IMAGE_MODEL: 'gpt-image-2.5-flare',
-    DEFAULT_GOOGLE_IMAGE_MODEL: 'gemini-nano-banana-2.1',
-  };
-
-  it('requires any provider key and forwards only configured keys with model defaults', () => {
+  it('launches the owned subscription server without forwarding paid API keys', () => {
     const sourceConfig = testConfig();
     const server = remoteMcpServer('image-gen', { sourceConfig });
     assert.equal(server.command, process.execPath);
-    assert.equal(server.args.length, 1);
-    assert.match(server.args[0], /image-router-mcp[/\\]dist[/\\]index\.js$/);
-    assert.deepEqual(remoteMcpAvailability('image-gen', { sourceConfig, env: {} }),
-      { configured: false, reasonCode: 'credential_missing' });
-    for (const [key, forwarded] of [
-      ['DM_MCP_XAI_API_KEY', 'XAI_API_KEY'], ['XAI_API_KEY', 'XAI_API_KEY'],
-      ['DM_MCP_OPENAI_API_KEY', 'OPENAI_API_KEY'], ['OPENAI_API_KEY', 'OPENAI_API_KEY'],
-      ['DM_MCP_GOOGLE_API_KEY', 'GOOGLE_API_KEY'], ['GOOGLE_API_KEY', 'GOOGLE_API_KEY'], ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
-    ]) {
-      const env = { [key]: 'dummy-key', UNRELATED_API_KEY: 'not-forwarded' };
-      assert.equal(remoteMcpAvailability('image-gen', { sourceConfig, env }).configured, true);
-      assert.deepEqual(remoteMcpStdioEnv(server, { env, workDir: '/work/tree' }), {
-        ...defaults, [forwarded]: 'dummy-key', DEFAULT_OUTPUT_DIR: '/work/tree/generated-images',
-      });
-    }
+    assert.deepEqual(server.args, [new URL('../scripts/image-gen-mcp.mjs', import.meta.url).pathname]);
+    assert.deepEqual(remoteMcpAvailability('image-gen', { sourceConfig, env: {} }), { configured: true });
     assert.deepEqual(remoteMcpStdioEnv(server, { env: {
-      XAI_API_KEY: 'xai', DM_MCP_XAI_API_KEY: 'xai-override',
-      OPENAI_API_KEY: 'openai', DM_MCP_OPENAI_API_KEY: 'openai-override', GOOGLE_API_KEY: 'google', DM_MCP_GOOGLE_API_KEY: 'google-override', GEMINI_API_KEY: 'gemini',
-    } }), {
-      ...defaults, XAI_API_KEY: 'xai-override', OPENAI_API_KEY: 'openai-override', GOOGLE_API_KEY: 'google-override',
+      XAI_API_KEY: 'not-forwarded', OPENAI_API_KEY: 'not-forwarded', GOOGLE_API_KEY: 'not-forwarded',
+      DM_MCP_OPENAI_API_KEY: 'not-forwarded', IMAGE_GEN_PROXY_KEY_FILE: '/proxy/key-file',
+    }, workDir: '/work/tree' }), {
+      IMAGE_GEN_PROXY_KEY_FILE: '/proxy/key-file', DEFAULT_OUTPUT_DIR: '/work/tree/generated-images',
+    });
+    assert.deepEqual(remoteMcpStdioEnv(server, { env: {} }), {
       DEFAULT_OUTPUT_DIR: runtimeStatePath('generated-images'),
     });
-  });
-
-  it('reports missing provider keys clearly through the real MCP tools', async () => {
-    const server = remoteMcpServer('image-gen', { sourceConfig: testConfig() });
-    const client = new Client({ name: 'image-gen-test', version: '1' });
-    const transport = new StdioClientTransport({
-      command: server.command, args: server.args,
-      env: { XAI_API_KEY: '', OPENAI_API_KEY: '', GOOGLE_API_KEY: '', GEMINI_API_KEY: '' },
-    });
-    try {
-      await client.connect(transport);
-      for (const [name, key] of [
-        ['xai_generate_image', 'XAI_API_KEY'], ['openai_generate_image', 'OPENAI_API_KEY'],
-        ['google_generate_image', 'GOOGLE_API_KEY or GEMINI_API_KEY'],
-      ]) {
-        // With all provider keys explicitly empty, these fail before any API request.
-        const result = await client.callTool({ name, arguments: { prompt: 'test' } });
-        assert.equal(result.isError, true);
-        assert.equal(result.content[0].text, `Missing required environment variable: ${key}`);
-      }
-    } finally {
-      await client.close();
-    }
   });
 
   it('resolves legacy IDs without registering duplicate servers', () => {

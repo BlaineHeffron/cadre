@@ -407,7 +407,7 @@ const SERVER_DEFINITIONS = Object.freeze([
   server({
     id: 'image-gen',
     label: 'Image generation',
-    description: 'xAI Grok Imagine, OpenAI GPT Image, and Google Gemini/Nano Banana image generation and editing.',
+    description: 'Subscription image generation through Codex, Google Nano Banana, and Grok Build.',
     category: 'creative',
     providers: NATIVE_MCP_PROVIDERS,
     runtimes: NATIVE_MCP_RUNTIMES,
@@ -415,7 +415,7 @@ const SERVER_DEFINITIONS = Object.freeze([
     required: false,
     requiresExplicitSelection: true,
     alwaysLoad: false,
-    permissions: 'Spends paid provider credits per image with the operator API keys.',
+    permissions: 'Uses the operator subscription image quotas and writes generated images.',
   }),
   server({
     id: 'filesystem',
