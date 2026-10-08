@@ -5,6 +5,7 @@ import {
   createTmuxCommandExecutor,
 } from '../modules/session-state/command-gate.mjs';
 import { createSessionStateTracker } from '../modules/session-state/tracker.mjs';
+import { allowsActiveQueue } from '../modules/sessions/index.mjs';
 
 function immediate() {
   return new Promise((resolve) => setImmediate(resolve));
@@ -329,6 +330,28 @@ describe('session command gate', () => {
 
     assert.equal(result.state, 'awaiting_response');
     assert.deepEqual(test.executions.map((entry) => entry.text), ['room message']);
+  });
+
+  it('sends Codex and Claude room messages into a working turn; Pi waits for idle', async () => {
+    for (const [provider, sent] of [['codex', true], ['claude', true], ['pi', false]]) {
+      const test = harness();
+      test.observe({ execution: 'working', interaction: 'none', fingerprint: 'working-composer' });
+      test.observeTranscript('working');
+      const ticket = test.gate.submit(test.sessionId, {
+        id: `${provider}-room`,
+        source: 'agent_bus',
+        operation: 'message',
+        text: 'room message',
+        allowActiveQueue: allowsActiveQueue('agent_bus', provider),
+        resolveOnAwaiting: true,
+      });
+      await ticket.accepted;
+      await immediate();
+      assert.equal(test.executions.length, sent ? 1 : 0, provider);
+      test.observeTranscript('idle');
+      await ticket.completion;
+      assert.deepEqual(test.executions.map((entry) => entry.text), ['room message'], provider);
+    }
   });
 
   it('holds an allowed Telegram answer while a transcript reports working', async () => {

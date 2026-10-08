@@ -26,7 +26,7 @@ const REQUIRED_STATES = [
   'selection-menu',
   'exited',
 ];
-const RECONSTRUCTED_ONLY_STATES = ['permission-prompt', 'exited'];
+const RECONSTRUCTED_ONLY_STATES = ['exited'];
 
 async function loadManifest() {
   return JSON.parse(await readFile(join(paneDir, 'manifest.json'), 'utf8'));

@@ -5,7 +5,7 @@
     "Live fixtures are trimmed tails of real tmux panes. Spinner/composer/separator/footer are byte-verbatim; only content above chrome was shortened.",
     "ANSI is preserved on live and live-derived fixtures. Reconstructed fixtures are hand-written and must not carry knownDefect.",
     "current* locks detector output including known defects. Flip current* to intended* when the detector is fixed.",
-    "permission-prompt and exited are reconstructed-only. Do not grow that allowlist."
+    "exited is reconstructed-only. Do not grow that allowlist."
   ],
   "fixtures": [
     {
@@ -285,6 +285,23 @@
       "currentLegacyState": "needs_approval",
       "currentExecution": "unknown",
       "currentInteraction": "permission",
+      "knownDefect": false
+    },
+    {
+      "id": "claude-2-1-293-permission",
+      "file": "claude-2-1-293-permission.pane",
+      "provider": "claude",
+      "source": "live-tmux",
+      "capturedFrom": "scratch haiku session, Claude Code v2.1.293, --permission-mode default",
+      "capturedAt": "2026-10-07T18:53:01-04:00",
+      "intendedState": "permission-prompt",
+      "intendedLegacyState": "needs_approval",
+      "intendedExecution": "unknown",
+      "intendedInteraction": "selection",
+      "notes": "Live Bash permission dialog (\"Do you want to proceed?\", 4 numbered options). Banner above the prompt dropped; scratch workdir path in option 2 redacted to /home/user/project. Legacy state is needs_approval; the parsed numbered menu wins as a selection interaction so its options stay answerable. Either kind blocks room delivery.",
+      "currentLegacyState": "needs_approval",
+      "currentExecution": "unknown",
+      "currentInteraction": "selection",
       "knownDefect": false
     },
     {
@@ -672,7 +689,6 @@
     }
   ],
   "reconstructedOnlyStates": [
-    "permission-prompt",
     "exited"
   ]
 }
