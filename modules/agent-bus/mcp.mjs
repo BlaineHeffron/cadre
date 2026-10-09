@@ -33,7 +33,7 @@ const CACHEABLE_METHODS = new Set([
 ]);
 const EMPTY_LIST = Object.freeze([]);
 const DEFAULT_CONTEXT_MESSAGE_LIMIT = 8;
-const DEFAULT_CONTEXT_BODY_CHARS = 1200;
+const DEFAULT_CONTEXT_BODY_CHARS = 3000;
 const MCP_ID_MAX = 240;
 const MCP_BODY_MAX = 200000;
 const AGENT_PERMISSION_AUTHORITY_TOOLS = new Set([
@@ -219,12 +219,12 @@ function compactRoomContext(payload, args = {}) {
       ...(truncated ? { nextOffset: bodyOffset + slice.length } : {}),
     };
   });
-  const participants = (payload?.thread?.participants || []).map((item) => ({
+  const participants = args.metadata === true ? (payload?.thread?.participants || []).map((item) => ({
     kind: item.kind, sessionId: item.sessionId,
     canSendNow: item.session_capabilities?.canSendNow === true,
     canSendNowReason: item.can_send_now_reason || null,
     status: item.canonical_status || item.session_state || null,
-  }));
+  })) : undefined;
   const deliveries = includeDeliveries ? (payload?.deliveries || []).map((delivery) => ({
     id: delivery.id, messageId: delivery.messageId, target: delivery.target, status: delivery.status,
     holdReason: delivery.holdReason || null, willInjectWhenIdle: delivery.willInjectWhenIdle === true,
@@ -234,8 +234,9 @@ function compactRoomContext(payload, args = {}) {
     attempts: delivery.attempts, lastAttemptAt: delivery.lastAttemptAt, error: delivery.error || null,
   })) : undefined;
   return {
-    thread: { id: payload?.thread?.id, title: payload?.thread?.title, status: payload?.thread?.status, health: payload?.thread?.health,
-      deliveryHealth: payload?.thread?.metadata?.deliveryHealth, participants },
+    thread: { id: payload?.thread?.id, title: payload?.thread?.title, status: payload?.thread?.status,
+      ...(args.metadata === true ? { health: payload?.thread?.health,
+        deliveryHealth: payload?.thread?.metadata?.deliveryHealth, participants } : {}) },
     messageCount: compactMessages.length,
     totalMessageCount: payload?.messageCount ?? compactMessages.length,
     messages: compactMessages,
@@ -438,12 +439,12 @@ export function buildAgentBusMcpServer({
     },
     {
       name: 'room_context',
-      description: 'Read recent truncated messages in any non-DM room without subscribing; DMs require membership. Continue a truncated body with message_id and body_offset=nextOffset (ignores since/after). since=message id, after=timestamp return the next limit messages; pass deliveries=true as needed, or bodies=false or summary_only=true (summaries, no bodies) to save context.',
+      description: 'Read recent truncated messages in any non-DM room without subscribing; DMs require membership. Continue a truncated body with message_id and body_offset=nextOffset (ignores since/after). since=message id, after=timestamp return the next limit messages; pass metadata=true for thread health/participants, deliveries=true as needed, or bodies=false or summary_only=true (summaries, no bodies) to save context.',
       inputSchema: { type: 'object', properties: {
         thread_id: { type: 'string' }, limit: { type: 'integer', minimum: 0, maximum: 500 },
         since: { type: 'string' }, after: { type: 'string' }, message_id: { type: 'string' },
-        body_offset: { type: 'integer', minimum: 0 }, body_limit: { type: 'integer', minimum: 0, maximum: 1200 },
-        bodies: { type: 'boolean' }, deliveries: { type: 'boolean' }, summary_only: { type: 'boolean' },
+        body_offset: { type: 'integer', minimum: 0 }, body_limit: { type: 'integer', minimum: 0, maximum: DEFAULT_CONTEXT_BODY_CHARS },
+        metadata: { type: 'boolean' }, bodies: { type: 'boolean' }, deliveries: { type: 'boolean' }, summary_only: { type: 'boolean' },
       }, required: ['thread_id'], additionalProperties: false },
     },
     {
@@ -546,7 +547,7 @@ export function buildAgentBusMcpServer({
           taskRoomRead: args.summary_only !== true && args.bodies !== false && count > 0,
         });
         const compact = compactRoomContext(payload, args);
-        return textResult(JSON.stringify(compact), compact);
+        return { content: [{ type: 'text', text: JSON.stringify(compact) }] };
       }
 
       case 'room_send': {

@@ -84,7 +84,7 @@ test('two subprocess tasks require genuine authenticated room reads, collect res
     threadAllowlist: ['@member'], toolScopes: ['mcp:discover', 'room_context', 'room_send', ...TASK_TOOLS.map((tool) => tool.name)] });
   const parent = await credentials.authenticate(issued.token);
   const room = await store.createThread({ participants: [{ kind: 'codex', sessionId: 'parent' }] });
-  const call = async (name, args, context = parent) => (await mcp.callTool(name, args, context)).structuredContent;
+  const call = async (name, args, context = parent) => JSON.parse((await mcp.callTool(name, args, context)).content[0].text);
   const spawn = async (key) => {
     const action = await call('task_spawn', { thread_id: room.id, task_key: key,
       spec: { provider: 'codex-app-server', workDir: root, model: 'fixture-model', initialPrompt: 'Complete this task.' } });

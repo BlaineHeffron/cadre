@@ -59,7 +59,7 @@ test('a refused Cadre connection reports a restart instead of a bare ECONNREFUSE
 });
 
 test('room context defaults to truncated bodies and omits deliveries', async () => {
-  const longBody = 'x'.repeat(2000);
+  const longBody = 'x'.repeat(3800);
   const server = buildAgentBusMcpServer({ requestImpl: async (path) => {
     assert.match(path, /deliveryLimit=0/);
     return {
@@ -73,14 +73,73 @@ test('room context defaults to truncated bodies and omits deliveries', async () 
   } });
   const result = await server.callTool('room_context', { thread_id: 'thr_1' }, context);
   const payload = JSON.parse(result.content.find((item) => item.type === 'text').text);
-  assert.deepEqual(payload.messages, result.structuredContent.messages);
+  assert.equal(result.structuredContent, undefined);
   assert.equal(payload.messages[0].truncated, true);
-  assert.equal(payload.messages[0].body.length, 1200);
-  assert.equal(payload.messages[0].bodyLength, 2000);
-  assert.equal(payload.messages[0].nextOffset, 1200);
+  assert.equal(payload.messages[0].body.length, 3000);
+  assert.equal(payload.messages[0].bodyLength, 3800);
+  assert.equal(payload.messages[0].nextOffset, 3000);
   assert.equal(payload.deliveries, undefined);
   assert.equal(payload.messageCount, 1);
-  assert.equal(payload.thread.participants[0].canSendNowReason, 'Provider reports working');
+  assert.deepEqual(payload.thread, { id: 'thr_1', title: 'Work', status: 'open' });
+});
+
+test('room context halves full-report retrieval bytes and restores opt-in metadata', async (t) => {
+  const deliveryHealth = { queued: 2, held: 1, injected: 12, failed: 0, cancelled: 0,
+    oldestQueuedAt: 1700000000000, oldestQueuedAgeMs: 2000, overdue: false };
+  const participants = ['codex', 'claude'].map((kind, i) => ({
+    kind, sessionId: `reviewer-${i}`, session_capabilities: { canSendNow: false },
+    can_send_now_reason: 'Free-text prompt is not yet stable', canonical_status: 'working',
+  }));
+  const messages = Array.from({ length: 5 }, (_, i) => ({
+    id: `msg_${i}`, from: { kind: 'claude', sessionId: 'reviewer-1' },
+    type: i === 4 ? 'result' : 'message', createdAt: 1700000000000 + i,
+    body: (i === 4 ? 'Review report: tests passed.\n' : 'Implementation progress.\n').repeat(100).slice(0, i === 4 ? 2500 : 441),
+  }));
+  const server = buildAgentBusMcpServer({ requestImpl: async () => ({
+    thread: { id: 'thr_1', title: 'Implementation and review', status: 'open', health: 'ok',
+      metadata: { deliveryHealth }, participants }, messageCount: 5, messages,
+  }) });
+  const result = await server.callTool('room_context', { thread_id: 'thr_1' }, context);
+  const payload = JSON.parse(result.content[0].text);
+  const detailed = JSON.parse((await server.callTool('room_context', { thread_id: 'thr_1', metadata: true }, context)).content[0].text);
+  assert.equal(result.structuredContent, undefined);
+  assert.equal(payload.messages.length, 5);
+  assert.equal(payload.messages[4].body.length, 2500);
+  assert.equal(payload.messages[4].truncated, false);
+  assert.equal(payload.thread.health, undefined);
+  assert.equal(payload.thread.deliveryHealth, undefined);
+  assert.equal(payload.thread.participants, undefined);
+  assert.equal(detailed.thread.health, 'ok');
+  assert.deepEqual(detailed.thread.deliveryHealth, deliveryHealth);
+  assert.deepEqual(detailed.thread.participants, participants.map((item) => ({
+    kind: item.kind, sessionId: item.sessionId, canSendNow: false,
+    canSendNowReason: item.can_send_now_reason, status: item.canonical_status,
+  })));
+  // The previous default included metadata, 1,200-char bodies, and both JSON copies.
+  const oldPayload = JSON.parse((await server.callTool('room_context', {
+    thread_id: 'thr_1', metadata: true, body_limit: 1200,
+  }, context)).content[0].text);
+  const oldResultBytes = (payload) => Buffer.byteLength(JSON.stringify({
+    content: [{ type: 'text', text: JSON.stringify(payload) }], structuredContent: payload,
+  }));
+  const before = oldResultBytes(oldPayload);
+  let fullBefore = before;
+  let report = oldPayload.messages[4];
+  let oldReportBody = report.body;
+  while (report.truncated) {
+    const page = JSON.parse((await server.callTool('room_context', {
+      thread_id: 'thr_1', metadata: true, body_limit: 1200,
+      message_id: report.id, body_offset: report.nextOffset,
+    }, context)).content[0].text);
+    fullBefore += oldResultBytes(page);
+    report = page.messages[0];
+    oldReportBody += report.body;
+  }
+  assert.equal(oldReportBody, payload.messages[4].body);
+  const after = Buffer.byteLength(JSON.stringify(result));
+  t.diagnostic(`room_context initial bytes: ${before} -> ${after} (${(100 * (1 - after / before)).toFixed(1)}% smaller); full report: ${fullBefore} -> ${after} (${(100 * (1 - after / fullBefore)).toFixed(1)}% smaller)`);
+  assert.ok(after < before, `${before} -> ${after}`);
+  assert.ok(after <= fullBefore / 2, `${fullBefore} -> ${after}`);
 });
 
 test('room context exposes queued age and detailed hold reason when deliveries are requested', async () => {
@@ -96,7 +155,7 @@ test('room context exposes queued age and detailed hold reason when deliveries a
     ],
   }) });
   const result = await server.callTool('room_context', { thread_id: 'thr_1', deliveries: true }, context);
-  const [held, pending, injected, failed] = result.structuredContent.deliveries;
+  const [held, pending, injected, failed] = JSON.parse(result.content[0].text).deliveries;
   assert.ok(held.held_for_s >= 120 && held.held_for_s < 125);
   assert.equal(held.hold_reason, 'Free-text prompt is not yet stable');
   assert.equal(held.holdReason, 'can_send_false');
@@ -109,7 +168,7 @@ test('room context exposes queued age and detailed hold reason when deliveries a
 });
 
 test('room context pages a truncated body with message_id and body_offset', async () => {
-  const longBody = 'x'.repeat(2000);
+  const longBody = 'x'.repeat(3800);
   const paths = [];
   const server = buildAgentBusMcpServer({ requestImpl: async (path) => {
     paths.push(path);
@@ -119,13 +178,15 @@ test('room context pages a truncated body with message_id and body_offset', asyn
       messages: [{ id: 'msg_1', from: { kind: 'claude', sessionId: 'a1' }, type: 'message', createdAt: 1, body: longBody }],
     };
   } });
+  const first = JSON.parse((await server.callTool('room_context', { thread_id: 'thr_1' }, context)).content[0].text).messages[0];
   const result = await server.callTool('room_context', {
-    thread_id: 'thr_1', message_id: 'msg_1', body_offset: 1200,
+    thread_id: 'thr_1', message_id: 'msg_1', body_offset: first.nextOffset,
   }, context);
   const message = JSON.parse(result.content.find((item) => item.type === 'text').text).messages[0];
   assert.equal(message.body, 'x'.repeat(800));
   assert.equal(message.truncated, false);
-  assert.equal(message.bodyLength, 2000);
+  assert.equal(first.body + message.body, longBody);
+  assert.equal(message.bodyLength, 3800);
   assert.equal(message.nextOffset, undefined);
   assert.ok(paths.some((path) => /messageLimit=500/.test(path)));
 });
@@ -139,7 +200,7 @@ test('room context ignores body_offset without message_id', async () => {
   const result = await server.callTool('room_context', {
     thread_id: 'thr_1', body_offset: 6, body_limit: 0,
   }, context);
-  const message = result.structuredContent.messages[0];
+  const message = JSON.parse(result.content[0].text).messages[0];
   assert.equal(message.body, 'hello-world');
   assert.equal(message.truncated, false);
   assert.equal(message.nextOffset, undefined);
@@ -157,13 +218,13 @@ test('room context reports missing message_id and skips since/after', async () =
   const missing = await server.callTool('room_context', {
     thread_id: 'thr_1', message_id: 'msg_missing', since: 'msg_1',
   }, context);
-  assert.equal(missing.structuredContent.messageCount, 0);
-  assert.equal(missing.structuredContent.missingMessageId, 'msg_missing');
+  assert.equal(JSON.parse(missing.content[0].text).messageCount, 0);
+  assert.equal(JSON.parse(missing.content[0].text).missingMessageId, 'msg_missing');
   const hit = await server.callTool('room_context', {
     thread_id: 'thr_1', message_id: 'msg_1', since: 'msg_1', after: '9999',
   }, context);
-  assert.equal(hit.structuredContent.messages[0].id, 'msg_1');
-  assert.equal(hit.structuredContent.messages[0].body, 'a');
+  assert.equal(JSON.parse(hit.content[0].text).messages[0].id, 'msg_1');
+  assert.equal(JSON.parse(hit.content[0].text).messages[0].body, 'a');
 });
 
 test('room context since/after counts only filtered messages', async () => {
@@ -177,15 +238,15 @@ test('room context since/after counts only filtered messages', async () => {
     ],
   }) });
   const result = await server.callTool('room_context', { thread_id: 'thr_1', since: 'msg_1' }, context);
-  assert.equal(result.structuredContent.messageCount, 2);
-  assert.equal(result.structuredContent.totalMessageCount, 3);
+  assert.equal(JSON.parse(result.content[0].text).messageCount, 2);
+  assert.equal(JSON.parse(result.content[0].text).totalMessageCount, 3);
 });
 
 test('room context is open to nonparticipants', async () => {
   const server = buildAgentBusMcpServer({ requestImpl: async () => ({ thread: { id: 'thr_other', participants: [
     { kind: 'claude', sessionId: 'a1' }, { kind: 'pi', sessionId: 'p1' },
   ] } }) });
-  assert.equal((await server.callTool('room_context', { thread_id: 'thr_other' }, context)).structuredContent.thread.id, 'thr_other');
+  assert.equal(JSON.parse((await server.callTool('room_context', { thread_id: 'thr_other', metadata: true }, context)).content[0].text).thread.id, 'thr_other');
 });
 
 test('room list pins the caller and returns only the compact participant-scoped room shape', async () => {
@@ -224,8 +285,8 @@ test('room creator can read, address, and close without being a participant', as
     if (path.includes('/threads/by-participant')) return { threads: [thread] };
     throw new Error(`Unexpected ${path}`);
   } });
-  const contextResult = await server.callTool('room_context', { thread_id: 'thr_owned' }, owner);
-  assert.equal(contextResult.structuredContent.thread.id, 'thr_owned');
+  const contextResult = await server.callTool('room_context', { thread_id: 'thr_owned', metadata: true }, owner);
+  assert.equal(JSON.parse(contextResult.content[0].text).thread.id, 'thr_owned');
   const sent = await server.callTool('room_send', { thread_id: 'thr_owned', body: 'status' }, owner);
   assert.equal(sent.structuredContent.message_id || 'msg_owned', 'msg_owned');
   assert.deepEqual(calls.find((item) => item.path === '/api/agent-bus/messages').options.body.from,

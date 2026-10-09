@@ -33,11 +33,11 @@ test('nonmembers read and post without subscribing; all scope lists only open ro
   const { h, thread, call } = await setup(t);
   const closed = await h.store.createThread({ title: 'Archived', participants: [], createdBy: owner });
   await h.store.closeThread(closed.id);
-  assert.equal((await call('room_context', { thread_id: thread.id }, outsider)).structuredContent.thread.id, thread.id);
+  assert.equal(JSON.parse((await call('room_context', { thread_id: thread.id }, outsider)).content[0].text).thread.id, thread.id);
   await call('room_send', { thread_id: thread.id, body: 'Observer contribution' }, outsider);
   assert.deepEqual(h.store.getThread(thread.id).thread.participants, participants);
   const history = await call('room_context', { thread_id: thread.id }, outsider);
-  assert.equal(history.structuredContent.messages[0].body, 'Observer contribution');
+  assert.equal(JSON.parse(history.content[0].text).messages[0].body, 'Observer contribution');
   assert.equal((await call('room_list', {}, outsider)).structuredContent.rooms.length, 0);
   assert.deepEqual((await call('room_list', { scope: 'all' }, outsider)).structuredContent.rooms.map((room) => room.id), [thread.id]);
 });
@@ -126,7 +126,7 @@ test('outsiders cannot read, send, close or reopen DMs or discover them in all-o
   } }), (err) => err.statusCode === 403);
   assert.deepEqual((await call('room_list', { scope: 'all' }, outsider)).structuredContent.rooms.map((room) => room.id), [thread.id]);
   assert.deepEqual((await call('room_list', { scope: 'all' }, participants[0])).structuredContent.rooms.map((room) => room.id), [thread.id]);
-  assert.equal((await call('room_context', { thread_id: dm.id }, participants[1])).structuredContent.messages[0].body, 'Private history');
+  assert.equal(JSON.parse((await call('room_context', { thread_id: dm.id }, participants[1])).content[0].text).messages[0].body, 'Private history');
   assert.equal((await call('room_list', {}, participants[1])).structuredContent.rooms.some((room) => room.id === dm.id), true);
   await assert.rejects(call('room_close', { thread_id: dm.id }, outsider), (err) => err.statusCode === 403);
   await call('room_close', { thread_id: dm.id, cancel_pending: true }, participants[0]);
@@ -158,21 +158,21 @@ test('poster summaries persist through MCP room and DM calls and compact context
   const stored = h.store.getMessage(sent.structuredContent.message_id);
   assert.equal(stored.metadata.summary, summary);
   const compact = await call('room_context', { thread_id: thread.id, summary_only: true });
-  assert.equal(compact.structuredContent.messages[0].summary, summary);
-  assert.equal(compact.structuredContent.messages[0].body, undefined);
+  assert.equal(JSON.parse(compact.content[0].text).messages[0].summary, summary);
+  assert.equal(JSON.parse(compact.content[0].text).messages[0].body, undefined);
   const envelope = renderBusEnvelope(stored);
   assert.ok(envelope.includes(summary));
   assert.ok(envelope.includes(`Body length: ${body.length} characters`));
   assert.ok(envelope.includes(`Full body: room_context(thread_id="${thread.id}", message_id="${stored.id}")`));
   assert.equal(envelope.includes(body), false);
   const page = await call('room_context', { thread_id: thread.id, message_id: stored.id });
-  assert.equal(page.structuredContent.messages[0].body, body.slice(0, 1200));
+  assert.equal(JSON.parse(page.content[0].text).messages[0].body, body);
 
   const fallback = '\n  \n' + 'f'.repeat(201) + '\nOther details';
   await call('room_send', { thread_id: thread.id, body: fallback });
   const history = await call('room_context', { thread_id: thread.id, summary_only: true });
-  assert.equal(history.structuredContent.messages[1].summary, 'f'.repeat(199) + '…');
-  assert.equal((await call('room_context', { thread_id: thread.id, bodies: false })).structuredContent.messages[0].summary, undefined);
+  assert.equal(JSON.parse(history.content[0].text).messages[1].summary, 'f'.repeat(199) + '…');
+  assert.equal(JSON.parse((await call('room_context', { thread_id: thread.id, bodies: false })).content[0].text).messages[0].summary, undefined);
   const changed = await call('room_send', { thread_id: thread.id, body, summary: 'Updated summary', type: 'result' });
   assert.notEqual(changed.structuredContent.message_id, stored.id);
 
@@ -184,7 +184,7 @@ test('poster summaries persist through MCP room and DM calls and compact context
   assert.ok(dmEnvelope.includes(summary));
   assert.ok(dmEnvelope.includes(`Full body: room_context(thread_id="${dmMessage.threadId}", message_id="${dmMessage.id}")`));
   assert.equal(dmEnvelope.includes(body), false);
-  assert.equal((await call('room_context', { thread_id: dmMessage.threadId, summary_only: true })).structuredContent.messages[0].summary, summary);
+  assert.equal(JSON.parse((await call('room_context', { thread_id: dmMessage.threadId, summary_only: true })).content[0].text).messages[0].summary, summary);
 
   for (const tool of ['room_send', 'agent_dm']) {
     const args = tool === 'room_send' ? { thread_id: thread.id } : { kind: 'claude', session_id: 'claude-1' };
@@ -201,7 +201,7 @@ test('poster summaries persist through MCP room and DM calls and compact context
     const sent = await call('room_send', { thread_id: thread.id, body: 'Fallback headline\n' + 'd'.repeat(1200), summary });
     const message = h.store.getMessage(sent.structuredContent.message_id);
     assert.match(renderBusEnvelope(message), /Summary: Fallback headline/);
-    assert.equal((await call('room_context', { thread_id: thread.id, message_id: message.id, summary_only: true })).structuredContent.messages[0].summary, 'Fallback headline');
+    assert.equal(JSON.parse((await call('room_context', { thread_id: thread.id, message_id: message.id, summary_only: true })).content[0].text).messages[0].summary, 'Fallback headline');
   }
   const boundary = await call('room_send', { thread_id: thread.id, body: 'Accepted', summary: 'x'.repeat(200) });
   assert.equal(h.store.getMessage(boundary.structuredContent.message_id).metadata.summary.length, 200);

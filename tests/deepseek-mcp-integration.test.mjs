@@ -237,8 +237,8 @@ describe('DeepSeek dsh-mcp-client authenticated Agent Bus E2E', () => {
         thread_id: threadId,
         limit: 10,
       }, exec);
-      assert.equal(received.structuredContent.messages[0].body, 'DeepSeek authenticated bus E2E');
-      assert.deepEqual(received.structuredContent.messages[0].from, { kind: 'deepseek', sessionId });
+      assert.equal(JSON.parse(received.content[0].text).messages[0].body, 'DeepSeek authenticated bus E2E');
+      assert.deepEqual(JSON.parse(received.content[0].text).messages[0].from, { kind: 'deepseek', sessionId });
     } finally {
       await cordis.dispose();
       await new Promise((resolve) => httpServer.close(resolve));

@@ -177,10 +177,10 @@ test('MCP close cancellation and outsider reopen reach real routes with scope ch
   await assert.rejects(server.callTool('room_reopen', args, { ...context, toolScopes: ['room_context'] }), /does not grant/);
   await server.callTool('room_reopen', args, { ...context, principal: { type: 'agent', kind: 'codex', sessionId: 'other' } });
   await server.callTool('room_reopen', args, context);
-  const snapshot = await server.callTool('room_context', { ...args, deliveries: true }, context);
-  assert.equal(snapshot.structuredContent.thread.status, 'open');
-  assert.equal(snapshot.structuredContent.thread.deliveryHealth.cancelled, 1);
-  assert.equal(snapshot.structuredContent.deliveries[0].resolution, 'cancelled');
+  const snapshot = await server.callTool('room_context', { ...args, deliveries: true, metadata: true }, context);
+  assert.equal(JSON.parse(snapshot.content[0].text).thread.status, 'open');
+  assert.equal(JSON.parse(snapshot.content[0].text).thread.deliveryHealth.cancelled, 1);
+  assert.equal(JSON.parse(snapshot.content[0].text).deliveries[0].resolution, 'cancelled');
 });
 
 
