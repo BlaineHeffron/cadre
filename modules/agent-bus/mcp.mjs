@@ -389,8 +389,11 @@ export function buildAgentBusMcpServer({
     }
   }
 
-  async function authorizeCoordinatorControl(_context, _name, _args = {}) {
-    return;
+  async function authorizeCoordinatorControl(context, name, args = {}) {
+    const policy = coordinatorPolicyForContext(context);
+    if (policy && name === 'cancel_scheduled_agent' && args.id !== policy.scheduleId) {
+      await rejectAuthorization(context, name, 'coordinator_foreign_schedule_denied', 'Coordinators can only cancel their own scheduled task');
+    }
   }
 
   async function assertThreadAccess(context, threadId, tool, knownPayload = null) {

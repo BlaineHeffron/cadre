@@ -180,6 +180,8 @@ async function fixture() {
     if (path.startsWith('/api/codex/sessions')) return { sessions: codexSessions };
     if (path.startsWith('/api/pi/sessions')) return { sessions: piSessions };
     if (path === '/api/agents/scheduled') return { tasks: [{ id: policy.scheduleId }, { id: 'sched_foreign' }] };
+    if (path === `/api/agents/scheduled/${policy.scheduleId}/cancel`) return { id: policy.scheduleId, status: 'cancelled' };
+    if (path === '/api/agents/scheduled/sched_foreign/cancel') return { id: 'sched_foreign', status: 'cancelled' };
     if (path.startsWith('/api/agent-bus/threads/')) return {};
     if (path.startsWith('/api/agent-bus/threads')) return threadPayload;
     throw new Error(`Unexpected request ${path}`);
@@ -204,7 +206,7 @@ async function fixture() {
       description: name,
       inputSchema: { type: 'object' },
       async handler(args, context) {
-        if (['monitor_list_codex_sessions', 'monitor_list_pi_sessions', 'monitor_list_threads', 'list_scheduled_agents'].includes(name)) return monitor.handleToolCall(name, args, context);
+        if (['monitor_list_codex_sessions', 'monitor_list_pi_sessions', 'monitor_list_threads', 'list_scheduled_agents', 'cancel_scheduled_agent'].includes(name)) return monitor.handleToolCall(name, args, context);
         return { ok: true, name, args };
       },
     })),
@@ -443,6 +445,34 @@ describe('scheduled coordinator control policy', () => {
 });
 
 describe('coordinator MCP authorization fences', () => {
+  it('refuses foreign schedule cancellation with a coordinator credential while allowing owner and operator cancels', async () => {
+    const { server, policy, credentialStore, calls } = await fixture();
+    const credential = await prepareAgentBusCredentialLaunch({
+      backendType: 'codex', sessionId: 'coordinator', attemptGeneration: 1, credentialStore, coordinatorPolicy: policy,
+    });
+    const context = await credentialStore.authenticate(credential.token);
+    const denied = await rpc(server, 'cancel_scheduled_agent', { id: 'sched_foreign' }, context);
+    assert.equal(denied.error?.data?.reason, 'coordinator_foreign_schedule_denied');
+    assert.deepEqual(calls, []);
+    const audit = credentialStore.auditEvents().filter((event) => event.event === 'coordinator_control');
+    assert.equal(audit.length, 1);
+    assert.equal(audit[0].outcome, 'denied');
+    assert.equal(audit[0].denialReason, 'coordinator_foreign_schedule_denied');
+
+    const owner = await rpc(server, 'cancel_scheduled_agent', { id: policy.scheduleId }, context);
+    assert.equal(owner.error, undefined);
+    assert.deepEqual(owner.result.structuredContent, { id: policy.scheduleId, status: 'cancelled' });
+    const operator = await rpc(server, 'cancel_scheduled_agent', { id: 'sched_foreign' }, {
+      ...ordinaryContext(['*']), principal: { type: 'ui', kind: 'dashboard', sessionId: 'operator' },
+    });
+    assert.equal(operator.error, undefined);
+    assert.deepEqual(operator.result.structuredContent, { id: 'sched_foreign', status: 'cancelled' });
+    assert.deepEqual(calls, [
+      `/api/agents/scheduled/${policy.scheduleId}/cancel`,
+      '/api/agents/scheduled/sched_foreign/cancel',
+    ]);
+  });
+
   it('keeps coordinator tools undiscoverable and unusable by ordinary or legacy agents', async () => {
     const { server } = await fixture();
     const listed = await server.handleRequest(
@@ -542,6 +572,7 @@ describe('coordinator MCP authorization fences', () => {
     ];
     for (const [tool, args] of cases) {
       const result = await rpc(server, tool, args, context);
+      if (tool === 'cancel_scheduled_agent') assert.equal(result.error?.data?.reason, 'coordinator_foreign_schedule_denied');
       assert.equal(result.error?.data?.reason === 'principal_type_denied', false, tool);
     }
     for (const tool of [
