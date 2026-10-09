@@ -111,6 +111,7 @@ test('bootstrap injects simplified room prompts without loop startup metadata', 
   assert.match(h.injected.codex[0], /Begin working now/);
   assert.doesNotMatch(h.injected.codex[0], /\back\b|manager.loop|wait for/i);
   for (const prompt of [h.injected.codex[0], h.injected.claude[0]]) {
+    assert.match(prompt, /For your own bounded reading, searching, and checks, use built-in subagents when available: Haiku 5\.5 \(claude-haiku-5-5\) on Claude, GPT-6 Luna \(gpt-6-luna\) on Codex/);
     assert.match(prompt, /if you are assigned implementer or reviewer, the implementer writes code and tests; the reviewer blocks on correctness or unnecessary code\. Iterate until the reviewer approves/);
     assert.match(prompt, /Coordinator findings go through the reviewer/);
     assert.match(prompt, /implementer acts only on forwarded findings/);

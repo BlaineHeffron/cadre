@@ -147,12 +147,15 @@ test('real MCP session output strips terminal controls before paging while REST 
   h.sessionDetailResponders.codex = null;
   h.content.codex = '\x1b]0;title\x07' + 'old'.repeat(5000) + '\x1b[32m' + 'recent'.repeat(2000) + '\x1b[0m';
   const tail = await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1' });
-  assert.equal(tail.content, 'recent'.repeat(2000));
-  assert.equal(tail.nextOffset, 12000);
-  const older = await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1', offset: tail.nextOffset });
+  assert.equal(tail.content, 'recent'.repeat(500));
+  assert.equal(tail.nextOffset, 3000);
+  const expanded = await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1', lines: 200, maxChars: 12000 });
+  assert.equal(expanded.content, 'recent'.repeat(2000));
+  assert.equal(expanded.nextOffset, 12000);
+  const older = await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1', offset: expanded.nextOffset, maxChars: 12000 });
   assert.equal(older.content, 'old'.repeat(4000));
   assert.equal(older.nextOffset, 24000);
-  const oldest = await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1', offset: older.nextOffset });
+  const oldest = await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1', offset: older.nextOffset, maxChars: 12000 });
   assert.deepEqual(oldest, { session_id: 'codex-1', content: 'old'.repeat(1000) });
 });
 
@@ -204,10 +207,11 @@ test('real MCP reads honor default limits, filters, paging, and recent output ta
   assert.ok(JSON.stringify(summaries).length < JSON.stringify(recent).length);
   h.content.codex = 'old'.repeat(5000) + 'recent'.repeat(2000);
   const tail = await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1' });
-  assert.equal(tail.content, 'recent'.repeat(2000));
-  assert.equal(tail.nextOffset, 12000);
+  assert.equal(tail.content, 'recent'.repeat(500));
+  assert.equal(tail.nextOffset, 3000);
   const older = await call('monitor_get_session_output', { type: 'codex', sessionId: 'codex-1', offset: tail.nextOffset });
-  assert.equal(older.content, 'old'.repeat(4000));
+  assert.equal(older.content, 'recent'.repeat(500));
+  assert.equal(older.nextOffset, 6000);
 });
 
 

@@ -447,14 +447,15 @@ describe('Monitor MCP server', () => {
 
   it('fetches captured output for a direct backend session', async () => {
     const requests = [];
+    const content = 'older' + 'x'.repeat(4000);
     const server = buildMonitorMcpServer({
       async requestImpl(path) {
         requests.push(path);
-        if (path === '/api/codex/sessions/codex_1?lines=120') {
+        if (['/api/codex/sessions/codex_1?lines=120', '/api/codex/sessions/codex_1?lines=50'].includes(path)) {
           return {
             id: 'codex_1',
             sessionName: 'codex-1',
-            content: 'latest output',
+            content,
             state: { state: 'waiting_for_input', detail: null, needsInput: true },
           };
         }
@@ -462,15 +463,19 @@ describe('Monitor MCP server', () => {
       },
     });
 
+    assert.deepEqual(await server.handleToolCall('monitor_get_session_output', {
+      type: 'codex', sessionId: 'codex_1',
+    }), { session_id: 'codex_1', content: 'x'.repeat(3000), nextOffset: 3000 });
     const result = await server.handleToolCall('monitor_get_session_output', {
       type: 'codex',
       sessionId: 'codex_1',
       lines: 120,
+      maxChars: 12000,
     });
 
-    assert.deepEqual(requests, ['/api/codex/sessions/codex_1?lines=120']);
+    assert.deepEqual(requests, ['/api/codex/sessions/codex_1?lines=50', '/api/codex/sessions/codex_1?lines=120']);
     assert.deepEqual(result, {
-      session_id: 'codex_1', content: 'latest output',
+      session_id: 'codex_1', content,
     });
   });
 
@@ -491,6 +496,16 @@ describe('Monitor MCP server', () => {
       /provider must be claude, codex, codex-app-server, deepseek, xai, google, opencode-go, or openrouter/,
     );
     assert.deepEqual(requests, []);
+  });
+
+  it('bounds output pages even when the handler is called without schema validation', async () => {
+    const server = buildMonitorMcpServer({ requestImpl: async () => ({ content: 'x'.repeat(15000) }) });
+    const { handler } = server.tools.find((tool) => tool.name === 'monitor_get_session_output');
+    for (const [maxChars, size] of [['invalid', 3000], [20000, 12000], [-1, 1]]) {
+      assert.deepEqual(await handler({ type: 'codex', sessionId: 'codex_1', maxChars }), {
+        session_id: 'codex_1', content: 'x'.repeat(size), nextOffset: size,
+      });
+    }
   });
 
   it('passes Codex plugin opt-in through the spawn_session entry point', async () => {
