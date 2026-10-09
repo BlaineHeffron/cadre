@@ -64,12 +64,14 @@ async function setup(t) {
     const response = await mcp.handleRequest({ jsonrpc: '2.0', id: name, method: 'tools/call', params: { name, arguments: args } }, { authContext: context });
     assert.equal(response.error, undefined, JSON.stringify(response.error));
     const result = response.result;
-    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
+    const payload = JSON.parse(result.content[0].text);
+    if (name === 'room_context') assert.equal(result.structuredContent, undefined);
+    else assert.deepEqual(payload, result.structuredContent);
     if (keys) {
-      assert.deepEqual(Object.keys(result.structuredContent).sort(), keys.sort(), name);
+      assert.deepEqual(Object.keys(payload).sort(), keys.sort(), name);
       assert.doesNotMatch(JSON.stringify(result), /PRIVATE_INPUT_DO_NOT_ECHO|startup_prompt|initialPrompt|bodyHash|textHash/, name);
     }
-    return result.structuredContent;
+    return payload;
   }
   return { h, call, mcp, requestImpl, context, schedules, recordings, repos, audit };
 }

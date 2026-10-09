@@ -136,7 +136,7 @@ The `agent-bus:alerts` channel publishes `delivery_failed` when a delivery reach
 The agent-bus MCP server exposes room tools alongside DM, directory, and task tools:
 
 - `room_send(thread_id, body, reply_to?, type?)`: broadcast as the authenticated agent; delivery is enqueued
-- `room_context(thread_id, limit?, since?, after?, bodies?, deliveries?, summary_only?)`: read recent truncated room messages (`since` is a message id, `after` is a timestamp); deliveries omitted unless requested
+- `room_context(thread_id, limit?, since?, after?, message_id?, body_offset?, body_limit?, metadata?, bodies?, deliveries?, summary_only?)`: read recent truncated room messages (`since` is a message id, `after` is a timestamp); thread health/participants and deliveries omitted unless requested; bodies capped at 3,000 characters; one JSON payload in text content
 - `room_list(scope?, limit?, offset?)`: default lists owned/subscribed rooms; `scope="all"` lists all open non-DM rooms
 - `room_close(thread_id, cancel_pending?)`: archive without terminating sessions; any agent may close a non-DM room without subscribing; DMs require membership
 - `room_end(thread_id)`: owner or operator closes a non-DM room, cancels queued deliveries, and terminates eligible sessions
