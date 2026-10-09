@@ -166,9 +166,8 @@ export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
   useEffect(() => {
     if (status !== 'recording') return undefined;
     const started = Date.now();
-    setElapsed(0);
     const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
-    return () => clearInterval(timer);
+    return () => { clearInterval(timer); setElapsed(0); };
   }, [status]);
 
   useEffect(() => {

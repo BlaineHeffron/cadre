@@ -3397,11 +3397,12 @@ body:has(.tmux-pane-page) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  width: 140px;
-  flex: 0 0 140px;
+  gap: 4px;
+  width: 104px;
+  flex: 0 0 104px;
   min-height: 44px;
-  padding: 6px 8px;
+  padding: 6px 4px;
+  font-size: 11px;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -3414,7 +3415,7 @@ body:has(.tmux-pane-page) {
   border-color: var(--danger);
 }
 
-.voice-timer { font-variant-numeric: tabular-nums; }
+.voice-timer { font-size: 13px; font-variant-numeric: tabular-nums; }
 .voice-meter {
   display: inline-flex;
   align-items: center;
