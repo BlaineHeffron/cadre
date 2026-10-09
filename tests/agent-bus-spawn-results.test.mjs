@@ -20,16 +20,75 @@ async function setup(t, metadata, stateDir = null) {
   let closed = false;
   t.after(async () => { unregister(); if (!closed) await h.cleanup(); });
   const restart = async () => { closed = true; unregister(); await h.app.close(); return setup(t, metadata, h.stateDir); };
-  const hook = (payload) => recordHookPayload({ session_id: 'cli-2', cwd: h.stateDir, ...payload },
-    { provider: 'claude', duenoSessionId: 'claude-2', workDir: h.stateDir });
+  const hook = (payload, sessionId = 'claude-2') => recordHookPayload({ session_id: sessionId, cwd: h.stateDir, ...payload },
+    { provider: 'claude', duenoSessionId: sessionId, workDir: h.stateDir });
   const turn = async (answer) => {
     await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' });
     await hook({ hook_event_name: 'Stop', last_assistant_message: answer });
   };
   const results = () => h.store.listMessages().filter((message) => message.type === 'result');
   const delivered = (text) => h.injected.codex.filter((item) => item.includes(text)).length;
-  return { h, hook, turn, results, delivered, restart };
+  return { h, hook, turn, results, delivered, restart, sessions };
 }
+
+test('a spawned coordinator waits for its own worker result, including after a new worker prompt', async (t) => {
+  const { h, hook, turn, results, delivered, sessions } = await setup(t, { spawnedBy: spawner });
+  h.sessionCatalog.claude.add('worker');
+  sessions.set('worker', { workDir: h.stateDir, metadata: { spawnedBy: { kind: 'claude', sessionId: 'claude-2' } } });
+  await turn('Waiting before worker hooks exist');
+  await delay(150);
+  assert.equal(results().length, 0);
+  for (const round of [1, 2]) {
+    await hook({ hook_event_name: 'UserPromptSubmit', prompt: `work ${round}` }, 'worker');
+    await turn(`Waiting for worker ${round}`);
+    await delay(150);
+    assert.equal(delivered(`Waiting for worker ${round}`), 0);
+    assert.equal(results().filter((message) => message.from.sessionId === 'claude-2').length, round - 1);
+    await hook({ hook_event_name: 'Stop', last_assistant_message: `Worker answer ${round}` }, 'worker');
+    assert.ok(await settle(() => results().some((message) => message.body === `Worker answer ${round}`)));
+    await turn(`Coordinator answer ${round}`);
+    assert.ok(await settle(() => delivered(`Coordinator answer ${round}`) === 1));
+  }
+  assert.deepEqual(results().filter((message) => message.from.sessionId === 'claude-2').map((message) => message.body),
+    ['Coordinator answer 1', 'Coordinator answer 2']);
+});
+
+for (const [name, worker] of [
+  ['not opted in', { metadata: {} }],
+  ['ended', { endedAt: Date.now() }],
+  ['ended lifecycle', { lifecycle: 'ended' }],
+  ['created after the Stop', { created: Date.now() + 60_000 }],
+  ['created after the Stop with an ISO timestamp', { createdAt: new Date(Date.now() + 60_000).toISOString() }],
+  ['spawned by someone else', { metadata: { spawnedBy: spawner } }],
+]) {
+  test(`a worker ${name} does not hold a coordinator result`, async (t) => {
+    const { h, turn, delivered, sessions } = await setup(t, { spawnedBy: spawner });
+    h.sessionCatalog.claude.add('worker');
+    sessions.set('worker', { workDir: h.stateDir,
+      metadata: { spawnedBy: { kind: 'claude', sessionId: 'claude-2' } }, ...worker });
+    await turn('Coordinator finished');
+    assert.ok(await settle(() => delivered('Coordinator finished') === 1));
+  });
+}
+
+test('a restart does not return an earlier waiting Stop after the worker result arrives', async (t) => {
+  const first = await setup(t, { spawnedBy: spawner });
+  const worker = { workDir: first.h.stateDir, metadata: { spawnedBy: { kind: 'claude', sessionId: 'claude-2' } } };
+  first.h.sessionCatalog.claude.add('worker');
+  first.sessions.set('worker', worker);
+  await first.hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' }, 'worker');
+  await first.turn('Waiting before restart');
+  await delay(150);
+  assert.equal(first.results().length, 0);
+  await first.hook({ hook_event_name: 'Stop', last_assistant_message: 'Worker finished' }, 'worker');
+  assert.ok(await settle(() => first.results().some((message) => message.body === 'Worker finished')));
+  const second = await first.restart();
+  second.h.sessionCatalog.claude.add('worker');
+  second.sessions.set('worker', worker);
+  await second.turn('Coordinator finished after restart');
+  assert.ok(await settle(() => second.delivered('Coordinator finished after restart') === 1));
+  assert.deepEqual(second.results().map((message) => message.body), ['Worker finished', 'Coordinator finished after restart']);
+});
 
 test('a spawned child returns each finished turn to its spawner once', async (t) => {
   const { turn, results, delivered } = await setup(t, { spawnedBy: spawner });

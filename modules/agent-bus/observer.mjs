@@ -80,7 +80,8 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
   // from the start a no-op.
   const spawnResultCursors = new Map();
   async function returnSpawnResults() {
-    await Promise.allSettled([...knownSessions()].filter((session) => session.metadata?.spawnedBy).map(async (session) => {
+    const sessions = [...knownSessions()].filter((session) => session.metadata?.spawnedBy);
+    await Promise.allSettled(sessions.map(async (session) => {
       const key = `${session.provider}:${session.id}`;
       const hookFile = { workDir: session.workDir, provider: session.provider, sessionId: session.id };
       const prior = spawnResultCursors.get(key) || { cursor: 0, index: 0, turnStartedAt: 0, size: 0 };
@@ -93,6 +94,22 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
         if (event.eventName === 'UserPromptSubmit') turnStartedAt = at;
         if (event.eventName !== 'Stop' || !event.lastAssistantMessage?.trim()) continue;
         if (Array.isArray(event.payload?.background_tasks) && event.payload.background_tasks.length) continue;
+        let outstanding = false;
+        for (const child of sessions) {
+          if (child.metadata.spawnedBy.kind !== session.provider || child.metadata.spawnedBy.sessionId !== session.id
+            || (child.endedAt && !(child.resumedAt > child.endedAt)) || child.lifecycle === 'ended'
+            || new Date(child.created ?? child.createdAt ?? 0).getTime() > at) continue;
+          const { events: childEvents } = await readHookEventsSince({ workDir: child.workDir, provider: child.provider, sessionId: child.id });
+          const promptAt = childEvents.filter((item) => item.eventName === 'UserPromptSubmit' && Date.parse(item.loggedAt) <= at)
+            .map((item) => Date.parse(item.loggedAt)).at(-1) || 0;
+          const returned = store.listMessages().some((message) => message.type === 'result'
+            && message.from.kind === child.provider && message.from.sessionId === child.id
+            && message.createdAt >= promptAt && message.createdAt <= at
+            && store.listDeliveries().some((delivery) => delivery.messageId === message.id
+              && delivery.target.kind === session.provider && delivery.target.sessionId === session.id));
+          if (!returned) { outstanding = true; break; }
+        }
+        if (outstanding) continue;
         const result = await app.agentBusLifecycle.directMessage({ from: { kind: session.provider, sessionId: session.id },
           target: session.metadata.spawnedBy, body: event.lastAssistantMessage, type: 'result',
           idempotencyKey: `spawn-result:${key}:${prior.index + offset}`, skipIfSentBetween: [turnStartedAt, at] });
