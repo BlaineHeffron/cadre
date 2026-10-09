@@ -57,6 +57,29 @@ describe('Session state detectors', () => {
     }
   });
 
+  it('does not treat menu phrases in prose above an empty composer as parked', () => {
+    for (const prose of [
+      'Codex is committing next with the hook enabled, then opening the PR.',
+      'The PreCompact hook runs before compaction.',
+      'The PostCompact hook runs after compaction.',
+      'The menu documentation says press q to quit.',
+    ]) {
+      const content = [
+        prose,
+        '────────────────────────────────────────────────────────────────────────────────',
+        '❯ ',
+        '────────────────────────────────────────────────────────────────────────────────',
+        '⏵⏵ bypass permissions on (shift+tab to cycle)',
+      ].join('\n');
+
+      for (const detect of [detectClaudeState, detectCodexState]) {
+        assert.deepEqual(detect(content), {
+          state: 'waiting_for_input', needsInput: true, inputType: 'text', detail: 'Waiting for input',
+        }, prose);
+      }
+    }
+  });
+
   it('still detects a live Claude yes/no prompt at the end of the transcript', () => {
     const content = [
       'Claude: I am ready to remove those files.',

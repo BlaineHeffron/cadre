@@ -303,7 +303,9 @@ export function detectProviderState(provider, content) {
     }
   }
 
-  if (matchesAny(recentLines, config.parkedPatterns)) {
+  // An empty trailing composer puts menu phrases above it in transcript prose.
+  if (!(view.promptVisible && lineMatches(promptLine, config.promptOnlyPatterns))
+    && matchesAny(recentLines, config.parkedPatterns)) {
     return { state: STATES.PARKED, needsInput: true, inputType: 'escape', detail: 'Parked on menu' };
   }
 
