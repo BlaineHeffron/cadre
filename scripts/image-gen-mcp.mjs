@@ -7,9 +7,10 @@ import { generateImage } from '../modules/integrations/image-generation.mjs';
 export function createImageGenServer(generate = generateImage) {
   const server = new McpServer({ name: 'cadre-image-gen', version: '1.0.0' });
   server.registerTool('generate_image', {
-    description: 'Generate an image using subscriptions: ChatGPT via Codex, Google Nano Banana 2 via local CLIProxyAPI; xAI via Grok Build image_gen. Saves to the session generated-images directory with output_path confined to that directory.',
+    description: 'Generate an image using subscriptions: ChatGPT via Codex, Google Nano Banana 2 via local CLIProxyAPI; xAI via Grok Build image_gen. All three providers accept 1–4 local PNG, JPEG, or WebP reference images confined to the session working directory (10 MB each). Saves to the session generated-images directory with output_path confined to that directory.',
     inputSchema: {
       provider: z.enum(['openai', 'google', 'xai']), prompt: z.string().min(1),
+      reference_images: z.array(z.string().min(1)).min(1).max(4).optional().describe('Local reference image paths inside the session working directory; sent to the selected provider for editing or reference.'),
       output_path: z.string().min(1).optional(),
       aspect_ratio: z.string().min(1).optional().describe('Provider-supported ratio such as 1:1, 16:9, or 9:16. OpenAI uses a prompt hint and verifies the output ratio.'),
       size: z.string().min(1).optional().describe('Google only: 512, 1K, 2K, or 4K. Other subscription tools expose no size control.'),

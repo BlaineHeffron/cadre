@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
+import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, lstat, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, lstat, open, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
@@ -65,7 +66,7 @@ function outside(directory, path) {
   return offset === '..' || offset.startsWith('../') || isAbsolute(offset);
 }
 
-export async function generateImage({ provider, prompt, output_path, aspect_ratio, size, background }, {
+export async function generateImage({ provider, prompt, output_path, aspect_ratio, size, background, reference_images }, {
   env = process.env, run = runImageCli, fetchImpl = fetch, readKey = readFile,
 } = {}) {
   if (!['openai', 'google', 'xai'].includes(provider)) throw new Error(`Unknown image provider: ${provider}`);
@@ -73,6 +74,32 @@ export async function generateImage({ provider, prompt, output_path, aspect_rati
   for (const [option, value] of Object.entries({ aspect_ratio, size, background })) {
     if (value !== undefined && !IMAGE_OPTIONS[provider][option].includes(value)) {
       throw new Error(`${provider} does not support ${option}=${JSON.stringify(value)}. Supported values: ${IMAGE_OPTIONS[provider][option].join(', ') || 'none (the subscription tool exposes no control)'}.`);
+    }
+  }
+  const references = [];
+  if (reference_images !== undefined) {
+    if (!Array.isArray(reference_images) || reference_images.length < 1 || reference_images.length > 4 ||
+        reference_images.some((path) => typeof path !== 'string' || !path.trim())) {
+      throw new Error('reference_images must contain 1–4 local image paths.');
+    }
+    const root = await realpath(process.cwd());
+    for (const input of reference_images) {
+      let path;
+      try { path = await realpath(resolve(input)); }
+      catch { throw new Error('A reference image does not exist or cannot be accessed.'); }
+      if (outside(root, path)) throw new Error('reference_images must stay inside the session working directory.');
+      const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      try {
+        const stat = await file.stat();
+        if (!stat.isFile()) throw new Error('Each reference image must be a regular file.');
+        if (stat.size > 10 * 1024 * 1024) throw new Error('Each reference image must be at most 10 MB.');
+        const bytes = await file.readFile();
+        if (bytes.length > 10 * 1024 * 1024) throw new Error('Each reference image must be at most 10 MB.');
+        let type;
+        try { type = imageType(bytes); }
+        catch { throw new Error('Each reference image must have PNG, JPEG, or WebP magic bytes.'); }
+        references.push({ bytes, mimeType: type[0], extension: type[1] });
+      } finally { await file.close(); }
     }
   }
   const outputDir = resolve(env.DEFAULT_OUTPUT_DIR || 'generated-images');
@@ -86,20 +113,27 @@ export async function generateImage({ provider, prompt, output_path, aspect_rati
   if (provider !== 'google') {
     const cwd = await mkdtemp(join(tmpdir(), 'cadre-image-'));
     try {
+      const referencePaths = [];
+      for (const [index, reference] of references.entries()) {
+        const path = join(cwd, `reference-${index + 1}.${reference.extension}`);
+        await writeFile(path, reference.bytes, { flag: 'wx' });
+        referencePaths.push(path);
+      }
       // An isolated cwd, sandbox, and allowlisted env bound untrusted image descriptions.
       const childEnv = Object.fromEntries(['HOME', 'PATH'].filter((key) => env[key]).map((key) => [key, env[key]]));
       if (provider === 'openai') {
         await run('codex', [
           'exec', '--ignore-user-config', '--skip-git-repo-check', '--ephemeral',
-          '--sandbox', 'workspace-write', '-C', cwd,
-          `Use the built-in image_gen tool to generate exactly one image. Save it as ${join(cwd, 'image.png')}. Do not use API keys or external image services.${background ? ` Set transparent_background=${background === 'transparent'}.` : ''} The image description is: ${JSON.stringify(aspect_ratio ? `${prompt}\nRequired output aspect ratio: ${aspect_ratio}.` : prompt)}`,
+          '--sandbox', 'workspace-write', '-C', cwd, ...referencePaths.flatMap((path) => ['-i', path]), ...(references.length ? ['--'] : []),
+          `Use the built-in image_gen tool to generate exactly one image. Save it as ${join(cwd, 'image.png')}. Do not use API keys or external image services.${references.length ? ' Use the attached images as references or for editing with image_gen.' : ''}${background ? ` Set transparent_background=${background === 'transparent'}.` : ''} The image description is: ${JSON.stringify(aspect_ratio ? `${prompt}\nRequired output aspect ratio: ${aspect_ratio}.` : prompt)}`,
         ], { cwd, env: childEnv, timeoutMs: TIMEOUT_MS });
         try { bytes = await readFile(join(cwd, 'image.png')); }
         catch { throw new Error('Codex completed without saving an image.'); }
       } else {
+        // References switch the allowed tool to image_edit and deny image_gen.
         const output = await run('grok', [
-          '--cwd', cwd, ...GROK_IMAGE_ARGS, '-p',
-          `Call the built-in image_gen tool exactly once.${aspect_ratio ? ` Set the tool argument aspect_ratio=${JSON.stringify(aspect_ratio)}.` : ''} Do not read instructions, search for tools, or use other tools. Report the actual image file path from the tool result. The image description is: ${JSON.stringify(prompt)}`,
+          '--cwd', cwd, ...GROK_IMAGE_ARGS.map((arg) => references.length ? arg === 'image_gen' ? 'image_edit' : arg.replace(',image_edit,', ',image_gen,') : arg), ...(references.length ? ['--tools', 'image_edit'] : []), '-p',
+          `Call the built-in ${references.length ? 'image_edit' : 'image_gen'} tool exactly once.${references.length ? ` Set image to ${JSON.stringify(referencePaths)} and use these images as references for the edit.` : ''}${aspect_ratio ? ` Set the tool argument aspect_ratio=${JSON.stringify(aspect_ratio)}.` : ''} Do not read instructions, search for tools, or use other tools. Report the actual image file path from the tool result. The image description is: ${JSON.stringify(prompt)}`,
         ], { cwd, env: childEnv, timeoutMs: TIMEOUT_MS });
         let imagePath;
         for (const line of String(output || '').split('\n')) {
@@ -108,7 +142,7 @@ export async function generateImage({ provider, prompt, output_path, aspect_rati
             for (const block of event.type === 'user' ? event.message?.content || [] : []) {
               if (block.type !== 'tool_result' || block.is_error) continue;
               const result = JSON.parse(block.content);
-              if (result.type === 'ImageGen') imagePath = result.path;
+              if (result.type === (references.length ? 'ImageEdit' : 'ImageGen')) imagePath = result.path;
             }
           } catch { /* Ignore unrelated stream events. */ }
         }
@@ -139,7 +173,7 @@ export async function generateImage({ provider, prompt, output_path, aspect_rati
         method: 'POST', redirect: 'error', signal: AbortSignal.timeout(TIMEOUT_MS),
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          contents: [{ role: 'user', parts: [...references.map(({ bytes, mimeType }) => ({ inlineData: { mimeType, data: bytes.toString('base64') } })), { text: prompt }] }],
           generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { imageSize: size || '1K', ...(aspect_ratio ? { aspectRatio: aspect_ratio } : {}) } },
         }),
       });
