@@ -54,7 +54,7 @@ export function clickToTalk({ open, onStatus, onText, onEmpty, onError, maxMs = 
   return { toggle: () => (busy ? stop() : start()), stop };
 }
 
-export async function openRecorder({ getUserMedia, Recorder, transcribe }) {
+export async function openRecorder({ getUserMedia, Recorder, transcribe, onStream }) {
   const stream = await getUserMedia({ audio: true });
   const releaseMic = () => stream.getTracks().forEach((track) => track.stop());
   try {
@@ -64,6 +64,7 @@ export async function openRecorder({ getUserMedia, Recorder, transcribe }) {
     recorder.ondataavailable = (e) => chunks.push(e.data);
     recorder.onerror = releaseMic;
     recorder.start();
+    onStream?.(stream);
     return {
       async finish(keep) {
         try {
@@ -110,6 +111,9 @@ async function transcribeBlob(blob) {
 // transcribes, and the text goes to onResult. Hiding the page stops and transcribes the take.
 export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
   const [status, setStatus] = useState('idle');
+  const [elapsed, setElapsed] = useState(0);
+  const [stream, setStream] = useState(null);
+  const meter = useRef(null);
   const onResultRef = useRef(onResult);
   onResultRef.current = onResult;
   const [take] = useState(() => clickToTalk({
@@ -117,6 +121,7 @@ export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
       getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
       Recorder: MediaRecorder,
       transcribe: transcribeBlob,
+      onStream: setStream,
     })),
     onStatus: setStatus,
     onText: (text) => { if (text) onResultRef.current?.(text); },
@@ -127,6 +132,43 @@ export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
       addToast(fallback ? 'Server speech-to-text unavailable; click again to use browser speech' : `Voice input failed: ${error.message}`, 'error');
     },
   }));
+
+  useEffect(() => {
+    if (status !== 'recording') {
+      setStream(null);
+      return undefined;
+    }
+    if (!stream) return undefined;
+    let context;
+    let frame;
+    try {
+      context = new AudioContext();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      context.createMediaStreamSource(stream).connect(analyser);
+      const samples = new Uint8Array(analyser.fftSize);
+      const draw = () => {
+        analyser.getByteTimeDomainData(samples);
+        const rms = Math.sqrt(samples.reduce((sum, sample) => sum + ((sample - 128) / 128) ** 2, 0) / samples.length);
+        meter.current?.style.setProperty('--voice-level', String(Math.min(1, rms * 4)));
+        frame = requestAnimationFrame(draw);
+      };
+      draw();
+    } catch {
+      // Dictation still works when Web Audio is unavailable.
+    }
+    return () => {
+      cancelAnimationFrame(frame);
+      context?.close().catch(() => {});
+    };
+  }, [stream, status]);
+
+  useEffect(() => {
+    if (status !== 'recording') return undefined;
+    const started = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => { clearInterval(timer); setElapsed(0); };
+  }, [status]);
 
   useEffect(() => {
     const onHidden = () => { if (document.hidden) take.stop(); };
@@ -153,18 +195,34 @@ export function VoiceInput({ onResult, hotkey = false, className = 'btn' }) {
   if (!canRecord && !SpeechRecognition) return null;
 
   // pointerdown preventDefault keeps focus in the draft being dictated into; keyboard activation still clicks.
+  const label = status === 'recording' ? 'Stop and transcribe' : status === 'transcribing' ? 'Transcribing…' : 'Start dictation';
 
   return html`
     <button
       type="button"
-      class="${className} voice-ptt ${status !== 'idle' ? 'btn-danger' : ''}"
-      title=${`${status === 'recording' ? 'Click to stop' : 'Click to talk'}${hotkey ? ' (Ctrl+Space)' : ''}`}
+      class="${className} voice-ptt ${status === 'recording' ? 'voice-recording' : ''}"
+      title=${`${label}${hotkey ? ' (Ctrl+Space)' : ''}`}
+      aria-label=${label}
       aria-pressed=${status === 'recording'}
       disabled=${status === 'transcribing'}
       onpointerdown=${(e) => e.preventDefault()}
       onclick=${() => take.toggle()}
     >
-      ${status === 'recording' ? 'Rec' : status === 'transcribing' ? '...' : 'Mic'}
+      ${status === 'recording' ? html`
+        <span class="voice-meter" ref=${meter} aria-hidden="true">
+          <span></span><span></span><span></span>
+        </span>
+        <span class="voice-timer" aria-hidden="true">${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}</span>
+        <span aria-hidden="true">■</span>
+      ` : status === 'transcribing' ? html`
+        <span class="voice-spinner" aria-hidden="true"></span>
+        <span>Transcribing…</span>
+      ` : html`
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <rect x="9" y="2" width="6" height="12" rx="3" />
+          <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" />
+        </svg>
+      `}
     </button>
   `;
 }
