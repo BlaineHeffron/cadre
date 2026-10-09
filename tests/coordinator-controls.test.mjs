@@ -81,7 +81,7 @@ function owned(policy, id, state = { execution: 'idle', interaction: { kind: 'fr
   };
 }
 
-async function fixture() {
+async function fixture({ catalogAvailable = true } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dueno-coordinator-controls-'));
   temporaryPaths.push(root);
   const worktree = join(root, 'worktree');
@@ -175,14 +175,25 @@ async function fixture() {
   ],
 };
   const calls = [];
-  const requestImpl = async (path) => {
+  const requestImpl = async (path, options = {}) => {
     calls.push(path);
+    if (path === '/api/agent-bus/participants') {
+      if (!catalogAvailable) throw new Error('Participant catalog unavailable');
+      return { supportedKinds: ['codex', 'pi'], sessions: { codex: codexSessions, pi: piSessions } };
+    }
+    if (path === '/api/claude/sessions') return { sessions: [] };
+    if (options.method === 'DELETE') return { ok: true, status: 'terminated' };
+    if (path.endsWith('/input')) return { accepted: true, transactionId: 'input-1' };
+    if (/\/sessions\/[^/]+\?lines=/.test(path)) return { content: 'captured output' };
     if (path.startsWith('/api/codex/sessions')) return { sessions: codexSessions };
     if (path.startsWith('/api/pi/sessions')) return { sessions: piSessions };
     if (path === '/api/agents/scheduled') return { tasks: [{ id: policy.scheduleId }, { id: 'sched_foreign' }] };
     if (path === `/api/agents/scheduled/${policy.scheduleId}/cancel`) return { id: policy.scheduleId, status: 'cancelled' };
     if (path === '/api/agents/scheduled/sched_foreign/cancel') return { id: 'sched_foreign', status: 'cancelled' };
-    if (path.startsWith('/api/agent-bus/threads/')) return {};
+    if (path.startsWith('/api/agent-bus/threads/')) {
+      const id = path.split('/').pop().split('?')[0];
+      return { thread: threadPayload.threads.find((thread) => thread.id === id), messages: [] };
+    }
     if (path.startsWith('/api/agent-bus/threads')) return threadPayload;
     throw new Error(`Unexpected request ${path}`);
   };
@@ -206,20 +217,15 @@ async function fixture() {
       description: name,
       inputSchema: { type: 'object' },
       async handler(args, context) {
-        if (['monitor_list_codex_sessions', 'monitor_list_pi_sessions', 'monitor_list_threads', 'list_scheduled_agents', 'cancel_scheduled_agent'].includes(name)) return monitor.handleToolCall(name, args, context);
+        if (COORDINATOR_CONTROL_TOOL_SCOPES.includes(name)) return monitor.handleToolCall(name, args, context);
         return { ok: true, name, args };
       },
     })),
   });
-  const context = ordinaryContext([
-    'mcp:discover',
-    ...COORDINATOR_CONTROL_TOOL_SCOPES,
-    'spawn_session',
-    'spawn_collab_session',
-    'spawn_conference_session',
-  ]);
-  context.principal.sessionId = 'coordinator';
-  context.coordinatorPolicy = policy;
+  const credential = await prepareAgentBusCredentialLaunch({
+    backendType: 'codex', sessionId: 'coordinator', attemptGeneration: 1, credentialStore, coordinatorPolicy: policy,
+  });
+  const context = await credentialStore.authenticate(credential.token);
   return { root, worktree, outside, policy, context, server, credentialStore, calls };
 }
 
@@ -509,8 +515,11 @@ describe('coordinator MCP authorization fences', () => {
       ['monitor_list_codex_sessions', {}],
       ['monitor_list_pi_sessions', {}],
       ['monitor_list_threads', {}],
+      ['monitor_get_session_output', { type: 'codex', sessionId: 'owned-finished' }],
       ['monitor_get_session_output', { type: 'pi', sessionId: 'github-match' }],
+      ['monitor_get_session_output', { type: 'codex', sessionId: 'ambiguous' }],
       ['monitor_get_session_output', { type: 'pi', sessionId: 'github-secondary' }],
+      ['monitor_get_session_output', { type: 'xai', sessionId: 'github-secondary' }],
       ['monitor_send_to_session', { type: 'pi', sessionId: 'github-match', text: 'Review current SHA' }],
       ['monitor_terminate_session', { session_id: 'owned-finished' }],
       ['cancel_scheduled_agent', { id: policy.scheduleId }],
@@ -518,6 +527,7 @@ describe('coordinator MCP authorization fences', () => {
     for (const [tool, args] of calls) {
       const result = await rpc(server, tool, args, context);
       assert.equal(result.error, undefined, `${tool}: ${result.error?.message || ''}`);
+      if (tool === 'monitor_terminate_session') assert.equal(result.result.structuredContent.status, 'terminated');
     }
     const audit = credentialStore.auditEvents().filter((event) => (
       event.event === 'coordinator_control' && event.outcome === 'succeeded'
@@ -554,33 +564,68 @@ describe('coordinator MCP authorization fences', () => {
     assert.equal(spawned.error, undefined, spawned.error?.message);
   });
 
-  it('denies foreign, protected, interactive, unfinished, and authority targets', async () => {
-    const { server, context, policy, credentialStore } = await fixture();
-    const cases = [
-      ['cancel_scheduled_agent', { id: 'sched_foreign' }, 'coordinator_foreign_schedule_denied'],
-      ['monitor_get_session_output', { type: 'pi', sessionId: 'github-other' }, 'coordinator_session_not_owned'],
-      ['monitor_send_to_session', { type: 'codex', sessionId: 'owned-blocked', text: 'yes' }, 'coordinator_interaction_authority_denied'],
-      ['monitor_send_to_session', { type: 'codex', sessionId: 'e0275de9', text: 'stop' }, 'coordinator_protected_session_denied'],
-      ['monitor_terminate_session', { session_id: 'owned-blocked' }, 'coordinator_session_not_finished_owned'],
-      ['monitor_terminate_session', { session_id: 'github-match' }, 'coordinator_session_not_finished_owned'],
-      ['monitor_terminate_session', { session_id: 'foreign-owned' }, 'coordinator_session_not_owned'],
-      ['monitor_get_session_output', { type: 'codex', sessionId: 'owned-repository-mismatch' }, 'coordinator_session_not_owned'],
-      ['monitor_get_session_output', { type: 'codex', sessionId: 'forged-name' }, 'coordinator_session_not_owned'],
-      ['monitor_get_session_output', { type: 'codex', sessionId: 'missing' }, 'coordinator_target_identity_missing'],
-      ['monitor_terminate_session', { session_id: 'ambiguous' }, 'coordinator_target_identity_ambiguous'],
-      ['monitor_list_threads', { include_messages: true }, 'coordinator_thread_messages_denied'],
-    ];
-    for (const [tool, args] of cases) {
-      const result = await rpc(server, tool, args, context);
-      if (tool === 'cancel_scheduled_agent') assert.equal(result.error?.data?.reason, 'coordinator_foreign_schedule_denied');
-      assert.equal(result.error?.data?.reason === 'principal_type_denied', false, tool);
-    }
-    for (const tool of [
-      'monitor_answer_human_queue_item', 'monitor_scheduled_send', 'register_scheduled_agent',
-      'monitor_step_scheduled_agents',
-    ]) {
-      const result = await rpc(server, tool, {}, { ...context, toolScopes: [...context.toolScopes, tool] });
-      assert.equal(result.error?.data?.reason === 'principal_type_denied', false, tool);
-    }
+  it('resolves termination through session lists when the participant catalog is unavailable', async () => {
+    const { server, context, calls } = await fixture({ catalogAvailable: false });
+    const allowed = await rpc(server, 'monitor_terminate_session', { session_id: 'owned-finished' }, context);
+    assert.equal(allowed.error, undefined);
+    assert.equal(allowed.result.structuredContent.status, 'terminated');
+    assert.equal(calls.includes('/api/codex/sessions/owned-finished'), true);
+    const ambiguous = await rpc(server, 'monitor_terminate_session', { session_id: 'ambiguous' }, context);
+    assert.equal(ambiguous.error?.data?.reason, 'coordinator_target_identity_ambiguous');
+    assert.equal(calls.some((path) => path.endsWith('/sessions/ambiguous')), false);
   });
+
+  for (const type of ['agent', 'ui']) {
+    it(`preserves session actions and thread messages for an issued non-coordinator ${type} credential`, async () => {
+      const { server, credentialStore, calls } = await fixture();
+      const issued = await credentialStore.issue({
+        principal: { type, kind: type === 'agent' ? 'codex' : 'dashboard', sessionId: 'ordinary' },
+        attemptGeneration: 1,
+        toolScopes: COORDINATOR_CONTROL_TOOL_SCOPES,
+      });
+      const context = await credentialStore.authenticate(issued.token);
+      assert.equal(context.coordinatorPolicy, null);
+      const output = await rpc(server, 'monitor_get_session_output', { type: 'pi', sessionId: 'github-other' }, context);
+      assert.equal(output.error, undefined);
+      assert.equal(output.result.structuredContent.content, 'captured output');
+      const send = await rpc(server, 'monitor_send_to_session', { type: 'codex', sessionId: 'owned-blocked', text: 'yes' }, context);
+      assert.equal(send.error, undefined);
+      assert.equal(send.result.structuredContent.status, 'queued');
+      const terminate = await rpc(server, 'monitor_terminate_session', { session_id: 'foreign-owned' }, context);
+      assert.equal(terminate.error, undefined);
+      assert.equal(terminate.result.structuredContent.status, 'terminated');
+      const threads = await rpc(server, 'monitor_list_threads', { include_messages: true }, context);
+      assert.equal(threads.error, undefined);
+      assert.equal(threads.result.structuredContent.threads.length, 4);
+      assert.equal(calls.filter((path) => path.endsWith('/sessions')).length, 0);
+      assert.equal(calls.some((path) => path.includes('messageLimit=10')), true);
+    });
+  }
+
+  const deniedCases = [
+    ['cancel_scheduled_agent', { id: 'sched_foreign' }, 'coordinator_foreign_schedule_denied'],
+    ['monitor_get_session_output', { type: 'pi', sessionId: 'github-other' }, 'coordinator_session_not_owned'],
+    ['monitor_send_to_session', { type: 'codex', sessionId: 'owned-blocked', text: 'yes' }, 'coordinator_interaction_authority_denied'],
+    ['monitor_send_to_session', { type: 'codex', sessionId: 'e0275de9', text: 'stop' }, 'coordinator_protected_session_denied'],
+    ['monitor_terminate_session', { session_id: 'owned-blocked' }, 'coordinator_session_not_finished_owned'],
+    ['monitor_terminate_session', { session_id: 'github-match' }, 'coordinator_session_not_finished_owned'],
+    ['monitor_terminate_session', { session_id: 'foreign-owned' }, 'coordinator_session_not_owned'],
+    ['monitor_get_session_output', { type: 'codex', sessionId: 'owned-repository-mismatch' }, 'coordinator_session_not_owned'],
+    ['monitor_get_session_output', { type: 'codex', sessionId: 'forged-name' }, 'coordinator_session_not_owned'],
+    ['monitor_get_session_output', { type: 'codex', sessionId: 'missing' }, 'coordinator_target_identity_missing'],
+    ['monitor_terminate_session', { session_id: 'ambiguous' }, 'coordinator_target_identity_ambiguous'],
+    ['monitor_list_threads', { include_messages: true }, 'coordinator_thread_messages_denied'],
+  ];
+  for (const [tool, args, reason] of deniedCases) {
+    it(`denies ${tool} ${JSON.stringify(args)} with ${reason}`, async () => {
+      const { server, context, credentialStore, calls } = await fixture();
+      const result = await rpc(server, tool, args, context);
+      assert.equal(result.error?.data?.reason, reason);
+      assert.equal(calls.some((path) => path.endsWith('/input') || /\/sessions\/[^/]+(?:\?lines=|$)/.test(path)), false);
+      const audit = credentialStore.auditEvents().filter((event) => event.event === 'coordinator_control');
+      assert.equal(audit.length, 1);
+      assert.equal(audit[0].outcome, 'denied');
+      assert.equal(audit[0].denialReason, reason);
+    });
+  }
 });

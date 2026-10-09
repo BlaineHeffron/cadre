@@ -9,7 +9,9 @@ import { fileURLToPath, URL } from 'node:url';
 import { getAgentBusCredentialStore, isAgentSpawnTool } from './mcp-auth.mjs';
 import { messageSummary } from './envelope.mjs';
 import { TASK_TOOLS } from './task-routes.mjs';
+import { normalizeAgentProvider, resolveAgentProviderSelection } from '../agent/provider-interface.mjs';
 import {
+  assertCoordinatorSessionTarget,
   coordinatorAuditTarget,
   coordinatorPolicyForContext,
   isCoordinatorControlTool,
@@ -400,8 +402,41 @@ export function buildAgentBusMcpServer({
 
   async function authorizeCoordinatorControl(context, name, args = {}) {
     const policy = coordinatorPolicyForContext(context);
-    if (policy && name === 'cancel_scheduled_agent' && args.id !== policy.scheduleId) {
+    if (!policy) return;
+    if (name === 'cancel_scheduled_agent' && args.id !== policy.scheduleId) {
       await rejectAuthorization(context, name, 'coordinator_foreign_schedule_denied', 'Coordinators can only cancel their own scheduled task');
+    }
+    if (name === 'monitor_list_threads' && args.include_messages === true) {
+      await rejectAuthorization(context, name, 'coordinator_thread_messages_denied', 'Coordinators cannot read thread messages through monitor_list_threads');
+    }
+    if (!['monitor_get_session_output', 'monitor_send_to_session', 'monitor_terminate_session'].includes(name)) return;
+    const terminate = name === 'monitor_terminate_session';
+    const id = String(terminate ? args.session_id || '' : args.sessionId || '').trim();
+    let matches;
+    if (terminate) {
+      const catalog = await request('/api/agent-bus/participants').catch(() => null);
+      const kinds = Array.isArray(catalog?.supportedKinds) ? catalog.supportedKinds : ['claude', 'codex', 'pi'];
+      const lists = await Promise.all(kinds.map(async (kind) => (
+        Array.isArray(catalog?.sessions?.[kind]) ? catalog.sessions[kind]
+          : (await request(`/api/${kind}/sessions`).catch(() => ({ sessions: [] }))).sessions || []
+      )));
+      matches = lists.flat().filter((session) => (session.id || session.sessionId) === id);
+    } else {
+      const provider = normalizeAgentProvider(args.type);
+      const kind = ['claude', 'codex', 'pi'].includes(provider) ? provider : resolveAgentProviderSelection({ provider }).backendType;
+      const payload = await request(`/api/${encodeURIComponent(kind)}/sessions`);
+      matches = (payload.sessions || []).filter((session) => (session.id || session.sessionId) === id);
+    }
+    if (matches.length !== 1) {
+      await rejectAuthorization(context, name, matches.length ? 'coordinator_target_identity_ambiguous' : 'coordinator_target_identity_missing', 'Coordinator target must resolve to exactly one session');
+    }
+    try {
+      assertCoordinatorSessionTarget(policy, matches[0], {
+        operation: name === 'monitor_send_to_session' ? 'prompt' : 'read',
+        requireFinished: terminate,
+      });
+    } catch (error) {
+      await rejectAuthorization(context, name, error.reason, error.message);
     }
   }
 
