@@ -977,20 +977,22 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_get_session_output',
-      description: 'Fetch the current captured output for an interactive session. Defaults to a recent tail capped at 12000 characters; use nextOffset to page back within captured lines.',
+      description: 'Fetch captured session output. Defaults to 50 lines and 3000 characters; request more with lines/maxChars or page back with nextOffset.',
       inputSchema: {
         type: 'object',
         properties: {
           type: { type: 'string', description: 'Session backend type or provider alias.' },
           sessionId: { type: 'string', description: 'Session ID' },
-          lines: { type: 'integer', minimum: 1, maximum: 5000, description: 'Captured history lines; defaults to 200, maximum 5000.' },
+          lines: { type: 'integer', minimum: 1, maximum: 5000, description: 'Captured history lines; defaults to 50, maximum 5000.' },
+          maxChars: { type: 'integer', minimum: 1, maximum: 12000, description: 'Characters per page; defaults to 3000, maximum 12000.' },
           offset: { type: 'integer', minimum: 0, description: 'Characters back from the captured tail; use nextOffset for older output.' },
         },
         required: ['type', 'sessionId'],
         additionalProperties: false,
       },
-      handler: async ({ type, sessionId, lines = 200, offset = 0 }) => {
-        const count = Math.min(Math.max(Number(lines) || 200, 1), 5000);
+      handler: async ({ type, sessionId, lines = 50, maxChars = 3000, offset = 0 }) => {
+        const count = Math.min(Math.max(Number(lines) || 50, 1), 5000);
+        const chars = Math.min(Math.max(Number(maxChars) || 3000, 1), 12000);
         const payload = await request(`/api/${encodeURIComponent(resolveSessionBackendType(type))}/sessions/${encodeURIComponent(sessionId)}?lines=${count}`);
         const text = String(payload.content || payload.output || '')
           .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
@@ -998,7 +1000,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
           .replace(/\x1b(?:[ -/]*[0-~])?/g, '')
           .replace(/\r+(\n|$)/g, '$1').replace(/[^\n]*\r/g, '');
         const end = Math.max(0, text.length - normalizeOffset(offset));
-        const start = Math.max(0, end - 12000);
+        const start = Math.max(0, end - chars);
         return { session_id: sessionId, content: text.slice(start, end),
           ...(start > 0 ? { nextOffset: normalizeOffset(offset) + end - start } : {}) };
       },
