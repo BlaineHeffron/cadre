@@ -90,6 +90,33 @@ test('a restart does not return an earlier waiting Stop after the worker result 
   assert.deepEqual(second.results().map((message) => message.body), ['Worker finished', 'Coordinator finished after restart']);
 });
 
+test('a worker that finishes with an empty answer does not hold the coordinator result', async (t) => {
+  const { h, hook, turn, results, delivered, sessions } = await setup(t, { spawnedBy: spawner });
+  h.sessionCatalog.claude.add('worker');
+  sessions.set('worker', { workDir: h.stateDir, metadata: { spawnedBy: { kind: 'claude', sessionId: 'claude-2' } } });
+  await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' }, 'worker');
+  await hook({ hook_event_name: 'Stop', last_assistant_message: '' }, 'worker');
+  await turn('Coordinator answer without worker result');
+  assert.ok(await settle(() => delivered('Coordinator answer without worker result') === 1));
+  assert.deepEqual(results().map((message) => message.body), ['Coordinator answer without worker result']);
+});
+
+test('a worker Stop with background tasks still holds the coordinator result', async (t) => {
+  const { h, hook, turn, results, delivered, sessions } = await setup(t, { spawnedBy: spawner });
+  h.sessionCatalog.claude.add('worker');
+  sessions.set('worker', { workDir: h.stateDir, metadata: { spawnedBy: { kind: 'claude', sessionId: 'claude-2' } } });
+  await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' }, 'worker');
+  await hook({ hook_event_name: 'Stop', last_assistant_message: 'Worker waiting',
+    background_tasks: [{ task_id: 'task-1', status: 'running' }] }, 'worker');
+  await turn('Coordinator waiting on background worker');
+  await delay(150);
+  assert.equal(results().length, 0);
+  await hook({ hook_event_name: 'Stop', last_assistant_message: 'Worker background finished', background_tasks: [] }, 'worker');
+  await turn('Coordinator finished after background worker');
+  assert.ok(await settle(() => delivered('Coordinator finished after background worker') === 1));
+  assert.equal(delivered('Coordinator waiting on background worker'), 0);
+});
+
 test('a spawned child returns each finished turn to its spawner once', async (t) => {
   const { turn, results, delivered } = await setup(t, { spawnedBy: spawner });
   await turn('First answer');

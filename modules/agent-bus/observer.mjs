@@ -100,14 +100,14 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
             || (child.endedAt && !(child.resumedAt > child.endedAt)) || child.lifecycle === 'ended'
             || new Date(child.created ?? child.createdAt ?? 0).getTime() > at) continue;
           const { events: childEvents } = await readHookEventsSince({ workDir: child.workDir, provider: child.provider, sessionId: child.id });
-          const promptAt = childEvents.filter((item) => item.eventName === 'UserPromptSubmit' && Date.parse(item.loggedAt) <= at)
-            .map((item) => Date.parse(item.loggedAt)).at(-1) || 0;
-          const returned = store.listMessages().some((message) => message.type === 'result'
-            && message.from.kind === child.provider && message.from.sessionId === child.id
-            && message.createdAt >= promptAt && message.createdAt <= at
-            && store.listDeliveries().some((delivery) => delivery.messageId === message.id
-              && delivery.target.kind === session.provider && delivery.target.sessionId === session.id));
-          if (!returned) { outstanding = true; break; }
+          const history = childEvents.filter((item) => Date.parse(item.loggedAt) <= at);
+          // Log positions keep a re-prompt after a Stop outstanding even within one clock millisecond.
+          const prompt = history.findLastIndex((item) => item.eventName === 'UserPromptSubmit');
+          const stop = history.findLastIndex((item) => item.eventName === 'Stop');
+          const background = history[stop]?.payload?.background_tasks;
+          if (prompt < 0 || stop < prompt || (Array.isArray(background) && background.length)) {
+            outstanding = true; break;
+          }
         }
         if (outstanding) continue;
         const result = await app.agentBusLifecycle.directMessage({ from: { kind: session.provider, sessionId: session.id },
