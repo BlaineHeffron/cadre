@@ -21,7 +21,7 @@ async function setup(t, metadata, stateDir = null) {
   t.after(async () => { unregister(); if (!closed) await h.cleanup(); });
   const restart = async () => { closed = true; unregister(); await h.app.close(); return setup(t, metadata, h.stateDir); };
   const hook = (payload) => recordHookPayload({ session_id: 'cli-2', cwd: h.stateDir, ...payload },
-    { provider: 'claude', duenoSessionId: 'claude-2' });
+    { provider: 'claude', duenoSessionId: 'claude-2', workDir: h.stateDir });
   const turn = async (answer) => {
     await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' });
     await hook({ hook_event_name: 'Stop', last_assistant_message: answer });
@@ -50,6 +50,16 @@ test('a spawned child returns each finished turn to its spawner once', async (t)
   await turn('Second answer');
   assert.ok(await settle(() => delivered('Second answer') === 2));
   assert.equal(results().length, 3);
+});
+
+test('a spawned child returns its result after changing into a nested git repo', async (t) => {
+  const { h, hook, results, delivered } = await setup(t, { spawnedBy: spawner });
+  const cwd = join(h.stateDir, 'repo');
+  await mkdir(join(cwd, '.git'), { recursive: true });
+  await hook({ cwd, hook_event_name: 'UserPromptSubmit', prompt: 'work' });
+  await hook({ cwd, hook_event_name: 'Stop', last_assistant_message: 'Nested repo answer' });
+  assert.ok(await settle(() => delivered('Nested repo answer') === 1));
+  assert.deepEqual(results().map((message) => message.body), ['Nested repo answer']);
 });
 
 test('the benchmark worker returns only its 25:30 answer after background work finishes', async (t) => {

@@ -18,13 +18,14 @@ function isCodexProvider(provider = '') {
   return name === 'codex' || name === 'openai';
 }
 
-export function buildLaunchEnvPrefix(sessionId = '', provider = '') {
+export function buildLaunchEnvPrefix(sessionId = '', provider = '', workDir = '') {
   const id = String(sessionId || '').trim();
   const providerName = String(provider || '').trim();
   const originator = isCodexProvider(providerName) ? duenoOriginator(id) : '';
   return [
     id ? `export CADRE_SESSION_ID=${shellEscape(id)}; export DUENO_SESSION_ID=${shellEscape(id)}` : '',
     providerName ? `export CADRE_PROVIDER=${shellEscape(providerName)}; export DUENO_PROVIDER=${shellEscape(providerName)}` : '',
+    workDir ? `export CADRE_SESSION_WORK_DIR=${shellEscape(workDir)}; export DUENO_SESSION_WORK_DIR=${shellEscape(workDir)}` : '',
     originator ? `export CODEX_INTERNAL_ORIGINATOR_OVERRIDE=${shellEscape(originator)}` : '',
   ].filter(Boolean).join('; ');
 }

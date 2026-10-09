@@ -84,7 +84,7 @@ export async function createCodexAppServerSessionProvider({
             .filter((tool) => toolScopes.includes(tool)).map((tool) => [tool, { approval_mode: 'approve' }])),
         } } },
         requiredTools: ['room_context', 'room_send'], allowedMcpServers: ['dueno'], allowedMcpTools: toolScopes, mcpCapabilities: { serverIds: ['dueno'] },
-        env: { ...process.env, ...headroom.env, ...withCadreEnv({ DUENO_SESSION_ID: sessionId, DUENO_PROVIDER: 'codex-app-server', DUENO_AGENT_BUS_TOKEN: prepared.token }) },
+        env: { ...process.env, ...headroom.env, ...withCadreEnv({ DUENO_SESSION_ID: sessionId, DUENO_PROVIDER: 'codex-app-server', DUENO_SESSION_WORK_DIR: workDir, DUENO_AGENT_BUS_TOKEN: prepared.token }) },
       });
       return result;
     } catch (error) { await cleanup(sessionId, 'start_failed'); throw error; }

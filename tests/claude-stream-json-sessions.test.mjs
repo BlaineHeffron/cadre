@@ -191,6 +191,8 @@ describe('Claude stream-json sessions', () => {
     assert.equal(mcpConfig.includes(issuedTokens[0]), false);
     assert.equal(clients[0].startSpec.env.DUENO_SESSION_ID, session.id);
     assert.equal(clients[0].startSpec.env.DUENO_PROVIDER, 'claude');
+    assert.equal(clients[0].startSpec.env.DUENO_SESSION_WORK_DIR, workDir);
+    assert.equal(clients[0].startSpec.env.CADRE_SESSION_WORK_DIR, workDir);
     assert.equal(clients[0].startSpec.env.DUENO_AGENT_BUS_TOKEN, issuedTokens[0]);
     assert.equal(issueCalls, 1);
     assert.deepEqual(session.mcpCapabilities.serverIds, ['dueno']);

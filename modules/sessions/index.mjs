@@ -265,7 +265,7 @@ const PROVIDER_CONFIGS = {
     shellPrefix(sessionId, provider) {
       return buildLaunchEnvPrefix(sessionId, provider);
     },
-    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, mcpLaunch = {}, initialPromptFile = '' }) {
+    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, workDir, mcpLaunch = {}, initialPromptFile = '' }) {
       const baseCommand = `${shellQuote(sessionBinary)} ${allArgs.map(shellQuote).join(' ')}${initialPromptFile ? ` -- "$(< ${shellQuote(initialPromptFile)})"` : ''}`;
       const command = launchLogPath
         ? `${baseCommand} 2> >(tee -a ${shellQuote(launchLogPath)} >&2)`
@@ -276,7 +276,7 @@ const PROVIDER_CONFIGS = {
       const forwardedEnvPrefix = mcpLaunch.envPath
         ? `while IFS= read -r -d '' entry; do export "$entry"; done < ${shellQuote(mcpLaunch.envPath)}`
         : '';
-      const envPrefix = [buildLaunchEnvPrefix(sessionId, provider), credentialPrefix, forwardedEnvPrefix].filter(Boolean).join('; ');
+      const envPrefix = [buildLaunchEnvPrefix(sessionId, provider, workDir), credentialPrefix, forwardedEnvPrefix].filter(Boolean).join('; ');
       return envPrefix ? `${envPrefix}; ${command}` : command;
     },
   },
@@ -330,14 +330,14 @@ const PROVIDER_CONFIGS = {
         resumeId,
       ];
     },
-    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, initialPromptFile = '' }) {
+    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, workDir, initialPromptFile = '' }) {
       const baseCommand = [sessionBinary, ...allArgs].map(shellQuote).join(' ')
         + (initialPromptFile ? ` -- "$(< ${shellQuote(initialPromptFile)})"` : '');
       const command = launchLogPath
         ? `${baseCommand} 2> >(tee -a ${shellQuote(launchLogPath)} >&2)`
         : baseCommand;
       return [
-        buildLaunchEnvPrefix(sessionId, 'claude'),
+        buildLaunchEnvPrefix(sessionId, 'claude', workDir),
         'unset CLAUDECODE',
         command,
       ].filter(Boolean).join('; ');
@@ -407,14 +407,14 @@ const PROVIDER_CONFIGS = {
     async validateBinary(binary) {
       return validatePiCliContract(binary);
     },
-    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, mcpLaunch = {}, initialPromptFile = '' }) {
+    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, workDir, mcpLaunch = {}, initialPromptFile = '' }) {
       const baseCommand = [sessionBinary, ...allArgs].map(shellQuote).join(' ')
         + (initialPromptFile ? ` "$(< ${shellQuote(initialPromptFile)})"` : '');
       const command = launchLogPath
         ? `${baseCommand} 2> >(tee -a ${shellQuote(launchLogPath)} >&2)`
         : baseCommand;
       const envPrefix = [
-        buildLaunchEnvPrefix(sessionId, provider),
+        buildLaunchEnvPrefix(sessionId, provider, workDir),
         mcpLaunch.piConfigPath ? `export CADRE_PI_MCP_CONFIG=${shellQuote(mcpLaunch.piConfigPath)}; export DUENO_PI_MCP_CONFIG=${shellQuote(mcpLaunch.piConfigPath)}` : '',
       ].filter(Boolean).join('; ');
       return envPrefix ? `${envPrefix}; ${command}` : command;
@@ -450,6 +450,7 @@ export function renderAgentSessionLaunch({
       launchLogPath,
       sessionId,
       provider,
+      workDir: buildOptions.workDir,
       mcpLaunch: buildOptions.mcpLaunch || {},
       initialPromptFile: resume ? '' : buildOptions.initialPromptFile || '',
     })].filter(Boolean).join('; '),
