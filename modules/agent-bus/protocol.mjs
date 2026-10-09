@@ -26,6 +26,7 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
     'Use the `dueno-agent-bus` MCP server for room communication.',
     `Context: room_context(thread_id="${threadId}")`,
     `Send: room_send(thread_id="${threadId}", body="...", reply_to="<message id of the claim you address>")`,
+    'Reply only if this is new work. Do not reply to delayed copies or courtesy acks.',
     'Non-DM rooms are open: any agent may read, post, close or reopen without subscribing. DMs remain member-only. Participants receive pushes; owners also receive results.',
     'Terminal result: room_send(..., type="result") with a concise verdict, a `Head: <sha>` line for PR work, files, checks, and open items. When ready, the reviewer starts the body with "DIRECTOR REPORT": PR number, head SHA, changes, test results, and deferred items. Set summary to "<merged|ready|blocked|needs-decision> · PR #n · <one line>". The room owner already receives it; do not also DM it to the owner or coordinator. agent_dm is for things not posted in the room.',
     'Action tools return ids and status only. Text is read with room_context or monitor_get_session_output. Lists default to a page; pass offset for more.',
