@@ -1,8 +1,9 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { buildHookSessionPaths, recordHookPayload, recordRuntimeHookEvent, readHookEventsSince } from '../modules/agent/hook-events.mjs';
 import { deriveHookState, readHookDerivedState } from '../modules/agent/hook-state.mjs';
 import { buildLaunchEnvPrefix } from '../modules/agent/launch-env.mjs';
@@ -37,6 +38,32 @@ describe('agent hook events', () => {
     const prefix = buildLaunchEnvPrefix("internal ' 1", "co dex'");
     assert.match(prefix, /export DUENO_SESSION_ID='internal '"'"' 1'/);
     assert.match(prefix, /export DUENO_PROVIDER='co dex'"'"''/);
+  });
+
+  it('writes hooks from a nested repo to the launch workDir and keeps the real cwd', async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "hook-launch-'"));
+    tempDirs.push(workDir);
+    await mkdir(join(workDir, '.git'));
+    const cwd = join(workDir, 'repo');
+    await mkdir(join(cwd, '.git'), { recursive: true });
+    const payload = { session_id: 'cli-1', cwd, hook_event_name: 'Stop', last_assistant_message: 'Done' };
+    const command = `${buildLaunchEnvPrefix('launch-1', 'claude', workDir)}; exec "$NODE_BINARY" "$HOOK_SCRIPT"`;
+    execFileSync('bash', ['-c', command], {
+      cwd, input: JSON.stringify(payload),
+      env: { PATH: process.env.PATH, NODE_BINARY: process.execPath, HOOK_SCRIPT: resolve('scripts/agent-hooks/log-event.mjs') },
+    });
+    const read = await readHookEventsSince({ workDir, provider: 'claude', sessionId: 'launch-1' });
+    assert.equal(read.path, join(workDir, '.agent_bus', 'hooks', 'claude-launch-1.jsonl'));
+    assert.equal(read.events.length, 1);
+    assert.equal(read.events[0].eventName, 'Stop');
+    assert.equal(read.events[0].cwd, cwd);
+    assert.equal(await exists(join(cwd, '.agent_bus')), false);
+    const state = JSON.parse(await readFile(join(workDir, '.agent_bus', 'hooks', 'state', 'claude-launch-1.json'), 'utf8'));
+    assert.equal(state.session.cwd, cwd);
+
+    // Hooks outside Cadre still use the payload cwd.
+    const fallback = await recordHookPayload(payload, { provider: 'claude' });
+    assert.equal(fallback.paths.rootDir, cwd);
   });
 
   it('maps codex hook events to activity states', () => {

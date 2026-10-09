@@ -30,6 +30,7 @@ async function main() {
   const { stopDecision } = await recordHookPayload(payload, {
     provider: provider || envProvider,
     duenoSessionId: duenoSessionId || undefined,
+    workDir: readEnv('DUENO_SESSION_WORK_DIR'),
   });
   if (stopDecision) {
     process.stdout.write(`${JSON.stringify(stopDecision)}\n`);

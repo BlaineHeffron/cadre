@@ -242,16 +242,17 @@ function mergeSessionMetadata(priorState = {}, event = {}) {
 export async function recordHookPayload(payload = {}, {
   provider = '',
   duenoSessionId = '',
+  workDir = '',
 } = {}) {
   const sessionId = normalizeText(payload.session_id);
   const storageSessionId = normalizeText(duenoSessionId) || sessionId;
-  const workDir = normalizeText(payload.cwd) || process.cwd();
+  const cwd = normalizeText(payload.cwd) || process.cwd();
   const eventName = normalizeText(payload.hook_event_name);
   const lastAssistantMessage = typeof payload.last_assistant_message === 'string'
     ? payload.last_assistant_message
     : '';
   const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
-  const paths = await buildHookSessionPaths({ workDir, provider, sessionId: storageSessionId });
+  const paths = await buildHookSessionPaths({ workDir: normalizeText(workDir) || cwd, provider, sessionId: storageSessionId });
   const result = await withStateFileLock(paths.statePath, async () => {
     const priorState = await readJsonFile(paths.statePath);
     const loggedAt = Date.now();
@@ -263,7 +264,7 @@ export async function recordHookPayload(payload = {}, {
       eventName,
       payload: payload && typeof payload === 'object' ? payload : {},
       turnId: normalizeText(payload.turn_id || payload.tool_use_id || ''),
-      cwd: workDir,
+      cwd,
       transcriptPath: normalizeText(payload.transcript_path || ''),
       transcriptStartOffset: normalizeText(provider || payload.provider) === 'claude' && eventName === 'SessionStart' && payload.source === 'resume'
         ? (await stat(normalizeText(payload.transcript_path)).catch(() => null))?.size || 0

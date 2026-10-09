@@ -162,6 +162,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         [CLAUDE_STREAM_JSON_MCP_TOKEN_ENV_VAR]: mcpPreparation.credentialToken,
         DUENO_SESSION_ID: id,
         DUENO_PROVIDER: kind,
+        DUENO_SESSION_WORK_DIR: workDir,
       }),
     };
     if (!claude) {

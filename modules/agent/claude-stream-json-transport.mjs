@@ -12,7 +12,7 @@ import { ProcessSupervisor } from './process-supervisor.mjs';
 const DEFAULT_MAX_FRAME_BYTES = 8 * 1024 * 1024;
 export const CLAUDE_STREAM_JSON_ENV_ALLOWLIST = Object.freeze([
   'PATH', 'HOME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'CLAUDE_CODE_OAUTH_TOKEN',
-  'DUENO_AGENT_BUS_TOKEN', 'DUENO_SESSION_ID', 'DUENO_PROVIDER',
+  'DUENO_AGENT_BUS_TOKEN', 'DUENO_SESSION_ID', 'DUENO_PROVIDER', 'DUENO_SESSION_WORK_DIR',
 ]);
 
 export function buildClaudeStreamJsonArgs({
