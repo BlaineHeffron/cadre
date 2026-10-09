@@ -116,7 +116,10 @@ test('bootstrap injects simplified room prompts without loop startup metadata', 
     assert.match(prompt, /Coordinator findings go through the reviewer/);
     assert.match(prompt, /implementer acts only on forwarded findings/);
     assert.match(prompt, /Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges/);
-    assert.match(prompt, /type="result".*reviewer starts the body with "DIRECTOR REPORT": PR number, head SHA, changes, test results, and deferred items/);
+    assert.match(prompt, /in implement\/review collabs, the implementer sends PR, head SHA, and checks to the reviewer with type="message"/);
+    assert.match(prompt, /Only the reviewer posts type="result", starting with "DIRECTOR REPORT": PR number, Head: <sha>, changes, test results, and open items/);
+    assert.match(prompt, /Without a reviewer or in a single-role room, participants post the same report as type="result" and stop/);
+    assert.doesNotMatch(prompt, /Other participants post type=result and stop/);
     assert.match(prompt, /<merged\|ready\|blocked\|needs-decision> · PR #n · <one line>/);
     assert.match(prompt, /The room owner already receives it; do not also DM it to the owner or coordinator\. agent_dm is for things not posted in the room\./);
     assert.match(prompt, /any agent may read, post, close or reopen without subscribing/);

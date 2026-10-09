@@ -25,6 +25,7 @@ test('MCP exposes the clean room/DM/directory surface and no old bus or manager-
     assert.match(text, new RegExp(name));
   }
   assert.doesNotMatch(text, /agent_bus_|ack/);
+  assert.doesNotMatch(text, /Other participants post type=result and stop/);
 });
 
 test('room sends and DMs pin the authenticated sender server-side', async () => {
