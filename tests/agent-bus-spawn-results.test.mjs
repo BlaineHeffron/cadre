@@ -31,6 +31,65 @@ async function setup(t, metadata, stateDir = null) {
   return { h, hook, turn, results, delivered, restart, sessions };
 }
 
+test('a spawned coordinator waits for its owned room result and for renewed room work', async (t) => {
+  const { h, turn, results, delivered } = await setup(t, { spawnedBy: spawner });
+  const owner = { kind: 'claude', sessionId: 'claude-2' };
+  const worker = { kind: 'claude', sessionId: 'claude-1' };
+  const room = await h.store.createThread({ title: 'Collaboration', participants: [worker], createdBy: owner });
+  for (const round of [1, 2]) {
+    if (round === 2) await h.store.createMessage({ threadId: room.id, from: owner, body: 'Please do more work' });
+    await h.store.createMessage({ threadId: room.id, from: worker, body: 'Working' });
+    await turn(`Waiting for room ${round}`);
+    await delay(150);
+    assert.equal(delivered(`Waiting for room ${round}`), 0);
+    const response = await h.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: h.authHeaders,
+      payload: { threadId: room.id, from: worker, body: `Room answer ${round}`, type: 'result' } });
+    assert.equal(response.statusCode, 200);
+    assert.ok(await settle(() => h.injected.claude.some((text) => text.includes(`Room answer ${round}`))));
+    // A participant's ordinary message after its result does not renew the owner's work.
+    await h.store.createMessage({ threadId: room.id, from: worker, body: 'Worker signing off' });
+    await turn(`Coordinator room answer ${round}`);
+    assert.ok(await settle(() => delivered(`Coordinator room answer ${round}`) === 1));
+  }
+  assert.deepEqual(results().filter((message) => message.metadata.dm).map((message) => message.body),
+    ['Coordinator room answer 1', 'Coordinator room answer 2']);
+});
+
+for (const name of ['closed', 'ended', 'already has a result', 'DM', 'owned by someone else', 'created after the Stop']) {
+  test(`a room ${name} does not hold a spawned result`, async (t) => {
+    const { h, turn, delivered } = await setup(t, { spawnedBy: spawner });
+    const owner = { kind: 'claude', sessionId: 'claude-2' };
+    const room = await h.store.createThread({ title: 'Irrelevant room', participants: [],
+      createdBy: name === 'owned by someone else' ? spawner : owner, metadata: { dm: name === 'DM' } });
+    if (name === 'closed') await h.store.closeThread(room.id);
+    if (name === 'ended') {
+      const response = await h.app.inject({ method: 'POST', url: `/api/agent-bus/threads/${room.id}/end`, headers: h.authHeaders, payload: {} });
+      assert.equal(response.statusCode, 200);
+    }
+    if (name === 'already has a result') await h.store.createMessage({ threadId: room.id, from: spawner, type: 'result', body: 'Done' });
+    if (name === 'created after the Stop') {
+      t.mock.method(Date, 'now', () => room.createdAt - 1000);
+      try { await turn('Coordinator finished'); } finally { Date.now.mock.restore(); }
+    } else await turn('Coordinator finished');
+    assert.ok(await settle(() => delivered('Coordinator finished') === 1));
+  });
+}
+
+test('replay does not return an earlier room-waiting Stop after its result arrives', async (t) => {
+  const first = await setup(t, { spawnedBy: spawner });
+  const room = await first.h.store.createThread({ title: 'Collaboration', participants: [],
+    createdBy: { kind: 'claude', sessionId: 'claude-2' } });
+  await first.turn('Waiting for room before restart');
+  await delay(150);
+  assert.equal(first.results().length, 0);
+  await first.h.store.createMessage({ threadId: room.id, from: spawner, type: 'result', body: 'Room finished' });
+  const second = await first.restart();
+  await second.turn('Coordinator finished after room restart');
+  assert.ok(await settle(() => second.delivered('Coordinator finished after room restart') === 1));
+  assert.deepEqual(second.results().filter((message) => message.metadata.dm).map((message) => message.body),
+    ['Coordinator finished after room restart']);
+});
+
 test('a spawned coordinator waits for its own worker result, including after a new worker prompt', async (t) => {
   const { h, hook, turn, results, delivered, sessions } = await setup(t, { spawnedBy: spawner });
   h.sessionCatalog.claude.add('worker');
