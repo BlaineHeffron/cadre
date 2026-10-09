@@ -455,7 +455,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'spawn_session',
-      description: 'Spawn exactly one interactive session using a provider returned by monitor_list_agent_providers. Returns thread_id, participant ids/names and warnings. With returnResults true, a tmux Claude session spawned without parentThreadId returns the final message of each turn with no background work outstanding to you as a DM result; end your turn to wait for it instead of polling.',
+      description: 'Spawn exactly one interactive session using a provider returned by monitor_list_agent_providers. Returns thread_id, participant ids/names and warnings. With returnResults true, a tmux Claude session spawned without parentThreadId returns the final message of each turn with no background work or returnResults workers outstanding to you as a DM result; end your turn to wait for it instead of polling.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -466,7 +466,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
           thinkingLevel: { type: 'string', description: 'Optional reasoning/effort level for the spawned session' },
           initialPrompt: { type: 'string', description: 'Optional prompt to inject after the session starts' },
           parentThreadId: { type: 'string', description: 'Optional existing agent-bus thread id to attach the spawned session to as a participant.' },
-          returnResults: { type: 'boolean', description: 'Default false. When true, a Claude session spawned without parentThreadId sends you its final message of each turn with no background work outstanding as a DM result. Leave off when only handing off context.' },
+          returnResults: { type: 'boolean', description: 'Default false. When true, a Claude session spawned without parentThreadId sends you its final message of each turn with no background work or returnResults workers outstanding as a DM result. Leave off when only handing off context.' },
           ...MCP_SELECTION_SCHEMA_PROPERTIES,
           codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
         },

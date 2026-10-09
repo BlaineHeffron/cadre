@@ -80,7 +80,8 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
   // from the start a no-op.
   const spawnResultCursors = new Map();
   async function returnSpawnResults() {
-    await Promise.allSettled([...knownSessions()].filter((session) => session.metadata?.spawnedBy).map(async (session) => {
+    const sessions = [...knownSessions()].filter((session) => session.metadata?.spawnedBy);
+    await Promise.allSettled(sessions.map(async (session) => {
       const key = `${session.provider}:${session.id}`;
       const hookFile = { workDir: session.workDir, provider: session.provider, sessionId: session.id };
       const prior = spawnResultCursors.get(key) || { cursor: 0, index: 0, turnStartedAt: 0, size: 0 };
@@ -93,6 +94,22 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
         if (event.eventName === 'UserPromptSubmit') turnStartedAt = at;
         if (event.eventName !== 'Stop' || !event.lastAssistantMessage?.trim()) continue;
         if (Array.isArray(event.payload?.background_tasks) && event.payload.background_tasks.length) continue;
+        let outstanding = false;
+        for (const child of sessions) {
+          if (child.metadata.spawnedBy.kind !== session.provider || child.metadata.spawnedBy.sessionId !== session.id
+            || (child.endedAt && !(child.resumedAt > child.endedAt)) || child.lifecycle === 'ended'
+            || new Date(child.created ?? child.createdAt ?? 0).getTime() > at) continue;
+          const { events: childEvents } = await readHookEventsSince({ workDir: child.workDir, provider: child.provider, sessionId: child.id });
+          const history = childEvents.filter((item) => Date.parse(item.loggedAt) <= at);
+          // Log positions keep a re-prompt after a Stop outstanding even within one clock millisecond.
+          const prompt = history.findLastIndex((item) => item.eventName === 'UserPromptSubmit');
+          const stop = history.findLastIndex((item) => item.eventName === 'Stop');
+          const background = history[stop]?.payload?.background_tasks;
+          if (prompt < 0 || stop < prompt || (Array.isArray(background) && background.length)) {
+            outstanding = true; break;
+          }
+        }
+        if (outstanding) continue;
         const result = await app.agentBusLifecycle.directMessage({ from: { kind: session.provider, sessionId: session.id },
           target: session.metadata.spawnedBy, body: event.lastAssistantMessage, type: 'result',
           idempotencyKey: `spawn-result:${key}:${prior.index + offset}`, skipIfSentBetween: [turnStartedAt, at] });
