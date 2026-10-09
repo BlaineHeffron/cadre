@@ -110,6 +110,15 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
           }
         }
         if (outstanding) continue;
+        const waitingRoom = store.listThreads({ status: 'open' }).some((thread) => {
+          if (thread.metadata?.dm || thread.createdBy?.kind !== session.provider
+            || thread.createdBy?.sessionId !== session.id || thread.createdAt > at) return false;
+          // Room order breaks ties within a clock millisecond; later results cannot release an earlier Stop.
+          const latest = store.getThread(thread.id).messages.findLast((message) => message.createdAt <= at
+            && (message.type === 'result' || (message.from?.kind === session.provider && message.from?.sessionId === session.id)));
+          return latest?.type !== 'result';
+        });
+        if (waitingRoom) continue;
         const result = await app.agentBusLifecycle.directMessage({ from: { kind: session.provider, sessionId: session.id },
           target: session.metadata.spawnedBy, body: event.lastAssistantMessage, type: 'result',
           idempotencyKey: `spawn-result:${key}:${prior.index + offset}`, skipIfSentBetween: [turnStartedAt, at] });
