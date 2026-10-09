@@ -33,13 +33,10 @@ export function renderBusEnvelope(message, parent = null) {
   const dm = message.metadata?.dm === true;
   const marker = busMessageMarker(message);
   const opening = dm
-    ? `[DM ${marker} from=${formatAgentRef(message.from)}]`
+    ? `[DM ${marker} room=${message.threadId} from=${formatAgentRef(message.from)}]`
     : `[ROOM_MESSAGE ${marker} room=${message.threadId} from=${formatAgentRef(message.from)}]`;
   const closing = dm ? '[/DM]' : '[/ROOM_MESSAGE]';
-  const reply = [
-    `Tool: room_send(thread_id="${message.threadId}", body="...", reply_to="<id if answering a claim>") · Context: room_context(thread_id="${message.threadId}")`,
-    'Reply only if this is new work. Do not reply to delayed copies or courtesy acks.'
-  ].join('\n');
+  const reply = 'Reply: room_send(thread_id=<room>, body="...", reply_to=<id>)';
   const body = String(message.body || '');
   // A returned spawn result arrives whole, like a subagent's answer.
   const content = body.length > 1200 && message.type !== 'startup_prompt' && !(dm && message.type === 'result')

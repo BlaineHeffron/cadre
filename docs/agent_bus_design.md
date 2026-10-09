@@ -52,7 +52,7 @@ A message contains:
 
 Messages do not contain a destination, acknowledgement requirement, completion signal, controller state, or execution state. Recipients are derived from the room roster and, for results, its owner at send time.
 
-Injected text uses a compact `[ROOM_MESSAGE]` envelope, or `[DM]` for direct messages, including the message `id`. The envelope names the `room_send` tool and `room_context` history read. It does not require a reply; delayed copies and courtesy acks should be skipped. If the target session transcript already contains that message id, delivery is marked injected without a second paste. Protocol injects use a stable `agent-bus:<deliveryId>` idempotency key. Terminal output is not parsed for acknowledgements, replies, completion markers, or control commands.
+Injected text uses a compact `[ROOM_MESSAGE]` envelope, or `[DM]` for direct messages, including the message `id` and `room` id. The envelope ends with a one-line `room_send` reply hint; `room_context` guidance appears only when the body is truncated. Collaboration onboarding teaches agents to reply only to new work and skip delayed copies and courtesy acks. If the target session transcript already contains that message id, delivery is marked injected without a second paste. Protocol injects use a stable `agent-bus:<deliveryId>` idempotency key. Terminal output is not parsed for acknowledgements, replies, completion markers, or control commands.
 
 ### Deliveries
 
