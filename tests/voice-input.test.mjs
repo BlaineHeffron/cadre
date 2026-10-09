@@ -194,7 +194,7 @@ describe('voice input button', () => {
         import { toasts } from '/app/state.mjs'; import { VoiceInput } from '/components/voice-input.mjs';
         window.results = []; window.toastLog = [];
         effect(() => toasts.value.forEach((t) => { if (!window.toastLog.includes(t.message)) window.toastLog.push(t.message); }));
-        render(h(VoiceInput, { hotkey: true, onResult: (text) => window.results.push(text) }), document.getElementById('app'));
+        render(h('div', { class: 'control-row control-row-compose' }, h(VoiceInput, { className: 'ctrl-btn', hotkey: true, onResult: (text) => window.results.push(text) })), document.getElementById('app'));
       </script>`,
     )));
     const replies = [];
@@ -207,22 +207,65 @@ describe('voice input button', () => {
     });
     try {
       const page = await browser.newPage();
+      await page.addInitScript(() => {
+        const NativeAudioContext = window.AudioContext;
+        window.audioContexts = [];
+        window.AudioContext = class extends NativeAudioContext {
+          constructor(...args) { super(...args); window.audioContexts.push(this); }
+        };
+        const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async (constraints) => {
+          const stream = await getUserMedia(constraints);
+          const context = new NativeAudioContext();
+          const source = context.createMediaStreamSource(stream);
+          const gain = context.createGain();
+          gain.gain.value = 0;
+          const output = context.createMediaStreamDestination();
+          source.connect(gain).connect(output);
+          const tone = context.createOscillator();
+          tone.connect(gain);
+          tone.start();
+          window.inputGain = gain;
+          return output.stream;
+        };
+      });
       await page.goto(`${origin}/voice-fixture`);
       const button = page.locator('button.voice-ptt');
-      assert.equal(await button.getAttribute('title'), 'Click to talk (Ctrl+Space)');
+      assert.equal(await button.getAttribute('title'), 'Start dictation (Ctrl+Space)');
+
+      assert.equal(await button.getAttribute('aria-label'), 'Start dictation');
+      assert.equal(await button.locator('svg').count(), 1);
+      const idleBox = await button.boundingBox();
 
       let open;
       gate = new Promise((r) => { open = r; });
       replies.push('hello');
       await button.click();
-      await page.waitForFunction(() => document.querySelector('button.voice-ptt').textContent.trim() === 'Rec');
-      assert.equal(await button.getAttribute('title'), 'Click to stop (Ctrl+Space)');
-      await page.waitForTimeout(300);
+      await page.waitForFunction(() => document.querySelector('button.voice-ptt').getAttribute('aria-label') === 'Stop and transcribe');
+      assert.equal(await button.getAttribute('title'), 'Stop and transcribe (Ctrl+Space)');
+      assert.equal(await button.evaluate((el) => el.classList.contains('voice-recording')), true);
+      assert.equal(await button.getAttribute('aria-pressed'), 'true');
+      assert.equal(await button.locator('.voice-timer').textContent(), '0:00');
+      await page.waitForFunction(() => document.querySelector('.voice-timer').textContent === '0:01');
+      assert.equal((await button.boundingBox()).width, idleBox.width);
+      assert.equal((await button.boundingBox()).height, idleBox.height);
+      await page.waitForFunction(() => document.querySelector('.voice-meter').style.getPropertyValue('--voice-level') === '0');
+      const quietHeight = await button.locator('.voice-meter span').first().evaluate((el) => el.getBoundingClientRect().height);
+      await page.evaluate(() => { window.inputGain.gain.value = 1; });
+      await page.waitForFunction(() => Number(document.querySelector('.voice-meter').style.getPropertyValue('--voice-level')) > 0.1);
+      assert.ok(await button.locator('.voice-meter span').first().evaluate((el) => el.getBoundingClientRect().height) > quietHeight);
+      assert.equal(await page.evaluate(() => window.audioContexts[0].state), 'running');
       await button.click();
-      await page.waitForFunction(() => document.querySelector('button.voice-ptt').textContent.trim() === '...');
+      await page.waitForFunction(() => document.querySelector('button.voice-ptt').getAttribute('aria-label') === 'Transcribing…');
+      assert.equal(await button.isDisabled(), true);
+      await page.waitForFunction(() => window.audioContexts[0].state === 'closed');
+      assert.equal(await button.locator('.voice-spinner').count(), 1);
+      assert.equal((await button.textContent()).trim(), 'Transcribing…');
+      assert.equal((await button.boundingBox()).width, idleBox.width);
+      assert.equal((await button.boundingBox()).height, idleBox.height);
       await page.keyboard.press('Control+Space'); // ignored while transcribing
       open();
-      await page.waitForFunction(() => document.querySelector('button.voice-ptt').textContent.trim() === 'Mic');
+      await page.waitForFunction(() => document.querySelector('button.voice-ptt').getAttribute('aria-label') === 'Start dictation');
       assert.deepEqual(await page.evaluate(() => window.results), ['hello']);
 
       replies.push('');
@@ -232,12 +275,13 @@ describe('voice input button', () => {
       await page.keyboard.up('Space');
       await page.keyboard.up('Control');
       await page.waitForTimeout(300);
-      assert.equal((await button.textContent()).trim(), 'Rec');
+      assert.equal(await button.getAttribute('aria-label'), 'Stop and transcribe');
       await page.keyboard.press('Control+Space');
       await page.waitForFunction(() => window.toastLog.length > 0);
       assert.deepEqual(await page.evaluate(() => window.toastLog), ['No speech detected — check your microphone input']);
       assert.deepEqual(await page.evaluate(() => window.results), ['hello']);
       assert.equal(replies.length, 0);
+      await page.waitForFunction(() => window.audioContexts.length === 2 && window.audioContexts.every((ctx) => ctx.state === 'closed'));
     } finally {
       await browser.close();
       await app.close();
