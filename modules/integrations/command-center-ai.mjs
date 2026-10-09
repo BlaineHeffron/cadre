@@ -460,6 +460,7 @@ export async function answerHumanQueueItem(id, input = {}, {
     answeredAt,
   };
   item.events.push(queueEvent('answered', { optionId: item.answer.optionId || '' }));
+  if (item.passThrough) broadcastWorkQueue(wsManager, 'item_answered', item);
   if (item.operatorAction) {
     // Claim durably before injection: a crash may lose the result, but cannot rerun the action.
     if (persist) await persistHumanWorkQueue();

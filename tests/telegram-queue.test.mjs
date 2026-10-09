@@ -12,6 +12,7 @@ const CHAT_ID = -100123;
 let queue;
 let app;
 let stateRoot;
+let deliveryGate = null;
 const commands = [];
 
 // Import the queue after choosing its hermetic on-disk store.
@@ -23,6 +24,7 @@ before(async () => {
   await app.register(queue.commandCenterAIPlugin, {
     enqueueSessionCommand: async (kind, sessionId, input) => {
       commands.push({ kind, sessionId, text: input.text });
+      await deliveryGate;
       return { ok: true };
     },
   });
@@ -101,17 +103,104 @@ describe('telegram Command Queue topic', () => {
     ]);
 
     assert.equal(await loop.handleUpdate(callback(1, `q:${item.id}:1`, 500)), true);
+    await loop.drainQueueAnswerJobs();
     await loop.queueSync;
     loop.stop();
 
     assert.equal(item.status, 'routed');
     assert.equal(item.answer.optionId, 'no');
     assert.deepEqual(commands.at(-1), { kind: 'codex', sessionId: 'sess-1', text: `Answer for Command Center queue item ${item.id}:\nHold` });
-    assert.equal(calls.find((call) => call.method === 'answerCallbackQuery').body.text, 'Answered');
-    const edit = calls.find((call) => call.method === 'editMessageText');
+    assert.equal(calls.find((call) => call.method === 'answerCallbackQuery').body.text, 'Answering…');
+    const edit = calls.filter((call) => call.method === 'editMessageText').at(-1);
     assert.equal(edit.body.message_id, 500);
     assert.match(edit.body.text, /Status: routed · Hold/);
     assert.deepEqual(edit.body.reply_markup.inline_keyboard, []);
+  });
+
+  it('keeps polling and acks later taps while a queue answer request is parked', { timeout: 2000 }, async () => {
+    const { loop, calls } = await bridge();
+    const item = await addItem();
+    const second = await addItem();
+    await loop.queueSync;
+    const request = loop.requestImpl;
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    let answerStarted;
+    const started = new Promise((resolve) => { answerStarted = resolve; });
+    loop.requestImpl = async (path, options) => {
+      assert.ok(calls.some((call) => call.method === 'answerCallbackQuery' && call.body.callback_query_id === 'cb-7'));
+      if (path.includes(item.id) && options?.method === 'POST') {
+        answerStarted();
+        await gate;
+      }
+      return request(path, options);
+    };
+    loop.sender.getUpdates = async () => [callback(7, `q:${item.id}:0`, 500), callback(8, `q:${second.id}:0`, 501)];
+    try {
+      await loop.pollOnce();
+      await started;
+      assert.equal(loop.offset, 9);
+      assert.deepEqual(calls.filter((call) => call.method === 'answerCallbackQuery').map((call) => call.body.callback_query_id), ['cb-7', 'cb-8']);
+      assert.equal(item.status, 'open');
+      // Repeated updates must not start a second answer job.
+      await loop.pollOnce();
+      assert.equal(calls.filter((call) => call.method === 'answerCallbackQuery').length, 2);
+    } finally {
+      release();
+      await loop.drainQueueAnswerJobs();
+      loop.stop();
+    }
+  });
+
+  it('removes buttons while answer delivery is still waiting for the agent', { timeout: 2000 }, async () => {
+    const { loop, calls } = await bridge();
+    const item = await addItem();
+    await loop.queueSync;
+    let release;
+    deliveryGate = new Promise((resolve) => { release = resolve; });
+    try {
+      await loop.handleUpdate(callback(10, `q:${item.id}:0`, 500));
+      while (!commands.some((command) => command.text.includes(item.id))) await new Promise((resolve) => setImmediate(resolve));
+      await loop.queueSync;
+      const edit = calls.find((call) => call.method === 'editMessageText');
+      assert.match(edit.body.text, /Status: answered · Ship it/);
+      assert.deepEqual(edit.body.reply_markup.inline_keyboard, []);
+      assert.equal(loop.queueAnswerJobs.size, 1);
+    } finally {
+      release();
+      deliveryGate = null;
+      await loop.drainQueueAnswerJobs();
+      loop.stop();
+    }
+  });
+
+  it('tells a stale tap the item was already answered', async () => {
+    const { loop, sent } = await bridge();
+    const item = await addItem();
+    await loop.queueSync;
+    await app.inject({ method: 'POST', url: `/api/command-center/work-queue/${item.id}/answer`, payload: { optionId: 'yes' } });
+    assert.equal(await loop.handleUpdate(callback(8, `q:${item.id}:0`, 500)), true);
+    await loop.drainQueueAnswerJobs();
+    assert.equal(sent().at(-1).body.text, 'Already answered');
+    assert.equal(sent().at(-1).body.message_thread_id, 77);
+    loop.stop();
+  });
+
+  it('posts a visible reply when the answer request fails', async () => {
+    const { loop, sent } = await bridge();
+    const item = await addItem();
+    await loop.queueSync;
+    const request = loop.requestImpl;
+    loop.requestImpl = async (path, options) => {
+      if (options?.method === 'POST') throw new Error('Answer unavailable; try again');
+      return request(path, options);
+    };
+    assert.equal(await loop.handleUpdate(callback(9, `q:${item.id}:0`, 500)), true);
+    await loop.drainQueueAnswerJobs();
+    assert.equal(sent().at(-1).body.text, 'Answer unavailable; try again');
+    assert.equal(sent().at(-1).body.message_thread_id, 77);
+    assert.equal(item.status, 'open');
+    loop.stop();
   });
 
   it('answers with the text of a reply to the item message', async () => {
@@ -122,6 +211,7 @@ describe('telegram Command Queue topic', () => {
       update_id: 2,
       message: { message_id: 900, message_thread_id: 77, chat: { id: CHAT_ID }, text: 'Wait for QA', reply_to_message: { message_id: 500 } },
     });
+    await loop.drainQueueAnswerJobs();
     loop.stop();
 
     assert.equal(handled, true);
@@ -143,14 +233,15 @@ describe('telegram Command Queue topic', () => {
     loop.stop();
 
     const edits = calls.filter((call) => call.method === 'editMessageText').map((call) => call.body);
-    assert.equal(edits.length, 3);
+    assert.equal(edits.length, 4);
     assert.equal(edits[0].message_id, 500);
-    assert.match(edits[0].text, /Status: routed · Ship it/);
-    assert.equal(edits[1].message_id, 501);
-    assert.match(edits[1].text, /Rebase onto main\?/);
-    assert.deepEqual(edits[1].reply_markup.inline_keyboard, []);
-    assert.match(edits[2].text, /Status: withdrawn/);
+    assert.match(edits[0].text, /Status: (answered|routed) · Ship it/);
+    assert.match(edits[1].text, /Status: routed · Ship it/);
+    assert.equal(edits[2].message_id, 501);
+    assert.match(edits[2].text, /Rebase onto main\?/);
     assert.deepEqual(edits[2].reply_markup.inline_keyboard, []);
+    assert.match(edits[3].text, /Status: withdrawn/);
+    assert.deepEqual(edits[3].reply_markup.inline_keyboard, []);
   });
 
   it('leaves operator actions to the dashboard', async () => {
@@ -162,22 +253,26 @@ describe('telegram Command Queue topic', () => {
     assert.deepEqual(post.body.reply_markup, undefined);
 
     // A forged approve callback is refused.
-    assert.equal(await loop.handleUpdate(callback(3, `q:${item.id}:0`, 500)), false);
+    assert.equal(await loop.handleUpdate(callback(3, `q:${item.id}:0`, 500)), true);
+    await loop.drainQueueAnswerJobs();
+    assert.equal(loop.status().lastIgnoredUpdate.reason, 'queue_answer_failed');
     loop.stop();
     assert.equal(item.status, 'open');
-    assert.equal(calls.find((call) => call.method === 'answerCallbackQuery').body.text, 'Options changed; answer in the dashboard');
+    assert.equal(sent().at(-1).body.text, 'Answer in the dashboard');
   });
 
   it('rejects a button tapped after the options changed', async () => {
-    const { loop, calls } = await bridge();
+    const { loop, sent } = await bridge();
     const agent = { type: 'agent', kind: 'codex', sessionId: 'sess-1' };
     const item = await addItem({}, { principal: agent });
     await queue.updateHumanQueueItem(item.id, { options: ['Hold', 'Ship it'] }, { persist: false, principal: agent });
     await loop.queueSync;
-    assert.equal(await loop.handleUpdate(callback(5, `q:${item.id}:0`, 500)), false);
+    assert.equal(await loop.handleUpdate(callback(5, `q:${item.id}:0`, 500)), true);
+    await loop.drainQueueAnswerJobs();
+    assert.equal(loop.status().lastIgnoredUpdate.reason, 'queue_answer_failed');
     loop.stop();
     assert.equal(item.status, 'open');
-    assert.equal(calls.find((call) => call.method === 'answerCallbackQuery').body.text, 'Options changed; answer in the dashboard');
+    assert.equal(sent().at(-1).body.text, 'Options changed; answer in the dashboard');
   });
 
   it('only accepts a button on the message recorded for its item', async () => {
@@ -186,7 +281,9 @@ describe('telegram Command Queue topic', () => {
     await addItem({ title: 'Second' });
     await loop.queueSync;
     // Message 501 belongs to the second item; a payload naming the first item there is refused.
-    assert.equal(await loop.handleUpdate(callback(6, `q:${first.id}:0`, 501)), false);
+    assert.equal(await loop.handleUpdate(callback(6, `q:${first.id}:0`, 501)), true);
+    await loop.drainQueueAnswerJobs();
+    assert.equal(loop.status().lastIgnoredUpdate.reason, 'queue_answer_failed');
     loop.stop();
     assert.equal(first.status, 'open');
   });
@@ -208,7 +305,7 @@ describe('telegram Command Queue topic', () => {
     await app.inject({ method: 'POST', url: `/api/command-center/work-queue/${item.id}/answer`, payload: { answer: 'y'.repeat(1000) } });
     await loop.queueSync;
     loop.stop();
-    const edit = calls.find((call) => call.method === 'editMessageText').body.text;
+    const edit = calls.filter((call) => call.method === 'editMessageText').at(-1).body.text;
     assert.ok(Array.from(edit).length <= 200);
     assert.match(edit, /Status: routed · y+…$/);
   });
