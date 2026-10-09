@@ -105,11 +105,3 @@ scope, risk, decision, attempt, turn, and interaction.
 Low-cardinality counters cover authentication accept/reject reason, issued /
 rotated / revoked credentials, and legacy-untrusted calls. Rejected calls are
 also retained in the credential audit without bearer material.
-
-## Room context output
-
-`room_context` returns one JSON payload in MCP text content, with messages and
-counts and thread identity by default. Pass `metadata=true` to include thread health, delivery health,
-and participant status; `deliveries=true` separately includes delivery records.
-Bodies default to at most 3,000 characters each. Continue longer messages with
-`message_id` and `body_offset=nextOffset`, or use `body_limit` for smaller pages.

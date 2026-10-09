@@ -157,9 +157,9 @@ test('poster summaries persist through MCP room and DM calls and compact context
   const sent = await call('room_send', { thread_id: thread.id, body, summary, type: 'result' });
   const stored = h.store.getMessage(sent.structuredContent.message_id);
   assert.equal(stored.metadata.summary, summary);
-  const compact = await call('room_context', { thread_id: thread.id, summary_only: true });
-  assert.equal(JSON.parse(compact.content[0].text).messages[0].summary, summary);
-  assert.equal(JSON.parse(compact.content[0].text).messages[0].body, undefined);
+  const compact = JSON.parse((await call('room_context', { thread_id: thread.id, summary_only: true })).content[0].text);
+  assert.equal(compact.messages[0].summary, summary);
+  assert.equal(compact.messages[0].body, undefined);
   const envelope = renderBusEnvelope(stored);
   assert.ok(envelope.includes(summary));
   assert.ok(envelope.includes(`Body length: ${body.length} characters`));

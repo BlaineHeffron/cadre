@@ -246,7 +246,7 @@ test('room context is open to nonparticipants', async () => {
   const server = buildAgentBusMcpServer({ requestImpl: async () => ({ thread: { id: 'thr_other', participants: [
     { kind: 'claude', sessionId: 'a1' }, { kind: 'pi', sessionId: 'p1' },
   ] } }) });
-  assert.equal(JSON.parse((await server.callTool('room_context', { thread_id: 'thr_other', metadata: true }, context)).content[0].text).thread.id, 'thr_other');
+  assert.equal(JSON.parse((await server.callTool('room_context', { thread_id: 'thr_other' }, context)).content[0].text).thread.id, 'thr_other');
 });
 
 test('room list pins the caller and returns only the compact participant-scoped room shape', async () => {
@@ -285,7 +285,7 @@ test('room creator can read, address, and close without being a participant', as
     if (path.includes('/threads/by-participant')) return { threads: [thread] };
     throw new Error(`Unexpected ${path}`);
   } });
-  const contextResult = await server.callTool('room_context', { thread_id: 'thr_owned', metadata: true }, owner);
+  const contextResult = await server.callTool('room_context', { thread_id: 'thr_owned' }, owner);
   assert.equal(JSON.parse(contextResult.content[0].text).thread.id, 'thr_owned');
   const sent = await server.callTool('room_send', { thread_id: 'thr_owned', body: 'status' }, owner);
   assert.equal(sent.structuredContent.message_id || 'msg_owned', 'msg_owned');
