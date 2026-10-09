@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, it } from 'node:test';
 import {
   createSessionCommandGate,
   createTmuxCommandExecutor,
 } from '../modules/session-state/command-gate.mjs';
 import { createSessionStateTracker } from '../modules/session-state/tracker.mjs';
+import { observeCodexPane } from '../modules/session-state/providers/codex.mjs';
 import { allowsActiveQueue } from '../modules/sessions/index.mjs';
 
 function immediate() {
@@ -595,6 +597,23 @@ describe('session command gate', () => {
     const result = await test.gate.ensureDialogPolicy(test.sessionId, { id: 'trust-policy' });
     assert.equal(result.handled, true);
     assert.deepEqual(statesFor(test.audit, 'trust-policy'), ['queued', 'sending', 'awaiting_response', 'completed']);
+  });
+
+  it('accepts the real Codex 0.161 folder trust dialog with Enter', async () => {
+    const test = harness();
+    const content = readFileSync(new URL('./fixtures/session-state/panes/codex-0-161-trust.pane', import.meta.url), 'utf8');
+    test.advance(1);
+    test.tracker.observe(test.sessionId, observeCodexPane(content, { observedAt: 102, expiresAt: 0 }));
+    assert.equal(test.tracker.get(test.sessionId).interaction.kind, 'trust');
+    test.setExecute(async (operation) => {
+      assert.equal(operation.interactionKind, 'trust');
+      assert.deepEqual(operation.keys, ['Enter']);
+      test.observe({ fingerprint: 'trusted-prompt' });
+    });
+
+    const result = await test.gate.ensureDialogPolicy(test.sessionId, { id: 'trust-0-161' });
+    assert.equal(result.handled, true);
+    assert.equal(test.executions.length, 1);
   });
 
   it('presses Enter for a Codex update and waits for the update prompt to clear', async () => {
