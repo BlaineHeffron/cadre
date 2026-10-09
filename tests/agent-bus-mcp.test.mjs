@@ -3,9 +3,34 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
 import { buildAgentBusMcpRequest, buildAgentBusMcpServer } from '../modules/agent-bus/mcp.mjs';
 import { AGENT_BUS_AGENT_TOOL_SCOPES } from '../modules/agent-bus/mcp-auth.mjs';
+import { buildInProcessAgentBusMcpServer } from '../modules/agent-bus/in-process-mcp.mjs';
+import { buildMonitorMcpServer } from '../modules/platform/monitor-mcp.mjs';
 
 const context = { authenticated: true, principal: { type: 'agent', kind: 'codex', sessionId: 'c1' },
   toolScopes: [...AGENT_BUS_AGENT_TOOL_SCOPES], threadAllowlist: ['@member'] };
+
+test('tools/list always-loads exactly the seven core dueno tools without reordering discovery', async () => {
+  const requestImpl = async () => { throw new Error('Discovery must not make backend requests'); };
+  const monitorMcp = buildMonitorMcpServer({ requestImpl });
+  const server = buildInProcessAgentBusMcpServer({ requestImpl, monitorMcp });
+  const expectedNames = [
+    ...buildAgentBusMcpServer({ requestImpl }).tools.map((tool) => tool.name),
+    ...monitorMcp.tools.map((tool) => tool.name),
+  ];
+  const alwaysLoadNames = ['agent_dm', 'room_send', 'room_context', 'room_list',
+    'spawn_session', 'spawn_collab_session', 'monitor_send_to_session'];
+  for (const protocolVersion of ['2025-11-25', '2026-07-28']) {
+    const listed = await server.handleRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
+      { protocolVersion, authContext: { ...context, toolScopes: ['*'] } });
+    assert.deepEqual(listed.result.tools.map((tool) => tool.name), expectedNames);
+    assert.deepEqual(listed.result.tools.filter((tool) => tool._meta).map((tool) => tool.name).sort(),
+      [...alwaysLoadNames].sort());
+    for (const tool of listed.result.tools) {
+      assert.deepEqual(tool._meta, alwaysLoadNames.includes(tool.name)
+        ? { 'anthropic/alwaysLoad': true } : undefined);
+    }
+  }
+});
 
 test('MCP exposes the clean room/DM/directory surface and no old bus or manager-loop aliases', async () => {
   const server = buildAgentBusMcpServer({ requestImpl: async () => ({ sessions: [] }) });
