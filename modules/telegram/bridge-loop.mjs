@@ -181,6 +181,7 @@ export class TelegramBridgeLoop {
     this.running = false;
     this.timer = null;
     this.ttsJobs = new Set();
+    this.queueAnswerJobs = new Set();
     this.lastPollAt = null;
     this.lastError = null;
     this.lastErrorAt = null;
@@ -517,30 +518,43 @@ export class TelegramBridgeLoop {
 
   // Answers go through the same HTTP route as the dashboard, so routing and operator-action auth are unchanged.
   async handleQueueAnswer({ updateId, processed, message, callback = null, itemId, optionIndex, text }) {
-    let note = 'Answered';
-    try {
-      const queue = await this.requestImpl('/api/command-center/work-queue?status=all');
-      const item = queue?.items?.find((entry) => entry.id === itemId);
-      const option = callback ? item?.options?.[optionIndex] : null;
-      if (!item) throw new Error('Queue item not found');
-      if (callback && !queueButtonsLive(item)) throw new Error('Options changed; answer in the dashboard');
-      if (callback ? !option : !item.allowFreeform || !text) throw new Error('Choose one of the options');
-      await this.requestImpl(`/api/command-center/work-queue/${encodeURIComponent(itemId)}/answer`, {
-        method: 'POST',
-        body: option ? { optionId: option.id } : { answer: text },
-      });
-    } catch (error) {
-      note = error.message || String(error);
-      this.logger?.warn?.(`telegram queue answer failed for ${itemId}: ${note}`);
-    }
-    processed[String(updateId)] = { update_id: updateId, message_id: message.message_id, queue_item_id: itemId, ts: this.now() / 1000 };
-    await writeJsonAtomic(this.processedPath(), processed);
     if (callback?.id) {
-      await this.sender.answerCallbackQuery(callback.id, note).catch((error) => {
+      await this.sender.answerCallbackQuery(callback.id, 'Answering…').catch((error) => {
         this.logger?.warn?.(`telegram callback ack failed: ${error.message || error}`);
       });
     }
-    return note === 'Answered' || this.ignoreUpdate(updateId, 'queue_answer_failed', { itemId, error: note });
+    processed[String(updateId)] = { update_id: updateId, message_id: message.message_id, queue_item_id: itemId, ts: this.now() / 1000 };
+    await writeJsonAtomic(this.processedPath(), processed);
+    // Delivery can wait for a busy agent indefinitely; it must not hold up getUpdates.
+    const job = (async () => {
+      try {
+        const queue = await this.requestImpl('/api/command-center/work-queue?status=all');
+        const item = queue?.items?.find((entry) => entry.id === itemId);
+        const option = callback ? item?.options?.[optionIndex] : null;
+        if (!item) throw new Error('Queue item not found');
+        if (item.status !== 'open') throw new Error(item.answer ? 'Already answered' : `Status: ${item.status}`);
+        if (callback && !queueButtonsLive(item)) throw new Error(item.operatorAction ? 'Answer in the dashboard' : 'Options changed; answer in the dashboard');
+        if (callback ? !option : !item.allowFreeform || !text) throw new Error('Choose one of the options');
+        await this.requestImpl(`/api/command-center/work-queue/${encodeURIComponent(itemId)}/answer`, {
+          method: 'POST',
+          body: option ? { optionId: option.id } : { answer: text },
+        });
+      } catch (error) {
+        const note = error.message || String(error);
+        this.logger?.warn?.(`telegram queue answer failed for ${itemId}: ${note}`);
+        this.ignoreUpdate(updateId, 'queue_answer_failed', { itemId, error: note });
+        await this.sender.sendMessage(clip(note, 300), { threadId: message.message_thread_id }).catch((error) => {
+          this.logger?.warn?.(`telegram queue reply failed: ${error.message || error}`);
+        });
+      }
+    })();
+    this.queueAnswerJobs.add(job);
+    job.finally(() => this.queueAnswerJobs.delete(job));
+    return true;
+  }
+
+  async drainQueueAnswerJobs() {
+    while (this.queueAnswerJobs.size) await Promise.allSettled([...this.queueAnswerJobs]);
   }
 
   // Never blocks or fails the queue operation: Telegram errors are logged after the sender's retries.
