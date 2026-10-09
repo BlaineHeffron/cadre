@@ -64,7 +64,10 @@ export async function createManagedWorktree({ repo, branch, base, roomId, baseDi
     if (config.setup) {
       const setup = await exec('timeout', ['-k', '5s', `${setupTimeoutMs / 1000}s`, 'bash', '-c', config.setup], { cwd: path, timeout: setupTimeoutMs + 10000,
         env: { CADRE_WORKTREE_PATH: path, CADRE_REPO_ROOT: repo } });
-      if (setup.code !== 0) throw new Error('worktree setup failed');
+      if (setup.code !== 0) {
+        const reason = setup.code === 124 ? `timed out after ${setupTimeoutMs / 1000}s` : `exited ${setup.code}`;
+        throw new Error(`worktree setup failed: ${reason}${setup.stderr.trim() ? `: ${setup.stderr.trim().slice(-500)}` : ''}`);
+      }
     }
     metadata.ignoredBaseline = await ignored(path);
     await writeFile(await markerPath(path), JSON.stringify(metadata));

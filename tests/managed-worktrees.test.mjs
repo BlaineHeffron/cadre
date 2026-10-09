@@ -395,7 +395,7 @@ test('setup timeout terminates child writers before rollback', async (t) => {
   const f = await fixture(t);
   const escaped = resolve(f.root, 'late-write');
   await pushConfig(f, JSON.stringify({ setup: `(sleep 0.4; touch '${escaped}') & wait` }));
-  await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'timeout', base: 'origin/main', roomId: 'thr_timeout', baseDir: f.options.baseDir, setupTimeoutMs: 50 }), /setup failed/);
+  await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'timeout', base: 'origin/main', roomId: 'thr_timeout', baseDir: f.options.baseDir, setupTimeoutMs: 50 }), /worktree setup failed: timed out after 0.05s/);
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.equal(await exists(escaped), false);
   assert.equal(await exists(resolve(f.options.baseDir, 'thr_timeout/repo')), false);
@@ -466,9 +466,9 @@ test('managed attach from repo subdirectory is rejected before worktree creation
 
 test('setup failure preserves original error when rollback branch CAS refuses', async (t) => {
   const f = await fixture(t);
-  await pushConfig(f, JSON.stringify({ setup: 'echo setup-change >> file; git commit -am setup-change; exit 1' }));
+  await pushConfig(f, JSON.stringify({ setup: 'echo setup-change >> file; git commit -qam setup-change; echo boom >&2; exit 1' }));
   await assert.rejects(createManagedWorktree({ repo: f.repo, branch: 'setup-commit', roomId: 'thr_setup_commit', baseDir: f.options.baseDir }), (error) => {
-    assert.equal(error.message, 'worktree setup failed'); assert.equal(error.rollbackError, 'git update-ref failed'); return true;
+    assert.equal(error.message, 'worktree setup failed: exited 1: boom'); assert.equal(error.rollbackError, 'git update-ref failed'); return true;
   });
   assert.equal(await exists(resolve(f.options.baseDir, 'thr_setup_commit/repo')), false);
   assert.notEqual(await git(f.repo, 'rev-parse', 'setup-commit'), f.metadata.baseHead);
