@@ -1,17 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { recordHookPayload, registerHookSessionRegistry } from '../modules/agent/hook-events.mjs';
 import { spawnerMetadata } from '../modules/agent-bus/coordinator-policy.mjs';
+import { buildSessionDeliveryAuditStore } from '../modules/sessions/delivery-audit.mjs';
 import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
 
 const spawner = { kind: 'codex', sessionId: 'codex-1' };
 const settle = async (done) => { for (let i = 0; i < 200 && !done(); i++) await delay(20); return done(); };
 
-async function setup(t, metadata, stateDir = null) {
-  const h = await createAgentBusHarness({ pollMs: 20, stateDir });
+async function setup(t, metadata, stateDir = null, sessionDeliveryAuditStore = null) {
+  const h = await createAgentBusHarness({ pollMs: 20, stateDir, sessionDeliveryAuditStore });
   // Hook files live under the nearest git root, so pin it to this test's directory.
   await mkdir(join(h.stateDir, '.git'), { recursive: true });
   h.sessionCatalog.claude.add('claude-2');
@@ -147,6 +149,56 @@ test('a restart does not return an earlier waiting Stop after the worker result 
   await second.turn('Coordinator finished after restart');
   assert.ok(await settle(() => second.delivered('Coordinator finished after restart') === 1));
   assert.deepEqual(second.results().map((message) => message.body), ['Worker finished', 'Coordinator finished after restart']);
+});
+
+test('a coordinator waits for a follow-up its worker has not started, but not for a failed one', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-bus-audit-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const audit = buildSessionDeliveryAuditStore({ storeFile: join(dir, 'audit.json') });
+  const { h, hook, turn, results, delivered, sessions } = await setup(t, { spawnedBy: spawner }, null, audit);
+  h.sessionCatalog.claude.add('worker');
+  sessions.set('worker', { workDir: h.stateDir, metadata: { spawnedBy: { kind: 'claude', sessionId: 'claude-2' } } });
+  const send = (transactionId, status) => audit.record({ source: 'monitor_send_to_session', kind: 'claude',
+    sessionId: 'worker', text: 'Follow up', enter: true, status, metadata: { transactionId, operation: 'message' } });
+  await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' }, 'worker');
+  await hook({ hook_event_name: 'Stop', last_assistant_message: 'Worker answer 1' }, 'worker');
+  assert.ok(await settle(() => results().some((message) => message.body === 'Worker answer 1')));
+  for (const status of ['queued', 'sent']) {
+    await send('tx-1', status);
+    await turn(`Waiting on ${status} follow-up`);
+    await delay(150);
+    assert.equal(delivered(`Waiting on ${status} follow-up`), 0);
+  }
+  await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'Follow up' }, 'worker');
+  await hook({ hook_event_name: 'Stop', last_assistant_message: 'Worker answer 2' }, 'worker');
+  assert.ok(await settle(() => results().some((message) => message.body === 'Worker answer 2')));
+  await turn('Coordinator answer');
+  assert.ok(await settle(() => delivered('Coordinator answer') === 1));
+  await send('tx-2', 'queued');
+  await send('tx-2', 'failed');
+  await turn('Coordinator after failed follow-up');
+  assert.ok(await settle(() => delivered('Coordinator after failed follow-up') === 1));
+  assert.equal(delivered('Waiting on'), 0);
+});
+
+test('a stale sent follow-up does not hold the coordinator result', async (t) => {
+  const createdAt = new Date(Date.now() - 3 * 60_000).toISOString();
+  const entries = [{ id: 'sdel_stale', source: 'monitor_send_to_session', target: { kind: 'claude', sessionId: 'worker' },
+    status: 'sent', enter: true, createdAt, completedAt: createdAt, metadata: { transactionId: 'tx-lost', operation: 'message' } }];
+  const audit = buildSessionDeliveryAuditStore({ stateStore: { load: async () => ({ entries }), save: async () => {} } });
+  await audit.init();
+  const { h, hook, turn, delivered, sessions } = await setup(t, { spawnedBy: spawner }, null, audit);
+  h.sessionCatalog.claude.add('worker');
+  sessions.set('worker', { workDir: h.stateDir, metadata: { spawnedBy: { kind: 'claude', sessionId: 'claude-2' } } });
+  // The worker finished its last turn before the follow-up was sent, and never started the follow-up.
+  const finishedAt = Date.now() - 4 * 60_000;
+  t.mock.method(Date, 'now', () => finishedAt);
+  try {
+    await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' }, 'worker');
+    await hook({ hook_event_name: 'Stop', last_assistant_message: '' }, 'worker');
+  } finally { Date.now.mock.restore(); }
+  await turn('Coordinator after lost follow-up');
+  assert.ok(await settle(() => delivered('Coordinator after lost follow-up') === 1));
 });
 
 test('a worker that finishes with an empty answer does not hold the coordinator result', async (t) => {

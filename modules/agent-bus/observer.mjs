@@ -5,6 +5,8 @@ import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { shouldSuppressSideEffectLoops } from '../platform/side-effect-loops.mjs';
 
 const RECOVERY_GRACE_MS = 2000;
+// A worker submits a follow-up it was sent well within this; lost keystrokes stop holding results after it.
+const FOLLOW_UP_START_MS = 2 * 60_000;
 
 function terminalLookupError(err = {}) {
   const status = Number(err.statusCode || err.payload?.statusCode || 0);
@@ -15,7 +17,7 @@ function terminalLookupError(err = {}) {
 export function createAgentBusObserver({ app, store, adapters, wsManager, observedSessions, deliveryInFlight,
   observerInFlightByRef, observerIntervalMs, observerSessionTimeoutMs, broadcast, broadcastAlert,
   broadcastThreadSnapshot, broadcastThreadSummary, threadSnapshot, enrichThread, normalizeThreadSummary,
-  pruneObservedParticipant, deliverMessage, failDelivery, hookEventsRetentionDays = 7 }) {
+  pruneObservedParticipant, deliverMessage, failDelivery, hookEventsRetentionDays = 7, sessionDeliveryAuditStore = null }) {
   const hookRetention = createHookEventRetention({
     retentionDays: hookEventsRetentionDays,
     store: buildPostgresJsonStore({ namespace: 'hook_event_roots', filePath: runtimeStatePath('hook_event_roots.json') }),
@@ -108,6 +110,20 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
           if (prompt < 0 || stop < prompt || (Array.isArray(background) && background.length)) {
             outstanding = true; break;
           }
+          // A follow-up message to the child holds the result until the child starts it. Audit records are
+          // newest first per transition; failed or dropped (including expired) sends release the hold.
+          const audit = (sessionDeliveryAuditStore?.listAll({ kind: child.provider, sessionId: child.id }) || [])
+            .filter((entry) => entry.metadata?.operation === 'message' && entry.metadata.transactionId
+              && Date.parse(entry.createdAt) <= at);
+          const after = (since, name) => history.some((item) => item.eventName === name && Date.parse(item.loggedAt) >= since);
+          outstanding = [...new Set(audit.map((entry) => entry.metadata.transactionId))].some((transactionId) => {
+            const records = audit.filter((entry) => entry.metadata.transactionId === transactionId);
+            const latest = records[0];
+            if (['failed', 'dropped'].includes(latest.status) || after(Date.parse(records.at(-1).createdAt), 'UserPromptSubmit')) return false;
+            const sentAt = Date.parse(latest.createdAt);
+            return latest.status !== 'sent' || (at - sentAt < FOLLOW_UP_START_MS && !after(sentAt, 'Stop'));
+          });
+          if (outstanding) break;
         }
         if (outstanding) continue;
         const waitingRoom = store.listThreads({ status: 'open' }).some((thread) => {
