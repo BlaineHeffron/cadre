@@ -196,6 +196,20 @@ html, body {
   z-index: 120;
 }
 
+.nav-more-popover .nav-bell-btn {
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.nav-more-popover .nav-bell-popover {
+  position: static;
+  width: auto;
+  max-height: 240px;
+  box-shadow: none;
+}
+
 .nav-bell-empty {
   padding: 12px 14px;
   color: var(--text-muted);
@@ -2977,7 +2991,7 @@ body:has(.tmux-pane-page) {
   }
 
   .nav-link {
-    min-height: 36px;
+    min-height: 44px;
     padding: 6px 10px;
     font-size: 12px;
     white-space: nowrap;
@@ -2998,6 +3012,10 @@ body:has(.tmux-pane-page) {
 
   .nav-link-mobile-default .nav-link-badge {
     display: none;
+  }
+
+  .nav-more-item {
+    min-height: 44px;
   }
 
   .nav-more-btn {
