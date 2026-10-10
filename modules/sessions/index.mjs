@@ -9,7 +9,6 @@ import { normalizeProviderPane } from '../session-state/providers/pane-view.mjs'
 import { assertValidCodexModel } from './codex-models.mjs';
 import { assertValidClaudeModel, normalizeClaudeProvider } from './claude-models.mjs';
 import { sendTmuxText, sleep } from '../platform/tmux-input.mjs';
-import { closeStaleSessionQueueItems } from '../integrations/command-center-ai.mjs';
 import { notifyPush } from '../platform/push.mjs';
 import { saveImageToWorkspace, buildAgentImagePrompt, buildImageAttachmentResult } from './image-handoff.mjs';
 import { AttachmentStore } from '../agent/attachment-store.mjs';
@@ -2129,6 +2128,7 @@ function queueSessionCreateAudit({ req, body, outcome, code, detail = '', sessio
 async function sessionsPlugin(app, {
   wsManager, sessionDeliveryAuditStore = null, credentialStore = null, attachmentStore = null,
 }) {
+  const { closeStaleSessionQueueItems } = await import('../integrations/command-center-ai.mjs');
   agentBusCredentialStore = credentialStore;
   const fleetAttachmentStore = attachmentStore || new AttachmentStore({
     rootDir: runtimeStatePath(`${config.id}_attachments`),

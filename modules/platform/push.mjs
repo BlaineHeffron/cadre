@@ -1,5 +1,4 @@
 import webpush from 'web-push';
-import { addHumanQueueItem, onHumanQueueChange } from '../integrations/command-center-ai.mjs';
 import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { readEnv } from './cadre-env.mjs';
@@ -14,6 +13,7 @@ let notifier = null;
 export const notifyPush = async (provider, alert, { wsManager } = {}) => {
   const interaction = alert.interaction;
   if (notifier && interaction?.fingerprint && ['permission', 'confirmation', 'selection'].includes(interaction.kind)) {
+    const { addHumanQueueItem } = await import('../integrations/command-center-ai.mjs');
     await addHumanQueueItem({
       title: `${provider.displayName}: ${alert.sessionName}`,
       question: interaction.detail || alert.reason || 'Decision needed',
@@ -79,6 +79,7 @@ export async function pushPlugin(app, {
     }
   };
 
+  const { onHumanQueueChange } = await import('../integrations/command-center-ai.mjs');
   const queueNotify = notifier;
   const unwatchQueue = onHumanQueueChange((item, type) => {
     if (type !== 'item_created') return;
