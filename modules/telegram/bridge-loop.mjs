@@ -249,7 +249,7 @@ export class TelegramBridgeLoop {
   start() {
     if (this.running) return false;
     this.running = true;
-    this.unwatchQueue = this.watchQueue?.((item) => this.queueChanged(item)) || null;
+    this.unwatchQueue = this.watchQueue?.((item) => { if (!item.sessionInteraction) this.queueChanged(item); }) || null;
     this.loadOffset()
       .catch((error) => {
         this.lastError = error.message || String(error);

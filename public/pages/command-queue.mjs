@@ -1,7 +1,7 @@
 import { h } from 'preact';
 import { html } from 'htm/preact';
 import { signal } from '@preact/signals';
-import { useEffect, useMemo } from 'preact/hooks';
+import { useEffect, useMemo, useRef } from 'preact/hooks';
 import { route } from 'preact-router';
 import { api } from '../app/api.mjs';
 import { subscribe } from '../app/ws-client.mjs';
@@ -45,11 +45,12 @@ function deliveryNote(item = {}) {
   return '';
 }
 
-export function CommandQueuePage() {
+export function CommandQueuePage({ item: selectedItem } = {}) {
+  const scrolledItem = useRef(null);
   const loading = useMemo(() => signal(false), []);
   const loadError = useMemo(() => signal(''), []);
   const queue = useMemo(() => signal({ items: [], openCount: 0 }), []);
-  const statusFilter = useMemo(() => signal('open'), []);
+  const statusFilter = useMemo(() => signal(selectedItem ? 'all' : 'open'), []);
 
   async function loadQueue() {
     loading.value = true;
@@ -106,6 +107,14 @@ export function CommandQueuePage() {
     });
   }, []);
 
+  useEffect(() => {
+    const element = selectedItem && document.getElementById(selectedItem);
+    if (element && scrolledItem.current !== selectedItem) {
+      element.scrollIntoView({ block: 'center' });
+      scrolledItem.current = selectedItem;
+    }
+  }, [selectedItem, queue.value]);
+
   const items = queueItems(queue.value, statusFilter.value);
 
   return html`
@@ -152,7 +161,7 @@ export function CommandQueuePage() {
                 ${items.map((item) => {
                   const routePath = sessionRoute(item);
                   return html`
-                    <div class="dashboard-action-row">
+                    <div class="dashboard-action-row" id=${item.id} style=${item.id === selectedItem ? 'outline:2px solid var(--accent)' : undefined}>
                       <div>
                         <div class="dashboard-action-title">
                           <span class="badge badge-${statusBadgeClass(item.status)}">${item.status}</span>

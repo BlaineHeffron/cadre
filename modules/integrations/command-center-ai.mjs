@@ -335,11 +335,16 @@ export function onHumanQueueChange(listener) {
 
 function broadcastWorkQueue(wsManager, type, item) {
   wsManager?.broadcast?.('command-center:work-queue', type, serializeWorkQueueSync({ status: 'all' }));
-  for (const listener of workQueueListeners) listener(item);
+  for (const listener of workQueueListeners) listener(item, type);
 }
 
-export async function addHumanQueueItem(input = {}, { wsManager, persist = true, principal } = {}) {
+export async function addHumanQueueItem(input = {}, { wsManager, persist = true, principal, sessionInteraction } = {}) {
   await ensureHumanWorkQueueLoaded();
+  if (sessionInteraction) {
+    const existing = humanWorkQueue.find((item) => item.status === 'open' && item.sessionKind === input.sessionKind && item.sessionId === input.sessionId
+      && item.sessionInteraction?.fingerprint === sessionInteraction.fingerprint);
+    if (existing) return existing;
+  }
   const operatorAction = input.operatorAction === undefined ? null : validateOperatorAction(input.operatorAction);
   if (operatorAction && (principal?.type !== 'agent' || !['claude', 'codex', 'pi'].includes(principal?.kind) || !principal?.sessionId)) {
     const error = new Error('Operator actions require an authenticated requesting session');
@@ -386,6 +391,7 @@ export async function addHumanQueueItem(input = {}, { wsManager, persist = true,
     createdAt: now,
     updatedAt: now,
     answer: null,
+    ...(sessionInteraction ? { sessionInteraction: { kind: sessionInteraction.kind, fingerprint: sessionInteraction.fingerprint } } : {}),
   };
   humanWorkQueue.unshift(item);
   if (humanWorkQueue.length > 200) humanWorkQueue.length = 200;
@@ -401,12 +407,12 @@ async function maybeRouteQueueAnswer(item, answerText, { sendSessionInput } = {}
   if (!['claude', 'codex', 'pi'].includes(kind) || !sessionId || typeof sendSessionInput !== 'function') {
     return { mode: 'pass_through', routed: false, error: 'missing_target_session' };
   }
-  const text = item.operatorAction ? answerText : [
+  const text = item.operatorAction || item.sessionInteraction ? answerText : [
     `Answer for Command Center queue item ${item.id}:`,
     answerText,
   ].join('\n');
   try {
-    const result = await sendSessionInput({ kind, sessionId, text });
+    const result = await sendSessionInput({ kind, sessionId, text, ...(item.sessionInteraction ? { interaction: item.sessionInteraction, optionId: item.answer?.optionId } : {}) });
     return { mode: 'pass_through', routed: true, kind, sessionId, result: result || null };
   } catch (err) {
     return { mode: 'pass_through', routed: false, kind, sessionId, error: err.message || 'route_failed' };
@@ -428,8 +434,8 @@ export async function answerHumanQueueItem(id, input = {}, {
     error.statusCode = 404;
     throw error;
   }
-  if (item.operatorAction && principal?.type !== 'ui') {
-    const error = new Error('Operator action answers require an authenticated operator');
+  if ((item.operatorAction || item.sessionInteraction) && principal?.type !== 'ui') {
+    const error = new Error(`${item.operatorAction ? 'Operator action' : 'Session interaction'} answers require an authenticated operator`);
     error.statusCode = 403;
     throw error;
   }
@@ -519,6 +525,16 @@ export async function answerHumanQueueItem(id, input = {}, {
   return item;
 }
 
+export async function closeStaleSessionQueueItems(kind, sessionId, fingerprint, { wsManager } = {}) {
+  await ensureHumanWorkQueueLoaded();
+  for (const item of humanWorkQueue) {
+    if (item.status === 'open' && item.sessionKind === kind && item.sessionId === sessionId
+      && item.sessionInteraction && item.sessionInteraction.fingerprint !== fingerprint) {
+      await dismissHumanQueueItem(item.id, { wsManager });
+    }
+  }
+}
+
 export async function acknowledgeHumanQueueItem(id, input = {}, { wsManager, persist = true } = {}) {
   await ensureHumanWorkQueueLoaded();
   const item = humanWorkQueue.find((entry) => entry.id === id);
@@ -604,7 +620,7 @@ export async function dismissHumanQueueItem(id, { wsManager, sendSessionInput, p
   if (['dismissed', 'withdrawn'].includes(item.status)) return item;
   const withdrawn = isQueueRequester(item, principal);
   // An open pass-through item has a session waiting on it; tell it there is no answer coming.
-  if (item.status === 'open' && item.passThrough && !withdrawn) {
+  if (item.status === 'open' && item.passThrough && !withdrawn && !item.sessionInteraction) {
     await maybeRouteQueueAnswer(item, 'Dismissed by the operator without an answer.', { sendSessionInput });
   }
   if (!Array.isArray(item.events)) item.events = [];
@@ -809,14 +825,17 @@ export async function commandCenterAIPlugin(app, {
   wsManager,
   enqueueSessionCommand = enqueueAgentSessionCommand,
 } = {}) {
-  async function sendSessionInput({ kind, sessionId, text }) {
+  async function sendSessionInput({ kind, sessionId, text, interaction, optionId }) {
     const normalizedKind = String(kind || '').trim().toLowerCase();
     if (!['claude', 'codex', 'pi'].includes(normalizedKind)) throw new Error('sessionKind must be claude, codex, or pi');
     return enqueueSessionCommand(normalizedKind, sessionId, {
       source: 'command_center_queue_answer',
-      operation: 'message',
-      text,
-      enter: true,
+      operation: interaction ? 'interaction' : 'message',
+      ...(interaction && optionId ? {
+        keys: interaction.kind === 'selection' && /^\d+$/.test(text)
+          ? [...Array(Math.min(100, Math.max(0, Number(text) - 1))).fill('Down'), 'Enter'] : [text],
+      } : { text, enter: true }),
+      ...(interaction ? { expectedFingerprint: interaction.fingerprint, expectedInteractionKind: interaction.kind } : {}),
     });
   }
 

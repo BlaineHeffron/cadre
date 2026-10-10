@@ -10,12 +10,27 @@ const PUSH_SERVICE_HOST = /^(fcm\.googleapis\.com|jmt17\.google\.com)$|(^|\.)(pu
 
 // Set by pushPlugin; session alert broadcasts call notifyPush after their 30s throttle.
 let notifier = null;
-export const notifyPush = (provider, alert) => notifier?.({
+export const notifyPush = async (provider, alert, { wsManager } = {}) => {
+  const interaction = alert.interaction;
+  if (notifier && interaction?.fingerprint && ['permission', 'confirmation', 'selection'].includes(interaction.kind)) {
+    const { addHumanQueueItem } = await import('../integrations/command-center-ai.mjs');
+    await addHumanQueueItem({
+      title: `${provider.displayName}: ${alert.sessionName}`,
+      question: interaction.detail || alert.reason || 'Decision needed',
+      source: 'session_interaction', sessionKind: provider.id, sessionId: alert.sessionId, passThrough: true,
+      options: (interaction.options || []).filter((option) => option.key != null || option.index != null).map((option) => ({
+        id: String(option.key ?? option.index), label: option.label, value: String(option.key ?? option.index),
+      })),
+    }, { sessionInteraction: interaction, wsManager });
+    return;
+  }
+  return notifier?.({
   title: `${provider.displayName}: ${alert.sessionName}`,
   body: alert.interaction?.detail || alert.reason || 'Waiting for your next prompt',
   url: alert.route,
   tag: `${provider.id}-${alert.sessionId}`, // same tag as the in-app alert, so they replace each other
 }, alert.status === 'blocked', `${provider.id}:${alert.sessionId}`); // client sessionMuteKey
+};
 
 const sendWebPush = (subscription, payload, vapidDetails) =>
   webpush.sendNotification(subscription, payload, { vapidDetails, TTL: 3600, timeout: 10000 });
@@ -63,6 +78,22 @@ export async function pushPlugin(app, {
       app.log.warn({ err: err?.message }, 'Web push notify failed');
     }
   };
+
+  // Lazy: command-center-ai resolves its state directory at import time.
+  const { onHumanQueueChange } = await import('../integrations/command-center-ai.mjs');
+  const queueNotify = notifier;
+  const unwatchQueue = onHumanQueueChange((item, type) => {
+    if (type !== 'item_created') return;
+    void queueNotify?.({
+      title: item.title,
+      body: item.question,
+      url: `/queue?item=${encodeURIComponent(item.id)}`,
+      tag: item.id,
+      queueItemId: item.id,
+      actions: item.options.slice(0, 2).map((option) => ({ action: option.id, title: option.label })),
+    }, true, `${item.sessionKind}:${item.sessionId}`);
+  });
+  app.addHook('onClose', async () => unwatchQueue());
 
   app.get('/api/push/key', async () => ({ publicKey: vapid.publicKey }));
 
