@@ -52,7 +52,7 @@ export function detectCodexTrust(content) {
   const options = parseNumberedOptions(lines);
   const selected = options.find((option) => option.selected);
   const affirmative = options.find((option) => option.index === 1 && /\b(?:yes|trust|continue)\b/i.test(option.label));
-  const negative = options.find((option) => option.index === 2 && /\b(?:no|exit|cancel|back)\b/i.test(option.label));
+  const negative = options.find((option) => option.index === 2 && /\b(?:no|exit|cancel|back|quit)\b/i.test(option.label));
   if (selected?.index !== 1 || !affirmative || !negative) return null;
   return {
     kind: 'trust',

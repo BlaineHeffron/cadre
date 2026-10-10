@@ -599,9 +599,9 @@ describe('session command gate', () => {
     assert.deepEqual(statesFor(test.audit, 'trust-policy'), ['queued', 'sending', 'awaiting_response', 'completed']);
   });
 
-  it('accepts the real Codex 0.161 folder trust dialog with Enter', async () => {
+  for (const pane of ['codex-0-161-trust', 'codex-0-161-trust-quit']) it(`accepts the real Codex 0.161 folder trust dialog with Enter (${pane})`, async () => {
     const test = harness();
-    const content = readFileSync(new URL('./fixtures/session-state/panes/codex-0-161-trust.pane', import.meta.url), 'utf8');
+    const content = readFileSync(new URL(`./fixtures/session-state/panes/${pane}.pane`, import.meta.url), 'utf8');
     test.advance(1);
     test.tracker.observe(test.sessionId, observeCodexPane(content, { observedAt: 102, expiresAt: 0 }));
     assert.equal(test.tracker.get(test.sessionId).interaction.kind, 'trust');
