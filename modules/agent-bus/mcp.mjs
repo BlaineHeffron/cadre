@@ -38,15 +38,6 @@ const DEFAULT_CONTEXT_MESSAGE_LIMIT = 8;
 const DEFAULT_CONTEXT_BODY_CHARS = 3000;
 const MCP_ID_MAX = 240;
 const MCP_BODY_MAX = 200000;
-const ALWAYS_LOAD_TOOLS = new Set([
-  'agent_dm',
-  'room_send',
-  'room_context',
-  'room_list',
-  'spawn_session',
-  'spawn_collab_session',
-  'monitor_send_to_session',
-]);
 const AGENT_PERMISSION_AUTHORITY_TOOLS = new Set([
   'monitor_answer_human_queue_item',
   'monitor_send_to_session',
@@ -545,9 +536,7 @@ export function buildAgentBusMcpServer({
       tools.push({ name: t.name, description: t.description, inputSchema: t.inputSchema });
     }
   }
-  const exposedTools = tools.map((tool) => ALWAYS_LOAD_TOOLS.has(tool.name)
-    ? { ...tool, _meta: { 'anthropic/alwaysLoad': true } }
-    : tool);
+  const exposedTools = tools;
   const validateArguments = compileToolArguments(tools);
 
   const prompts = [
