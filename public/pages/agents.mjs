@@ -17,6 +17,7 @@ import {
   deepseekSessions,
   piSessions,
   removeSessionForKind,
+  sessionDisplayStatus,
   wsConnected,
 } from '../app/state.mjs';
 import { SessionCard } from '../components/session-card.mjs';
@@ -58,7 +59,8 @@ const SOL_REASONING_LEVELS = Object.freeze([
 ]);
 const STATE_FILTERS = [
   { id: 'needs-approval', label: 'Needs approval' },
-  { id: 'prompt-ready', label: 'Prompt ready' },
+  { id: 'prompt-ready', label: 'Idle' },
+  { id: 'done', label: 'Done' },
   { id: 'working', label: 'Working' },
   { id: 'ended', label: 'Ended' },
 ];
@@ -145,7 +147,8 @@ function sessionSearchHaystack(session = {}) {
 }
 
 function sessionStateFilter(session = {}) {
-  const status = session.state?.status;
+  const status = sessionDisplayStatus(session._kind, session);
+  if (status === 'done') return 'done';
   if (status === 'ended') return 'ended';
   if (status === 'blocked') return 'needs-approval';
   if (status === 'ready') return 'prompt-ready';
@@ -165,7 +168,7 @@ function railProjectLabel(workDir = '') {
 // come from the platform. The bulk-select checkbox stays outside it: a button
 // must not contain another interactive control.
 function AgentRailRow({ session, active, selected, onSelect, onToggleSelected, onStartLoop }) {
-  const status = session.state?.status || 'unknown';
+  const status = sessionDisplayStatus(session._kind, session);
   const rustManaged = session.readOnly === true && session.externalOwner === 'rust-monitor';
   const mutable = !rustManaged;
   const title = previewTitle(session);
@@ -181,6 +184,7 @@ function AgentRailRow({ session, active, selected, onSelect, onToggleSelected, o
         onclick=${() => onSelect(session)}>
         <span class="agent-rail-row-topline">
           <span class="agent-rail-row-title">${title}</span>
+          ${status === 'done' ? html`<span class="badge badge-info">Done</span>` : null}
         </span>
         <span class="agent-rail-row-meta">
           <span>${providerLabel(session._provider)}</span>

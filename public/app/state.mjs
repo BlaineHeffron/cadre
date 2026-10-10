@@ -57,6 +57,31 @@ export const seenCodexPromptNotificationKeys = signal(loadSeen(CODEX_ATTENTION_S
 export const seenPiPromptNotificationKeys = signal(loadSeen('dueno_seen_pi_prompt_notifications'));
 export const seenDeepseekPromptNotificationKeys = signal(loadSeen('dueno_seen_deepseek_prompt_notifications'));
 
+// Last completed turn viewed on this device, independent of server state.
+const DONE_SEEN_KEY = 'dueno_seen_completed_turns';
+export const seenCompletedTurns = signal({});
+try { seenCompletedTurns.value = JSON.parse(localStorage.getItem(DONE_SEEN_KEY) || '{}') || {}; } catch { /* Device storage may be unavailable. */ }
+
+export function sessionDisplayStatus(kind, session) {
+  const state = session?.state;
+  if (state?.status !== 'ready' || !state.completedTurnAt) return state?.status || 'unknown';
+  return state.completedTurnAt > (seenCompletedTurns.value[`${kind}:${session.id}`] || 0) ? 'done' : 'ready';
+}
+
+export function markSessionTurnSeen(kind, session) {
+  const turn = session?.state?.completedTurnAt;
+  if (!turn) return;
+  const key = `${kind}:${session.id}`;
+  if (turn <= (seenCompletedTurns.value[key] || 0)) return;
+  seenCompletedTurns.value = { ...seenCompletedTurns.value, [key]: turn };
+  try { localStorage.setItem(DONE_SEEN_KEY, JSON.stringify(seenCompletedTurns.value)); } catch { /* Device storage may be unavailable. */ }
+}
+
+export const unseenDoneCount = computed(() =>
+  ['claude', 'codex', 'pi', 'deepseek'].reduce((count, kind) => count
+    + sessionStoreForKind(kind).value.filter((session) => sessionDisplayStatus(kind, session) === 'done').length, 0)
+);
+
 function isSeenWaitingPrompt(session, seenStore) {
   return session?.state?.status === 'ready'
     && session?.attention?.active

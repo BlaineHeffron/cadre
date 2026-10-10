@@ -3,12 +3,13 @@ import { html } from 'htm/preact';
 import { route } from 'preact-router';
 import { copyText, linkedThreadsForSession, sessionTitle, shortThreadId } from '../app/agent-bus-ui.mjs';
 import { providerDescriptor } from '../app/providers.mjs';
-import { addToast, agentThreads, seenSessionStoreForKind, hasSeenPromptNotification } from '../app/state.mjs';
+import { addToast, agentThreads, seenSessionStoreForKind, hasSeenPromptNotification, sessionDisplayStatus } from '../app/state.mjs';
 
 const STATE_CONFIG = {
   starting: { label: 'Starting', cls: 'badge-info', pulse: false, idle: false },
   blocked: { label: 'Needs Attention', cls: 'badge-critical', pulse: true, idle: true },
-  ready: { label: 'Ready', cls: 'badge-medium', pulse: true, idle: true },
+  done: { label: 'Done', cls: 'badge-info', pulse: false, idle: false },
+  ready: { label: 'Idle', cls: 'badge-medium', pulse: true, idle: true },
   thinking: { label: 'Thinking', cls: 'badge-info', pulse: false, idle: false },
   working: { label: 'Working', cls: 'badge-success', pulse: false, idle: false },
   awaiting_response: { label: 'Awaiting Response', cls: 'badge-info', pulse: false, idle: false },
@@ -31,7 +32,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
     ? new Date(session.created * 1000).toLocaleTimeString()
     : '';
 
-  const stateInfo = STATE_CONFIG[session.state?.status] || STATE_CONFIG.unknown;
+  const stateInfo = STATE_CONFIG[sessionDisplayStatus(descriptor.kind, session)] || STATE_CONFIG.unknown;
   const isRustManagedReadOnly = session.readOnly === true && session.externalOwner === 'rust-monitor';
   const isMutable = !isRustManagedReadOnly;
   const isEnded = session.state?.status === 'ended';
@@ -116,6 +117,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
         </div>
       ` : null}
       <div style="display:flex; gap:8px; font-size:12px; color:var(--text-muted); align-items:center">
+        ${stateInfo.label === 'Done' ? html`<span class="badge badge-info">Done</span>` : null}
         ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono); font-size:11px" title=${session.workDir}>${session.workDir}</span>` : null}
       </div>
       <div style="display:flex; gap:8px; font-size:11px; color:var(--text-muted); margin-top:2px">

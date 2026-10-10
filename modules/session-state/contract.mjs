@@ -86,6 +86,7 @@ export function createInitialSnapshot(sessionId, now = 0) {
     lifecycle: 'starting',
     execution: 'unknown',
     executionSource: '',
+    completedTurnAt: 0,
     interaction: {
       kind: 'none',
       detail: '',
@@ -214,6 +215,7 @@ export function projectCompatibility(snapshot) {
     lifecycle: snapshot.lifecycle,
     execution: snapshot.execution,
     executionSource: snapshot.executionSource || '',
+    completedTurnAt: snapshot.completedTurnAt || 0,
     interaction: clone(snapshot.interaction),
     runtime: clone(snapshot.runtime),
     status: snapshot.status,

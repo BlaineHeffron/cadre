@@ -270,6 +270,19 @@ export function reduce(previousSnapshot, observationSet, now = Date.now()) {
   else if (sendMessage) status = 'ready';
   else if (lifecycle === 'starting') status = 'starting';
 
+  // Completion survives evidence expiry. Capture-time refreshes must not
+  // create another turn; transcript writtenAt and native Stop are fact times.
+  let completedTurnAt = previous.completedTurnAt || 0;
+  if (executionIdle && !blocked && !deliveryPending) {
+    if (['working', 'thinking'].includes(previous.execution)) {
+      completedTurnAt = Math.max(completedTurnAt, factTime(executionObservation));
+    }
+    if (executionObservation?.value?.activity === 'terminal'
+      || (executionSource === 'hook' && executionObservation.fingerprint.endsWith(':Stop'))) {
+      completedTurnAt = Math.max(completedTurnAt, factTime(executionObservation));
+    }
+  }
+
   const nextBase = {
     sessionId: previous.sessionId,
     revision: previous.revision,
@@ -277,6 +290,7 @@ export function reduce(previousSnapshot, observationSet, now = Date.now()) {
     lifecycle,
     execution,
     executionSource,
+    completedTurnAt,
     interaction: {
       kind: interaction.kind,
       detail: interaction.detail,
