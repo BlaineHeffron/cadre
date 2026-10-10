@@ -5,6 +5,8 @@ import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { shouldSuppressSideEffectLoops } from '../platform/side-effect-loops.mjs';
 
 const RECOVERY_GRACE_MS = 2000;
+// A worker submits a follow-up it was sent well within this; lost keystrokes stop holding results after it.
+const FOLLOW_UP_START_MS = 2 * 60_000;
 
 function terminalLookupError(err = {}) {
   const status = Number(err.statusCode || err.payload?.statusCode || 0);
@@ -118,7 +120,8 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
             const records = audit.filter((entry) => entry.metadata.transactionId === transactionId);
             const latest = records[0];
             if (['failed', 'dropped'].includes(latest.status) || after(Date.parse(records.at(-1).createdAt), 'UserPromptSubmit')) return false;
-            return latest.status !== 'sent' || !after(Date.parse(latest.createdAt), 'Stop');
+            const sentAt = Date.parse(latest.createdAt);
+            return latest.status !== 'sent' || (at - sentAt < FOLLOW_UP_START_MS && !after(sentAt, 'Stop'));
           });
           if (outstanding) break;
         }

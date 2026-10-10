@@ -181,6 +181,26 @@ test('a coordinator waits for a follow-up its worker has not started, but not fo
   assert.equal(delivered('Waiting on'), 0);
 });
 
+test('a stale sent follow-up does not hold the coordinator result', async (t) => {
+  const createdAt = new Date(Date.now() - 3 * 60_000).toISOString();
+  const entries = [{ id: 'sdel_stale', source: 'monitor_send_to_session', target: { kind: 'claude', sessionId: 'worker' },
+    status: 'sent', enter: true, createdAt, completedAt: createdAt, metadata: { transactionId: 'tx-lost', operation: 'message' } }];
+  const audit = buildSessionDeliveryAuditStore({ stateStore: { load: async () => ({ entries }), save: async () => {} } });
+  await audit.init();
+  const { h, hook, turn, delivered, sessions } = await setup(t, { spawnedBy: spawner }, null, audit);
+  h.sessionCatalog.claude.add('worker');
+  sessions.set('worker', { workDir: h.stateDir, metadata: { spawnedBy: { kind: 'claude', sessionId: 'claude-2' } } });
+  // The worker finished its last turn before the follow-up was sent, and never started the follow-up.
+  const finishedAt = Date.now() - 4 * 60_000;
+  t.mock.method(Date, 'now', () => finishedAt);
+  try {
+    await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' }, 'worker');
+    await hook({ hook_event_name: 'Stop', last_assistant_message: '' }, 'worker');
+  } finally { Date.now.mock.restore(); }
+  await turn('Coordinator after lost follow-up');
+  assert.ok(await settle(() => delivered('Coordinator after lost follow-up') === 1));
+});
+
 test('a worker that finishes with an empty answer does not hold the coordinator result', async (t) => {
   const { h, hook, turn, results, delivered, sessions } = await setup(t, { spawnedBy: spawner });
   h.sessionCatalog.claude.add('worker');
