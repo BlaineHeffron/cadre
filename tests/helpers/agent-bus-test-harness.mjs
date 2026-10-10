@@ -172,6 +172,7 @@ export async function createAgentBusHarness({
   replyTimeoutMs = 5000,
   freshAgentBusModule = false,
   credentialStore = null,
+  sessionDeliveryAuditStore = null,
   sessionDeleteTimeoutMs = undefined,
   beforeReady = async () => {},
   // Reuse a closed harness's directory to restart the agent bus over its persisted state.
@@ -517,6 +518,7 @@ export async function createAgentBusHarness({
     managedWorktreeBaseDir: join(stateDir, "managed-worktrees"),
     store,
     ...(credentialStore ? { credentialStore } : {}),
+    sessionDeliveryAuditStore,
     wsManager: {
       broadcast(channel, type, data) {
         pushCapped(wsEvents, { channel, type, data: summarizeEventData(data) });
