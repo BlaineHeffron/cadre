@@ -60,7 +60,7 @@ test('launch preflight verifies the local service; off and smoke modes bypass it
 
 test('fresh and resumed launches deliver endpoint overrides to the actual child only when enabled', async () => {
   const run = promisify(execFile);
-  const capture = `function fleet_agent() { node -e 'console.log(JSON.stringify({args:process.argv.slice(1),anthropic:process.env.ANTHROPIC_BASE_URL,openai:process.env.OPENAI_BASE_URL,pi:process.env.DUENO_HEADROOM_URL}))' -- "$@"; }; `;
+  const capture = `function fleet_agent() { node -e 'console.log(JSON.stringify({args:process.argv.slice(1),anthropic:process.env.ANTHROPIC_BASE_URL,suggest:process.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION,openai:process.env.OPENAI_BASE_URL,pi:process.env.DUENO_HEADROOM_URL}))' -- "$@"; }; `;
   for (const [backendType, provider] of [['claude', 'claude'], ['codex', 'codex'], ['pi', 'xai']]) {
     for (const resume of [false, true]) {
       for (const enabled of [false, true]) {
@@ -78,6 +78,7 @@ test('fresh and resumed launches deliver endpoint overrides to the actual child 
           if (enabled) assert.ok(child.args.includes('model_providers.dueno-headroom.base_url="http://127.0.0.1:8787/v1"'));
         }
         if (enabled && backendType === 'pi') assert.ok(child.args.some((arg) => arg.endsWith('/pi-headroom-extension.mjs')));
+        if (backendType === 'claude') assert.equal(child.suggest, enabled ? 'false' : undefined);
         if (resume) assert.ok(child.args.includes('test-resume'));
       }
     }

@@ -14,7 +14,9 @@ export function headroomLaunchOverrides(provider, baseUrl = HEADROOM_URL) {
   }
   const origin = url.origin;
   if (provider === 'claude' || provider === 'anthropic') {
-    return { env: { ANTHROPIC_BASE_URL: origin }, args: [] };
+    // Prompt-suggestion side requests make Headroom re-send compressed history uncompressed on the next
+    // turn, forcing a full prompt-cache rewrite; agent-driven sessions never use the suggestions.
+    return { env: { ANTHROPIC_BASE_URL: origin, CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: 'false' }, args: [] };
   }
   if (provider === 'codex' || provider === 'openai') {
     // Built-in provider IDs are reserved in current Codex. Keep OpenAI auth
