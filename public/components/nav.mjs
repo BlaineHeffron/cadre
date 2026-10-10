@@ -21,7 +21,7 @@ import {
 
 const PRIMARY_NAV = [
   { label: 'Command Center', path: '/' },
-  { label: 'Queue', path: '/queue' },
+  { label: 'Queue', path: '/queue', mobileDefault: true },
   { label: 'Capture', path: '/capture', mobileDefault: true },
   { label: 'Fleet', path: '/fleet' },
   { label: 'GitHub', path: '/github-agents' },
@@ -79,11 +79,6 @@ export function Nav() {
   const connectionLabel = wsConnected.value ? 'Connected' : (isAuthenticated.value ? 'Polling' : 'Offline');
   const connectionClass = wsConnected.value ? 'badge-success' : (isAuthenticated.value ? 'badge-low' : 'badge-critical');
 
-  function openPromptNotification(item) {
-    showPromptBell.value = false;
-    route(item.route);
-  }
-
   function navigateTo(path) {
     showPromptBell.value = false;
     showMoreMenu.value = false;
@@ -128,42 +123,6 @@ export function Nav() {
         </span>
       </div>
       <div class="nav-links">
-        <div class="nav-bell-wrap">
-          <button
-            class="nav-bell-btn ${visibleSessionPromptNotificationCount.value > 0 ? 'nav-bell-btn-active' : ''}"
-            onclick=${() => {
-              showPromptBell.value = !showPromptBell.value;
-              if (showPromptBell.value) showMoreMenu.value = false;
-            }}
-            title="Prompt-ready session notifications"
-            aria-label="Prompt-ready session notifications"
-            aria-expanded=${showPromptBell.value ? 'true' : 'false'}
-            aria-controls=${promptPopoverId}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true" class="nav-bell-icon">
-              <path d="M12 3a4 4 0 0 0-4 4v2.2c0 1.1-.4 2.1-1.1 2.9L5.6 13.6A1 1 0 0 0 6.4 15h11.2a1 1 0 0 0 .8-1.4l-1.3-1.5A4.5 4.5 0 0 1 16 9.2V7a4 4 0 0 0-4-4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-              <path d="M10 18a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-            </svg>
-            ${visibleSessionPromptNotificationCount.value > 0 ? html`
-              <span class="badge badge-critical badge-pulse" style="margin-left:6px; font-size:10px">
-                ${visibleSessionPromptNotificationCount.value}
-              </span>
-            ` : null}
-          </button>
-          ${showPromptBell.value ? html`
-            <div class="nav-bell-popover" id=${promptPopoverId} role="menu">
-              ${visibleSessionPromptNotifications.value.length === 0 ? html`
-                <div class="nav-bell-empty">No unseen prompt-ready sessions</div>
-              ` : visibleSessionPromptNotifications.value.map(item => html`
-                <button class="nav-bell-item" onclick=${() => openPromptNotification(item)} role="menuitem">
-                  <span class="nav-bell-item-title">${item.sessionName}</span>
-                  <span class="nav-bell-item-meta">${item.meta || item.label}</span>
-                  <span class="nav-bell-item-detail">${item.detail}</span>
-                </button>
-              `)}
-            </div>
-          ` : null}
-        </div>
         ${PRIMARY_NAV.map((item) => html`
           <a
             href=${item.path}
@@ -194,7 +153,44 @@ export function Nav() {
           </button>
           ${showMoreMenu.value ? html`
             <div class="nav-more-popover" id=${morePopoverId} role="menu">
-              ${PRIMARY_NAV.map((item) => html`
+              <div class="nav-bell-wrap">
+                <button
+                  class="nav-more-item nav-bell-btn ${visibleSessionPromptNotificationCount.value > 0 ? 'nav-bell-btn-active' : ''}"
+                  onclick=${() => {
+                    showPromptBell.value = !showPromptBell.value;
+                  }}
+                  role="menuitem"
+                  title="Prompt-ready session notifications"
+                  aria-label="Prompt-ready session notifications"
+                  aria-expanded=${showPromptBell.value ? 'true' : 'false'}
+                  aria-controls=${promptPopoverId}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" class="nav-bell-icon">
+                    <path d="M12 3a4 4 0 0 0-4 4v2.2c0 1.1-.4 2.1-1.1 2.9L5.6 13.6A1 1 0 0 0 6.4 15h11.2a1 1 0 0 0 .8-1.4l-1.3-1.5A4.5 4.5 0 0 1 16 9.2V7a4 4 0 0 0-4-4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                    <path d="M10 18a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  </svg>
+                  Notifications
+                  ${visibleSessionPromptNotificationCount.value > 0 ? html`
+                    <span class="badge badge-critical badge-pulse" style="margin-left:6px; font-size:10px">
+                      ${visibleSessionPromptNotificationCount.value}
+                    </span>
+                  ` : null}
+                </button>
+                ${showPromptBell.value ? html`
+                  <div class="nav-bell-popover" id=${promptPopoverId} role="menu">
+                    ${visibleSessionPromptNotifications.value.length === 0 ? html`
+                      <div class="nav-bell-empty">No unseen prompt-ready sessions</div>
+                    ` : visibleSessionPromptNotifications.value.map(item => html`
+                      <button class="nav-bell-item" onclick=${() => navigateTo(item.route)} role="menuitem">
+                        <span class="nav-bell-item-title">${item.sessionName}</span>
+                        <span class="nav-bell-item-meta">${item.meta || item.label}</span>
+                        <span class="nav-bell-item-detail">${item.detail}</span>
+                      </button>
+                    `)}
+                  </div>
+                ` : null}
+              </div>
+              ${PRIMARY_NAV.filter((item) => !item.mobileDefault).map((item) => html`
                 <button
                   class="nav-more-item nav-more-item-mobile ${isPathActive(item.path, pathname) ? 'active' : ''}"
                   type="button"
