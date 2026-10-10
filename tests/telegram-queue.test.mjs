@@ -88,6 +88,15 @@ function callback(id, data, messageId, chatId = CHAT_ID) {
 }
 
 describe('telegram Command Queue topic', () => {
+  it('leaves session interactions to the existing Telegram session relay', async () => {
+    const { loop, sent } = await bridge();
+    try {
+      await addItem({}, { sessionInteraction: { kind: 'permission', fingerprint: 'session-only' } });
+      await loop.queueSync;
+      assert.equal(sent().length, 0);
+    } finally { loop.stop(); }
+  });
+
   it('posts a new item with its buttons and answers it from a button', async () => {
     const { loop, calls, sent } = await bridge();
     const item = await addItem();

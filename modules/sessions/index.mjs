@@ -9,6 +9,7 @@ import { normalizeProviderPane } from '../session-state/providers/pane-view.mjs'
 import { assertValidCodexModel } from './codex-models.mjs';
 import { assertValidClaudeModel, normalizeClaudeProvider } from './claude-models.mjs';
 import { sendTmuxText, sleep } from '../platform/tmux-input.mjs';
+import { closeStaleSessionQueueItems } from '../integrations/command-center-ai.mjs';
 import { notifyPush } from '../platform/push.mjs';
 import { saveImageToWorkspace, buildAgentImagePrompt, buildImageAttachmentResult } from './image-handoff.mjs';
 import { AttachmentStore } from '../agent/attachment-store.mjs';
@@ -3341,6 +3342,7 @@ async function sessionsPlugin(app, {
           const normalized = config.stripContent(stdout);
           const canonicalState = await observeSessionEvidence(s.id, s, normalized, now);
           const state = projectCanonicalState(canonicalState);
+          await closeStaleSessionQueueItems(config.id, s.id, canonicalState.capabilities.canAnswerInteraction ? canonicalState.interaction?.fingerprint : null, { wsManager });
           const pendingResponse = state.pendingResponse ? { sentAt: state.updatedAt } : null;
           const attention = syncAttention(s.id, { ...s, name: tn, tmuxSession: tn }, state, normalized, now);
           s.state = state;
@@ -3377,7 +3379,7 @@ async function sessionsPlugin(app, {
                 createdAt: attention?.createdAt || now,
               };
               wsManager.broadcast(`${config.id}:alerts`, 'alert', alert);
-              void notifyPush(config, alert);
+              void notifyPush(config, alert, { wsManager }).catch((err) => app.log.warn({ err: err.message }, 'Session push failed'));
               lastAlertTime.set(s.id, now);
               lastBroadcastAttentionKey.set(s.id, attention.key);
             }
