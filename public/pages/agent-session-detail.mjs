@@ -19,7 +19,7 @@ import { expandQuickTokens, quickTokenLabel } from '../app/skill-tokens.mjs';
 import { subscribe } from '../app/ws-client.mjs';
 import { shouldReduceNetworkActivity } from '../app/network-profile.mjs';
 import { createRevisionGuard } from '../app/revision-guard.mjs';
-import { addToast, agentThreads, markSessionSeenForKind, markSessionAttentionSeen, removeSessionForKind } from '../app/state.mjs';
+import { addToast, agentThreads, markSessionSeenForKind, markSessionAttentionSeen, markSessionTurnSeen, removeSessionForKind } from '../app/state.mjs';
 import { isEditableTarget, mapKeyboardEventToTmux } from '../app/terminal-input.mjs';
 import { Terminal, stripAnsi } from '../components/terminal.mjs';
 import { AgentControlBar } from '../components/agent-control-bar.mjs';
@@ -135,13 +135,22 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
       if (type === 'content') {
         contentRevision.advance();
         content.value = data.content;
-        if (data.state) sessionState.value = data.state;
+        if (data.state) {
+          sessionState.value = data.state;
+          if (document.visibilityState === 'visible') markSessionTurnSeen(providerKind, { id, state: data.state });
+        }
         if (data.attention) markSessionAttentionSeen(providerKind, data);
       }
     }, { lines: initialLines });
 
+    const markViewed = () => {
+      if (document.visibilityState === 'visible') markSessionTurnSeen(providerKind, { id, state: sessionState.value });
+    };
+    document.addEventListener('visibilitychange', markViewed);
+
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', markViewed);
       unsub();
     };
   }, [id, providerKind, providerApiBase]);
@@ -207,7 +216,10 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         contentRevision.advance();
         content.value = data.content;
         loadedLines.value = data.lines || lines || INITIAL_LINES;
-        if (data.state) sessionState.value = data.state;
+        if (data.state) {
+          sessionState.value = data.state;
+          if (document.visibilityState === 'visible') markSessionTurnSeen(providerKind, { id, state: data.state });
+        }
         if (data.attention) markSessionAttentionSeen(activeDescriptor.kind, data);
       }
       sessionInfo.value = {

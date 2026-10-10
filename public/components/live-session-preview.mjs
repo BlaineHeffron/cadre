@@ -5,13 +5,14 @@ import { useEffect, useMemo } from 'preact/hooks';
 import { route } from 'preact-router';
 import { api } from '../app/api.mjs';
 import { subscribe } from '../app/ws-client.mjs';
-import { addToast } from '../app/state.mjs';
+import { addToast, markSessionTurnSeen, sessionDisplayStatus } from '../app/state.mjs';
 import { Terminal } from './terminal.mjs';
 
 const STATE_LABELS = {
   starting: 'Starting',
   blocked: 'Needs Attention',
-  ready: 'Ready',
+  done: 'Done',
+  ready: 'Idle',
   thinking: 'Thinking',
   working: 'Working',
   awaiting_response: 'Awaiting Response',
@@ -31,31 +32,45 @@ export function LiveSessionPreview({ session, title = '', onRemove = null }) {
     if (!session?.id || !session?._kind || session?.source === 'bare-process') return undefined;
 
     let cancelled = false;
+    sessionState.value = session.state || { status: 'unknown', reason: '' };
+    content.value = '';
     const path = `/${session._kind}/sessions/${session.id}?lines=120`;
     api.get(path)
       .then((data) => {
         if (cancelled) return;
         content.value = String(data?.content || '');
-        if (data?.state) sessionState.value = data.state;
+        if (data?.state) {
+          sessionState.value = data.state;
+          if (document.visibilityState === 'visible') markSessionTurnSeen(session._kind, { id: session.id, state: data.state });
+        }
       })
       .catch((error) => {
         if (!cancelled) addToast(`Failed to load preview: ${error.message}`, 'error');
       });
 
     const unsub = subscribe(`${session._kind}:session:${session.id}`, (type, data) => {
-      if (type !== 'content') return;
+      if (cancelled || type !== 'content') return;
       content.value = String(data?.content || '');
-      if (data?.state) sessionState.value = data.state;
+      if (data?.state) {
+        sessionState.value = data.state;
+        if (document.visibilityState === 'visible') markSessionTurnSeen(session._kind, { id: session.id, state: data.state });
+      }
     }, { lines: 120 });
+
+    const markViewed = () => {
+      if (document.visibilityState === 'visible') markSessionTurnSeen(session._kind, { id: session.id, state: sessionState.value });
+    };
+    document.addEventListener('visibilitychange', markViewed);
 
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', markViewed);
       unsub?.();
     };
   }, [session?.id, session?._kind, session?.source]);
 
   const openSession = () => route(detailRoute(session._kind, session.id));
-  const stateLabel = STATE_LABELS[sessionState.value?.status] || STATE_LABELS.unknown;
+  const stateLabel = STATE_LABELS[sessionDisplayStatus(session._kind, { id: session.id, state: sessionState.value })] || STATE_LABELS.unknown;
   const detail = String(sessionState.value?.interaction?.detail || sessionState.value?.reason || '').trim();
 
   return html`

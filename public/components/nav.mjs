@@ -7,6 +7,7 @@ import {
   wsConnected,
   isAuthenticated,
   unreadAlerts,
+  unseenDoneCount,
   unseenSessionCount,
   unseenCodexSessionCount,
   unseenPiSessionCount,
@@ -50,6 +51,7 @@ function isPathActive(path, pathname) {
 
 function navBadge(path) {
   if (path === '/agents') {
+    if (unseenDoneCount.value > 0) return html`<span class="badge badge-info nav-link-badge">${unseenDoneCount.value} done</span>`;
     const unseen = unseenSessionCount.value + unseenCodexSessionCount.value + unseenPiSessionCount.value;
     if (unseen > 0) return html`<span class="badge badge-info nav-link-badge">${unseen} new</span>`;
     return null;
