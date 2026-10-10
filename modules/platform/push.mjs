@@ -79,6 +79,7 @@ export async function pushPlugin(app, {
     }
   };
 
+  // Lazy: command-center-ai resolves its state directory at import time.
   const { onHumanQueueChange } = await import('../integrations/command-center-ai.mjs');
   const queueNotify = notifier;
   const unwatchQueue = onHumanQueueChange((item, type) => {
