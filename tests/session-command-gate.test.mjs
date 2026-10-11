@@ -1057,3 +1057,136 @@ describe('session command gate', () => {
     assert.equal(test.executions.length, 1);
   });
 });
+
+describe('Claude MCP reconnect through the command gate and tmux input', () => {
+  const history = 'Claude Code v2.1.296\n❯ earlier prompt quoting ✘ dueno\nPrevious response\nReconnected to dueno.\n';
+  const prompt = (draft = '') => `${history}────────────────────\n❯ ${draft}\n────────────────────\n  ⏵⏵ bypass permissions on`;
+  function reconnectPane({ healthy = false, connecting = false, absent = false, unexpected = '', draft = '' } = {}) {
+    let pane = prompt(draft);
+    let pasted = '';
+    let selected = 0;
+    let detailSelected = 0;
+    let stage = 'prompt';
+    const keys = [];
+    const calls = [];
+    const list = () => `${history}❯ /mcp\n  Manage MCP servers\n  2 servers\n  Built-in MCPs (always available)\n  ${selected === 0 ? '❯' : ' '} ✔ other\n  ${selected === 1 ? '❯' : ' '} ${healthy ? '✔' : connecting ? '…' : '✘'} ${absent ? 'another-server' : 'dueno'}\n ↑/↓ to navigate · Enter to confirm · Esc to cancel`;
+    const detail = () => `${history}❯ /mcp\n  Dueno MCP Server\n  Status: ✘ failed\n  ${detailSelected === 0 ? '❯' : ' '} 1. Authenticate\n  ${detailSelected === 1 ? '❯' : ' '} 2. Reconnect\n    3. Disable\n ↑/↓ to navigate · Enter to select · Esc to back`;
+    const execFn = async (command, args, options) => {
+      assert.equal(command, 'tmux');
+      calls.push(args[0]);
+      if (args[0] === 'capture-pane') {
+        assert.ok(args.includes('-e'), 'preserve dim placeholders in actual capture');
+        return { code: 0, stdout: pane };
+      }
+      if (args[0] === 'load-buffer') pasted = options.input;
+      if (args[0] === 'send-keys') {
+        const key = args.at(-1);
+        keys.push(key);
+        if (key === 'Escape') {
+          if (stage === 'detail') { stage = 'list'; pane = list(); }
+          else { stage = 'prompt'; pane = prompt(); }
+        } else if (key === 'Down') {
+          if (stage === 'list') { selected = 1; pane = list(); }
+          else { detailSelected = 1; pane = detail(); }
+        } else if (key === 'Enter' && stage === 'prompt' && pasted === '/mcp') {
+          stage = 'list';
+          pane = unexpected === 'list' ? `${history}Unrelated dialog` : list();
+        } else if (key === 'Enter' && stage === 'list') {
+          assert.equal(selected, 1);
+          stage = 'detail';
+          pane = unexpected === 'detail' ? `${history}Other MCP Server\n❯ 1. Reconnect` : detail();
+        } else if (key === 'Enter' && stage === 'detail') {
+          assert.equal(detailSelected, 1, 'never Authenticate or Disable');
+          if (unexpected === 'confirmation') pane = detail();
+          else {
+            stage = 'prompt';
+            pane = `${history}❯ /mcp\n  ⎿ ${unexpected === 'failure' ? 'Failed to reconnect to dueno: ECONNREFUSED' : 'Reconnected to dueno.'}\n${prompt()}`;
+          }
+        }
+      }
+      return { code: 0, stdout: '' };
+    };
+    const executor = createTmuxCommandExecutor({
+      target: 'fake-claude', delayMs: 0, sleepFn: immediate, execFn,
+      capturePane: () => execFn('tmux', ['capture-pane', '-t', 'fake-claude', '-p', '-e']),
+    });
+    return { executor, keys, calls, pane: () => pane };
+  }
+
+  it('reconnects failed idle sessions with history and Authenticate before Reconnect', async () => {
+    const test = harness();
+    const fake = reconnectPane();
+    test.setExecute(fake.executor);
+    const result = await test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' });
+    assert.equal(result.ok, true);
+    assert.deepEqual(fake.keys, ['Enter', 'Down', 'Enter', 'Down', 'Enter']);
+    assert.ok(fake.calls.includes('load-buffer'));
+    assert.ok(fake.calls.includes('paste-buffer'));
+  });
+
+  it('defers busy sessions until idle without typing into the active turn', async () => {
+    const test = harness();
+    const fake = reconnectPane();
+    test.setExecute(fake.executor);
+    test.observe({ execution: 'working' });
+    const pending = test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' });
+    await immediate();
+    await immediate();
+    assert.deepEqual(fake.keys, []);
+    test.observe({ execution: 'idle' });
+    await pending;
+    assert.deepEqual(fake.keys, ['Enter', 'Down', 'Enter', 'Down', 'Enter']);
+  });
+
+  for (const connecting of [false, true]) {
+    it(connecting ? 'keeps a connecting dueno pending' : 'escapes from a healthy dueno without selecting it', async () => {
+      const test = harness();
+      const fake = reconnectPane({ healthy: !connecting, connecting });
+      test.setExecute(fake.executor);
+      const result = await test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' });
+      assert.equal(result.result.pending, connecting);
+      assert.deepEqual(fake.keys, ['Enter', 'Escape']);
+    });
+  }
+
+  it('does not keep sessions with no dueno row pending despite dueno in history', async () => {
+    const test = harness();
+    const fake = reconnectPane({ absent: true });
+    test.setExecute(fake.executor);
+    const result = await test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' });
+    assert.equal(result.result.pending, false);
+    assert.deepEqual(fake.keys, ['Enter', 'Escape']);
+  });
+
+  for (const unexpected of ['list', 'detail', 'confirmation', 'failure']) {
+    it(`escapes safely from an unexpected ${unexpected} screen, ignoring historical success`, async () => {
+      const test = harness();
+      const fake = reconnectPane({ unexpected });
+      test.setExecute(fake.executor);
+      await assert.rejects(test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' }), /Unexpected MCP screen|Failed to reconnect/);
+      if (unexpected === 'detail' || unexpected === 'confirmation') assert.deepEqual(fake.keys.slice(-2), ['Escape', 'Escape']);
+      assert.ok(fake.pane().includes('⏵⏵ bypass permissions on'));
+    });
+  }
+
+  for (const placeholder of ['\x1b[2mTry "fix typecheck errors"\x1b[0m', '\x1b[2mTry\x1b[0m \x1b[2m"fix\x1b[0m \x1b[2mtypecheck\x1b[0m \x1b[2merrors"\x1b[0m']) {
+    it('reconnects with a dim placeholder and NBSP composer', async () => {
+      const test = harness();
+      const fake = reconnectPane({ draft: `\u00a0${placeholder}` });
+      test.setExecute(fake.executor);
+      await test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' });
+      assert.deepEqual(fake.keys, ['Enter', 'Down', 'Enter', 'Down', 'Enter']);
+    });
+  }
+
+  for (const draft of ['my unsent draft', 'Try "fix typecheck errors"']) {
+    it(`leaves the composer untouched: ${draft}`, async () => {
+      const test = harness();
+      const fake = reconnectPane({ draft });
+      test.setExecute(fake.executor);
+      await assert.rejects(test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' }), /composer/);
+      assert.deepEqual(fake.keys, []);
+      assert.ok(fake.pane().includes(draft));
+    });
+  }
+});

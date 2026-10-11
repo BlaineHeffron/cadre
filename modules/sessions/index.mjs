@@ -36,6 +36,7 @@ import {
 } from '../telegram/transcript.mjs';
 import { resolveBinding } from '../telegram/binding.mjs';
 import { createTmuxCommandExecutor, sessionCommandGate } from '../session-state/command-gate.mjs';
+import { shouldSuppressSideEffectLoops } from '../platform/side-effect-loops.mjs';
 import {
   buildAgentRuntimeLaunchArgs,
   buildClaudeLaunchArgs,
@@ -2135,6 +2136,10 @@ async function sessionsPlugin(app, {
   });
   await fleetAttachmentStore.init();
   await loadPersistedSessions();
+  const mcpReconnectAfter = Date.now() + 20_000;
+  const pendingMcpReconnect = new Map(config.id === 'claude'
+    && !shouldSuppressSideEffectLoops({ port: appConfig.port })
+    ? [...sessions.keys()].map((id) => [id, 0]) : []);
   const unregisterHookSessions = registerHookSessionRegistry(config.id, () => sessions);
   await sessionDeliveryAuditStore?.init?.();
   const interruptedTransactions = new Set();
@@ -2176,6 +2181,7 @@ async function sessionsPlugin(app, {
       },
       execute: createTmuxCommandExecutor({
         execFn: exec,
+        capturePane: () => exec('tmux', ['capture-pane', '-t', sessionName, '-p', '-e']),
         target: sessionName,
         delayMs: config.startupDelayMs,
         startupDelayMs: config.initialPromptDelayMs || config.startupDelayMs,
@@ -3349,6 +3355,18 @@ async function sessionsPlugin(app, {
           s.canonicalState = canonicalState;
           s.attention = attention;
           s.pendingResponse = pendingResponse;
+
+          if (now >= mcpReconnectAfter && pendingMcpReconnect.has(s.id) && !s.readOnly
+            && canonicalState.execution === 'idle' && canonicalState.interaction?.kind === 'free_text'
+            && canonicalState.capabilities.canSendNow) {
+            const attempt = pendingMcpReconnect.get(s.id);
+            pendingMcpReconnect.delete(s.id);
+            void enqueueSessionCommand(s.id, {
+              operation: 'mcp_reconnect', source: 'startup_mcp_reconnect', deadlineAt: now + 15_000,
+            }).then((result) => {
+              if (result.result?.pending && attempt < 2) pendingMcpReconnect.set(s.id, attempt + 1);
+            }).catch((error) => app.log.warn({ id: s.id, err: error.message }, 'Claude MCP reconnect failed'));
+          }
 
           const prevState = lastStates.get(s.id);
           const autoCloseMode = String(s.autoCloseMode || sessions.get(s.id)?.autoCloseMode || 'never');
