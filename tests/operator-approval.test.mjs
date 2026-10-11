@@ -38,7 +38,7 @@ test('operator actions use the real queue, auth, MCP transport and GitHub routes
   app.decorate('agentBusLifecycle', {});
   registerAgentBusRoutes({ app, store: busStore, adapters: {},
     broadcastThreadSummary: async () => {}, enrichThread: async (thread) => thread,
-    normalizeThreadSummary: (thread) => thread, participantRef: (ref) => ref, pruneObservedParticipant: () => {},
+    normalizeThreadSummary: (thread) => thread, participantRef: (ref) => ref,
   });
   const commands = [];
   const executions = [];

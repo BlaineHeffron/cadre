@@ -68,10 +68,10 @@ function createdByFromRequest(req) {
   return { kind: String(principal.kind), sessionId: String(principal.sessionId) };
 }
 
-export function registerAgentBusRoutes({ app, store, adapters, wsManager, productionControls, observedSessions, deliveryInFlight,
+export function registerAgentBusRoutes({ app, store, adapters, wsManager, productionControls, deliveryInFlight,
   broadcast, broadcastAlert, broadcastThreadSnapshot, broadcastThreadSummary, enrichThread, normalizeThreadSummary,
   threadMatchesStatusFilter, buildStateSnapshotEntry, normalizeCollectionLimit, participantKey, participantRef,
-  threadHasParticipant, threadHasOwner, uniqueAgentRefs, isAgentRef, pruneObservedParticipant, resolveAgentSession, planParticipant, executeParticipantPlan,
+  threadHasParticipant, threadHasOwner, uniqueAgentRefs, isAgentRef, resolveAgentSession, planParticipant, executeParticipantPlan,
   discardCreatedParticipants, waitForSessionReady, injectBootstrapStartupText, createBootstrapMessage,
   deliverMessage, failDelivery, replayDelivery, taskService = null, managedWorktreeBaseDir }) {
   const endingThreads = new Set();
@@ -199,7 +199,6 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (participants.length < 2) return reply.code(400).send({ error: 'At least two unique participants are required' });
     const thread = await store.createThread({ title: req.body.title, projectKey: req.body.projectKey,
       participants, metadata: req.body.metadata, createdBy: createdByFromRequest(req) });
-    participants.forEach((item) => observedSessions.add(participantKey(item)));
     return { thread: normalizeThreadSummary(await enrichThread(thread)) };
   });
 
@@ -207,7 +206,6 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     body: bodySchema({ participant: agentRef }, ['participant']) } }, async (req, reply) => {
     const thread = await store.addThreadParticipant(req.params.threadId, req.body.participant);
     if (!thread) return reply.code(404).send({ error: 'Thread not found' });
-    observedSessions.add(participantKey(req.body.participant));
     return { thread: normalizeThreadSummary(await enrichThread(thread)) };
   });
 
@@ -280,14 +278,13 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
             lastAttemptAt: Date.now(), error: err.message });
           throw new Error(`Participant ${participantKey(participant)} failed bootstrap: ${err.message}`);
         }
-        observedSessions.add(participantKey(participant)); messages.push(record.message); deliveries.push(delivery);
+        messages.push(record.message); deliveries.push(delivery);
       }
       return { thread: normalizeThreadSummary(await enrichThread(thread, store.getThread(thread.id))), participants: created,
         messages, deliveries, bootstrapOk: true, warnings: [] };
     } catch (err) {
       if (thread) {
         await store.closeThread(thread.id, err.message);
-        thread.participants.forEach(pruneObservedParticipant);
       }
       const cleanupFailures = await discardCreatedParticipants(created);
       if (cleanupFailures?.length) err.message += `; session rollback failed: ${cleanupFailures.join('; ')}`;
@@ -331,7 +328,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     }
     const thread = await store.closeThread(req.params.threadId, req.body?.reason || '');
     if (!thread) return reply.code(404).send({ error: 'Thread not found' });
-    thread.participants.forEach(pruneObservedParticipant); await broadcastThreadSummary(thread.id);
+    await broadcastThreadSummary(thread.id);
     return { ok: true, status: 'closed', thread: normalizeThreadSummary(await enrichThread(thread)), preserved: thread.participants.map(participantRef) };
   });
 
@@ -340,7 +337,6 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (endingThreads.has(id)) return reply.code(409).send({ error: 'Room is ending', code: 'room_ending' });
     const thread = await store.reopenThread(req.params.threadId);
     if (!thread) return reply.code(404).send({ error: 'Thread not found' });
-    thread.participants.forEach((participant) => observedSessions.add(participantKey(participant)));
     await broadcastThreadSummary(thread.id);
     return { ok: true, status: 'open', thread: normalizeThreadSummary(await enrichThread(thread)) };
   });
@@ -370,7 +366,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
         ? { participant, status: 'already_gone' }
         : { participant, status: 'failed', reason: err.message };
     });
-    thread.participants.forEach(pruneObservedParticipant); await broadcastThreadSummary(thread.id);
+    await broadcastThreadSummary(thread.id);
     const worktree = thread.metadata?.worktree ? await cleanupWorktree(thread.metadata.worktree) : undefined;
     return { ...(worktree ? { worktree } : {}), ok: results.every((item) => item.status !== 'failed'), status: 'ended', thread: normalizeThreadSummary(await enrichThread(thread)), results, skipped };
     } finally { endingThreads.delete(snapshot.thread.id); }
@@ -383,7 +379,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (endingThreads.has(snapshot.thread.id) || snapshot.deliveries.some((item) => deliveryInFlight.has(item.id))) {
       return reply.code(409).send({ error: 'Room has lifecycle or delivery work in flight', code: 'room_in_flight' });
     }
-    await store.deleteThread(req.params.threadId); snapshot.thread.participants.forEach(pruneObservedParticipant);
+    await store.deleteThread(req.params.threadId);
     broadcast(wsManager, 'agent-bus:threads', 'thread_deleted', { threadId: req.params.threadId }); return { ok: true };
   });
 
@@ -479,7 +475,6 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
       if (endingThreads.has(thread.id)) return { statusCode: 409, payload: { error: 'Room is ending', code: 'room_ending' } };
       thread = await store.reopenThread(thread.id);
     }
-    thread.participants.forEach((participant) => observedSessions.add(participantKey(participant)));
     const result = await send({ threadId: thread.id, from, body, summary, replyTo, type, metadata: { dm: true },
       idempotencyKey });
     return { statusCode: result.statusCode, payload: { thread: normalizeThreadSummary(await enrichThread(thread)), ...result.payload } };

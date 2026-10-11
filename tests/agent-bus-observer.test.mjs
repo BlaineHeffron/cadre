@@ -25,13 +25,9 @@ test('thread directory subscription shares participant runtime lookups', async (
     createAgentBusObserver({
       app: { addHook(_name, handler) { close = handler; } },
       store,
-      adapters: {},
       wsManager,
-      observedSessions: new Set(),
       deliveryInFlight: new Set(),
-      observerInFlightByRef: new Map(),
       observerIntervalMs: 60_000,
-      observerSessionTimeoutMs: 5_000,
       enrichThread: async (thread, _snapshot, runtimeCache) => {
         if (!runtimeCache.has(thread.participant)) runtimeCache.set(thread.participant, ++lookups);
         return thread;
