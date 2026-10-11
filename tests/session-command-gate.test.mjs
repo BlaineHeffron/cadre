@@ -1059,7 +1059,7 @@ describe('session command gate', () => {
 });
 
 describe('Claude MCP reconnect through the command gate and tmux input', () => {
-  const history = 'Claude Code v2.1.296\n❯ earlier prompt quoting ✘ dueno\nPrevious response\nReconnected to dueno.\n';
+  const history = 'Claude Code v2.1.296\n❯ earlier prompt quoting ✘ dueno and /mcp\nPrevious response about the Dueno MCP Server, Manage MCP servers and Tools for bevy_brp\nReconnected to dueno.\n';
   const prompt = (draft = '') => `${history}────────────────────\n❯ ${draft}\n────────────────────\n  ⏵⏵ bypass permissions on`;
   const rule = '  ──────────────────────────────';
   function reconnectPane({ healthy = false, connecting = false, absent = false, unexpected = '', draft = '', lag = 0 } = {}) {

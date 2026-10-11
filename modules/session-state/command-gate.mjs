@@ -1126,13 +1126,14 @@ export function createTmuxCommandExecutor({
         if (separators.length < 2) return undefined;
         return rows.slice(separators.at(-2) + 1, separators.at(-1)).join('\n');
       };
-      // MCP screens can contain separator lines, so only trust the composer once no MCP UI follows the /mcp echo.
-      const view = (pane) => pane.slice(Math.max(0, pane.lastIndexOf('/mcp')));
-      const closed = (pane) => composer(pane) !== undefined
-        && !/Manage MCP servers|MCP Server|Tools for |Esc to (?:cancel|(?:go )?back)/i.test(view(pane));
+      // MCP screens can draw separator lines, so judge open menus by their footer, not the composer.
+      const open = (pane) => /\bEsc to (?!interrupt)/i.test(pane.split('\n').filter((row) => row.trim()).slice(-3).join('\n'));
+      const closed = (pane) => composer(pane) !== undefined && !open(pane);
       const menu = (pane, header) => {
-        const index = view(pane).lastIndexOf(header);
-        return index < 0 ? '' : view(pane).slice(index);
+        // Ignore MCP text in the transcript above the latest /mcp echo.
+        const view = pane.slice([...pane.matchAll(/^\s*[❯>]\s*\/mcp\s*$/gm)].at(-1)?.index ?? 0);
+        const index = view.lastIndexOf(header);
+        return index < 0 || !open(pane) ? '' : view.slice(index);
       };
       const screen = async (matches) => {
         for (let attempt = 0; attempt < 20; attempt += 1) {
