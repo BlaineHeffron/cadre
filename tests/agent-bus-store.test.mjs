@@ -183,4 +183,68 @@ describe('AgentBusStore runtime state', () => {
     await store.close();
   });
 
+  it('prunes closed bulk and terminal deliveries while preserving open history across restart', async () => {
+    const dir = await makeTempDir();
+    const now = Date.now();
+    const old = now - 10 * 86_400_000;
+    await writeFile(join(dir, 'state.json'), JSON.stringify({
+      threads: [
+        { id: 'closed', status: 'closed', updatedAt: old },
+        { id: 'open', status: 'open', updatedAt: old },
+        { id: 'recent', status: 'closed', updatedAt: now },
+      ],
+      messages: ['closed', 'open', 'recent'].map((threadId) => ({ id: `m_${threadId}`, threadId, body: threadId, createdAt: old, idempotencyKey: 'stable' })),
+      deliveries: [
+        { id: 'closed_delivery', threadId: 'closed', status: 'failed', createdAt: old },
+        { id: 'injected', threadId: 'open', status: 'injected', createdAt: old },
+        { id: 'failed', threadId: 'open', status: 'failed', createdAt: old },
+        { id: 'queued', threadId: 'open', status: 'queued', createdAt: old },
+        { id: 'fresh', threadId: 'open', status: 'injected', createdAt: old, lastAttemptAt: now },
+      ],
+    }));
+    const store = new AgentBusStore({ stateDir: dir });
+    await store.init();
+    assert.deepEqual(store.getThread('closed').messages, []);
+    assert.equal(store.getThread('open').messages[0].body, 'open');
+    assert.equal(store.getThread('recent').messages[0].body, 'recent');
+    assert.deepEqual(store.listDeliveries().map((item) => item.id), ['queued', 'fresh']);
+    const repeated = await store.createMessage({ threadId: 'open', body: 'duplicate', idempotencyKey: 'stable' });
+    assert.equal(repeated.message.id, 'm_open');
+    assert.equal(store.getThread('open').messages.length, 1);
+    assert.deepEqual(repeated.deliveries, []);
+    const mirrored = JSON.parse((await readFile(join(dir, 'rooms/closed/messages.jsonl'), 'utf8')).trim());
+    assert.equal(mirrored.body, 'closed');
+    await store.close();
+    const restarted = new AgentBusStore({ stateDir: dir });
+    await restarted.init();
+    assert.equal(restarted.getThread('open').messages[0].body, 'open');
+    assert.deepEqual(restarted.getThread('closed').messages, []);
+    assert.deepEqual(restarted.listDeliveries().map((item) => item.id), ['queued', 'fresh']);
+    await restarted.reopenThread('closed');
+    await restarted.createMessage({ threadId: 'closed', body: 'new', from: { kind: 'system', sessionId: 'test' } });
+    assert.equal(restarted.getThread('closed').messages[0].body, 'new');
+    await restarted.close();
+  });
+
+  it('keeps bulk when its room mirror is unreadable and prunes during later writes', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() - 10 * 86_400_000 });
+    const dir = await makeTempDir();
+    const store = new AgentBusStore({ stateDir: dir });
+    await store.init();
+    const thread = await store.createThread({ title: 'old' });
+    await store.createMessage({ threadId: thread.id, body: 'retained' });
+    await store.closeThread(thread.id);
+    const mirror = join(dir, 'rooms', thread.id, 'messages.jsonl');
+    await writeFile(mirror, 'invalid json');
+    t.mock.timers.tick(10 * 86_400_000);
+    await store.persist();
+    assert.equal(store.getThread(thread.id).messages[0].body, 'retained');
+    await rm(mirror);
+    t.mock.timers.tick(3_600_000);
+    await store.persist();
+    assert.deepEqual(store.getThread(thread.id).messages, []);
+    assert.equal(JSON.parse((await readFile(mirror, 'utf8')).trim()).body, 'retained');
+    await store.close();
+  });
+
 });

@@ -8,7 +8,7 @@ import {
   PROCESS_LIFECYCLE_FRESH_MS,
   sessionStateTracker,
 } from '../modules/session-state/tracker.mjs';
-import { observeProcessLiveness } from '../modules/session-state/providers/process.mjs';
+import { createTmuxPaneProbe, observeProcessLiveness } from '../modules/session-state/providers/process.mjs';
 
 function identities(entries) {
   return new Map(Object.entries(entries));
@@ -29,6 +29,46 @@ function execTmux(handlers) {
 }
 
 describe('tmux process liveness observations', () => {
+  it('shares one pane listing and preserves individual lifecycle and fallback results', async () => {
+    const rows = { live: ['1'], wrapper: ['2'], zombie: ['3'], vanished: ['4'], multi: ['2', '1'], uncertain: ['5'] };
+    const live = identities({
+      1: { state: 'S', cmdline: 'codex' },
+      2: { state: 'S', cmdline: 'bash -lc codex' },
+      3: { state: 'Z', cmdline: 'codex' },
+      5: { state: 'S', cmdline: 'bash' },
+    });
+    let listings = 0;
+    const execFn = async (_, args) => {
+      if (args[0] === 'list-panes' && args[1] === '-a') {
+        listings++;
+        return { code: 0, stdout: Object.entries(rows).flatMap(([name, pids]) => pids.map((pid) => `${name}\t${pid}`)).join('\n') };
+      }
+      if (args[0] === 'list-panes' && rows[args[3]]) return { code: 0, stdout: rows[args[3]].join('\n') };
+      return { code: 1, stderr: "can't find session" };
+    };
+    const options = { execFn, now: 1000, expectedCli: 'codex',
+      readIdentityFn: async (pid) => live.get(pid), listChildrenFn: async (pid) => pid === '5' ? null : [] };
+    const paneProbe = createTmuxPaneProbe(execFn);
+    for (const sessionName of [...Object.keys(rows), 'absent']) {
+      assert.deepEqual(await observeProcessLiveness({ ...options, sessionName, paneProbe }),
+        await observeProcessLiveness({ ...options, sessionName }));
+    }
+    assert.equal(listings, 1);
+    live.delete('1');
+    assert.equal((await observeProcessLiveness({ ...options, sessionName: 'live', paneProbe: createTmuxPaneProbe(execFn) }))[0].value.lifecycle, 'missing');
+    assert.equal(listings, 2);
+    const failedProbe = createTmuxPaneProbe(async () => { throw new Error('failed batch'); });
+    assert.equal((await observeProcessLiveness({ ...options, sessionName: 'live', paneProbe: failedProbe }))[0].value.lifecycle, 'missing');
+  });
+
+  it('refreshes a stale dead pane pid before reporting missing', async () => {
+    const execFn = async (_, args) => ({ code: 0, stdout: args[1] === '-a' ? 'respawned\t1\n' : '2\n' });
+    const options = { sessionName: 'respawned', execFn, expectedCli: 'codex',
+      readIdentityFn: async (pid) => pid === '2' ? { state: 'S', cmdline: 'codex' } : null,
+      listChildrenFn: async () => [] };
+    assert.equal((await observeProcessLiveness({ ...options, paneProbe: createTmuxPaneProbe(execFn) }))[0].value.lifecycle, 'running');
+  });
+
   it('writes running only while a CLI pid is live in the pane tree', async () => {
     const live = identities({
       4242: { pid: '4242', state: 'S', starttime: '1', cmdline: 'codex --cd /tmp' },
@@ -248,7 +288,7 @@ describe('session evidence process and Pi transcripts', () => {
     await withFakeTmux([
       'case "$1" in',
       `capture-pane) cat '${contentFile}'; exit 0 ;;`,
-      `list-panes) echo probe >> '${countFile}'; cat '${pidFile}'; exit 0 ;;`,
+      `list-panes) echo probe >> '${countFile}'; if [ "$2" = -a ]; then printf 'codex-cached-live\\t%s\\ncodex-replaced\\t%s\\n' "$(cat '${pidFile}')" "$(cat '${pidFile}')"; else cat '${pidFile}'; fi; exit 0 ;;`,
       'esac',
       'exit 1',
     ].join('\n'), async () => {
@@ -265,15 +305,15 @@ describe('session evidence process and Pi transcripts', () => {
       assert.equal(await probes(), 2);
       await writeFile(contentFile, 'changed');
       await capture();
-      assert.equal(await probes(), 3);
+      assert.equal(await probes(), 2);
       session.tmuxSession = 'codex-replaced';
       await capture();
-      assert.equal(await probes(), 4);
+      assert.equal(await probes(), 2);
       await writeFile(pidFile, '42424242');
       t.mock.timers.tick(PROCESS_LIFECYCLE_FRESH_MS);
       assert.notEqual((await capture()).canonicalState.lifecycle, 'running');
       await capture();
-      assert.equal(await probes(), 6);
+      assert.equal(await probes(), 5);
     });
     sessionStateTracker.remove(trackerId);
   });

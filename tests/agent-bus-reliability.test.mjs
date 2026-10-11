@@ -23,7 +23,13 @@ test('close protects pending reviews; explicit cancellation persists through reo
   assert.equal(rejected.statusCode, 409, rejected.body);
   assert.equal(rejected.json().code, 'pending_deliveries');
   assert.equal(h.store.getThread(thread.id).thread.status, 'open');
-  const closed = await request(`threads/${thread.id}/close`, { cancelPending: true });
+  let closed;
+  for (let i = 0; i < 50; i++) {
+    closed = await request(`threads/${thread.id}/close`, { cancelPending: true });
+    if (closed.statusCode === 200) break;
+    assert.equal(closed.json().code, 'delivery_in_flight', closed.body);
+    await delay(20);
+  }
   assert.equal(closed.statusCode, 200, closed.body);
   for (const delivery of h.store.getThread(thread.id).deliveries) {
     assert.equal(delivery.status, 'failed'); assert.equal(delivery.error, 'thread_closed');

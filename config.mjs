@@ -141,6 +141,7 @@ export const config = {
     replyTimeoutMs: Number(env('AGENT_BUS_REPLY_TIMEOUT_MS', '900000')),
     injectDeadlineMs: Number(env('AGENT_BUS_INJECT_DEADLINE_MS', '120000')),
     queuedTimeoutMs: Number(env('AGENT_BUS_QUEUED_TIMEOUT_MS', '900000')),
+    messageRetentionDays: Number(env('AGENT_BUS_MESSAGE_RETENTION_DAYS', '7')),
     closedThreadRetentionDays: Number(env('AGENT_BUS_CLOSED_THREAD_RETENTION_DAYS', '30')),
   },
 

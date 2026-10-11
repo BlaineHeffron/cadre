@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
@@ -25,12 +25,16 @@ const jsonFileCache = new Map();
 async function readJsonFile(filePath, fallback, cache = false) {
   if (cache && jsonFileCache.has(filePath)) return jsonFileCache.get(filePath).value;
   try {
+    const info = cache ? null : await stat(filePath);
+    const signature = info && `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+    if (!cache && jsonFileCache.get(filePath)?.signature === signature) return jsonFileCache.get(filePath).value;
     const raw = await readFile(filePath, 'utf8');
     const parsed = JSON.parse(raw);
     const value = parsed && typeof parsed === 'object' ? parsed : fallback;
-    if (cache) jsonFileCache.set(filePath, { value, serialized: JSON.stringify(value, null, 2) });
+    jsonFileCache.set(filePath, cache ? { value, serialized: JSON.stringify(value, null, 2) } : { value, signature });
     return value;
   } catch {
+    if (!cache) jsonFileCache.delete(filePath);
     return fallback;
   }
 }
