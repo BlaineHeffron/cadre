@@ -167,10 +167,12 @@ export class AgentBusStore {
   }
 
   listThreads(filters = {}) {
-    const { status, projectKey } = filters;
+    const { status, projectKey, participant } = filters;
     return this.state.threads
       .filter((thread) => !status || thread.status === status)
       .filter((thread) => !projectKey || thread.projectKey === projectKey)
+      .filter((thread) => !participant || (thread.participants || []).some((item) =>
+        item.kind === participant.kind && item.sessionId === participant.sessionId))
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map(clone);
   }
@@ -196,17 +198,29 @@ export class AgentBusStore {
     return null;
   }
 
-  getThread(threadId) {
+  getThread(threadId, options = null) {
+    const { includeMessages = true, includeDeliveries = true, messageLimit = null, deliveryLimit = null } = options || {};
     const resolvedThreadId = this.resolveThreadId(threadId);
     if (!resolvedThreadId) return null;
     const thread = this.state.threads.find((item) => item.id === resolvedThreadId);
     if (!thread) return null;
 
-    return {
+    const messages = this._msgIdx.get(resolvedThreadId) || [];
+    const deliveries = this._delIdx.get(resolvedThreadId) || [];
+    const tail = (items, include, limit) => !include ? undefined
+      : limit === null ? items.map(clone) : limit > 0 ? items.slice(-limit).map(clone) : [];
+    const snapshot = {
       thread: clone(thread),
-      messages: (this._msgIdx.get(resolvedThreadId) || []).map(clone),
-      deliveries: (this._delIdx.get(resolvedThreadId) || []).map(clone),
+      messages: tail(messages, includeMessages, messageLimit),
+      deliveries: tail(deliveries, includeDeliveries, deliveryLimit),
     };
+    if (options) Object.assign(snapshot, { messageCount: messages.length, deliveryCount: deliveries.length,
+      latestMessageAt: messages.at(-1)?.createdAt || null, latestDeliveryAt: deliveries.at(-1)?.lastAttemptAt || null });
+    return snapshot;
+  }
+
+  getThreadDeliveries(threadId) {
+    return this._delIdx.get(this.resolveThreadId(threadId)) || [];
   }
 
   getMessage(messageId) {

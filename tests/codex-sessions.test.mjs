@@ -206,6 +206,8 @@ async function runStateTransitionScenario({ initialPaneContent, updatedPaneConte
     await app.ready();
     await app.inject({ method: 'GET', url: '/api/codex/sessions/codex-hooks-1' });
     await writeFile(${JSON.stringify(paneFile)}, ${JSON.stringify(updatedPaneContent)});
+    const realNow = Date.now;
+    Date.now = () => realNow() + 5001;
     await app.inject({ method: 'GET', url: '/api/codex/sessions/codex-hooks-1' });
     await new Promise((resolve) => setTimeout(resolve, 50));
     await app.inject({ method: 'GET', url: '/api/codex/sessions/codex-hooks-1' });

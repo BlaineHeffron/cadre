@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile, utimes } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -629,6 +630,42 @@ describe('transcript binding resolvers', () => {
 });
 
 describe('binding store', () => {
+  it('persists observation heartbeats after the configured interval', async () => {
+    await withTempDir(async (stateDir) => {
+      let now = 1000;
+      const store = buildBindingStore({ stateDir, now: () => now });
+      await store.load();
+      const session = { id: 'aaaa1111', runtime: 'claude', workDir: WORK_DIR, tmuxSession: 'claude-aaaa1111' };
+      await store.bind('aaaa1111', { path: '/t/a.jsonl', anchor: 'identity', runtime: 'claude', workDir: WORK_DIR, session });
+      const before = await stat(store.filePath);
+      now += 60_000 - 1;
+      await store.observe('aaaa1111', session);
+      assert.equal((await stat(store.filePath)).ino, before.ino);
+      now += 1;
+      await store.observe('aaaa1111', session);
+      assert.equal(store.get('aaaa1111').last_seen_at_ms, now);
+      assert.notEqual((await stat(store.filePath)).ino, before.ino);
+    });
+  });
+
+  it('loads persisted bindings in a fresh process and skips unchanged writes', async () => {
+    await withTempDir(async (stateDir) => {
+      const store = buildBindingStore({ stateDir, now: () => 42 });
+      await store.load();
+      await store.bind('aaaa1111', { path: '/t/a.jsonl', anchor: 'identity', ino: 5, runtime: 'claude', workDir: WORK_DIR });
+      const before = await stat(store.filePath);
+      await store.bind('aaaa1111', { path: '/t/a.jsonl', anchor: 'identity', ino: 5, runtime: 'claude', workDir: WORK_DIR });
+      const after = await stat(store.filePath);
+      assert.equal(after.ino, before.ino);
+
+      const modulePath = new URL('../modules/telegram/binding.mjs', import.meta.url).href;
+      const script = `import { buildBindingStore } from ${JSON.stringify(modulePath)}; const store = buildBindingStore({ stateDir: ${JSON.stringify(stateDir)} }); await store.load(); console.log(JSON.stringify(store.get('aaaa1111')));`;
+      const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+      assert.equal(child.status, 0, child.stderr);
+      assert.equal(JSON.parse(child.stdout).transcript_path, '/t/a.jsonl');
+    });
+  });
+
   it('resets the offset atomically on rebind and refuses to advance a foreign path', async () => {
     await withTempDir(async (stateDir) => {
       const store = buildBindingStore({ stateDir, now: () => 42 });

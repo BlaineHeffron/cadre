@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildSentStore, listSessionsFromRegistry, TelegramRelayLoop } from '../modules/telegram/relay.mjs';
@@ -159,6 +160,19 @@ async function readJson(path) {
 }
 
 describe('telegram relay loop', () => {
+  it('loads sent state in a fresh process', async () => {
+    await withTempDir(async (stateDir) => {
+      const store = buildSentStore({ stateDir });
+      await store.load();
+      await store.set('session-1', { session_id: 'session-1', message_id: 42 });
+      const modulePath = new URL('../modules/telegram/relay.mjs', import.meta.url).href;
+      const script = `import { buildSentStore } from ${JSON.stringify(modulePath)}; const store = buildSentStore({ stateDir: ${JSON.stringify(stateDir)} }); await store.load(); console.log(JSON.stringify(store.get('session-1')));`;
+      const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+      assert.equal(child.status, 0, child.stderr);
+      assert.deepEqual(JSON.parse(child.stdout), { session_id: 'session-1', message_id: 42 });
+    });
+  });
+
   it('delivers bound transcript output from a canonical ready session', async () => {
     await withTempDir(async (stateDir) => {
       const deliveries = [];

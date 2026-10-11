@@ -175,16 +175,18 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     const entries = [];
     const includeMessages = req.query.includeMessages !== 'false';
     const includeDeliveries = req.query.includeDeliveries !== 'false';
-    for (const thread of store.listThreads({ projectKey: req.query.projectKey || undefined })) {
+    const messageLimit = normalizeCollectionLimit(req.query.messageLimit, 10);
+    const deliveryLimit = normalizeCollectionLimit(req.query.deliveryLimit, 10);
+    for (const thread of store.listThreads({ projectKey: req.query.projectKey || undefined,
+      participant: req.query.kind && req.query.sessionId ? req.query : undefined })) {
       if (req.query.kind && (!req.query.sessionId || !threadHasParticipant(thread, req.query))) continue;
-      const snapshot = store.getThread(thread.id);
+      const snapshot = store.getThread(thread.id, { includeMessages, includeDeliveries, messageLimit, deliveryLimit });
       const enriched = thread.status === 'open' || req.query.status === 'stale'
         ? await enrichThread(thread, snapshot)
         : thread;
       if (!threadMatchesStatusFilter(enriched, req.query.status)) continue;
       entries.push(buildStateSnapshotEntry(snapshot, enriched, { includeMessages, includeDeliveries,
-        messageLimit: normalizeCollectionLimit(req.query.messageLimit, 10),
-        deliveryLimit: normalizeCollectionLimit(req.query.deliveryLimit, 10) }));
+        messageLimit, deliveryLimit }));
     }
     return { threads: entries };
   });
