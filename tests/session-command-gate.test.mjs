@@ -1061,43 +1061,63 @@ describe('session command gate', () => {
 describe('Claude MCP reconnect through the command gate and tmux input', () => {
   const history = 'Claude Code v2.1.296\n❯ earlier prompt quoting ✘ dueno\nPrevious response\nReconnected to dueno.\n';
   const prompt = (draft = '') => `${history}────────────────────\n❯ ${draft}\n────────────────────\n  ⏵⏵ bypass permissions on`;
-  function reconnectPane({ healthy = false, connecting = false, absent = false, unexpected = '', draft = '' } = {}) {
+  const rule = '  ──────────────────────────────';
+  function reconnectPane({ healthy = false, connecting = false, absent = false, unexpected = '', draft = '', lag = 0 } = {}) {
     let pane = prompt(draft);
+    let visible = pane;
+    let stale = 0;
     let pasted = '';
     let selected = 0;
     let detailSelected = 0;
     let stage = 'prompt';
     const keys = [];
     const calls = [];
-    const list = () => `${history}❯ /mcp\n  Manage MCP servers\n  2 servers\n  Built-in MCPs (always available)\n  ${selected === 0 ? '❯' : ' '} ✔ other\n  ${selected === 1 ? '❯' : ' '} ${healthy ? '✔' : connecting ? '…' : '✘'} ${absent ? 'another-server' : 'dueno'}\n ↑/↓ to navigate · Enter to confirm · Esc to cancel`;
-    const detail = () => `${history}❯ /mcp\n  Dueno MCP Server\n  Status: ✘ failed\n  ${detailSelected === 0 ? '❯' : ' '} 1. Authenticate\n  ${detailSelected === 1 ? '❯' : ' '} 2. Reconnect\n    3. Disable\n ↑/↓ to navigate · Enter to select · Esc to back`;
+    // Claude's MCP screens draw ──── rules that look like composer separators.
+    const list = () => `${history}❯ /mcp\n  Manage MCP servers\n${rule}\n  3 servers\n  Built-in MCPs (always available)\n  ${selected === 0 ? '❯' : ' '} ✔ other\n  ${selected === 1 ? '❯' : ' '} ${healthy ? '✔' : connecting ? '…' : '✘'} ${absent ? 'another-server' : 'dueno'}\n  ${selected === 2 ? '❯' : ' '} ✔ bevy_brp\n${rule}\n ↑/↓ to navigate · Enter to confirm · Esc to cancel`;
+    const detail = () => `${history}❯ /mcp\n  Dueno MCP Server\n${rule}\n  Status: ✘ failed\n  ${detailSelected === 0 ? '❯' : ' '} 1. Authenticate\n  ${detailSelected === 1 ? '❯' : ' '} 2. Reconnect\n    3. Disable\n${rule}\n ↑/↓ to navigate · Enter to select · Esc to back`;
+    const screens = {
+      prompt: () => prompt(),
+      list,
+      detail,
+      bevy: () => `${history}❯ /mcp\n  Bevy_brp MCP Server\n${rule}\n  Status: ✔ connected\n  ❯ 1. View tools\n${rule}\n ↑/↓ to navigate · Enter to select · Esc to back`,
+      tools: () => `${history}❯ /mcp\n  Tools for bevy_brp (40 tools)\n${rule}\n  ❯ 1. brp_execute\n${rule}\n ↑/↓ to navigate · Enter to select · Esc to back`,
+      tool: () => `${history}❯ /mcp\n  brp_execute (bevy_brp)\n${rule}\n  Execute a BRP method\n${rule}\n  Esc to go back`,
+    };
+    const back = { list: 'prompt', detail: 'list', bevy: 'list', tools: 'bevy', tool: 'tools' };
+    const show = (next) => { stage = next; pane = screens[next](); };
     const execFn = async (command, args, options) => {
       assert.equal(command, 'tmux');
       calls.push(args[0]);
       if (args[0] === 'capture-pane') {
         assert.ok(args.includes('-e'), 'preserve dim placeholders in actual capture');
-        return { code: 0, stdout: pane };
+        if (stale > 0) stale -= 1;
+        else visible = pane;
+        return { code: 0, stdout: visible };
       }
       if (args[0] === 'load-buffer') pasted = options.input;
       if (args[0] === 'send-keys') {
         const key = args.at(-1);
         keys.push(key);
-        if (key === 'Escape') {
-          if (stage === 'detail') { stage = 'list'; pane = list(); }
-          else { stage = 'prompt'; pane = prompt(); }
-        } else if (key === 'Down') {
-          if (stage === 'list') { selected = 1; pane = list(); }
-          else { detailSelected = 1; pane = detail(); }
+        stale = lag;
+        if (key === 'Escape') show(back[stage] || 'prompt');
+        else if (key === 'Down') {
+          if (stage === 'list') { selected = Math.min(selected + 1, 2); pane = list(); }
+          else { detailSelected = Math.min(detailSelected + 1, 2); pane = detail(); }
         } else if (key === 'Enter' && stage === 'prompt' && pasted === '/mcp') {
-          stage = 'list';
-          pane = unexpected === 'list' ? `${history}Unrelated dialog` : list();
+          show('list');
+          if (unexpected === 'list') pane = `${history}Unrelated dialog`;
         } else if (key === 'Enter' && stage === 'list') {
-          assert.equal(selected, 1);
-          stage = 'detail';
-          pane = unexpected === 'detail' ? `${history}Other MCP Server\n❯ 1. Reconnect` : detail();
-        } else if (key === 'Enter' && stage === 'detail') {
+          if (selected === 2) show('bevy');
+          else {
+            assert.equal(selected, 1);
+            show('detail');
+            if (unexpected === 'detail') pane = `${history}Other MCP Server\n❯ 1. Reconnect`;
+          }
+        } else if (key === 'Enter' && stage === 'bevy') show('tools');
+        else if (key === 'Enter' && stage === 'detail') {
           assert.equal(detailSelected, 1, 'never Authenticate or Disable');
           if (unexpected === 'confirmation') pane = detail();
+          else if (unexpected === 'tools') show('tool');
           else {
             stage = 'prompt';
             pane = `${history}❯ /mcp\n  ⎿ ${unexpected === 'failure' ? 'Failed to reconnect to dueno: ECONNREFUSED' : 'Reconnected to dueno.'}\n${prompt()}`;
@@ -1168,6 +1188,35 @@ describe('Claude MCP reconnect through the command gate and tmux input', () => {
       assert.ok(fake.pane().includes('⏵⏵ bypass permissions on'));
     });
   }
+
+  it('escapes from bevy_brp tool screens drawn with ──── rules back to the prompt', async () => {
+    const test = harness();
+    const fake = reconnectPane({ unexpected: 'tools' });
+    test.setExecute(fake.executor);
+    await assert.rejects(test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' }), /Unexpected MCP screen/);
+    assert.deepEqual(fake.keys.slice(5), ['Escape', 'Escape', 'Escape', 'Escape']);
+    assert.equal(fake.pane(), prompt());
+  });
+
+  it('waits for slow renders instead of sending keys from a stale frame', async () => {
+    const test = harness();
+    const fake = reconnectPane({ lag: 2 });
+    test.setExecute(fake.executor);
+    const result = await test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' });
+    assert.equal(result.ok, true);
+    assert.deepEqual(fake.keys, ['Enter', 'Down', 'Enter', 'Down', 'Enter']);
+    assert.ok(fake.pane().includes('⏵⏵ bypass permissions on'));
+  });
+
+  it('exits a healthy dueno cleanly despite slow renders', async () => {
+    const test = harness();
+    const fake = reconnectPane({ healthy: true, lag: 2 });
+    test.setExecute(fake.executor);
+    const result = await test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' });
+    assert.equal(result.result.pending, false);
+    assert.deepEqual(fake.keys, ['Enter', 'Escape']);
+    assert.equal(fake.pane(), prompt());
+  });
 
   for (const placeholder of ['\x1b[2mTry "fix typecheck errors"\x1b[0m', '\x1b[2mTry\x1b[0m \x1b[2m"fix\x1b[0m \x1b[2mtypecheck\x1b[0m \x1b[2merrors"\x1b[0m']) {
     it('reconnects with a dim placeholder and NBSP composer', async () => {

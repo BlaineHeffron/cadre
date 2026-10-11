@@ -1126,9 +1126,13 @@ export function createTmuxCommandExecutor({
         if (separators.length < 2) return undefined;
         return rows.slice(separators.at(-2) + 1, separators.at(-1)).join('\n');
       };
+      // MCP screens can contain separator lines, so only trust the composer once no MCP UI follows the /mcp echo.
+      const view = (pane) => pane.slice(Math.max(0, pane.lastIndexOf('/mcp')));
+      const closed = (pane) => composer(pane) !== undefined
+        && !/Manage MCP servers|MCP Server|Tools for |Esc to (?:cancel|(?:go )?back)/i.test(view(pane));
       const menu = (pane, header) => {
-        const index = pane.lastIndexOf(header);
-        return index < 0 || composer(pane) !== undefined ? '' : pane.slice(index);
+        const index = view(pane).lastIndexOf(header);
+        return index < 0 ? '' : view(pane).slice(index);
       };
       const screen = async (matches) => {
         for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -1138,6 +1142,21 @@ export function createTmuxCommandExecutor({
         }
         throw new Error('Unexpected MCP screen');
       };
+      // Move one row at a time; never act on a frame captured before the previous key took effect.
+      const select = async (pane, header, target) => {
+        const distance = (content) => {
+          const rows = menu(content, header).split('\n');
+          const selected = rows.findIndex((row) => /^\s*[❯>]\s+/.test(row));
+          const index = rows.findIndex((row) => target.test(row));
+          return selected < 0 || index < 0 ? NaN : index - selected;
+        };
+        for (let rows = distance(pane); rows !== 0; rows = distance(pane)) {
+          if (Number.isNaN(rows)) throw new Error('Unrecognized MCP selection');
+          await key(rows > 0 ? 'Down' : 'Up');
+          pane = await screen((content) => distance(content) === rows - Math.sign(rows));
+        }
+        return pane;
+      };
       const pane = await capture(true);
       // Claude's empty composer placeholder is dim; actual draft text is not.
       const draft = normalizedPaneText((composer(pane) || '').replace(/\x1b\[2m[^\x1b]*\x1b\[(?:0|22)m/g, ''));
@@ -1145,36 +1164,14 @@ export function createTmuxCommandExecutor({
       if (/esc to interrupt/i.test(pane) || !/^[❯>]\s*$/.test(draft)) throw new Error('Claude composer is not empty and idle');
       try {
         await sendTmuxText(execFn, { target: tmuxTarget, text: '/mcp', delayMs, sleepFn, bufferPrefix });
-        let list = menu(await screen((pane) => menu(pane, 'Manage MCP servers')), 'Manage MCP servers');
-        if (!/✘\s+dueno(?:\s|$)/i.test(list)) {
-          return { ok: true, pending: /^\s*[❯>]?\s*[^✔✘\s]\s+dueno(?:\s|$)/im.test(list) };
+        const list = await screen((pane) => menu(pane, 'Manage MCP servers'));
+        if (!/✘\s+dueno(?:\s|$)/i.test(menu(list, 'Manage MCP servers'))) {
+          return { ok: true, pending: /^\s*[❯>]?\s*[^✔✘\s]\s+dueno(?:\s|$)/im.test(menu(list, 'Manage MCP servers')) };
         }
-        // Move only from an identified selected server row, checking every step.
-        for (let step = 0; step < 30; step += 1) {
-          const rows = list.split('\n');
-          const selected = rows.findIndex((row) => /^\s*[❯>]\s+/.test(row));
-          const dueno = rows.findIndex((row) => /✘\s+dueno(?:\s|$)/i.test(row));
-          if (selected < 0 || dueno < 0) throw new Error('Unrecognized MCP server selection');
-          if (selected === dueno) break;
-          if (step === 29) throw new Error('MCP server selection did not advance');
-          await key(selected < dueno ? 'Down' : 'Up');
-          await sleepFn(100);
-          list = menu(await screen((pane) => menu(pane, 'Manage MCP servers')), 'Manage MCP servers');
-        }
+        const server = await select(list, 'Manage MCP servers', /✘\s+dueno(?:\s|$)/i);
         await key('Enter');
-        let detail = menu(await screen((pane) => menu(pane, 'Dueno MCP Server')), 'Dueno MCP Server');
-        for (let step = 0; step < 10; step += 1) {
-          const rows = detail.split('\n');
-          const selected = rows.findIndex((row) => /^\s*[❯>]\s+\d+\./.test(row));
-          const reconnect = rows.findIndex((row) => /^\s*[❯>]?\s*\d+\.\s+Reconnect\s*$/i.test(row));
-          if (selected < 0 || reconnect < 0) throw new Error('Unrecognized MCP reconnect selection');
-          if (selected === reconnect) break;
-          if (step === 9) throw new Error('MCP reconnect selection did not advance');
-          await key(selected < reconnect ? 'Down' : 'Up');
-          await sleepFn(100);
-          detail = menu(await screen((pane) => menu(pane, 'Dueno MCP Server')), 'Dueno MCP Server');
-        }
-        const before = await capture();
+        const detail = await screen((pane) => menu(pane, 'Dueno MCP Server'));
+        const before = await select(detail, 'Dueno MCP Server', /^\s*[❯>]?\s*\d+\.\s+Reconnect\s*$/i);
         const count = (content, phrase) => content.split(phrase).length;
         await key('Enter');
         await screen((content) => {
@@ -1185,12 +1182,12 @@ export function createTmuxCommandExecutor({
         });
         return { ok: true };
       } finally {
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          if (composer(await capture()) !== undefined) break;
+        let pane = await capture();
+        for (let attempt = 0; attempt < 6 && !closed(pane); attempt += 1) {
           await key('Escape');
-          await sleepFn(100);
+          pane = await screen((next) => next !== pane).catch(() => capture());
         }
-        if (composer(await capture()) === undefined) throw new Error('MCP menu did not close');
+        if (!closed(pane)) throw new Error('MCP menu did not close');
       }
     }
     if (operation.type === 'dialog') {
