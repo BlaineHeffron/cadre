@@ -1,4 +1,4 @@
-import { appendFile, mkdir, rm } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { config } from '../../config.mjs';
@@ -32,7 +32,9 @@ function clone(value) {
 
 export class AgentBusStore {
   constructor({ stateDir = config.agentBus.stateDir, logger = noopLogger, persistDebounceMs = DEFAULT_PERSIST_DEBOUNCE_MS,
-    closedThreadRetentionDays = config.agentBus.closedThreadRetentionDays } = {}) {
+    messageRetentionDays = config.agentBus.messageRetentionDays, closedThreadRetentionDays = config.agentBus.closedThreadRetentionDays } = {}) {
+    this.messageRetentionDays = messageRetentionDays;
+    this._lastPruneAt = 0;
     this.closedThreadRetentionDays = closedThreadRetentionDays;
     this.stateDir = resolve(stateDir);
     this.stateFile = resolve(this.stateDir, 'state.json');
@@ -114,6 +116,7 @@ export class AgentBusStore {
   }
 
   async persist() {
+    if (Date.now() - this._lastPruneAt >= 3_600_000) await this.pruneClosedThreads();
     this._persistDirty = true;
     if (!this._persistPromise) {
       this._persistPromise = new Promise((resolvePromise, rejectPromise) => {
@@ -334,16 +337,50 @@ export class AgentBusStore {
 
   /** Drops closed threads (with messages, deliveries and room mirrors) idle past the retention window; task records and task parents are kept. */
   async pruneClosedThreads({ retentionDays = this.closedThreadRetentionDays, now = Date.now() } = {}) {
-    if (!(retentionDays >= 0)) return 0;
-    const cutoff = now - retentionDays * 86_400_000;
+    this._lastPruneAt = now;
+    const bulkCutoff = now - this.messageRetentionDays * 86_400_000;
+    const candidates = this.state.threads.filter((item) => this.messageRetentionDays >= 0
+      && item.status === 'closed' && !isDurableTaskRecord(item.metadata?.task)
+      && Number(item.updatedAt || item.createdAt || 0) <= bulkCutoff && this._msgIdx.get(item.id)?.length);
+    const unsafe = new Set();
+    // Mirrors are best effort on send. Backfill missing messages before dropping bodies.
+    for (const { id } of candidates) {
+      try {
+        const dir = resolve(this.stateDir, 'rooms', id);
+        await mkdir(dir, { recursive: true });
+        const file = resolve(dir, 'messages.jsonl');
+        const raw = await readFile(file, 'utf8').catch((error) => {
+          if (error.code === 'ENOENT') return '';
+          throw error;
+        });
+        const mirrored = new Set(raw.split('\n').filter(Boolean).map((line) => JSON.parse(line).id));
+        const missing = (this._msgIdx.get(id) || []).filter((message) => !mirrored.has(message.id));
+        if (missing.length) await appendFile(file, missing.map((message) => JSON.stringify(message)).join('\n') + '\n');
+      } catch (error) {
+        unsafe.add(id);
+        this.logger.warn?.({ err: error.message, threadId: id }, 'Cannot prune unmirrored room history');
+      }
+    }
+    // Derive eligibility after I/O, including rooms reopened or newly pinned while awaiting mirrors.
     const tasks = this.state.threads.map((item) => item.metadata?.task).filter(isDurableTaskRecord);
     const pinned = new Set(tasks.flatMap((task) => [task.parentTaskId, task.parentThreadId]));
-    const doomed = new Set(this.state.threads.filter((item) => item.status === 'closed' && !isDurableTaskRecord(item.metadata?.task)
-      && !pinned.has(item.id) && Number(item.updatedAt || item.createdAt || 0) <= cutoff).map((item) => item.id));
-    if (!doomed.size) return 0;
+    const eligible = this.state.threads.filter((item) => item.status === 'closed' && !isDurableTaskRecord(item.metadata?.task)
+      && !pinned.has(item.id) && !unsafe.has(item.id));
+    const cutoff = now - retentionDays * 86_400_000;
+    const doomed = new Set(eligible.filter((item) => retentionDays >= 0
+      && Number(item.updatedAt || item.createdAt || 0) <= cutoff).map((item) => item.id));
+    const bulk = new Set(eligible.filter((item) => this.messageRetentionDays >= 0
+      && Number(item.updatedAt || item.createdAt || 0) <= bulkCutoff).map((item) => item.id));
+    const messages = this.state.messages.filter((item) => !doomed.has(item.threadId) && !bulk.has(item.threadId));
+    const deliveries = this.state.deliveries.filter((item) => {
+      const at = Math.max(Number(item.lastAttemptAt || 0), Number(item.cancelledAt || 0), Number(item.createdAt || 0));
+      return !doomed.has(item.threadId) && !bulk.has(item.threadId)
+        && !(this.messageRetentionDays >= 0 && ['injected', 'failed'].includes(item.status) && at > 0 && at <= bulkCutoff);
+    });
+    if (!doomed.size && messages.length === this.state.messages.length && deliveries.length === this.state.deliveries.length) return 0;
     this.state.threads = this.state.threads.filter((item) => !doomed.has(item.id));
-    this.state.messages = this.state.messages.filter((item) => !doomed.has(item.threadId));
-    this.state.deliveries = this.state.deliveries.filter((item) => !doomed.has(item.threadId));
+    this.state.messages = messages;
+    this.state.deliveries = deliveries;
     this._rebuildIndexes();
     await this.persist();
     await Promise.all([...doomed].map((id) => rm(resolve(this.stateDir, 'rooms', id), { recursive: true, force: true }).catch(() => {})));
@@ -493,10 +530,7 @@ export class AgentBusStore {
     const dir = resolve(this.stateDir, 'rooms', thread.id);
     try {
       await mkdir(dir, { recursive: true });
-      await appendFile(resolve(dir, 'messages.jsonl'), `${JSON.stringify({
-        id: message.id, threadId: message.threadId, from: message.from, type: message.type,
-        body: message.body, replyTo: message.replyTo, createdAt: message.createdAt,
-      })}\n`);
+      await appendFile(resolve(dir, 'messages.jsonl'), `${JSON.stringify(message)}\n`);
     } catch (err) {
       this.logger.debug?.({ err: err?.message || err, dir }, 'Agent bus room message mirror write failed');
     }

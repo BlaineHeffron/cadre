@@ -106,6 +106,30 @@ async function firstResolvedLifecycle(pids, options) {
   return pids.length ? 'missing' : null;
 }
 
+// One listing shared by a caller's poll cycle; /proc remains the liveness authority.
+export function createTmuxPaneProbe(execFn) {
+  let snapshot;
+  return () => snapshot ||= (async () => {
+    try {
+      const result = await execFn('tmux', ['list-panes', '-a', '-F', '#{session_name}\t#{pane_pid}']);
+      if (result?.code !== 0) return null;
+      const panes = new Map();
+      for (const line of String(result.stdout || '').split('\n').filter(Boolean)) {
+        const split = line.lastIndexOf('\t');
+        const name = line.slice(0, split);
+        const pid = line.slice(split + 1).trim();
+        if (split < 0 || !/^\d+$/.test(pid)) return null;
+        const pids = panes.get(name) || [];
+        pids.push(pid);
+        panes.set(name, pids);
+      }
+      return panes;
+    } catch {
+      return null;
+    }
+  })();
+}
+
 /**
  * Tmux capture success is not liveness. Probe session existence + pane pid
  * trees + /proc. Return null when the probe cannot decide.
@@ -116,6 +140,7 @@ export async function resolveTmuxProcessLifecycle({
   readIdentityFn = readProcIdentity,
   listChildrenFn = readProcChildPids,
   expectedCli = '',
+  paneProbe,
 } = {}) {
   const target = text(sessionName);
   if (!target || typeof execFn !== 'function') return null;
@@ -123,6 +148,12 @@ export async function resolveTmuxProcessLifecycle({
   const treeOptions = { readIdentityFn, listChildrenFn, expectedCli };
 
   try {
+    const snapshot = await paneProbe?.();
+    if (snapshot?.has(target)) {
+      const lifecycle = await firstResolvedLifecycle(snapshot.get(target), treeOptions);
+      if (lifecycle === 'running') return lifecycle;
+    }
+    // A missing entry or failed batch uses the existing existence/fallback semantics.
     const panes = await execFn('tmux', ['list-panes', '-s', '-t', target, '-F', '#{pane_pid}']);
     if (panes?.code === 0) {
       const pids = panePids(panes.stdout);
@@ -155,6 +186,7 @@ export async function observeProcessLiveness({
   readIdentityFn = readProcIdentity,
   listChildrenFn = readProcChildPids,
   expectedCli = '',
+  paneProbe,
   freshMs = PROCESS_LIFECYCLE_FRESH_MS,
 } = {}) {
   const lifecycle = await resolveTmuxProcessLifecycle({
@@ -163,6 +195,7 @@ export async function observeProcessLiveness({
     readIdentityFn,
     listChildrenFn,
     expectedCli,
+    paneProbe,
   });
   if (!lifecycle) return Object.freeze([]);
   const observedAt = Number(now);

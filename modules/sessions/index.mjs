@@ -27,7 +27,7 @@ import { observeClaudePane } from '../session-state/providers/claude.mjs';
 import { observeCodexPane } from '../session-state/providers/codex.mjs';
 import { observePiPane } from '../session-state/providers/pi.mjs';
 import { observeTranscriptFile } from '../session-state/providers/transcript.mjs';
-import { observeProcessLiveness } from '../session-state/providers/process.mjs';
+import { createTmuxPaneProbe, observeProcessLiveness } from '../session-state/providers/process.mjs';
 import { latestFreshPaneExecution, nextTranscriptIdleSince, shouldAutoCloseSession } from './auto-close.mjs';
 import {
   extractClaudeConversationText,
@@ -504,6 +504,8 @@ export function createAgentSessionsProvider(providerId) {
   const discoveryCache = new Map();
   const stateCache = new Map();
   const processEvidenceCache = new Map();
+  let processPaneProbe;
+  let processPaneProbeAt = 0;
   const captureInFlight = new Map();
   const paneCache = new Map();
   const pollingGeneration = new Map();
@@ -602,11 +604,15 @@ async function observeSessionEvidence(id, meta = {}, content = '', now = Date.no
   if (lifecycle === 'running' && meta?.tmuxSession) {
     const sessionName = meta.tmuxSession || meta.name || '';
     const cached = processEvidenceCache.get(id);
+    if (!processPaneProbe || now - processPaneProbeAt >= 1000) {
+      processPaneProbe = createTmuxPaneProbe(exec);
+      processPaneProbeAt = now;
+    }
     // Preserve the original expiry; unchanged panes cannot renew a liveness grant.
     const processObservations = cached?.sessionName === sessionName && cached.content === content
       && cached.observations[0]?.expiresAt > now
       ? cached.observations
-      : await observeProcessLiveness({ sessionName, now, execFn: exec, expectedCli: config.id });
+      : await observeProcessLiveness({ sessionName, now, execFn: exec, expectedCli: config.id, paneProbe: processPaneProbe });
     if (processObservations[0]?.value?.lifecycle === 'running') {
       processEvidenceCache.set(id, { sessionName, content, observations: processObservations });
     } else {

@@ -2024,6 +2024,28 @@ Telegram Q&A beta final: choose an option
 });
 
 describe('telegram relay registry session listing', () => {
+  it('sees external registry and bus-state edits, removal, and recreation after cached reads', async () => {
+    await withTempDir(async (sessionsDir) => {
+      const registry = join(sessionsDir, '.codex_sessions.json');
+      const bus = join(sessionsDir, 'bus.json');
+      const read = () => listSessionsFromRegistry({ sessionsDir, agentBusStatePaths: [bus] });
+      const entry = { id: 'one', tmuxSession: 'codex-one', workDir: '/tmp/work' };
+      await writeFile(registry, JSON.stringify([entry]));
+      const thread = { id: 'thr_one', status: 'open', title: 'Before', participants: [{ kind: 'codex', sessionId: 'one' }] };
+      await writeFile(bus, JSON.stringify({ threads: [thread] }));
+      assert.equal((await read())[0].busThreadTitle, 'Before');
+      assert.equal((await read())[0].busThreadTitle, 'Before');
+      await writeFile(bus, JSON.stringify({ threads: [{ ...thread, title: 'After!' }] }));
+      await writeFile(registry, JSON.stringify([{ ...entry, displayName: 'Changed' }]));
+      assert.equal((await read())[0].busThreadTitle, 'After!');
+      assert.equal((await read())[0].name, 'Changed');
+      await rm(registry);
+      assert.deepEqual(await read(), []);
+      await writeFile(registry, JSON.stringify([entry]));
+      assert.equal((await read())[0].id, 'one');
+    });
+  });
+
   it('reads claude, codex, and Pi registry files from the sessions directory', async () => {
     await withTempDir(async (sessionsDir) => {
       await writeFile(join(sessionsDir, '.claude_sessions.json'), JSON.stringify([
