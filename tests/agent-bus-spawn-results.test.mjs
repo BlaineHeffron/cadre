@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { recordHookPayload, registerHookSessionRegistry } from '../modules/agent/hook-events.mjs';
+import { buildHookSessionPaths, recordHookPayload, registerHookSessionRegistry } from '../modules/agent/hook-events.mjs';
 import { spawnerMetadata } from '../modules/agent-bus/coordinator-policy.mjs';
 import { buildSessionDeliveryAuditStore } from '../modules/sessions/delivery-audit.mjs';
 import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
@@ -226,6 +226,19 @@ test('a worker Stop with background tasks still holds the coordinator result', a
   await turn('Coordinator finished after background worker');
   assert.ok(await settle(() => delivered('Coordinator finished after background worker') === 1));
   assert.equal(delivered('Coordinator waiting on background worker'), 0);
+});
+
+test('replay after a restart skips Stops older than the replay window', async (t) => {
+  const { h, turn, delivered, sessions } = await setup(t, {});
+  await turn('Ancient answer');
+  const { eventsPath } = await buildHookSessionPaths({ workDir: h.stateDir, provider: 'claude', sessionId: 'claude-2' });
+  const old = new Date(Date.now() - 31 * 60_000).toISOString();
+  await writeFile(eventsPath, (await readFile(eventsPath, 'utf8')).replace(/"loggedAt":"[^"]+"/g, `"loggedAt":"${old}"`));
+  sessions.set('claude-2', { workDir: h.stateDir, metadata: { spawnedBy: spawner } });
+  await turn('Fresh answer');
+  assert.ok(await settle(() => delivered('Fresh answer') === 1));
+  await delay(150);
+  assert.equal(delivered('Ancient answer'), 0);
 });
 
 test('a spawned child returns each finished turn to its spawner once', async (t) => {
