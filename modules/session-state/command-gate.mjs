@@ -14,7 +14,8 @@ const BLOCKING_INTERACTIONS = new Set([
 
 const TERMINAL_LIFECYCLES = new Set(['ended', 'missing']);
 const DELIVERY_STATES = new Set(['queued', 'sending', 'awaiting_response', 'completed', 'failed']);
-const IMMEDIATE_OPERATIONS = new Set(['terminal_keys', 'terminal_text']);
+// MCP reconnect verifies its own UI result; it must not wait for an agent turn.
+const IMMEDIATE_OPERATIONS = new Set(['terminal_keys', 'terminal_text', 'mcp_reconnect']);
 const COALESCIBLE_OPERATIONS = new Set(['message', 'terminal_text', 'startup']);
 const DEFAULT_POLL_INTERVAL_MS = 50;
 // A startup prompt is confirmed only when the agent actually starts working.
@@ -133,6 +134,11 @@ function startupFailOpen(transaction = {}, snapshot = {}) {
 
 function canAttemptSend(snapshot, capability, transaction = {}) {
   if (!snapshot || TERMINAL_LIFECYCLES.has(snapshot.lifecycle)) return false;
+  if (transaction.operation === 'mcp_reconnect') {
+    return snapshot.execution === 'idle'
+      && snapshot.interaction?.kind === 'free_text'
+      && snapshot.capabilities?.canQueueMessage === true;
+  }
   if (BLOCKING_INTERACTIONS.has(snapshot.interaction?.kind)) return false;
   const activeQueue = transaction.allowActiveQueue
     && transaction.operation === 'message'
@@ -543,7 +549,7 @@ export function createSessionCommandGate({
       if (expired(transaction)) throw deadlineError(transaction);
       if (TERMINAL_LIFECYCLES.has(snapshot?.lifecycle)) throw endedError(registration.sessionId, snapshot);
 
-      const policy = dialogPolicy(snapshot);
+      const policy = transaction.operation === 'mcp_reconnect' ? null : dialogPolicy(snapshot);
       if (policy) {
         await applyDialogPolicy(registration, snapshot, transaction);
         continue;
@@ -713,7 +719,7 @@ export function createSessionCommandGate({
       if (expired(transaction) && !startupFailOpen(transaction, finalSnapshot)) {
         throw deadlineError(transaction);
       }
-      await registration.execute({
+      const executionResult = await registration.execute({
         transactionId: transaction.id,
         sessionId: registration.sessionId,
         type: transaction.keys.length ? 'dialog' : transaction.operation,
@@ -737,6 +743,7 @@ export function createSessionCommandGate({
           transactionId: transaction.id,
           state: 'completed',
           snapshot: completedSnapshot,
+          result: executionResult,
         };
       }
       const isStartup = transaction.operation === 'startup' && transaction.enter !== false;
@@ -1093,6 +1100,7 @@ export const sessionCommandGate = createSessionCommandGate({ tracker: sessionSta
 
 export function createTmuxCommandExecutor({
   execFn,
+  capturePane,
   target,
   delayMs = 300,
   startupDelayMs = delayMs,
@@ -1105,6 +1113,86 @@ export function createTmuxCommandExecutor({
   if (!tmuxTarget) throw new TypeError('target is required');
 
   return async function executeTmuxCommand(operation = {}) {
+    if (operation.operation === 'mcp_reconnect') {
+      const capture = async (raw = false) => {
+        const result = await capturePane();
+        if (result?.code !== 0) throw new Error(result?.stderr || 'Failed to inspect MCP screen');
+        return raw ? result.stdout : normalizedPaneText(result.stdout);
+      };
+      const key = (value) => executeTmuxCommand({ type: 'dialog', keys: [value] });
+      const composer = (pane) => {
+        const rows = pane.split('\n');
+        const separators = rows.map((row, index) => /^\s*─{10,}\s*$/.test(normalizedPaneText(row)) ? index : -1).filter((index) => index >= 0);
+        if (separators.length < 2) return undefined;
+        return rows.slice(separators.at(-2) + 1, separators.at(-1)).join('\n');
+      };
+      const menu = (pane, header) => {
+        const index = pane.lastIndexOf(header);
+        return index < 0 || composer(pane) !== undefined ? '' : pane.slice(index);
+      };
+      const screen = async (matches) => {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          const pane = await capture();
+          if (matches(pane)) return pane;
+          await sleepFn(100);
+        }
+        throw new Error('Unexpected MCP screen');
+      };
+      const pane = await capture(true);
+      // Claude's empty composer placeholder is dim; actual draft text is not.
+      const draft = normalizedPaneText((composer(pane) || '').replace(/\x1b\[2m[^\x1b]*\x1b\[(?:0|22)m/g, ''));
+      // Do not submit a user's draft or interrupt an active turn.
+      if (/esc to interrupt/i.test(pane) || !/^[❯>]\s*$/.test(draft)) throw new Error('Claude composer is not empty and idle');
+      try {
+        await sendTmuxText(execFn, { target: tmuxTarget, text: '/mcp', delayMs, sleepFn, bufferPrefix });
+        let list = menu(await screen((pane) => menu(pane, 'Manage MCP servers')), 'Manage MCP servers');
+        if (!/✘\s+dueno(?:\s|$)/i.test(list)) {
+          return { ok: true, pending: /^\s*[❯>]?\s*[^✔✘\s]\s+dueno(?:\s|$)/im.test(list) };
+        }
+        // Move only from an identified selected server row, checking every step.
+        for (let step = 0; step < 30; step += 1) {
+          const rows = list.split('\n');
+          const selected = rows.findIndex((row) => /^\s*[❯>]\s+/.test(row));
+          const dueno = rows.findIndex((row) => /✘\s+dueno(?:\s|$)/i.test(row));
+          if (selected < 0 || dueno < 0) throw new Error('Unrecognized MCP server selection');
+          if (selected === dueno) break;
+          if (step === 29) throw new Error('MCP server selection did not advance');
+          await key(selected < dueno ? 'Down' : 'Up');
+          await sleepFn(100);
+          list = menu(await screen((pane) => menu(pane, 'Manage MCP servers')), 'Manage MCP servers');
+        }
+        await key('Enter');
+        let detail = menu(await screen((pane) => menu(pane, 'Dueno MCP Server')), 'Dueno MCP Server');
+        for (let step = 0; step < 10; step += 1) {
+          const rows = detail.split('\n');
+          const selected = rows.findIndex((row) => /^\s*[❯>]\s+\d+\./.test(row));
+          const reconnect = rows.findIndex((row) => /^\s*[❯>]?\s*\d+\.\s+Reconnect\s*$/i.test(row));
+          if (selected < 0 || reconnect < 0) throw new Error('Unrecognized MCP reconnect selection');
+          if (selected === reconnect) break;
+          if (step === 9) throw new Error('MCP reconnect selection did not advance');
+          await key(selected < reconnect ? 'Down' : 'Up');
+          await sleepFn(100);
+          detail = menu(await screen((pane) => menu(pane, 'Dueno MCP Server')), 'Dueno MCP Server');
+        }
+        const before = await capture();
+        const count = (content, phrase) => content.split(phrase).length;
+        await key('Enter');
+        await screen((content) => {
+          if (count(content, 'Failed to reconnect to dueno') > count(before, 'Failed to reconnect to dueno')) {
+            throw new Error('Failed to reconnect to dueno');
+          }
+          return count(content, 'Reconnected to dueno.') > count(before, 'Reconnected to dueno.');
+        });
+        return { ok: true };
+      } finally {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          if (composer(await capture()) !== undefined) break;
+          await key('Escape');
+          await sleepFn(100);
+        }
+        if (composer(await capture()) === undefined) throw new Error('MCP menu did not close');
+      }
+    }
     if (operation.type === 'dialog') {
       const keys = Array.isArray(operation.keys) ? operation.keys.map(text).filter(Boolean) : [];
       if (!keys.length) throw new TypeError('dialog operation keys are required');
