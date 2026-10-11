@@ -57,11 +57,12 @@ function buildStateSnapshotEntry(snapshot, enriched, { includeMessages, includeD
   const selectedMessages = includeMessages ? slice(messages, messageLimit) : undefined;
   const selectedDeliveries = includeDeliveries ? slice(deliveries, deliveryLimit) : undefined;
   return { thread: normalizeThreadSummary(enriched, { includeFullMetadata: includeFullThreadMetadata }),
-    messageCount: messages.length, deliveryCount: deliveries.length,
-    latestMessageAt: messages.at(-1)?.createdAt || null, latestDeliveryAt: deliveries.at(-1)?.lastAttemptAt || null,
+    messageCount: snapshot.messageCount ?? messages.length, deliveryCount: snapshot.deliveryCount ?? deliveries.length,
+    latestMessageAt: snapshot.latestMessageAt ?? (messages.at(-1)?.createdAt || null),
+    latestDeliveryAt: snapshot.latestDeliveryAt ?? (deliveries.at(-1)?.lastAttemptAt || null),
     messages: selectedMessages, deliveries: selectedDeliveries,
-    messagesTruncated: includeMessages ? selectedMessages.length < messages.length : undefined,
-    deliveriesTruncated: includeDeliveries ? selectedDeliveries.length < deliveries.length : undefined };
+    messagesTruncated: includeMessages ? selectedMessages.length < (snapshot.messageCount ?? messages.length) : undefined,
+    deliveriesTruncated: includeDeliveries ? selectedDeliveries.length < (snapshot.deliveryCount ?? deliveries.length) : undefined };
 }
 
 export async function agentBusPlugin(app, { wsManager, productionControls = getProductionControlRegistry(),
@@ -99,7 +100,7 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
   async function enrichThread(thread, snapshot = store.getThread(thread.id), runtimeCache = new Map()) {
     const next = structuredClone(thread);
     const deliveryHealth = { queued: 0, held: 0, injected: 0, failed: 0, cancelled: 0, oldestQueuedAt: null, oldestQueuedAgeMs: 0 };
-    for (const item of snapshot?.deliveries || []) {
+    for (const item of store.getThreadDeliveries(thread.id)) {
       if (item.status === 'failed') deliveryHealth.failed++;
       if (item.status === 'injected') deliveryHealth.injected++;
       if (item.resolution === 'cancelled') deliveryHealth.cancelled++;

@@ -121,6 +121,7 @@ const LAUNCH_LOG_DIR = runtimeStatePath('agent_launch_logs');
 const LAUNCH_VERIFY_INTERVAL_MS = 250;
 const DISCOVERY_CACHE_TTL_MS = 10000;
 const STATE_CACHE_TTL_MS = 5000;
+const UNCHANGED_PANE_POLL_MS = 10_000;
 const LIST_STATE_CAPTURE_LINES = 120;
 export const HOOK_STATE_TTL_MS = 90000;
 const PROMPT_READY_SNIPPET_MAX = 160;
@@ -504,6 +505,8 @@ export function createAgentSessionsProvider(providerId) {
   const stateCache = new Map();
   const processEvidenceCache = new Map();
   const captureInFlight = new Map();
+  const paneCache = new Map();
+  const pollingGeneration = new Map();
   let agentBusCredentialStore = null;
 
   function credentialStoreOptions() {
@@ -836,11 +839,36 @@ async function captureSessionSnapshotUncached(id, sessionName, meta = {}, { line
   return { content, state, canonicalState: snapshot, attention, pendingResponse };
 }
 
+function resetSessionPolling(id) {
+  pollingGeneration.set(id, (pollingGeneration.get(id) || 0) + 1);
+}
+
 async function captureSessionSnapshot(id, sessionName, meta = {}, options = {}) {
   const lines = Number(options?.lines || 200);
   const cache = options?.cache !== false;
-  // Detail reads and permission-authority probes must observe the current pane. A capture
-  // started before input delivery can otherwise pin pre-send state for the cache TTL.
+  if (options.adaptive) {
+    const startedAt = Date.now();
+    const generation = pollingGeneration.get(id) || 0;
+    const hook = config.readNativeHookState === false ? null : await readHookDerivedState({
+      workDir: meta.workDir || process.cwd(), provider: config.id, sessionId: id, now: startedAt,
+    });
+    const hookAt = hook?.last_hook_event_at || '';
+    const paneKey = `${id}:${lines}`;
+    const previous = paneCache.get(paneKey);
+    if (previous?.sessionName === sessionName && previous.lines === lines
+      && previous.hookAt === hookAt && previous.generation === generation
+      && (previous.result.canonicalState.status !== 'unknown' || previous.pollMs === UNCHANGED_PANE_POLL_MS)
+      && startedAt - previous.startedAt < previous.pollMs) return previous.result;
+    const result = await captureSessionSnapshotUncached(id, sessionName, meta, { lines, cache });
+    // A capture begun before delivery must never repopulate the post-send cache.
+    if ((pollingGeneration.get(id) || 0) === generation) {
+      paneCache.set(paneKey, { sessionName, lines, hookAt, startedAt, generation, result,
+        pollMs: previous?.generation === generation && previous.lines === lines && previous.hookAt === hookAt
+          && previous.result.content === result.content ? UNCHANGED_PANE_POLL_MS : STATE_CACHE_TTL_MS });
+    }
+    return result;
+  }
+  // Permission probes and command confirmations always observe the current pane.
   if (options?.reuseInFlight === false) {
     return captureSessionSnapshotUncached(id, sessionName, meta, { lines, cache });
   }
@@ -1604,6 +1632,7 @@ function invalidateSessionCaches() {
   discoveryCache.clear();
   stateCache.clear();
   processEvidenceCache.clear();
+  paneCache.clear();
 }
 
 function parseIncludeReadOnly(value, fallback = true) {
@@ -1626,6 +1655,8 @@ function forgetSession(id) {
   lastHookedStates.delete(id);
   stateCache.delete(id);
   processEvidenceCache.delete(id);
+  resetSessionPolling(id);
+  for (const key of paneCache.keys()) if (key.startsWith(`${id}:`)) paneCache.delete(key);
   const trackerId = canonicalSessionStateId(config.id, id);
   sessionCommandGate.unregister(trackerId);
   sessionStateTracker.remove(trackerId);
@@ -1699,7 +1730,14 @@ async function getSessionState(session, { forceRefresh = false } = {}) {
   const cacheKey = sessionCacheKey(session);
   const now = Date.now();
   const cached = stateCache.get(cacheKey);
-  if (!forceRefresh && cached && now - cached.capturedAt < STATE_CACHE_TTL_MS) {
+  const generation = pollingGeneration.get(session.id) || 0;
+  // Hooks can arrive from another process while the pane is backed off.
+  const hook = config.readNativeHookState === false ? null : await readHookDerivedState({
+    workDir: session.workDir || process.cwd(), provider: config.id, sessionId: session.id, now,
+  });
+  const hookAt = hook?.last_hook_event_at || '';
+  if (!forceRefresh && cached && cached.generation === generation && cached.hookAt === hookAt
+    && now - cached.capturedAt < (cached.pollMs || STATE_CACHE_TTL_MS)) {
     const snapshot = sessionStateTracker.get(canonicalSessionStateId(config.id, session.id));
     const state = projectCanonicalState(snapshot);
     const attention = cached.state?.revision === state.revision
@@ -1724,7 +1762,9 @@ async function getSessionState(session, { forceRefresh = false } = {}) {
       const state = projectCanonicalState(snapshot);
       const pendingResponse = state.pendingResponse ? { sentAt: state.updatedAt } : null;
       const attention = syncAttention(session.id, session, state, normalized, now);
-      stateCache.set(cacheKey, { capturedAt: now, state, attention, pendingResponse, content: normalized });
+      if ((pollingGeneration.get(session.id) || 0) === generation) stateCache.set(cacheKey, { capturedAt: now, state, attention, pendingResponse, content: normalized, hookAt, generation,
+        pollMs: cached?.generation === generation && cached.content === normalized && cached.hookAt === hookAt
+          ? UNCHANGED_PANE_POLL_MS : STATE_CACHE_TTL_MS });
       return { state, canonicalState: snapshot, attention, pendingResponse };
     }
     if (!isTmuxMissingSessionError(stderr)) {
@@ -2198,6 +2238,7 @@ async function sessionsPlugin(app, {
         bufferPrefix: config.bufferPrefix,
       }),
       audit: async (transition) => {
+        if (transition.state === 'sending' || transition.state === 'completed') resetSessionPolling(id);
         try {
           await recordSessionDeliveryAudit(sessionDeliveryAuditStore, {
             source: transition.source,
@@ -2226,12 +2267,14 @@ async function sessionsPlugin(app, {
   }
 
   function enqueueSessionCommand(id, input) {
+    resetSessionPolling(id);
     const trackerId = registerCommandGateSession(id);
     return sessionCommandGate.enqueue(trackerId, input);
   }
   _enqueueSessionCommand = enqueueSessionCommand;
 
   function submitSessionCommand(id, input) {
+    resetSessionPolling(id);
     const trackerId = registerCommandGateSession(id);
     return sessionCommandGate.submit(trackerId, input);
   }
@@ -2680,7 +2723,7 @@ async function sessionsPlugin(app, {
         id,
         sessionName,
         detailMeta,
-        { lines, cache: false, reuseInFlight: false },
+        { lines, cache: false, reuseInFlight: false, adaptive: !streamIntervals.has(`${config.id}:session:${id}`) },
       );
       return {
         id,
@@ -2924,6 +2967,7 @@ async function sessionsPlugin(app, {
       }
       if (source === 'ui') {
         const sessionName = resolveSessionName(id);
+        resetSessionPolling(id);
         const result = await sendTmuxText(exec, {
           target: sessionName,
           text: resolvedText,
@@ -2931,6 +2975,7 @@ async function sessionsPlugin(app, {
           delayMs: config.startupDelayMs,
           bufferPrefix: config.bufferPrefix,
         });
+        resetSessionPolling(id);
         const sentAt = Date.now();
         const deliveryAudit = await recordSessionDeliveryAudit(sessionDeliveryAuditStore, {
           source,
@@ -3292,6 +3337,7 @@ async function sessionsPlugin(app, {
       const sessionName = resolveSessionName(id);
       const intervalKey = channel;
 
+      if (action === 'subscribe') resetSessionPolling(id);
       if (action === 'subscribe' && !streamIntervals.has(intervalKey)) {
         const wsLines = Math.min(Math.max(parseInt(data?.lines) || 200, 50), 5000);
         const interval = setInterval(async () => {
@@ -3352,15 +3398,9 @@ async function sessionsPlugin(app, {
         if (['bare-process', 'orphan-process'].includes(s.source)) continue;
         try {
           const tn = s.tmuxSession || s.name;
-          const { stdout, code } = await exec('tmux', ['capture-pane', '-t', tn, '-p', '-e']);
-          if (code !== 0) continue;
           const now = Date.now();
-          const normalized = config.stripContent(stdout);
-          const canonicalState = await observeSessionEvidence(s.id, s, normalized, now);
-          const state = projectCanonicalState(canonicalState);
+          const { state, canonicalState, attention, pendingResponse } = await getSessionState(s);
           await closeStaleSessionQueueItems(config.id, s.id, canonicalState.capabilities.canAnswerInteraction ? canonicalState.interaction?.fingerprint : null, { wsManager });
-          const pendingResponse = state.pendingResponse ? { sentAt: state.updatedAt } : null;
-          const attention = syncAttention(s.id, { ...s, name: tn, tmuxSession: tn }, state, normalized, now);
           s.state = state;
           s.canonicalState = canonicalState;
           s.attention = attention;

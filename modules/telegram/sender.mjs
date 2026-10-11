@@ -12,6 +12,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_RETRY_BASE_MS = 500;
 const DEFAULT_MAX_ROUTE_RECORDS = 100_000;
 const stateWriteQueues = new Map();
+const jsonFileCache = new Map();
 
 function envValue(value = '') {
   const trimmed = String(value || '').trim();
@@ -51,22 +52,32 @@ function isMissingThreadError(error) {
 }
 
 async function readJsonFile(filePath, fallback = {}) {
-  if (!existsSync(filePath)) return fallback;
+  if (jsonFileCache.has(filePath)) return jsonFileCache.get(filePath).value;
   try {
     const raw = await readFile(filePath, 'utf8');
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : fallback;
+    const value = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : fallback;
+    jsonFileCache.set(filePath, { value, serialized: JSON.stringify(value, null, 2) });
+    return value;
   } catch {
     return fallback;
   }
 }
 
 async function writeJsonAtomic(filePath, data) {
+  const serialized = JSON.stringify(data, null, 2);
+  if (jsonFileCache.get(filePath)?.serialized === serialized) return;
   const dir = dirname(filePath);
-  await mkdir(dir, { recursive: true });
   const tmp = join(dir, `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
-  await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
-  await rename(tmp, filePath);
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(tmp, `${serialized}\n`);
+    await rename(tmp, filePath);
+  } catch (error) {
+    jsonFileCache.delete(filePath);
+    throw error;
+  }
+  jsonFileCache.set(filePath, { value: data, serialized });
 }
 
 async function serializeStateWrite(key, operation) {

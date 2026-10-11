@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { TelegramSender, pagedMessages } from '../modules/telegram/sender.mjs';
@@ -83,6 +83,48 @@ describe('telegram sender paging', () => {
 });
 
 describe('telegram sender API and state', () => {
+  it('shares persisted topics across sender instances without rewriting unchanged state', async () => {
+    await withTempState(async (stateDir) => {
+      const firstCalls = [];
+      const first = new TelegramSender({ stateDir, fetchImpl: buildFetchRecorder(firstCalls) });
+      const topicRoute = route({ session_id: 'persisted-topic' });
+      await first.resolveTopic(topicRoute);
+      const path = join(stateDir, 'topics.json');
+      const before = await stat(path);
+
+      const secondCalls = [];
+      const second = new TelegramSender({ stateDir, fetchImpl: buildFetchRecorder(secondCalls) });
+      const resolved = await second.resolveTopic(topicRoute);
+      const after = await stat(path);
+      assert.equal(resolved.threadId, 177);
+      assert.equal(secondCalls.length, 0);
+      assert.equal(after.ino, before.ino);
+    });
+  });
+
+  it('retries topic persistence after an atomic write fails', async () => {
+    await withTempState(async (stateDir) => {
+      const calls = [];
+      const sender = new TelegramSender({ stateDir, fetchImpl: buildFetchRecorder(calls) });
+      await sender.resolveTopic(route({ session_id: 'existing-topic' }));
+      const movedDir = `${stateDir}-moved`;
+      await rename(stateDir, movedDir);
+      sender.configEnvPath = join(movedDir, 'config.env');
+      await writeFile(stateDir, 'blocks-directory-creation');
+      const failedRoute = route({ session_id: 'retry-topic' });
+      await assert.rejects(sender.resolveTopic(failedRoute), /ENOTDIR|EEXIST/);
+
+      await rm(stateDir);
+      await rename(movedDir, stateDir);
+      sender.configEnvPath = join(stateDir, 'config.env');
+      const retried = await sender.resolveTopic(failedRoute);
+      assert.equal(retried.threadId, 177);
+      const topics = await readJson(join(stateDir, 'topics.json'));
+      assert.equal(topics['session:retry-topic'].thread_id, 177);
+      assert.ok(topics['session:existing-topic']);
+    });
+  });
+
   it('creates forum topics with the expected payload and parses the thread id', async () => {
     await withTempState(async (stateDir) => {
       const calls = [];

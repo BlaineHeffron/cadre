@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -21,24 +20,35 @@ const OPERATOR_QUESTION_CLOSED_EVENTS = new Set(['UserPromptSubmit', 'Stop', 'Se
 const LEGACY_RELAYABLE_STATUSES = new Set(['ready', 'blocked']);
 const DEFAULT_ORPHAN_DRAIN_SEC = 120;
 const sentStoreWriteQueues = new Map();
+const jsonFileCache = new Map();
 
-async function readJsonFile(filePath, fallback) {
-  if (!existsSync(filePath)) return fallback;
+async function readJsonFile(filePath, fallback, cache = false) {
+  if (cache && jsonFileCache.has(filePath)) return jsonFileCache.get(filePath).value;
   try {
     const raw = await readFile(filePath, 'utf8');
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : fallback;
+    const value = parsed && typeof parsed === 'object' ? parsed : fallback;
+    if (cache) jsonFileCache.set(filePath, { value, serialized: JSON.stringify(value, null, 2) });
+    return value;
   } catch {
     return fallback;
   }
 }
 
 async function writeJsonAtomic(filePath, data) {
+  const serialized = JSON.stringify(data, null, 2);
+  if (jsonFileCache.get(filePath)?.serialized === serialized) return;
   const dir = dirname(filePath);
-  await mkdir(dir, { recursive: true });
   const tmp = join(dir, `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
-  await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
-  await rename(tmp, filePath);
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(tmp, `${serialized}\n`);
+    await rename(tmp, filePath);
+  } catch (error) {
+    jsonFileCache.delete(filePath);
+    throw error;
+  }
+  jsonFileCache.set(filePath, { value: data, serialized });
 }
 
 async function serializeSentStoreWrite(filePath, operation) {
@@ -234,7 +244,7 @@ export function buildSentStore({ stateDir = DEFAULT_STATE_DIR } = {}) {
   return {
     filePath,
     async load() {
-      data = await readJsonFile(filePath, {});
+      data = await readJsonFile(filePath, {}, true);
       return data;
     },
     get(sessionId) {
@@ -243,7 +253,7 @@ export function buildSentStore({ stateDir = DEFAULT_STATE_DIR } = {}) {
     async set(sessionId, entry) {
       const key = String(sessionId || '');
       await serializeSentStoreWrite(filePath, async () => {
-        const persisted = await readJsonFile(filePath, {});
+        const persisted = await readJsonFile(filePath, {}, true);
         data = {
           ...persisted,
           [key]: {

@@ -10,6 +10,7 @@ const DEFAULT_CLAUDE_PROJECTS_DIR = join(homedir(), '.claude/projects');
 const DEFAULT_CODEX_SESSIONS_DIR = join(homedir(), '.codex/sessions');
 const DEFAULT_PI_AGENT_DIR = join(homedir(), '.pi/agent');
 const DEFAULT_SCAN_LIMIT = 200;
+const jsonFileCache = new Map();
 
 /** A rollout's `session_meta` is its first line; this bounds how much of it we read. */
 const SESSION_META_READ_BYTES = 256 * 1024;
@@ -52,22 +53,32 @@ function escapeRegExp(value = '') {
   return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-async function readJsonFile(filePath, fallback) {
-  if (!existsSync(filePath)) return fallback;
+async function readJsonFile(filePath, fallback, cache = false) {
+  if (cache && jsonFileCache.has(filePath)) return jsonFileCache.get(filePath).value;
   try {
     const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : fallback;
+    const value = parsed && typeof parsed === 'object' ? parsed : fallback;
+    if (cache) jsonFileCache.set(filePath, { value, serialized: JSON.stringify(value, null, 2) });
+    return value;
   } catch {
     return fallback;
   }
 }
 
 async function writeJsonAtomic(filePath, data) {
+  const serialized = JSON.stringify(data, null, 2);
+  if (jsonFileCache.get(filePath)?.serialized === serialized) return;
   const dir = dirname(filePath);
-  await mkdir(dir, { recursive: true });
   const tmp = join(dir, `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
-  await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
-  await rename(tmp, filePath);
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(tmp, `${serialized}\n`);
+    await rename(tmp, filePath);
+  } catch (error) {
+    jsonFileCache.delete(filePath);
+    throw error;
+  }
+  jsonFileCache.set(filePath, { value: data, serialized });
 }
 
 async function statOrNull(filePath) {
@@ -578,7 +589,7 @@ export function buildBindingStore({ stateDir = DEFAULT_STATE_DIR, now = () => Da
   return {
     filePath,
     async load() {
-      data = await readJsonFile(filePath, {});
+      data = await readJsonFile(filePath, {}, true);
       return data;
     },
     get(sessionId) {
@@ -666,8 +677,10 @@ export function buildBindingStore({ stateDir = DEFAULT_STATE_DIR, now = () => Da
       };
       const changed = Object.entries(metadata).some(([field, value]) => entry[field] !== value);
       const heartbeatDue = observedAt - Number(entry.last_seen_at_ms || 0) >= OBSERVATION_HEARTBEAT_MS;
-      data[key] = { ...entry, ...metadata, last_seen_at_ms: observedAt };
-      if (changed || heartbeatDue) await persist();
+      if (changed || heartbeatDue) {
+        data[key] = { ...entry, ...metadata, last_seen_at_ms: observedAt };
+        await persist();
+      }
       return data[key];
     },
     async markMissing(sessionId) {
