@@ -7,6 +7,8 @@ import { shouldSuppressSideEffectLoops } from '../platform/side-effect-loops.mjs
 const RECOVERY_GRACE_MS = 2000;
 // A worker submits a follow-up it was sent well within this; lost keystrokes stop holding results after it.
 const FOLLOW_UP_START_MS = 2 * 60_000;
+// After a restart the hook logs replay from the start; older Stops were already returned (or are stale), so skip them.
+const SPAWN_RESULT_REPLAY_MS = 30 * 60_000;
 
 function terminalLookupError(err = {}) {
   const status = Number(err.statusCode || err.payload?.statusCode || 0);
@@ -81,8 +83,16 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
   // turn. A failed send leaves the cursor in place to retry; after a restart the keys make the replay
   // from the start a no-op.
   const spawnResultCursors = new Map();
+  const observerStartedAt = Date.now();
   async function returnSpawnResults() {
     const sessions = [...knownSessions()].filter((session) => session.metadata?.spawnedBy);
+    // One read per child per pass: re-reading every child's whole log for every parent Stop exhausted the heap.
+    const childLogs = new Map();
+    const readChildEvents = (child) => {
+      const childKey = `${child.provider}:${child.id}`;
+      if (!childLogs.has(childKey)) childLogs.set(childKey, readHookEventsSince({ workDir: child.workDir, provider: child.provider, sessionId: child.id }));
+      return childLogs.get(childKey);
+    };
     await Promise.allSettled(sessions.map(async (session) => {
       const key = `${session.provider}:${session.id}`;
       const hookFile = { workDir: session.workDir, provider: session.provider, sessionId: session.id };
@@ -96,12 +106,13 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
         if (event.eventName === 'UserPromptSubmit') turnStartedAt = at;
         if (event.eventName !== 'Stop' || !event.lastAssistantMessage?.trim()) continue;
         if (Array.isArray(event.payload?.background_tasks) && event.payload.background_tasks.length) continue;
+        if (at < observerStartedAt - SPAWN_RESULT_REPLAY_MS) continue;
         let outstanding = false;
         for (const child of sessions) {
           if (child.metadata.spawnedBy.kind !== session.provider || child.metadata.spawnedBy.sessionId !== session.id
             || (child.endedAt && !(child.resumedAt > child.endedAt)) || child.lifecycle === 'ended'
             || new Date(child.created ?? child.createdAt ?? 0).getTime() > at) continue;
-          const { events: childEvents } = await readHookEventsSince({ workDir: child.workDir, provider: child.provider, sessionId: child.id });
+          const { events: childEvents } = await readChildEvents(child);
           const history = childEvents.filter((item) => Date.parse(item.loggedAt) <= at);
           // Log positions keep a re-prompt after a Stop outstanding even within one clock millisecond.
           const prompt = history.findLastIndex((item) => item.eventName === 'UserPromptSubmit');
