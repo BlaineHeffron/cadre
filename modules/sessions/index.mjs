@@ -502,6 +502,7 @@ export function createAgentSessionsProvider(providerId) {
   let _submitSessionCommand = null;
   const discoveryCache = new Map();
   const stateCache = new Map();
+  const processEvidenceCache = new Map();
   const captureInFlight = new Map();
   let agentBusCredentialStore = null;
 
@@ -596,18 +597,25 @@ async function observeSessionEvidence(id, meta = {}, content = '', now = Date.no
   let processLifecycle = lifecycle;
   const observations = [];
   if (lifecycle === 'running' && meta?.tmuxSession) {
-    const processObservations = await observeProcessLiveness({
-      sessionName: meta.tmuxSession || meta.name || '',
-      now,
-      execFn: exec,
-      expectedCli: config.id,
-    });
+    const sessionName = meta.tmuxSession || meta.name || '';
+    const cached = processEvidenceCache.get(id);
+    // Preserve the original expiry; unchanged panes cannot renew a liveness grant.
+    const processObservations = cached?.sessionName === sessionName && cached.content === content
+      && cached.observations[0]?.expiresAt > now
+      ? cached.observations
+      : await observeProcessLiveness({ sessionName, now, execFn: exec, expectedCli: config.id });
+    if (processObservations[0]?.value?.lifecycle === 'running') {
+      processEvidenceCache.set(id, { sessionName, content, observations: processObservations });
+    } else {
+      processEvidenceCache.delete(id);
+    }
     // Empty means the probe could not decide. Do not synthesize missing.
     if (processObservations.length) {
       observations.push(...processObservations);
       processLifecycle = processObservations[0]?.value?.lifecycle || processLifecycle;
     }
   } else {
+    processEvidenceCache.delete(id);
     observations.push({
       source: 'process',
       kind: 'lifecycle',
@@ -1595,6 +1603,7 @@ async function tmuxPaneRootPids(sessionName) {
 function invalidateSessionCaches() {
   discoveryCache.clear();
   stateCache.clear();
+  processEvidenceCache.clear();
 }
 
 function parseIncludeReadOnly(value, fallback = true) {
@@ -1616,6 +1625,7 @@ function forgetSession(id) {
   firstTranscriptIdleAt.delete(id);
   lastHookedStates.delete(id);
   stateCache.delete(id);
+  processEvidenceCache.delete(id);
   const trackerId = canonicalSessionStateId(config.id, id);
   sessionCommandGate.unregister(trackerId);
   sessionStateTracker.remove(trackerId);

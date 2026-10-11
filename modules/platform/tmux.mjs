@@ -96,9 +96,26 @@ function shellArg(value) {
 // capture, and key delivery all talk to whatever server tmux resolves without
 // it. Attach commands must name that server, not the inherited socket, which
 // can exist (e.g. a keepalive on dm-agent) without owning any Fleet session.
+let socketCache = null;
+let socketDiscovery = null;
+
 export async function resolveTmuxSocketPath() {
-  const { stdout, code } = await exec('tmux', ['display-message', '-p', '#{socket_path}']);
-  return code === 0 ? stdout.trim() : '';
+  if (socketCache?.expiresAt > Date.now()) {
+    return socketCache.path;
+  }
+  if (socketDiscovery) return socketDiscovery;
+  const promise = (async () => {
+    const { stdout, code } = await exec('tmux', ['display-message', '-p', '#{socket_path}']);
+    const path = code === 0 ? stdout.trim() : '';
+    socketCache = path ? { path, expiresAt: Date.now() + 1000 } : null;
+    return path;
+  })();
+  socketDiscovery = promise;
+  try {
+    return await promise;
+  } finally {
+    if (socketDiscovery === promise) socketDiscovery = null;
+  }
 }
 
 export function buildAttachCommand(session, { socketPath = '' } = {}) {

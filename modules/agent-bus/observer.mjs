@@ -26,11 +26,10 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
   });
   let lastHookSweep = Date.now();
   async function recoverQueuedDeliveries() {
-    const messages = new Map(store.listMessages().map((message) => [message.id, message]));
     const groups = new Map();
-    for (const delivery of store.listDeliveries()) {
+    for (const delivery of store.listDeliveries({ status: 'queued' })) {
       if (delivery.status !== 'queued' || deliveryInFlight.has(delivery.id)) continue;
-      const message = messages.get(delivery.messageId);
+      const message = store.getMessage(delivery.messageId);
       const thread = message && store.getThread(message.threadId)?.thread;
       if (!message || !thread || thread.status !== 'open' || message.createdBy === 'bootstrap') continue;
       const key = `${delivery.target.kind}:${delivery.target.sessionId}`;

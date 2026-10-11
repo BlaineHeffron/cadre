@@ -36,6 +36,7 @@ describe('Tmux module', () => {
       const keepaliveOnly = (await tmux('-L', 'dm-agent', 'display-message', '-p', '#{socket_path}')).stdout.trim();
       assert.notEqual(owning, keepaliveOnly);
       process.env.TMUX_TMPDIR = dir;
+      t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
 
       process.env.TMUX = `${keepaliveOnly},1,0`;
       assert.equal(await resolveTmuxSocketPath(), owning);
@@ -52,6 +53,8 @@ describe('Tmux module', () => {
       );
 
       await tmux('kill-server');
+      assert.equal(await resolveTmuxSocketPath(), owning);
+      t.mock.timers.tick(1001);
       assert.equal(await resolveTmuxSocketPath(), '');
       assert.equal(
         buildAttachCommand('claude-attach-probe', { socketPath: await resolveTmuxSocketPath() }),

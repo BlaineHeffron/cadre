@@ -74,7 +74,8 @@ export function buildOpsControlEventStore({
 
   let loaded = false;
   let loadingPromise = null;
-  let saveQueue = Promise.resolve();
+  let saving = null;
+  let dirty = false;
   let state = {
     version: 1,
     events: [],
@@ -107,10 +108,26 @@ export function buildOpsControlEventStore({
 
   async function save() {
     if (!loaded) throw new Error('control event state is unavailable');
-    const snapshot = clone(state);
-    const write = saveQueue.catch(() => {}).then(() => stateStore.save(snapshot));
-    saveQueue = write.catch(() => {});
-    await write;
+    dirty = true;
+    if (!saving) {
+      saving = new Promise((resolve, reject) => {
+        setTimeout(async () => {
+          try {
+            do {
+              dirty = false;
+              // Events are private and immutable; only the array changes on record.
+              await stateStore.save({ version: 1, events: state.events.slice() });
+            } while (dirty);
+            resolve();
+          } catch (error) {
+            reject(error);
+          } finally {
+            saving = null;
+          }
+        }, 10);
+      });
+    }
+    await saving;
   }
 
   async function recordEvent({
@@ -189,7 +206,7 @@ export function buildOpsControlEventStore({
   }
 
   async function close() {
-    await saveQueue.catch(() => {});
+    await saving?.catch(() => {});
     if (typeof stateStore.close === 'function') {
       await stateStore.close();
     }
