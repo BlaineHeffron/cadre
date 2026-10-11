@@ -179,8 +179,8 @@ export class AgentBusStore {
     return this.state.messages.map(clone);
   }
 
-  listDeliveries() {
-    return this.state.deliveries.map(clone);
+  listDeliveries({ status } = {}) {
+    return this.state.deliveries.filter((delivery) => !status || delivery.status === status).map(clone);
   }
 
   resolveThreadId(threadId) {

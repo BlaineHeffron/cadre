@@ -70,6 +70,25 @@ describe('AgentBusStore runtime state', () => {
     assert.equal(warnings.length, 1);
   });
 
+  it('filters deliveries without exposing stored rows', async () => {
+    const dir = await makeTempDir();
+    await writeFile(join(dir, 'state.json'), JSON.stringify({
+      threads: [], messages: [], deliveries: [
+        { id: 'queued', status: 'queued', target: { sessionId: 'one' } },
+        { id: 'injected', status: 'injected', target: { sessionId: 'two' } },
+        { id: 'failed', status: 'failed', target: { sessionId: 'three' } },
+      ],
+    }));
+    const store = new AgentBusStore({ stateDir: dir });
+    await store.init();
+    const queued = store.listDeliveries({ status: 'queued' });
+    assert.deepEqual(queued.map((row) => row.id), ['queued']);
+    queued[0].target.sessionId = 'mutated';
+    assert.equal(store.getDelivery('queued').target.sessionId, 'one');
+    assert.equal(store.listDeliveries().length, 3);
+    await store.close();
+  });
+
   it('coalesces pending persists and omits events from state snapshots', async () => {
     const dir = await makeTempDir();
     const store = new AgentBusStore({ stateDir: join(dir, 'agent_bus'), persistDebounceMs: 20 });

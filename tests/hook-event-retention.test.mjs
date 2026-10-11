@@ -148,7 +148,7 @@ it('observer delays the first sweep and honors side-effect suppression', async (
   t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() });
   createAgentBusObserver({
     app: { addHook(_name, fn) { close = fn; }, log: { warn(fields) { warnings.push(fields); } } },
-    store: { listMessages() { ticks++; return []; }, listDeliveries() { return []; } },
+    store: { listDeliveries() { ticks++; return []; } },
     adapters: {}, observedSessions: new Set(), deliveryInFlight: new Set(), observerInFlightByRef: new Map(),
     observerIntervalMs: 1000, observerSessionTimeoutMs: 5000,
     broadcastAlert() {},

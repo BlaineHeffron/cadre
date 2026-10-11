@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
-import { chmod, mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -230,6 +230,53 @@ describe('session evidence process and Pi transcripts', () => {
       process.env.PATH = previousPath;
     }
   }
+
+  it('reuses unchanged pane evidence without renewing expiry and invalidates changes', async (t) => {
+    await loadSessions();
+    const provider = createAgentSessionsProvider('codex');
+    const dir = await mkdtemp(join(tmpdir(), 'cadre-process-cache-'));
+    tempDirs.push(dir);
+    const contentFile = join(dir, 'content');
+    const countFile = join(dir, 'probes');
+    const pidFile = join(dir, 'pid');
+    await writeFile(pidFile, String(process.pid));
+    await writeFile(contentFile, 'ready');
+    await writeFile(countFile, '');
+    const session = { id: 'cached-live', tmuxSession: 'codex-cached-live', workDir: homeDir };
+    const trackerId = canonicalSessionStateId('codex', session.id);
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    await withFakeTmux([
+      'case "$1" in',
+      `capture-pane) cat '${contentFile}'; exit 0 ;;`,
+      `list-panes) echo probe >> '${countFile}'; cat '${pidFile}'; exit 0 ;;`,
+      'esac',
+      'exit 1',
+    ].join('\n'), async () => {
+      const capture = () => provider.getSessionState(session, { forceRefresh: true });
+      const probes = async () => (await readFile(countFile, 'utf8')).trim().split('\n').length;
+      await capture();
+      const expiry = sessionStateTracker.explain(trackerId).observations.find((o) => o.source === 'process').expiresAt;
+      t.mock.timers.tick(1000);
+      await capture();
+      assert.equal(await probes(), 1);
+      assert.equal(sessionStateTracker.explain(trackerId).observations.find((o) => o.source === 'process').expiresAt, expiry);
+      t.mock.timers.tick(PROCESS_LIFECYCLE_FRESH_MS);
+      await capture();
+      assert.equal(await probes(), 2);
+      await writeFile(contentFile, 'changed');
+      await capture();
+      assert.equal(await probes(), 3);
+      session.tmuxSession = 'codex-replaced';
+      await capture();
+      assert.equal(await probes(), 4);
+      await writeFile(pidFile, '42424242');
+      t.mock.timers.tick(PROCESS_LIFECYCLE_FRESH_MS);
+      assert.notEqual((await capture()).canonicalState.lifecycle, 'running');
+      await capture();
+      assert.equal(await probes(), 6);
+    });
+    sessionStateTracker.remove(trackerId);
+  });
 
   it('marks a captured pane missing when its pid is dead', async () => {
     await loadSessions();

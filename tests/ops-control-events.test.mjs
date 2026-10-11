@@ -103,6 +103,68 @@ describe('ops control events', () => {
     await store.close();
   });
 
+  it('persists concurrent events before resolving and reloads isolated metadata', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cadre-events-reload-'));
+    tempDirs.push(dir);
+    const options = { storeFile: join(dir, 'events.json'), env: { APP_STATE_STORAGE: 'file' } };
+    const store = buildOpsControlEventStore(options);
+    const metadata = { nested: { value: 1 } };
+    const events = await Promise.all(Array.from({ length: 20 }, (_, index) =>
+      store.recordEvent({ action: `concurrent-${index}`, metadata })));
+    metadata.nested.value = 2;
+    events[0].metadata.nested.value = 3;
+    // Reload immediately, without close: recordEvent already promised persistence.
+    const reloaded = buildOpsControlEventStore(options);
+    const rows = await reloaded.listEvents();
+    assert.equal(rows.length, 20);
+    assert.deepEqual(new Set(rows.map((row) => row.action)), new Set(events.map((row) => row.action)));
+    assert.equal(rows.every((row) => row.metadata.nested.value === 1), true);
+    await store.close();
+    await reloaded.close();
+  });
+
+  it('keeps in-flight snapshots stable and waits for events arriving during a write', async () => {
+    let beginWrite;
+    const started = new Promise((resolve) => { beginWrite = resolve; });
+    let releaseWrite;
+    const blocked = new Promise((resolve) => { releaseWrite = resolve; });
+    const snapshots = [];
+    const store = buildOpsControlEventStore({ maxEvents: 100, stateStore: {
+      load: async () => ({ version: 1, events: Array.from({ length: 100 }, (_, i) => ({ id: `old-${i}` })) }),
+      save: async (snapshot) => {
+        snapshots.push(snapshot);
+        if (snapshots.length === 1) { beginWrite(); await blocked; }
+      },
+    } });
+    const first = store.recordEvent({ action: 'first' });
+    await started;
+    let secondResolved = false;
+    const second = store.recordEvent({ action: 'second' }).then(() => { secondResolved = true; });
+    await store.listEvents();
+    assert.equal(secondResolved, false);
+    assert.equal(snapshots[0].events.length, 100);
+    assert.equal(snapshots[0].events[0].action, 'first');
+    releaseWrite();
+    await Promise.all([first, second]);
+    assert.equal(snapshots.length, 2);
+    assert.equal(snapshots[1].events[0].action, 'second');
+    await store.close();
+  });
+
+  it('rejects every coalesced caller and retries after a failed write', async () => {
+    let writes = 0;
+    const store = buildOpsControlEventStore({ stateStore: {
+      load: async () => null,
+      save: async () => { if (++writes === 1) throw new Error('disk full'); },
+    } });
+    const results = await Promise.allSettled(Array.from({ length: 10 }, () => store.recordEvent()));
+    assert.equal(writes, 1);
+    assert.equal(results.every((result) => result.status === 'rejected' && /disk full/.test(result.reason.message)), true);
+    await store.recordEvent();
+    assert.equal(writes, 2);
+    await store.close();
+  });
+
   it('refuses writes when event history is corrupt', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dueno-control-events-'));
     tempDirs.push(dir);
