@@ -149,8 +149,7 @@ it('observer delays the first sweep and honors side-effect suppression', async (
   createAgentBusObserver({
     app: { addHook(_name, fn) { close = fn; }, log: { warn(fields) { warnings.push(fields); } } },
     store: { listDeliveries() { ticks++; return []; } },
-    adapters: {}, observedSessions: new Set(), deliveryInFlight: new Set(), observerInFlightByRef: new Map(),
-    observerIntervalMs: 1000, observerSessionTimeoutMs: 5000,
+    deliveryInFlight: new Set(), observerIntervalMs: 1000,
     broadcastAlert() {},
   });
   const flush = () => new Promise((resolve) => setImmediate(resolve));

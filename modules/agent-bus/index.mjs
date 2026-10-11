@@ -70,10 +70,8 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
   if (!app.hasDecorator('agentBusLifecycle')) app.decorate('agentBusLifecycle', {});
   store.setLogger?.(app.log);
   const adapters = createAgentAdapters();
-  const observedSessions = new Set();
   const deliveryInFlight = new Set();
   const sessionDeliveryInFlight = new Set();
-  const observerInFlightByRef = new Map();
   await store.init();
   await credentialStore.init();
   taskService ||= new TaskService({ store, sessionServiceForProvider: getProtocolSessionProvider, startupTimeoutMs: 120_000, logger: app.log });
@@ -92,10 +90,6 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
   function broadcastAlert(type, data, level = 'warn') {
     app.log[level === 'error' ? 'error' : 'warn']({ type, ...data }, 'Agent bus alert');
     broadcast(wsManager, 'agent-bus:alerts', type, data);
-  }
-  function pruneObservedParticipant(ref) {
-    if (store.listThreads({ status: 'open' }).some((thread) => threadHasParticipant(thread, ref))) return false;
-    return observedSessions.delete(participantKey(ref));
   }
 
   const participants = createAgentBusParticipants({ app, store, adapters,
@@ -149,21 +143,21 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
     if (snapshot) broadcast(wsManager, `agent-bus:thread:${threadId}`, 'snapshot', snapshot);
   }
 
-  const delivery = createAgentBusDelivery({ app, store, adapters, wsManager, observedSessions, deliveryInFlight,
+  const delivery = createAgentBusDelivery({ app, store, adapters, wsManager, deliveryInFlight,
     sessionDeliveryInFlight, broadcast, broadcastAlert, resolveAgentSession: participants.resolveAgentSession });
 
-  registerAgentBusRoutes({ app, store, adapters, wsManager, productionControls, observedSessions, deliveryInFlight,
+  registerAgentBusRoutes({ app, store, adapters, wsManager, productionControls, deliveryInFlight,
     readProviderPreferences: () => getAgentProviderPreferencesSync(), broadcast, broadcastAlert, broadcastThreadSnapshot,
     broadcastThreadSummary, enrichThread, normalizeThreadSummary, threadMatchesStatusFilter, buildStateSnapshotEntry,
     normalizeCollectionLimit, participantKey, participantRef, threadHasParticipant, threadHasOwner, uniqueAgentRefs, isAgentRef,
-    pruneObservedParticipant, taskService, managedWorktreeBaseDir, ...participants, ...delivery });
+    taskService, managedWorktreeBaseDir, ...participants, ...delivery });
 
-  createAgentBusObserver({ app, store, adapters, wsManager, observedSessions, deliveryInFlight, observerInFlightByRef,
+  createAgentBusObserver({ app, store, wsManager, deliveryInFlight,
     sessionDeliveryAuditStore,
     hookEventsRetentionDays: config.hookEventsRetentionDays,
-    observerIntervalMs: config.agentBus.pollMs, observerSessionTimeoutMs: Math.max(5000, config.agentBus.pollMs * 5),
+    observerIntervalMs: config.agentBus.pollMs,
     broadcast, broadcastAlert, broadcastThreadSnapshot, broadcastThreadSummary, threadSnapshot, enrichThread,
-    normalizeThreadSummary, pruneObservedParticipant, deliverMessage: delivery.deliverMessage,
+    normalizeThreadSummary, deliverMessage: delivery.deliverMessage,
     failDelivery: delivery.failDelivery });
 
   const stopSessionDelete = onAgentSessionDeleted(async ({ kind, sessionId }) => {
@@ -185,7 +179,6 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
         if (updated.metadata?.dm || agentsLeft.length === 0) {
           await store.closeThread(updated.id, 'session_deleted');
         }
-        pruneObservedParticipant(ref);
         await broadcastThreadSummary(updated.id);
       }
     } catch (error) {

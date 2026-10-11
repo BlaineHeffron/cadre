@@ -29,7 +29,7 @@ function holdReasonFor(session) {
   return 'can_send_false';
 }
 
-export function createAgentBusDelivery({ app, store, adapters, wsManager, observedSessions, deliveryInFlight,
+export function createAgentBusDelivery({ app, store, adapters, wsManager, deliveryInFlight,
   sessionDeliveryInFlight, broadcast, broadcastAlert, resolveAgentSession }) {
   async function markHold(message, delivery, patch) {
     const latest = store.getDelivery(delivery.id) || delivery;
@@ -104,7 +104,6 @@ export function createAgentBusDelivery({ app, store, adapters, wsManager, observ
       const injection = alreadyReceived
         ? { ok: true, resolution: 'already_present' }
         : await adapter.injectEnvelope(app, target.sessionId, renderBusEnvelope(message, parent), { deliveryId: delivery.id });
-      observedSessions.add(targetKey);
       const latest = store.getDelivery(delivery.id) || delivery;
       // DM auto-close on sender deletion still records an accepted write to the surviving recipient.
       if (latest.status !== 'queued' && !store.getThread(message.threadId)?.thread.metadata?.dm) return latest;

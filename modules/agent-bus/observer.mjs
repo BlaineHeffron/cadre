@@ -16,10 +16,9 @@ function terminalLookupError(err = {}) {
     || err.payload?.state?.status === 'ended';
 }
 
-export function createAgentBusObserver({ app, store, adapters, wsManager, observedSessions, deliveryInFlight,
-  observerInFlightByRef, observerIntervalMs, observerSessionTimeoutMs, broadcast, broadcastAlert,
-  broadcastThreadSnapshot, broadcastThreadSummary, threadSnapshot, enrichThread, normalizeThreadSummary,
-  pruneObservedParticipant, deliverMessage, failDelivery, hookEventsRetentionDays = 7, sessionDeliveryAuditStore = null }) {
+export function createAgentBusObserver({ app, store, wsManager, deliveryInFlight, observerIntervalMs, broadcast,
+  broadcastAlert, broadcastThreadSnapshot, broadcastThreadSummary, threadSnapshot, enrichThread, normalizeThreadSummary,
+  deliverMessage, failDelivery, hookEventsRetentionDays = 7, sessionDeliveryAuditStore = null }) {
   const hookRetention = createHookEventRetention({
     retentionDays: hookEventsRetentionDays,
     store: buildPostgresJsonStore({ namespace: 'hook_event_roots', filePath: runtimeStatePath('hook_event_roots.json') }),
@@ -55,26 +54,6 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
         }
       }
     }));
-  }
-
-  function withTimeout(ref, promise) {
-    let timer;
-    return Promise.race([promise, new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`Observer session timed out after ${observerSessionTimeoutMs}ms: ${ref}`)), observerSessionTimeoutMs);
-    })]).finally(() => clearTimeout(timer));
-  }
-
-  function observeSession(ref) {
-    if (observerInFlightByRef.has(ref)) return Promise.resolve();
-    const split = ref.indexOf(':');
-    if (split < 1) return Promise.resolve();
-    const participant = { kind: ref.slice(0, split), sessionId: ref.slice(split + 1) };
-    const adapter = adapters[participant.kind];
-    if (!adapter) return Promise.resolve();
-    const running = adapter.getSession(app, participant.sessionId).catch(() => pruneObservedParticipant(participant));
-    observerInFlightByRef.set(ref, running);
-    running.finally(() => observerInFlightByRef.delete(ref)).catch(() => {});
-    return withTimeout(ref, running);
   }
 
   // A spawn_session child's turn with no background work goes to its spawner as one DM result, keyed by the Stop
@@ -157,7 +136,6 @@ export function createAgentBusObserver({ app, store, adapters, wsManager, observ
   }
 
   async function observeSessions() {
-    await Promise.allSettled([...observedSessions].map(observeSession));
     await returnSpawnResults();
     await recoverQueuedDeliveries();
   }

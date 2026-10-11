@@ -31,6 +31,7 @@ describe('Internal bypass request logging', () => {
     app.get('/api/health', async () => ({ status: 'ok' }));
     app.get('/api/boom', async () => { throw new Error('boom'); });
     app.get('/api/claude/sessions/abc', async () => ({ ok: true }));
+    await app.listen({ host: '127.0.0.1', port: 0 });
   });
 
   after(async () => {
@@ -78,5 +79,23 @@ describe('Internal bypass request logging', () => {
     assert.equal(res.statusCode, 401);
     assert.ok(msgs().includes('incoming request'));
     assert.ok(msgs().includes('request completed'));
+  });
+
+  it('records a control event only for rejected internal bypasses over HTTP', async () => {
+    const { listControlEvents } = await import('../modules/ops/control-events.mjs');
+    const url = `http://127.0.0.1:${app.server.address().port}/api/claude/sessions/abc`;
+    const accepted = await fetch(url, { headers: buildInternalBypassHeaders() });
+    assert.equal(accepted.status, 200);
+    const rejected = await fetch(url, {
+      headers: { 'x-dueno-internal': 'wrong', 'x-dueno-internal-ts': new Date().toISOString() },
+    });
+    assert.equal(rejected.status, 401);
+    // The earlier spoofed-header test also recorded one rejection.
+    let events = [];
+    for (let i = 0; i < 100 && events.length < 2; i += 1) {
+      events = await listControlEvents({ type: 'internal_bypass' });
+      if (events.length < 2) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.deepEqual(events.map((event) => event.outcome), ['rejected', 'rejected']);
   });
 });

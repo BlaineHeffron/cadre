@@ -366,16 +366,16 @@ function authPluginImpl(app, opts = {}, done) {
     if (request.headers['x-dueno-mcp-principal'] || request.headers['x-dueno-mcp-auth-context']) {
       return reply.code(400).send({ error: 'Client-supplied MCP principal headers are forbidden' });
     }
-    if (request.headers['x-dueno-internal']) {
+    if (request.headers['x-dueno-internal'] && !bypass.allowed) {
       queueControlEvent({
         type: 'internal_bypass',
-        severity: bypass.allowed ? 'warning' : 'critical',
+        severity: 'critical',
         module: 'auth',
         action: 'internal_bypass',
-        outcome: bypass.allowed ? 'accepted' : 'rejected',
-        code: bypass.allowed ? 'auth.internal_bypass_accepted' : `auth.internal_bypass_${bypass.reason}`,
+        outcome: 'rejected',
+        code: `auth.internal_bypass_${bypass.reason}`,
         detail: path,
-        message: bypass.allowed ? 'Internal bypass accepted' : 'Internal bypass rejected',
+        message: 'Internal bypass rejected',
         metadata: {
           ip: bypass.ip,
           reason: bypass.reason,
