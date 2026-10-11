@@ -1100,6 +1100,7 @@ export const sessionCommandGate = createSessionCommandGate({ tracker: sessionSta
 
 export function createTmuxCommandExecutor({
   execFn,
+  capturePane,
   target,
   delayMs = 300,
   startupDelayMs = delayMs,
@@ -1114,7 +1115,7 @@ export function createTmuxCommandExecutor({
   return async function executeTmuxCommand(operation = {}) {
     if (operation.operation === 'mcp_reconnect') {
       const capture = async (raw = false) => {
-        const result = await execFn('tmux', ['capture-pane', '-t', tmuxTarget, '-p', '-e']);
+        const result = await capturePane();
         if (result?.code !== 0) throw new Error(result?.stderr || 'Failed to inspect MCP screen');
         return raw ? result.stdout : normalizedPaneText(result.stdout);
       };

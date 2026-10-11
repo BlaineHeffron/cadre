@@ -2181,6 +2181,7 @@ async function sessionsPlugin(app, {
       },
       execute: createTmuxCommandExecutor({
         execFn: exec,
+        capturePane: () => exec('tmux', ['capture-pane', '-t', sessionName, '-p', '-e']),
         target: sessionName,
         delayMs: config.startupDelayMs,
         startupDelayMs: config.initialPromptDelayMs || config.startupDelayMs,
