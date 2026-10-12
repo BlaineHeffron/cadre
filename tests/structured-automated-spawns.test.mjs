@@ -48,7 +48,7 @@ const { buildMonitorMcpServer } = await import('../modules/platform/monitor-mcp.
 const { buildInProcessFastifyRequest } = await import('../modules/agent-bus/in-process-mcp.mjs');
 const { createAgentAdapters } = await import('../modules/agent-bus/adapters.mjs');
 const { agentBusPlugin } = await import('../modules/agent-bus/index.mjs');
-const { knownSessions } = await import('../modules/agent/hook-events.mjs');
+const { knownSessions, recordHookPayload } = await import('../modules/agent/hook-events.mjs');
 const { pushPlugin } = await import('../modules/platform/push.mjs');
 const { addHumanQueueItem, commandCenterAIPlugin, serializeWorkQueue } = await import('../modules/integrations/command-center-ai.mjs');
 
@@ -67,6 +67,7 @@ class FakeTransport {
     this.prompts.push(blocks);
     this.turnId = turnId;
     this.emit('turn.started', { turnId, evidence: { accepted: true, settled: false, quiescent: false } });
+    this.emit('usage', { turnId, inputTokens: 1 });
     // Like Claude, a tool call asks the permission prompt tool unless permissions are skipped.
     if (blocks[0]?.text === 'run tests' && !buildClaudeStreamJsonArgs(this.spec).includes('--dangerously-skip-permissions')) {
       this.emit('interaction.requested', {
@@ -76,12 +77,12 @@ class FakeTransport {
       });
       return new Promise(() => {});
     }
-    if (blocks[0]?.text === 'long task') await new Promise((resolve) => { this.finishTurn = resolve; });
+    if (blocks[0]?.text.startsWith('long task')) await new Promise((resolve) => { this.finishTurn = resolve; });
     this.emit('message.committed', { turnId, blocks: [{ type: 'text', text: 'Structured reply' }] });
     this.emit('turn.settled', { turnId, stopReason: 'end_turn', evidence: { accepted: true, settled: true, quiescent: true } });
     return { stopReason: 'end_turn' };
   }
-  async attach(spec) { return this.start({ ...spec, sessionId: spec.protocolSessionId }); }
+  async attach(spec) { this.attached = spec.protocolSessionId; return this.start({ ...spec, sessionId: spec.protocolSessionId }); }
   async cancel() { return { mode: 'best_effort' }; }
   async answerInteraction({ interactionId, optionId }) {
     // Like Claude, an answered permission lets the blocked turn finish.
@@ -93,7 +94,7 @@ class FakeTransport {
   }
   events() { return this.queue; }
   snapshot() { return { attemptId: this.attemptId, lifecycle: 'ready' }; }
-  capabilities() { return createBaseCapabilities({ protocol: { name: 'claude-stream-json', version: '1' } }); }
+  capabilities() { return createBaseCapabilities({ protocol: { name: 'claude-stream-json', version: '1' }, sessionOps: { resume: 'supported' } }); }
   async terminate() { this.emit('attempt.exited', { code: 0 }); this.queue.close(); return { ok: true, status: 'terminated', residual: [] }; }
 }
 
@@ -115,7 +116,9 @@ const PRINCIPALS = {
   },
 };
 
-async function buildApp({ agentBus = false, queue = false } = {}) {
+// Each app gets its own session root unless a test restarts onto the same one; earlier apps' sessions would resume.
+let apps = 0;
+async function buildApp({ agentBus = false, queue = false, sessionRoot = join(root, `structured-${apps += 1}`), mcpDiscovery = async () => ({ authenticated: true }) } = {}) {
   let credentialState = null;
   const credentialStore = new AgentBusCredentialStore({
     mode: 'issue_only',
@@ -130,9 +133,9 @@ async function buildApp({ agentBus = false, queue = false } = {}) {
   const app = Fastify({ logger: false });
   app.addHook('onRequest', async (req) => { req.duenoAuth = PRINCIPALS[req.headers['x-test-principal'] || (req.headers.cookie ? 'ui' : 'agent')]; });
   await app.register(claudeSessionsPlugin, {
-    wsManager: ws, sessionRoot: join(root, 'structured'), credentialStore,
+    wsManager: ws, sessionRoot, credentialStore,
     sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
-    mcpDiscovery: async () => ({ authenticated: true }),
+    mcpDiscovery,
     e2eEvidence: { proven: true, expectedVersion: 'test' },
     transportFactory() { const transport = new FakeTransport(); transports.push(transport); return transport; },
   });
@@ -292,6 +295,81 @@ describe('structured automated spawns', () => {
     } finally {
       failStart = () => false;
       await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('resumes a structured returnResults worker after a Cadre restart and returns each turn once', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const sessionRoot = join(root, 'restart');
+    const first = await buildApp({ agentBus: true, sessionRoot });
+    let second = null;
+    try {
+      // The spawner is a structured session too, so it is live to receive results after the restart.
+      const parent = (await first.request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, initialPrompt: 'hi' } })).json();
+      PRINCIPALS.parent = { authenticated: true, principal: { type: 'agent', kind: 'claude', sessionId: parent.id } };
+      const worker = (await first.request('POST', '/api/claude/sessions', { principal: 'parent', payload: {
+        structured: true, workDir, initialPrompt: 'long task', metadata: { returnToSpawner: true } } })).json();
+      const ended = (await first.request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, initialPrompt: 'hi' } })).json();
+      await waitFor(() => first.transports[1].finishTurn && first.transports[2].prompts.length === 1);
+      await getProtocolSessionProvider('claude').service.terminate(ended.id);
+      const hook = (payload) => recordHookPayload({ session_id: worker.id, cwd: workDir, ...payload }, { provider: 'claude', duenoSessionId: worker.id, workDir });
+      await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'long task' });
+      // A room message sent while the worker is mid-turn is held through the restart.
+      const room = await first.request('POST', '/api/agent-bus/threads', { principal: 'ui', payload: {
+        title: 'restart', participants: [{ kind: 'claude', sessionId: 'tmux1' }, { kind: 'claude', sessionId: worker.id }] } });
+      const threadId = room.json().thread.id;
+      await first.request('POST', '/api/agent-bus/messages', { principal: 'ui', payload: {
+        threadId, from: { kind: 'claude', sessionId: 'tmux1' }, targets: [{ kind: 'claude', sessionId: worker.id }], body: 'held note' } });
+      await first.app.close();
+
+      // The Cadre MCP listener comes up after the app; resumes wait for it, holding the worker's deliveries.
+      let listening = false;
+      second = await buildApp({ agentBus: true, sessionRoot, mcpDiscovery: async () => {
+        if (!listening) throw new Error('connect ECONNREFUSED');
+        return { authenticated: true };
+      } });
+      // Longer than the observer's 2 s recovery grace, so it retries the held delivery while the bus is down.
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      assert.deepEqual([second.transports.length, (await second.request('GET', `/api/agent-bus/threads/${threadId}`, { principal: 'ui' })).json().deliveries[0].status],
+        [0, 'queued']);
+      listening = true;
+      const { service } = getProtocolSessionProvider('claude');
+      // The cut-off turn is reported to the resumed conversation, then the held message follows.
+      const resumedWorker = () => second.transports.find((transport) => transport.attached === worker.id);
+      await waitFor(() => resumedWorker()?.prompts.length === 2, 10000);
+      // The idle parent resumes without a note; the ended session stays down.
+      assert.deepEqual(second.transports.map((transport) => [transport.attached, transport.prompts.length]).sort(),
+        [[parent.id, 0], [worker.id, 2]].sort());
+      assert.match(resumedWorker().prompts[0][0].text, /^Cadre restarted during your last turn/);
+      assert.match(resumedWorker().prompts[1][0].text, /held note/);
+      const resumed = service.get(worker.id);
+      const before = (await second.request('GET', `/api/claude/sessions/${worker.id}`)).json();
+      assert.deepEqual([resumed.workDir, resumed.permissionMode, resumed.metadata.spawnedBy, before.model, resumedWorker().spec.permissionMode],
+        [worker.workDir, 'danger-full-access', { kind: 'claude', sessionId: parent.id }, worker.model, 'danger-full-access']);
+      assert.deepEqual(resumed.turns.slice(0, 1).map((turn) => turn.status), ['unknown']);
+      const endedDetail = (await second.request('GET', `/api/claude/sessions/${ended.id}`)).json();
+      assert.deepEqual([endedDetail.sessionEnded, endedDetail.canResume, service.get(ended.id).lifecycle], [true, false, 'ended']);
+
+      // Each resumed turn's Stop returns to the spawner exactly once.
+      const results = async () => {
+        const threads = (await second.request('GET', '/api/agent-bus/threads', { principal: 'ui' })).json().threads;
+        const messages = await Promise.all(threads.map(async (thread) => (await second.request('GET', `/api/agent-bus/threads/${thread.id}`, { principal: 'ui' })).json().messages));
+        return messages.flat().filter((message) => message.type === 'result' && message.from.sessionId === worker.id).map((message) => message.body);
+      };
+      await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'restart note' });
+      await hook({ hook_event_name: 'Stop', last_assistant_message: 'Continued answer' });
+      await waitFor(async () => (await results()).length === 1);
+      await waitFor(async () => (await second.request('GET', `/api/claude/sessions/${worker.id}`)).json().state.capabilities.canSendNow === true);
+      const sent = await second.request('POST', `/api/claude/sessions/${worker.id}/input`, { payload: { text: 'follow-up', source: 'agent_bus' } });
+      assert.equal(sent.statusCode, 200, sent.body);
+      await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'follow-up' });
+      await hook({ hook_event_name: 'Stop', last_assistant_message: 'Follow-up answer' });
+      await waitFor(async () => (await results()).length === 2);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      assert.deepEqual(await results(), ['Continued answer', 'Follow-up answer']);
+    } finally {
+      await (second || first).app.close();
       delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
     }
   });

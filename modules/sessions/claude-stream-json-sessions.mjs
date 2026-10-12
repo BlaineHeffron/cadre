@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { prepareHeadroomLaunch } from '../agent/headroom.mjs';
 import { mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { AttachmentStore } from '../agent/attachment-store.mjs';
 import { ClaudeStreamJsonTransport } from '../agent/claude-stream-json-transport.mjs';
 import { CODEX_APP_SERVER_ENV_ALLOWLIST, CodexAppServerTransport } from '../agent/codex-app-server-transport.mjs';
@@ -47,6 +48,7 @@ const TRANSCRIPT = {
   codex: { source: 'app_server_committed_text', transport: 'app-server' },
 };
 const CODEX_SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
+const RESTART_NOTE = 'Cadre restarted during your last turn and cut it off. Check what it already did, then continue the task.';
 
 function openInteraction(session) {
   return session.interactions.find((interaction) => interaction.status === 'open') || null;
@@ -324,25 +326,36 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   app.get(`/api/${kind}/sessions/:id`, async (req, reply) => {
     try { return project(requireSession(req.params.id)); } catch (error) { return errorReply(reply, error); }
   });
+  function resume(session, { waitForBus = false } = {}) {
+    let generation = 0;
+    const serverIds = session.mcpCapabilities?.serverIds || [];
+    return service.resume(session.id, {
+      prepare: async (current) => {
+        generation = current.generation + 1;
+        // At boot the Cadre MCP listener starts after the app listens, so a restart resume retries prepare for a minute.
+        for (let tries = 1; ; tries += 1) {
+          try {
+            const { preflight: _preflight, ...launch } = await prepareAttempt({
+              id: current.id, workDir: current.workDir, generation, resolvedMcp: { serverIds }, permissionMode: current.permissionMode, codexPlugins: current.codexPlugins,
+            });
+            return launch;
+          } catch (error) {
+            if (!waitForBus || closing || tries >= 60) throw error;
+            await cleanupAttempt(session.id, generation, 'resume_failed', serverIds);
+            await delay(1000, undefined, { ref: false });
+          }
+        }
+      },
+      // Runs under the session lock, so the principal's credential is still the one this request issued.
+      cleanup: async () => {
+        await cleanupAttempt(session.id, generation, 'resume_failed', serverIds);
+      },
+    });
+  }
   // Reattach an interrupted session (e.g. after a Fleet restart) to its provider conversation.
   app.post(`/api/${kind}/sessions/:id/resume`, async (req, reply) => {
     try {
-      const session = requireSession(req.params.id);
-      let generation = 0;
-      const serverIds = session.mcpCapabilities?.serverIds || [];
-      return project(await service.resume(session.id, {
-        prepare: async (current) => {
-          generation = current.generation + 1;
-          const { preflight: _preflight, ...launch } = await prepareAttempt({
-            id: current.id, workDir: current.workDir, generation, resolvedMcp: { serverIds }, permissionMode: current.permissionMode, codexPlugins: current.codexPlugins,
-          });
-          return launch;
-        },
-        // Runs under the session lock, so the principal's credential is still the one this request issued.
-        cleanup: async () => {
-          await cleanupAttempt(session.id, generation, 'resume_failed', serverIds);
-        },
-      }));
+      return project(await resume(requireSession(req.params.id)));
     } catch (error) {
       const session = service.get(req.params.id);
       // Offer Start Fresh only while the session is still down (not after a concurrent resume won).
@@ -453,7 +466,20 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       return verdict.ok ? { ...verdict, status: 'terminated' } : reply.code(500).send(verdict);
     } catch (error) { return errorReply(reply, error); }
   });
+  // Claude sessions a Cadre restart interrupted resume on their conversation; a turn the restart cut off is reported to the agent.
+  let closing = false;
+  for (const session of claude ? service.list() : []) {
+    const attempt = session.attempts.at(-1);
+    const cut = session.turns.at(-1);
+    if (attempt?.endReason !== 'fleet_restart' || !project(session).canResume) continue;
+    void resume(session, { waitForBus: true })
+      .then(() => cut?.status === 'unknown' && cut.generation === attempt.generation && service.prompt(session.id, {
+        blocks: [{ type: 'text', text: RESTART_NOTE }], idempotencyKey: `restart:${cut.turnId}`, source: 'fleet_restart',
+      }))
+      .catch((error) => app.log.warn({ id: session.id, err: error.message }, `${label} session did not resume after restart`));
+  }
   app.addHook('onClose', async () => {
+    closing = true;
     if (listTimer) clearTimeout(listTimer);
     unsubscribe(); unregister();
     await service.close({ interrupt: true });

@@ -257,6 +257,10 @@ describe('SessionService', () => {
     }), /provider unavailable/);
     assert.deepEqual(cleaned, ['provider_unavailable']);
     assert.equal(restarted.get(created.id).lifecycle, 'interrupted');
+    // So does a failed prepare, which runs while the session holds starting.
+    let preparing = '';
+    await assert.rejects(restarted.resume(created.id, { prepare: (session) => { preparing = session.lifecycle; throw new Error('bus down'); } }), /bus down/);
+    assert.deepEqual([preparing, restarted.get(created.id).lifecycle, restarted.get(created.id).detail], ['starting', 'interrupted', 'bus down']);
 
     failAttach = false;
     const resumed = await restarted.resume(created.id, { prepare: (session) => ({ env: { MARKER: `${session.generation}` } }) });

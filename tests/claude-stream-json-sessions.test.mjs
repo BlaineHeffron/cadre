@@ -435,12 +435,18 @@ describe('Claude stream-json sessions', () => {
       apps.splice(apps.indexOf(first), 1);
       assert.equal((await credentialStore.authenticate(firstToken)).reason, 'revoked');
 
+      // Claude resumes at boot; here that attempt fails like the Codex route resume below.
+      FakeTransport.failNextAttach = kind === 'claude';
       const second = await register();
+      if (kind === 'claude') await waitFor(() => clients[1]?.attachSpec);
+      await waitFor(async () => (await second.inject({ method: 'GET', url: `${base}/${id}` })).json().canResume);
       const interrupted = (await second.inject({ method: 'GET', url: `${base}/${id}` })).json();
       assert.deepEqual([interrupted.state.status, interrupted.sessionEnded, interrupted.canResume, interrupted.nonResumable], ['ended', true, true, false]);
-      FakeTransport.failNextAttach = true;
-      const failed = await second.inject({ method: 'POST', url: `${base}/${id}/resume` });
-      assert.equal(failed.statusCode, 500);
+      if (kind === 'codex') {
+        FakeTransport.failNextAttach = true;
+        const failed = await second.inject({ method: 'POST', url: `${base}/${id}/resume` });
+        assert.equal(failed.statusCode, 500);
+      }
       assert.equal((await credentialStore.authenticate(clients[1].attachSpec.env.DUENO_AGENT_BUS_TOKEN)).reason, 'revoked');
       assert.equal((await second.inject({ method: 'GET', url: `${base}/${id}` })).json().canResume, true);
       // Concurrent resumes serialize: the loser must not revoke or delete what the winner issued.

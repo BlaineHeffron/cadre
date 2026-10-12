@@ -91,10 +91,11 @@ function publicSession(session) {
   return clone(value);
 }
 
-// A provider conversation is proven to exist once a turn settled on an attempt bound to it; only then attach.
+// A provider conversation is proven to exist once a turn on an attempt bound to it settled or the provider
+// reported usage for it (the model answered, so the provider recorded the prompt); only then attach.
 export function resumableProtocolSessionId(session) {
   if (session?.negotiated?.sessionOps?.resume !== 'supported') return null;
-  const proven = new Set(session.turns.filter((turn) => turn.status === 'settled')
+  const proven = new Set(session.turns.filter((turn) => turn.status === 'settled' || turn.evidence?.responded)
     .map((turn) => session.attempts.find((attempt) => attempt.generation === turn.generation)?.protocolSessionId));
   return session.attempts.findLast((attempt) => attempt.protocolSessionId && proven.has(attempt.protocolSessionId))?.protocolSessionId || null;
 }
@@ -244,6 +245,8 @@ function reduceSessionEvent(session, event) {
         session.lifecycle = 'ready';
         session.detail = transportEvent.stopReason || transportEvent.error?.message || 'Ready for input';
       }
+    } else if (transportEvent.type === 'usage' && turn) {
+      turn.evidence = { ...turn.evidence, responded: true };
     } else if (transportEvent.type === 'message.delta') {
       session.transcript.push({
         type: 'message.delta', turnId: transportEvent.turnId, delta: clone(transportEvent.delta),
@@ -434,8 +437,9 @@ export class SessionService {
         });
       }
       try {
-        const spec = await prepare(this.#public(session));
+        // Starting before prepare, so a resume that waits on the Cadre MCP listener holds deliveries, not fails them.
         await this.#transition(session, 'starting', 'Resuming structured attempt');
+        const spec = await prepare(this.#public(session));
         // Reap a runtime left by an earlier failed attempt or terminate; its exit is stale while starting.
         if (session.transport && !(await session.transport.terminate({ grace: 500 })).ok) {
           await this.#append(session, 'session.interrupted', { reason: 'resume_failed', detail: 'Previous structured runtime did not exit' });
@@ -444,6 +448,7 @@ export class SessionService {
         await session.consumePromise;
         return await this.#launch(session, { model: session.model, thinkingLevel: session.thinkingLevel, ...spec, resumeFrom });
       } catch (error) {
+        if (session.lifecycle === 'starting') await this.#append(session, 'session.interrupted', { reason: 'resume_failed', detail: error?.message || 'Resume failed' });
         await cleanup(error);
         throw error;
       }
