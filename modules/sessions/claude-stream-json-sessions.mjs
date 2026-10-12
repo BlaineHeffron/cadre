@@ -19,7 +19,9 @@ import { buildPromptLaunchArgs, cleanupPromptProfileLaunch, promptProfilePath, p
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { permissionAuthorityForRequest } from '../platform/auth.mjs';
 import { buildAgentBusMcpUrl, seedClaudeWorkspaceTrust } from '../platform/mcp-seed.mjs';
+import { notifyPush } from '../platform/push.mjs';
 import { projectCompatibility } from '../session-state/contract.mjs';
+import { SPAWN_RESULT_NOTE, spawnerMetadata } from '../agent-bus/coordinator-policy.mjs';
 import { createJournalStore } from './journal-store.mjs';
 import { assertValidClaudeModel } from './claude-models.mjs';
 import { assertValidCodexModel } from './codex-models.mjs';
@@ -202,7 +204,26 @@ export async function claudeStreamJsonSessionsPlugin(app, {
     }, 250);
     listTimer.unref?.();
   }
+  // Open interactions reach the Command Queue through the tmux path's push; settled ones close their items.
+  let queueSync = Promise.resolve();
+  async function syncCommandQueue(session, requested) {
+    const { interaction, capabilities } = session.canonicalState;
+    const fingerprint = capabilities.canAnswerInteraction ? interaction.fingerprint : null;
+    const { closeStaleSessionQueueItems } = await import('../integrations/command-center-ai.mjs');
+    await closeStaleSessionQueueItems(kind, session.id, fingerprint, { wsManager });
+    if (requested && fingerprint) {
+      await notifyPush({ id: kind, displayName: label }, {
+        sessionId: session.id, sessionName: session.displayName || `${kind}-${session.id}`, status: 'blocked',
+        reason: session.canonicalState.reason, interaction: { ...interaction, structured: true }, route: `/${kind}/${session.id}`,
+      }, { wsManager });
+    }
+  }
   const unsubscribe = service.subscribe((session, event) => {
+    const transportType = event.type === 'transport.event' ? String(event.data?.event?.type || '') : '';
+    if (transportType.startsWith('interaction.') || event.type === 'session.interrupted') {
+      queueSync = queueSync.then(() => syncCommandQueue(session, transportType === 'interaction.requested'))
+        .catch((error) => app.log.warn({ id: session.id, err: error.message }, 'Structured Command Queue sync failed'));
+    }
     const projected = project(session);
     const appended = event.type === 'transport.event' && event.data?.event?.type === 'message.delta'
       ? String(event.data.event.delta?.text || '') : '';
@@ -249,8 +270,11 @@ export async function claudeStreamJsonSessionsPlugin(app, {
     try {
       const workDir = await normalizeSessionWorkDir(req.body?.workDir);
       if (!workDir) return reply.code(400).send({ error: `workDir is required for ${label} sessions` });
+      // As on tmux, the spawner comes from the credential, and the observer returns its turns from the hook log.
+      const metadata = { ...req.body?.metadata, ...spawnerMetadata(req.duenoAuth?.principal, req.body?.metadata) };
       // Resolve launch skills before starting so an unknown skill cannot orphan a process.
-      const initialPrompt = composeLaunchUserPrompt({ skillIds: req.body?.skills, initialPrompt: req.body?.initialPrompt });
+      const initialPrompt = composeLaunchUserPrompt({ skillIds: req.body?.skills,
+        initialPrompt: metadata.spawnedBy && req.body?.initialPrompt ? `${req.body.initialPrompt}\n\n${SPAWN_RESULT_NOTE}` : req.body?.initialPrompt });
       const requestedId = req.body?.sessionId || randomBytes(8).toString('hex');
       if (typeof requestedId !== 'string' || !/^[a-f0-9]{8,32}$/.test(requestedId) || service.get(requestedId)) throw Object.assign(new Error('Invalid or duplicate sessionId'), { statusCode: 400 });
       id = requestedId;
@@ -275,7 +299,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       const codexPlugins = claude ? null : req.body?.codexPlugins;
       const { preflight, ...launch } = await prepareAttempt({ id, workDir, body: req.body || {}, resolvedMcp, permissionMode, codexPlugins });
       let session = await service.start({
-        ...launch, metadata: req.body?.metadata, sessionId: id, displayName: text(req.body?.displayName), workDir, model, thinkingLevel, codexPlugins, permissionMode,
+        ...launch, metadata, sessionId: id, displayName: text(req.body?.displayName), workDir, model, thinkingLevel, codexPlugins, permissionMode,
         mcpCapabilities: sanitizedMcpSnapshot(resolvedMcp, preflight),
       });
       if (initialPrompt) {

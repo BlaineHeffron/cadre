@@ -391,7 +391,8 @@ export async function addHumanQueueItem(input = {}, { wsManager, persist = true,
     createdAt: now,
     updatedAt: now,
     answer: null,
-    ...(sessionInteraction ? { sessionInteraction: { kind: sessionInteraction.kind, fingerprint: sessionInteraction.fingerprint } } : {}),
+    ...(sessionInteraction ? { sessionInteraction: { kind: sessionInteraction.kind, fingerprint: sessionInteraction.fingerprint,
+      ...(sessionInteraction.structured ? { structured: true } : {}) } } : {}),
   };
   humanWorkQueue.unshift(item);
   if (humanWorkQueue.length > 200) humanWorkQueue.length = 200;
@@ -828,6 +829,16 @@ export async function commandCenterAIPlugin(app, {
   async function sendSessionInput({ kind, sessionId, text, interaction, optionId }) {
     const normalizedKind = String(kind || '').trim().toLowerCase();
     if (!['claude', 'codex', 'pi'].includes(normalizedKind)) throw new Error('sessionKind must be claude, codex, or pi');
+    // A structured interaction is answered by id through its session's interaction route, as the operator.
+    if (interaction?.structured) {
+      const response = await app.inject({
+        method: 'POST', url: `/api/${normalizedKind}/sessions/${encodeURIComponent(sessionId)}/interaction`,
+        payload: { interactionId: interaction.fingerprint, ...(optionId ? { optionId } : { text }) },
+        headers: { cookie: `${BROWSER_SESSION_COOKIE}=${createBrowserSessionCookieValue()}` },
+      });
+      if (response.statusCode !== 200) throw new Error(response.json().error || `Interaction answer failed (${response.statusCode})`);
+      return response.json();
+    }
     return enqueueSessionCommand(normalizedKind, sessionId, {
       source: 'command_center_queue_answer',
       operation: interaction ? 'interaction' : 'message',

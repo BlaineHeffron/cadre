@@ -99,10 +99,10 @@ export function createAgentBusObserver({ app, store, wsManager, deliveryInFlight
           if (prompt < 0 || stop < prompt || (Array.isArray(background) && background.length)) {
             outstanding = true; break;
           }
-          // A follow-up message to the child holds the result until the child starts it. Audit records are
-          // newest first per transition; failed or dropped (including expired) sends release the hold.
+          // A follow-up message (tmux) or prompt (structured) to the child holds the result until the child starts it.
+          // Audit records are newest first per transition; failed or dropped (including expired) sends release the hold.
           const audit = (sessionDeliveryAuditStore?.listAll({ kind: child.provider, sessionId: child.id }) || [])
-            .filter((entry) => entry.metadata?.operation === 'message' && entry.metadata.transactionId
+            .filter((entry) => ['message', 'prompt'].includes(entry.metadata?.operation) && entry.metadata.transactionId
               && Date.parse(entry.createdAt) <= at);
           const after = (since, name) => history.some((item) => item.eventName === name && Date.parse(item.loggedAt) >= since);
           outstanding = [...new Set(audit.map((entry) => entry.metadata.transactionId))].some((transactionId) => {
