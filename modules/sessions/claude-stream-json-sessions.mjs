@@ -207,7 +207,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
     }, 250);
     listTimer.unref?.();
   }
-  // Open interactions reach the Command Queue through the tmux path's push; settled ones, and ended sessions, close their items.
+  // Open interactions reach the Command Queue through the tmux path's push; settled ones, and ended or resuming sessions, close their items.
   let queueSync = Promise.resolve();
   async function syncCommandQueue(session, requested) {
     const { interaction, capabilities } = session.canonicalState;
@@ -224,7 +224,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   const unsubscribe = service.subscribe((session, event) => {
     const transportType = event.type === 'transport.event' ? String(event.data?.event?.type || '') : '';
     if (transportType.startsWith('interaction.') || event.type === 'session.interrupted'
-      || (event.type === 'session.lifecycle' && event.data?.lifecycle === 'ended')) {
+      || (event.type === 'session.lifecycle' && ['ended', 'starting'].includes(event.data?.lifecycle))) {
       queueSync = queueSync.then(() => syncCommandQueue(session, transportType === 'interaction.requested'))
         .catch((error) => app.log.warn({ id: session.id, err: error.message }, 'Structured Command Queue sync failed'));
     }

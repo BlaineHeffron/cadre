@@ -515,7 +515,8 @@ describe('structured automated spawns', () => {
 
   it('dismisses session-interaction queue items when the session ends, and at startup when it ended while down', async () => {
     process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
-    let { app, request } = await buildApp({ queue: true });
+    const sessionRoot = join(root, 'queue-restart');
+    let { app, request } = await buildApp({ queue: true, sessionRoot });
     const items = async (id) => (await request('GET', '/api/command-center/work-queue?status=all', { principal: 'ui' })).json()
       .items.filter((item) => item.sessionId === id);
     const block = async () => {
@@ -529,12 +530,13 @@ describe('structured automated spawns', () => {
       assert.equal((await request('DELETE', `/api/claude/sessions/${deleted}`, { principal: 'ui' })).statusCode, 200);
       await waitFor(async () => (await items(deleted))[0].status === 'dismissed');
 
-      // A shutdown interrupts a blocked session without closing its item; the next start does, and keeps a live session's.
+      // A shutdown interrupts a blocked session without closing its item; the next start does (here the session's resume
+      // cancels the dead attempt's prompt), and keeps a live session's.
       const interrupted = await block();
       await addHumanQueueItem({ sessionKind: 'claude', sessionId: 'tmux1', question: 'Allow?' }, { sessionInteraction: { kind: 'permission', fingerprint: 'f1' } });
       await app.close();
       assert.equal((await serializeWorkQueue()).items.find((item) => item.sessionId === interrupted).status, 'open');
-      ({ app, request } = await buildApp({ queue: true }));
+      ({ app, request } = await buildApp({ queue: true, sessionRoot }));
       await waitFor(async () => (await items(interrupted))[0].status === 'dismissed');
       assert.equal((await items('tmux1'))[0].status, 'open');
     } finally {
