@@ -404,6 +404,56 @@ test('a manual DM during the turn replaces that turn\'s result but not later one
   assert.ok(await settle(() => delivered('Follow-up answer') === 1));
 });
 
+test('a structured returnResults child returns its Stop to the spawner once', async (t) => {
+  const { h, results, delivered } = await setup(t, {});
+  const previousHome = process.env.HOME;
+  // Structured creates seed Claude workspace trust under HOME.
+  process.env.HOME = h.stateDir;
+  t.after(() => { process.env.HOME = previousHome; });
+  // Imported late, like monitor-mcp below.
+  const { default: Fastify } = await import('fastify');
+  const { AsyncEventQueue, createBaseCapabilities, createTransportEvent } = await import('../modules/agent/agent-transport.mjs');
+  const { AgentBusCredentialStore } = await import('../modules/agent-bus/mcp-auth.mjs');
+  const { claudeStreamJsonSessionsPlugin } = await import('../modules/sessions/claude-stream-json-sessions.mjs');
+  const queue = new AsyncEventQueue();
+  const transport = {
+    async start(spec) {
+      queue.push(createTransportEvent('attempt.started', { protocolSessionId: spec.sessionId }, { attemptId: spec.attemptId, provider: 'claude', transport: 'structured' }));
+      return { attemptId: spec.attemptId, protocolSessionId: spec.sessionId, negotiated: createBaseCapabilities({ protocol: { name: 'claude-stream-json', version: '1' } }) };
+    },
+    attach: () => { throw new Error('unused'); }, prompt: () => new Promise(() => {}),
+    cancel: async () => ({ mode: 'best_effort' }), answerInteraction: async () => ({ ok: true }),
+    events: () => queue, snapshot: () => ({ lifecycle: 'ready' }), capabilities: () => createBaseCapabilities({}),
+    async terminate() { queue.close(); return { ok: true, status: 'terminated', residual: [] }; },
+  };
+  let credentialState = null;
+  const runtime = Fastify({ logger: false });
+  runtime.addHook('onRequest', async (req) => { req.duenoAuth = { authenticated: true, principal: { type: 'agent', ...spawner } }; });
+  await runtime.register(claudeStreamJsonSessionsPlugin, {
+    sessionRoot: join(h.stateDir, 'structured'), transportFactory: () => transport,
+    credentialStore: new AgentBusCredentialStore({ mode: 'issue_only', store: { mode: 'memory',
+      async load() { return credentialState; }, async save(next) { credentialState = structuredClone(next); }, async close() {} } }),
+    sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
+    mcpDiscovery: async () => ({ authenticated: true }), e2eEvidence: { proven: true, expectedVersion: 'test' },
+  });
+  // Close before the harness removes its directory, which holds the session journal.
+  try {
+    const created = await runtime.inject({ method: 'POST', url: '/api/claude/sessions',
+      payload: { structured: true, workDir: h.stateDir, metadata: { returnToSpawner: true } } });
+    assert.equal(created.statusCode, 200, created.body);
+    const { id, workDir } = created.json();
+    h.sessionCatalog.claude.add(id);
+    // The fleet hook plugin's log-event records the structured CLI's hooks under the Cadre session id and workDir.
+    for (const payload of [{ hook_event_name: 'UserPromptSubmit', prompt: 'work' }, { hook_event_name: 'Stop', last_assistant_message: 'Structured answer' }]) {
+      await recordHookPayload({ session_id: 'cli-session', cwd: workDir, ...payload }, { provider: 'claude', duenoSessionId: id, workDir });
+    }
+    assert.ok(await settle(() => delivered('Structured answer') === 1));
+    await delay(200);
+    assert.equal(delivered('Structured answer'), 1);
+    assert.deepEqual(results().map((message) => [message.from, message.body]), [[{ kind: 'claude', sessionId: id }, 'Structured answer']]);
+  } finally { await runtime.close(); }
+});
+
 test('sessions without a spawner return nothing', async (t) => {
   const { turn, results, h } = await setup(t, {});
   await turn('Human session answer');
