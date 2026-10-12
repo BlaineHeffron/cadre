@@ -34,7 +34,9 @@ export function buildAgentScopeLaunch(command, {
   platform = process.platform,
 } = {}) {
   const unit = agentScopeUnitName(kind, sessionId);
-  if (!unit || !enabled(readEnv('DUENO_AGENT_CGROUP_ISOLATION', env), platform)) {
+  // systemd-run --user needs the user bus; without it (an `env -i` start) the pane, and a cold tmux server, exit at once.
+  if (!unit || !enabled(readEnv('DUENO_AGENT_CGROUP_ISOLATION', env), platform)
+    || !(env.XDG_RUNTIME_DIR || env.DBUS_SESSION_BUS_ADDRESS)) {
     return { command, enabled: false, unit: '', slice: '' };
   }
 

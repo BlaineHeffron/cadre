@@ -50,12 +50,14 @@ const { createAgentAdapters } = await import('../modules/agent-bus/adapters.mjs'
 const { agentBusPlugin } = await import('../modules/agent-bus/index.mjs');
 const { knownSessions } = await import('../modules/agent/hook-events.mjs');
 const { pushPlugin } = await import('../modules/platform/push.mjs');
-const { commandCenterAIPlugin } = await import('../modules/integrations/command-center-ai.mjs');
+const { addHumanQueueItem, commandCenterAIPlugin, serializeWorkQueue } = await import('../modules/integrations/command-center-ai.mjs');
 
+let failStart = () => false;
 class FakeTransport {
   constructor() { this.queue = new AsyncEventQueue(); this.prompts = []; }
   emit(type, payload = {}) { this.queue.push(createTransportEvent(type, payload, { attemptId: this.attemptId, provider: 'claude', transport: 'structured' })); }
   async start(spec) {
+    if (failStart()) throw new Error('fixture launch failed');
     this.spec = spec;
     this.attemptId = spec.attemptId;
     this.emit('attempt.started', { protocolSessionId: spec.sessionId });
@@ -272,6 +274,28 @@ describe('structured automated spawns', () => {
     }
   });
 
+  it('ends the room and terminates the launched participant when a collab participant fails to launch', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, transports, request, mcp } = await buildApp({ agentBus: true });
+    failStart = () => transports.length === 2;
+    const before = new Set(getProtocolSessionProvider('claude').service.list().map((session) => session.id));
+    try {
+      await assert.rejects(mcp.handleToolCall('spawn_collab_session', { title: 'doomed', workDir,
+        participants: [{ provider: 'claude' }, { provider: 'claude' }] }), /fixture launch failed/);
+      const rooms = (await request('GET', '/api/agent-bus/threads?status=all', { principal: 'ui' })).json().threads;
+      assert.deepEqual(rooms.filter((room) => room.title === 'doomed').map((room) => room.status), ['closed']);
+      // The first participant launched and was deleted; only the failed launch's ended record remains.
+      assert.equal(transports.length, 2);
+      assert.deepEqual(getProtocolSessionProvider('claude').service.list().filter((session) => !before.has(session.id))
+        .map((session) => [session.lifecycle, session.detail]),
+        [['ended', 'fixture launch failed']]);
+    } finally {
+      failStart = () => false;
+      await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
   it('lets a spawn_session worker run tools unattended, as tmux does, unless a mode is given', async () => {
     process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
     const { app, transports, request, mcp } = await buildApp();
@@ -371,6 +395,36 @@ describe('structured automated spawns', () => {
       const direct = await request('POST', `/api/claude/sessions/${other}/interaction`, { principal: 'ui', payload: { optionId: 'deny' } });
       assert.equal(direct.statusCode, 200, direct.body);
       await waitFor(async () => (await items(other))[0].status === 'dismissed');
+    } finally {
+      await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('dismisses session-interaction queue items when the session ends, and at startup when it ended while down', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    let { app, request } = await buildApp({ queue: true });
+    const items = async (id) => (await request('GET', '/api/command-center/work-queue?status=all', { principal: 'ui' })).json()
+      .items.filter((item) => item.sessionId === id);
+    const block = async () => {
+      const { id } = (await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, permissionMode: 'workspace-write' } })).json();
+      await request('POST', `/api/claude/sessions/${id}/input`, { payload: { text: 'run tests', source: 'agent_bus' } });
+      await waitFor(async () => (await items(id)).length === 1);
+      return id;
+    };
+    try {
+      const deleted = await block();
+      assert.equal((await request('DELETE', `/api/claude/sessions/${deleted}`, { principal: 'ui' })).statusCode, 200);
+      await waitFor(async () => (await items(deleted))[0].status === 'dismissed');
+
+      // A shutdown interrupts a blocked session without closing its item; the next start does, and keeps a live session's.
+      const interrupted = await block();
+      await addHumanQueueItem({ sessionKind: 'claude', sessionId: 'tmux1', question: 'Allow?' }, { sessionInteraction: { kind: 'permission', fingerprint: 'f1' } });
+      await app.close();
+      assert.equal((await serializeWorkQueue()).items.find((item) => item.sessionId === interrupted).status, 'open');
+      ({ app, request } = await buildApp({ queue: true }));
+      await waitFor(async () => (await items(interrupted))[0].status === 'dismissed');
+      assert.equal((await items('tmux1'))[0].status, 'open');
     } finally {
       await app.close();
       delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
