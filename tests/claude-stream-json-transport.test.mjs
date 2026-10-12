@@ -76,8 +76,11 @@ process.stdin.on('data', (chunk) => {
     const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
     if (!line.trim()) continue;
     const message = JSON.parse(line);
+    // The real CLI ends an interrupted turn with an error result and keeps reading input.
     if (message.type === 'control_request' && message.request?.subtype === 'interrupt') {
-      process.stdout.write(JSON.stringify({ type: 'result', subtype: 'interrupted', is_error: false }) + '\n');
+      process.stdout.write(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true }) + '\n');
+    } else if (message.message?.content?.[0]?.text !== 'wait') {
+      process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'after interrupt' }) + '\n');
     }
   }
 });
@@ -389,13 +392,27 @@ setInterval(() => {}, 1000);
   });
 
   it('interrupts an in-flight turn without destroying the session', async () => {
-    const { transport, workDir } = await harness();
-    await transport.start({ cwd: workDir, args: ['-e', INTERRUPTIBLE_CLAUDE] });
-    const prompt = transport.prompt({ turnId: 'turn-interrupt', blocks: [{ type: 'text', text: 'wait' }] });
-    const result = await transport.cancel({ turnId: 'turn-interrupt' });
-    assert.equal(result.mode, 'best_effort');
-    assert.equal((await prompt).stopReason, 'interrupted');
-    assert.equal(transport.snapshot().lifecycle, 'ready');
+    const { root, workDir, supervisor } = await harness();
+    const binary = join(root, 'fake-claude-interrupt');
+    await writeFile(binary, `#!/usr/bin/env node\n${INTERRUPTIBLE_CLAUDE}`, { mode: 0o755 });
+    const service = new SessionService({
+      provider: 'claude',
+      journal: createJournalStore({ rootDir: join(root, 'journal') }),
+      transportFactory: () => {
+        const transport = new ClaudeStreamJsonTransport({ binary, supervisor });
+        transports.push(transport);
+        return transport;
+      },
+    });
+    const created = await service.start({ sessionId: '11111111-2222-4333-8444-555555555555', workDir, permissionMode: 'workspace-write', env: process.env });
+    await service.prompt(created.id, { blocks: [{ type: 'text', text: 'wait' }], idempotencyKey: 'interrupted-turn' });
+    assert.equal((await service.cancel(created.id)).mode, 'best_effort');
+    const cancelled = await waitFor(() => service.get(created.id).turns[0]?.status === 'cancelled' && service.get(created.id));
+    assert.equal(cancelled.lifecycle, 'ready');
+    await service.prompt(created.id, { blocks: [{ type: 'text', text: 'next' }], idempotencyKey: 'follow-up-turn' });
+    const followUp = await waitFor(() => service.get(created.id).turns[1]?.status === 'settled' && service.get(created.id));
+    assert.equal(followUp.lifecycle, 'ready');
+    await service.close();
   });
 
   it('surfaces and answers the real can_use_tool control protocol', async () => {
