@@ -263,8 +263,14 @@ describe('SessionService', () => {
     assert.deepEqual([preparing, restarted.get(created.id).lifecycle, restarted.get(created.id).detail], ['starting', 'interrupted', 'bus down']);
 
     failAttach = false;
-    const resumed = await restarted.resume(created.id, { prepare: (session) => ({ env: { MARKER: `${session.generation}` } }) });
-    assert.equal(resumed.lifecycle, 'ready');
+    // A resume prompt is admitted under the resume's lock, so input sent meanwhile cannot reach the attempt first.
+    const resuming = restarted.resume(created.id, { prepare: (session) => ({ env: { MARKER: `${session.generation}` } }),
+      prompt: { blocks: [{ type: 'text', text: 'note' }], idempotencyKey: 'note' } });
+    const racing = restarted.prompt(created.id, { blocks: [{ type: 'text', text: 'racing' }], idempotencyKey: 'racing' }).catch((error) => error.code);
+    const resumed = await resuming;
+    assert.equal(await racing, 'session_not_ready');
+    assert.deepEqual(resumed.turns.at(-1).blocks, [{ type: 'text', text: 'note' }]);
+    await waitFor(() => restarted.get(created.id).lifecycle === 'ready');
     assert.equal(resumed.generation, 3);
     assert.equal(resumed.nonResumable, false);
     assert.deepEqual(attaches.map((spec) => [spec.protocolSessionId, spec.permissionMode, spec.model, spec.env.MARKER, spec.cwd]), [
@@ -273,7 +279,7 @@ describe('SessionService', () => {
     ]);
     // The dead attempt's permission prompt can never be answered, so it no longer blocks.
     assert.deepEqual(resumed.interactions.map((item) => item.status), ['cancelled']);
-    assert.equal(resumed.canonicalState.execution, 'idle');
+    assert.equal(restarted.get(created.id).canonicalState.execution, 'idle');
     await restarted.prompt(created.id, { blocks: [{ type: 'text', text: 'continue' }], idempotencyKey: 'after-resume' });
     await waitFor(() => restarted.get(created.id).turns.at(-1)?.status === 'settled');
     assert.equal((await restarted.journal.read(created.id)).events

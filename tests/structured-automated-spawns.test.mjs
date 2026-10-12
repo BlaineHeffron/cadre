@@ -374,6 +374,40 @@ describe('structured automated spawns', () => {
     }
   });
 
+  it('sends no restart note when the cut-off turn already wrote its Stop, so its result returns once', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const sessionRoot = join(root, 'restart-stopped');
+    const first = await buildApp({ agentBus: true, sessionRoot });
+    let second = null;
+    try {
+      const parent = (await first.request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, initialPrompt: 'hi' } })).json();
+      PRINCIPALS.parent = { authenticated: true, principal: { type: 'agent', kind: 'claude', sessionId: parent.id } };
+      const worker = (await first.request('POST', '/api/claude/sessions', { principal: 'parent', payload: {
+        structured: true, workDir, initialPrompt: 'long task', metadata: { returnToSpawner: true } } })).json();
+      await waitFor(() => first.transports[1].finishTurn);
+      // Claude ran its Stop hook, but Cadre stopped before the turn's result frame arrived.
+      for (const payload of [{ hook_event_name: 'UserPromptSubmit', prompt: 'long task' }, { hook_event_name: 'Stop', last_assistant_message: 'Finished before restart' }]) {
+        await recordHookPayload({ session_id: worker.id, cwd: workDir, ...payload }, { provider: 'claude', duenoSessionId: worker.id, workDir });
+      }
+      await first.app.close();
+
+      second = await buildApp({ agentBus: true, sessionRoot });
+      const results = async () => {
+        const threads = (await second.request('GET', '/api/agent-bus/threads', { principal: 'ui' })).json().threads;
+        const messages = await Promise.all(threads.map(async (thread) => (await second.request('GET', `/api/agent-bus/threads/${thread.id}`, { principal: 'ui' })).json().messages));
+        return messages.flat().filter((message) => message.type === 'result' && message.from.sessionId === worker.id).map((message) => message.body);
+      };
+      await waitFor(async () => (await results()).length === 1);
+      await waitFor(async () => (await second.request('GET', `/api/claude/sessions/${worker.id}`)).json().state.capabilities.canSendNow === true);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      assert.deepEqual(await results(), ['Finished before restart']);
+      assert.deepEqual(second.transports.find((transport) => transport.attached === worker.id).prompts, []);
+    } finally {
+      await (second || first).app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
   it('lets a spawn_session worker run tools unattended, as tmux does, unless a mode is given', async () => {
     process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
     const { app, transports, request, mcp } = await buildApp();

@@ -426,7 +426,8 @@ export class SessionService {
 
   // An interrupted session resumes as a new attempt attached to its proven provider conversation.
   // prepare/cleanup run under the session lock so a concurrent resume cannot race credential issuance.
-  resume(sessionId, { prepare = () => ({}), cleanup = () => {} } = {}) {
+  // An optional prompt is admitted under the same lock, before any other input reaches the resumed attempt.
+  resume(sessionId, { prepare = () => ({}), cleanup = () => {}, prompt = null } = {}) {
     return this.#withCommandLock(String(sessionId || ''), async () => {
       const session = this.sessions.get(String(sessionId || ''));
       if (session?.taskId) throw Object.assign(new Error('Task-owned sessions resume through task_resume'), { code: 'task_managed', statusCode: 409 });
@@ -446,7 +447,10 @@ export class SessionService {
           throw Object.assign(new Error('Previous structured runtime did not exit'), { code: 'terminate_failed', statusCode: 409 });
         }
         await session.consumePromise;
-        return await this.#launch(session, { model: session.model, thinkingLevel: session.thinkingLevel, ...spec, resumeFrom });
+        const resumed = await this.#launch(session, { model: session.model, thinkingLevel: session.thinkingLevel, ...spec, resumeFrom });
+        if (!prompt) return resumed;
+        await this.#promptUnlocked(session.id, prompt);
+        return this.#public(session);
       } catch (error) {
         if (session.lifecycle === 'starting') await this.#append(session, 'session.interrupted', { reason: 'resume_failed', detail: error?.message || 'Resume failed' });
         await cleanup(error);

@@ -15,6 +15,7 @@ import {
   sanitizedMcpSnapshot,
 } from '../integrations/mcp-launch-preflight.mjs';
 import { buildMcpCapabilityCatalog } from '../integrations/mcp-server-catalog.mjs';
+import { readHookEventsSince } from '../agent/hook-events.mjs';
 import { composeLaunchUserPrompt } from '../integrations/launch-skills.mjs';
 import { buildPromptLaunchArgs, cleanupPromptProfileLaunch, promptProfilePath, preparePromptProfileLaunch } from '../integrations/prompt-profile-launch.mjs';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
@@ -326,7 +327,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   app.get(`/api/${kind}/sessions/:id`, async (req, reply) => {
     try { return project(requireSession(req.params.id)); } catch (error) { return errorReply(reply, error); }
   });
-  function resume(session, { waitForBus = false } = {}) {
+  function resume(session, { waitForBus = false, prompt = null } = {}) {
     let generation = 0;
     const serverIds = session.mcpCapabilities?.serverIds || [];
     return service.resume(session.id, {
@@ -350,6 +351,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       cleanup: async () => {
         await cleanupAttempt(session.id, generation, 'resume_failed', serverIds);
       },
+      prompt,
     });
   }
   // Reattach an interrupted session (e.g. after a Fleet restart) to its provider conversation.
@@ -466,16 +468,18 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       return verdict.ok ? { ...verdict, status: 'terminated' } : reply.code(500).send(verdict);
     } catch (error) { return errorReply(reply, error); }
   });
-  // Claude sessions a Cadre restart interrupted resume on their conversation; a turn the restart cut off is reported to the agent.
+  // Claude sessions a Cadre restart interrupted resume on their conversation. A turn the restart cut off is reported
+  // to the agent first, unless its Stop already reached the hook log: that Stop is the turn's one spawn result.
   let closing = false;
   for (const session of claude ? service.list() : []) {
     const attempt = session.attempts.at(-1);
     const cut = session.turns.at(-1);
     if (attempt?.endReason !== 'fleet_restart' || !project(session).canResume) continue;
-    void resume(session, { waitForBus: true })
-      .then(() => cut?.status === 'unknown' && cut.generation === attempt.generation && service.prompt(session.id, {
-        blocks: [{ type: 'text', text: RESTART_NOTE }], idempotencyKey: `restart:${cut.turnId}`, source: 'fleet_restart',
-      }))
+    const { events } = await readHookEventsSince({ workDir: session.workDir, provider: kind, sessionId: session.id });
+    const stopped = events.findLast((event) => event.eventName === 'UserPromptSubmit' || event.eventName === 'Stop')?.lastAssistantMessage?.trim();
+    const prompt = cut?.status === 'unknown' && cut.generation === attempt.generation && !stopped
+      ? { blocks: [{ type: 'text', text: RESTART_NOTE }], idempotencyKey: `restart:${cut.turnId}`, source: 'fleet_restart' } : null;
+    void resume(session, { waitForBus: true, prompt })
       .catch((error) => app.log.warn({ id: session.id, err: error.message }, `${label} session did not resume after restart`));
   }
   app.addHook('onClose', async () => {
