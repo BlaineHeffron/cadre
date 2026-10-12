@@ -181,6 +181,30 @@ test('a coordinator waits for a follow-up its worker has not started, but not fo
   assert.equal(delivered('Waiting on'), 0);
 });
 
+test('a structured worker prompt holds the coordinator result until the worker starts it', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-bus-audit-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const audit = buildSessionDeliveryAuditStore({ storeFile: join(dir, 'audit.json') });
+  const { h, hook, turn, results, delivered, sessions } = await setup(t, { spawnedBy: spawner }, null, audit);
+  h.sessionCatalog.claude.add('worker');
+  sessions.set('worker', { workDir: h.stateDir, lifecycle: 'ready', createdAt: Date.now() - 1000,
+    metadata: { spawnedBy: { kind: 'claude', sessionId: 'claude-2' } } });
+  await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' }, 'worker');
+  await hook({ hook_event_name: 'Stop', last_assistant_message: 'Worker answer 1' }, 'worker');
+  assert.ok(await settle(() => results().some((message) => message.body === 'Worker answer 1')));
+  // The structured runtime admits a prompt as sent before the CLI's UserPromptSubmit hook runs.
+  await audit.record({ source: 'agent_bus', kind: 'claude', sessionId: 'worker', text: 'Follow up', enter: true,
+    status: 'sent', metadata: { transactionId: 'turn-2', attemptId: 'attempt-1', operation: 'prompt' } });
+  await turn('Waiting on structured prompt');
+  await delay(150);
+  assert.equal(delivered('Waiting on structured prompt'), 0);
+  await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'Follow up' }, 'worker');
+  await hook({ hook_event_name: 'Stop', last_assistant_message: 'Worker answer 2' }, 'worker');
+  assert.ok(await settle(() => results().some((message) => message.body === 'Worker answer 2')));
+  await turn('Coordinator answer');
+  assert.ok(await settle(() => delivered('Coordinator answer') === 1));
+});
+
 test('a stale sent follow-up does not hold the coordinator result', async (t) => {
   const createdAt = new Date(Date.now() - 3 * 60_000).toISOString();
   const entries = [{ id: 'sdel_stale', source: 'monitor_send_to_session', target: { kind: 'claude', sessionId: 'worker' },

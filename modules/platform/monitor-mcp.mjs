@@ -455,7 +455,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'spawn_session',
-      description: 'Spawn exactly one interactive session using a provider returned by monitor_list_agent_providers. Returns thread_id, participant ids/names and warnings. With returnResults true, a tmux Claude session spawned without parentThreadId returns the final message of each turn with no background work or returnResults workers outstanding to you as a DM result; end your turn to wait for it instead of polling.',
+      description: 'Spawn exactly one interactive session using a provider returned by monitor_list_agent_providers. Returns thread_id, participant ids/names and warnings. With returnResults true, a Claude session spawned without parentThreadId returns the final message of each turn with no background work or returnResults workers outstanding to you as a DM result; end your turn to wait for it instead of polling.',
       inputSchema: {
         type: 'object',
         properties: {

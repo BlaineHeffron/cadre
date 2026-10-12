@@ -48,6 +48,9 @@ const { buildMonitorMcpServer } = await import('../modules/platform/monitor-mcp.
 const { buildInProcessFastifyRequest } = await import('../modules/agent-bus/in-process-mcp.mjs');
 const { createAgentAdapters } = await import('../modules/agent-bus/adapters.mjs');
 const { agentBusPlugin } = await import('../modules/agent-bus/index.mjs');
+const { knownSessions } = await import('../modules/agent/hook-events.mjs');
+const { pushPlugin } = await import('../modules/platform/push.mjs');
+const { commandCenterAIPlugin } = await import('../modules/integrations/command-center-ai.mjs');
 
 class FakeTransport {
   constructor() { this.queue = new AsyncEventQueue(); this.prompts = []; }
@@ -60,6 +63,7 @@ class FakeTransport {
   }
   async prompt({ turnId, blocks }) {
     this.prompts.push(blocks);
+    this.turnId = turnId;
     this.emit('turn.started', { turnId, evidence: { accepted: true, settled: false, quiescent: false } });
     // Like Claude, a tool call asks the permission prompt tool unless permissions are skipped.
     if (blocks[0]?.text === 'run tests' && !buildClaudeStreamJsonArgs(this.spec).includes('--dangerously-skip-permissions')) {
@@ -77,7 +81,14 @@ class FakeTransport {
   }
   async attach(spec) { return this.start({ ...spec, sessionId: spec.protocolSessionId }); }
   async cancel() { return { mode: 'best_effort' }; }
-  async answerInteraction() { return { ok: true }; }
+  async answerInteraction({ interactionId, optionId }) {
+    // Like Claude, an answered permission lets the blocked turn finish.
+    const { turnId } = this;
+    this.emit('interaction.answered', { interactionId, optionId });
+    this.emit('message.committed', { turnId, blocks: [{ type: 'text', text: `Answered ${optionId}` }] });
+    this.emit('turn.settled', { turnId, stopReason: 'end_turn', evidence: { accepted: true, settled: true, quiescent: true } });
+    return { ok: true };
+  }
   events() { return this.queue; }
   snapshot() { return { attemptId: this.attemptId, lifecycle: 'ready' }; }
   capabilities() { return createBaseCapabilities({ protocol: { name: 'claude-stream-json', version: '1' } }); }
@@ -102,7 +113,7 @@ const PRINCIPALS = {
   },
 };
 
-async function buildApp({ agentBus = false } = {}) {
+async function buildApp({ agentBus = false, queue = false } = {}) {
   let credentialState = null;
   const credentialStore = new AgentBusCredentialStore({
     mode: 'issue_only',
@@ -115,7 +126,7 @@ async function buildApp({ agentBus = false } = {}) {
   };
   const transports = [];
   const app = Fastify({ logger: false });
-  app.addHook('onRequest', async (req) => { req.duenoAuth = PRINCIPALS[req.headers['x-test-principal'] || 'agent']; });
+  app.addHook('onRequest', async (req) => { req.duenoAuth = PRINCIPALS[req.headers['x-test-principal'] || (req.headers.cookie ? 'ui' : 'agent')]; });
   await app.register(claudeSessionsPlugin, {
     wsManager: ws, sessionRoot: join(root, 'structured'), credentialStore,
     sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
@@ -128,6 +139,10 @@ async function buildApp({ agentBus = false } = {}) {
     getPreferences: async () => ({ claudeEnabled: true, codexEnabled: true, piEnabled: true, preferredSingleProvider: 'claude' }),
   });
   if (agentBus) await app.register(agentBusPlugin, { wsManager: ws, credentialStore });
+  if (queue) {
+    await app.register(pushPlugin, { storeFile: join(root, 'push.json'), subject: 'mailto:test@example.com', send: async () => {} });
+    await app.register(commandCenterAIPlugin, { wsManager: ws });
+  }
   await app.ready();
   const request = (method, url, { principal, payload } = {}) => app.inject({
     method, url, payload, headers: principal ? { 'x-test-principal': principal } : {},
@@ -298,6 +313,68 @@ describe('structured automated spawns', () => {
       }
       assert.deepEqual(outcomes, [[undefined, false], [undefined, false], [{ kind: 'claude', sessionId: 'parent-1' }, true]]);
     } finally { await app.close(); }
+  });
+
+  it('records the credential spawner and result note on a structured returnResults worker', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, transports, request, mcp } = await buildApp();
+    try {
+      const { session_id: id } = (await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, initialPrompt: 'go', returnResults: true })).participants[0];
+      await waitFor(() => transports[0].prompts.length === 1);
+      assert.match(transports[0].prompts[0][0].text, /^go\n\nCadre returns your final message of each turn/);
+      // The observer finds spawned children, and their hook logs, through the hook session registry; structured
+      // Claude writes those logs with the same fleet hook plugin as tmux.
+      const spawned = [...knownSessions()].filter((session) => session.id === id);
+      assert.deepEqual(spawned.map((session) => [session.provider, session.metadata.spawnedBy]),
+        [['claude', { kind: 'claude', sessionId: 'parent-1' }]]);
+      assert.equal(spawned[0].workDir, (await request('GET', `/api/claude/sessions/${id}`)).json().workDir);
+
+      // A caller cannot name its own spawner, and an unopted spawn gets no note.
+      const forged = await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, initialPrompt: 'go',
+        metadata: { spawnedBy: { kind: 'claude', sessionId: 'victim' } } } });
+      await waitFor(() => transports[1]?.prompts.length === 1);
+      assert.equal(getProtocolSessionProvider('claude').service.get(forged.json().id).metadata.spawnedBy, undefined);
+      assert.equal(transports[1].prompts[0][0].text, 'go');
+    } finally {
+      await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('puts a structured permission on the Command Queue once, and answering it resumes the session', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, request } = await buildApp({ queue: true });
+    try {
+      const block = async () => {
+        const { id } = (await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, permissionMode: 'workspace-write' } })).json();
+        await request('POST', `/api/claude/sessions/${id}/input`, { payload: { text: 'run tests', source: 'agent_bus' } });
+        return id;
+      };
+      const items = async (id) => (await request('GET', '/api/command-center/work-queue?status=all', { principal: 'ui' })).json()
+        .items.filter((item) => item.sessionId === id);
+      const id = await block();
+      await waitFor(async () => (await items(id)).length === 1);
+      const [item] = await items(id);
+      assert.deepEqual([item.status, item.sessionKind, item.sessionInteraction, item.options.map((option) => option.id)],
+        ['open', 'claude', { kind: 'permission', fingerprint: 'i1', structured: true }, ['allow_once', 'deny']]);
+
+      const answered = await request('POST', `/api/command-center/work-queue/${item.id}/answer`, { principal: 'ui', payload: { optionId: 'allow_once' } });
+      assert.equal(answered.statusCode, 200, answered.body);
+      assert.equal(answered.json().status, 'routed');
+      await waitFor(async () => (await request('GET', `/api/claude/sessions/${id}`)).json().state.capabilities.canSendNow === true);
+      assert.match((await request('GET', `/api/claude/sessions/${id}`)).json().content, /Answered allow_once/);
+      assert.deepEqual((await items(id)).map((entry) => entry.status), ['routed']);
+
+      // An interaction answered elsewhere closes its queue item.
+      const other = await block();
+      await waitFor(async () => (await items(other)).length === 1);
+      const direct = await request('POST', `/api/claude/sessions/${other}/interaction`, { principal: 'ui', payload: { optionId: 'deny' } });
+      assert.equal(direct.statusCode, 200, direct.body);
+      await waitFor(async () => (await items(other))[0].status === 'dismissed');
+    } finally {
+      await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
   });
 
   it('refuses tmux-only routes for structured ids instead of falling through to tmux', async () => {
