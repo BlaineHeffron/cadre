@@ -2560,6 +2560,7 @@ async function sessionsPlugin(app, {
       throw error;
     });
     forgetSession(id);
+    await closeStaleSessionQueueItems(config.id, id, null, { wsManager });
     invalidateSessionCaches();
     await persistSessions();
     broadcastSessionList(wsManager);

@@ -43,7 +43,7 @@ let compactInterval = null;
 let supervisorCompactInterval = null;
 let workQueueSeq = 0;
 const humanWorkQueue = [];
-let humanWorkQueueLoaded = false;
+let humanWorkQueueLoad = null;
 
 const COMPACT_INTERVAL_MS = 15 * 60_000; // Auto-compact every 15 minutes
 const WORK_QUEUE_PATH = resolve(DATA_DIR, 'work-queue.json');
@@ -278,9 +278,13 @@ function normalizeHumanQueueItem(item = {}) {
   return normalized;
 }
 
-async function ensureHumanWorkQueueLoaded() {
-  if (humanWorkQueueLoaded) return;
-  humanWorkQueueLoaded = true;
+// One shared load, so a caller never mutates the queue before the file replaces it.
+function ensureHumanWorkQueueLoaded() {
+  humanWorkQueueLoad ||= loadHumanWorkQueue();
+  return humanWorkQueueLoad;
+}
+
+async function loadHumanWorkQueue() {
   const raw = await readFile(WORK_QUEUE_PATH, 'utf8').catch((error) => {
     if (error?.code === 'ENOENT') return '';
     throw error;
@@ -849,6 +853,23 @@ export async function commandCenterAIPlugin(app, {
       ...(interaction ? { expectedFingerprint: interaction.fingerprint, expectedInteractionKind: interaction.kind } : {}),
     });
   }
+
+  // Open interaction items whose session ended while Cadre was down can never be answered.
+  app.addHook('onReady', async () => {
+    void (async () => {
+      for (const item of (await serializeWorkQueue({ status: 'open' })).items.filter((entry) => entry.sessionInteraction)) {
+        try {
+          const response = await app.inject({
+            method: 'GET', url: `/api/${item.sessionKind}/sessions/${encodeURIComponent(item.sessionId)}`,
+            headers: { cookie: `${BROWSER_SESSION_COOKIE}=${createBrowserSessionCookieValue()}` },
+          });
+          if (response.statusCode === 404 || (response.statusCode === 200 && response.json().sessionEnded === true)) {
+            await closeStaleSessionQueueItems(item.sessionKind, item.sessionId, null, { wsManager });
+          }
+        } catch (error) { app.log.warn({ id: item.id, err: error.message }, 'Stale session queue sweep failed'); }
+      }
+    })().catch((error) => app.log.warn({ err: error.message }, 'Stale session queue sweep failed'));
+  });
 
   app.get('/api/command-center/status', async () => getCommandCenterStatus());
 

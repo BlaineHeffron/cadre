@@ -16,6 +16,7 @@ describe('agent session scopes', () => {
       sessionId: 'abc12345',
       platform: 'linux',
       env: {
+        XDG_RUNTIME_DIR: '/run/user/1000',
         DUENO_AGENT_SCOPE_TASKS_MAX: '256',
         DUENO_AGENT_SCOPE_MEMORY_HIGH: '2G',
         DUENO_AGENT_SCOPE_MEMORY_MAX: '3G',
@@ -30,8 +31,11 @@ describe('agent session scopes', () => {
     assert.match(result.command, /bash -lc/u);
   });
 
-  it('disables scope wrapping off Linux or by explicit switch', () => {
+  it('disables scope wrapping off Linux, by explicit switch, or without a user bus', () => {
     const command = 'sleep 1';
+    assert.equal(buildAgentScopeLaunch(command, {
+      kind: 'codex', sessionId: 'abc12345', platform: 'linux', env: {},
+    }).command, command);
     assert.equal(buildAgentScopeLaunch(command, {
       kind: 'codex', sessionId: 'abc12345', platform: 'darwin', env: {},
     }).command, command);

@@ -561,6 +561,30 @@ describe('Claude stream-json sessions', () => {
       [['danger-full-access', 'never'], ['read-only', 'untrusted']]);
   });
 
+  it('gives an operator-created Claude coordinator the unattended mode spawn_session grants, unless a mode is given', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dueno-claude-structured-coordinator-'));
+    roots.push(root);
+    const workDir = join(root, 'work');
+    await mkdir(workDir);
+    const clients = [];
+    const app = Fastify({ logger: false });
+    apps.push(app);
+    await app.register(claudeSessionsPlugin, {
+      streamJsonEnabled: true, sessionRoot: join(root, 'sessions'),
+      credentialStore: new AgentBusCredentialStore({ mode: 'issue_only', store: {
+        mode: 'memory', async load() { return null; }, async save() {}, async close() {},
+      } }),
+      sourceConfig: { agentBusMcpHttp: { host: '127.0.0.1', port: 9876, path: '/mcp' } },
+      mcpDiscovery: async () => ({ authenticated: true }), e2eEvidence: { proven: true, expectedVersion: 'test' },
+      transportFactory() { const client = new FakeTransport(); clients.push(client); return client; },
+    });
+    for (const payload of [{ promptProfile: 'coordinator' }, { promptProfile: 'coordinator', permissionMode: 'workspace-write' }, {}]) {
+      const res = await app.inject({ method: 'POST', url: '/api/claude/sessions', payload: { workDir, ...payload } });
+      assert.equal(res.statusCode, 200, res.body);
+    }
+    assert.deepEqual(clients.map((client) => client.startSpec.permissionMode), ['danger-full-access', 'workspace-write', 'workspace-write']);
+  });
+
   it('forwards paper-search keys to app-server Codex by name, never on its argv', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dueno-codex-structured-paper-search-'));
     roots.push(root);

@@ -204,7 +204,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
     }, 250);
     listTimer.unref?.();
   }
-  // Open interactions reach the Command Queue through the tmux path's push; settled ones close their items.
+  // Open interactions reach the Command Queue through the tmux path's push; settled ones, and ended sessions, close their items.
   let queueSync = Promise.resolve();
   async function syncCommandQueue(session, requested) {
     const { interaction, capabilities } = session.canonicalState;
@@ -220,7 +220,8 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   }
   const unsubscribe = service.subscribe((session, event) => {
     const transportType = event.type === 'transport.event' ? String(event.data?.event?.type || '') : '';
-    if (transportType.startsWith('interaction.') || event.type === 'session.interrupted') {
+    if (transportType.startsWith('interaction.') || event.type === 'session.interrupted'
+      || (event.type === 'session.lifecycle' && event.data?.lifecycle === 'ended')) {
       queueSync = queueSync.then(() => syncCommandQueue(session, transportType === 'interaction.requested'))
         .catch((error) => app.log.warn({ id: session.id, err: error.message }, 'Structured Command Queue sync failed'));
     }
@@ -289,8 +290,9 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       });
       // Research Workbench sessions handle untrusted input, so Codex gets the tmux path's read-only sandbox.
       const permissionMode = !claude && hasResearchWorkbenchLaunchProfile(req.body?.metadata)
-        // Automated spawns have no human to approve tools, so they default to tmux's full access.
-        ? 'read-only' : text(req.body?.permissionMode) || (req.body?.structured === true ? 'danger-full-access' : 'workspace-write');
+        // Automated spawns and coordinators have no human to approve tools, so they default to tmux's full access.
+        ? 'read-only' : text(req.body?.permissionMode)
+          || (req.body?.structured === true || req.body?.promptProfile === 'coordinator' ? 'danger-full-access' : 'workspace-write');
       if (!claude && !CODEX_SANDBOX_MODES.has(permissionMode)) {
         return reply.code(400).send({ error: `Unsupported Codex permission mode: ${permissionMode}`, code: 'unsupported_permission_mode' });
       }

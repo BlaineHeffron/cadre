@@ -1395,6 +1395,7 @@ async function runCreateCommandScenario({
       AGENT_BUS_MCP_HTTP_PORT: '9876',
       AGENT_BUS_MCP_HTTP_PATH: '/mcp',
       CADRE_AGENT_CGROUP_ISOLATION: scopeIsolation ? '1' : '0',
+      ...(scopeIsolation ? { XDG_RUNTIME_DIR: '/run/user/1000' } : {}),
     },
   });
 

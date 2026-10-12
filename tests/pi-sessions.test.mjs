@@ -65,6 +65,13 @@ describe('Pi sessions', () => {
     assert.match(result.tmuxArgs, /research agent/);
   });
 
+  it('launches Pi without a systemd scope when started with no user bus (an env -i start)', async () => {
+    const result = await runPiScenario({ action: 'create', cgroupIsolation: true });
+
+    assert.equal(result.response.statusCode, 200, JSON.stringify(result));
+    assert.doesNotMatch(result.tmuxArgs, /systemd-run/);
+  });
+
   it('launches Pi with no MCP servers by default', async () => {
     const result = await runPiScenario({ action: 'create' });
 
@@ -139,7 +146,7 @@ describe('Pi sessions', () => {
   });
 });
 
-async function runPiScenario({ action, piMode = 'ready', promptProfile = '' } = {}) {
+async function runPiScenario({ action, piMode = 'ready', promptProfile = '', cgroupIsolation = false } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-pi-sessions-'));
   tempDirs.push(tempDir);
   const binDir = join(tempDir, 'bin');
@@ -223,7 +230,7 @@ async function runPiScenario({ action, piMode = 'ready', promptProfile = '' } = 
   const env = {
     ...coverageEnv,
     NODE_TEST_CONTEXT: '1',
-    CADRE_AGENT_CGROUP_ISOLATION: '0',
+    ...(cgroupIsolation ? {} : { CADRE_AGENT_CGROUP_ISOLATION: '0' }),
     HOME: tempDir,
     PATH: `${binDir}:${systemPath}`,
     LOG_LEVEL: 'error',
