@@ -91,10 +91,11 @@ function publicSession(session) {
   return clone(value);
 }
 
-// A provider conversation is proven to exist once a turn settled on an attempt bound to it; only then attach.
+// A provider conversation is proven to exist once a turn on an attempt bound to it settled or the provider
+// reported usage for it (the model answered, so the provider recorded the prompt); only then attach.
 export function resumableProtocolSessionId(session) {
   if (session?.negotiated?.sessionOps?.resume !== 'supported') return null;
-  const proven = new Set(session.turns.filter((turn) => turn.status === 'settled')
+  const proven = new Set(session.turns.filter((turn) => turn.status === 'settled' || turn.evidence?.responded)
     .map((turn) => session.attempts.find((attempt) => attempt.generation === turn.generation)?.protocolSessionId));
   return session.attempts.findLast((attempt) => attempt.protocolSessionId && proven.has(attempt.protocolSessionId))?.protocolSessionId || null;
 }
@@ -244,6 +245,8 @@ function reduceSessionEvent(session, event) {
         session.lifecycle = 'ready';
         session.detail = transportEvent.stopReason || transportEvent.error?.message || 'Ready for input';
       }
+    } else if (transportEvent.type === 'usage' && turn) {
+      turn.evidence = { ...turn.evidence, responded: true };
     } else if (transportEvent.type === 'message.delta') {
       session.transcript.push({
         type: 'message.delta', turnId: transportEvent.turnId, delta: clone(transportEvent.delta),
@@ -423,7 +426,8 @@ export class SessionService {
 
   // An interrupted session resumes as a new attempt attached to its proven provider conversation.
   // prepare/cleanup run under the session lock so a concurrent resume cannot race credential issuance.
-  resume(sessionId, { prepare = () => ({}), cleanup = () => {} } = {}) {
+  // An optional prompt is admitted under the same lock, before any other input reaches the resumed attempt.
+  resume(sessionId, { prepare = () => ({}), cleanup = () => {}, prompt = null } = {}) {
     return this.#withCommandLock(String(sessionId || ''), async () => {
       const session = this.sessions.get(String(sessionId || ''));
       if (session?.taskId) throw Object.assign(new Error('Task-owned sessions resume through task_resume'), { code: 'task_managed', statusCode: 409 });
@@ -434,19 +438,32 @@ export class SessionService {
         });
       }
       try {
-        const spec = await prepare(this.#public(session));
+        // Starting before prepare, so a resume that waits on the Cadre MCP listener holds deliveries, not fails them.
         await this.#transition(session, 'starting', 'Resuming structured attempt');
+        const spec = await prepare(this.#public(session));
         // Reap a runtime left by an earlier failed attempt or terminate; its exit is stale while starting.
         if (session.transport && !(await session.transport.terminate({ grace: 500 })).ok) {
           await this.#append(session, 'session.interrupted', { reason: 'resume_failed', detail: 'Previous structured runtime did not exit' });
           throw Object.assign(new Error('Previous structured runtime did not exit'), { code: 'terminate_failed', statusCode: 409 });
         }
         await session.consumePromise;
-        return await this.#launch(session, { model: session.model, thinkingLevel: session.thinkingLevel, ...spec, resumeFrom });
+        await this.#launch(session, { model: session.model, thinkingLevel: session.thinkingLevel, ...spec, resumeFrom });
       } catch (error) {
+        if (session.lifecycle === 'starting') await this.#append(session, 'session.interrupted', { reason: 'resume_failed', detail: error?.message || 'Resume failed' });
         await cleanup(error);
         throw error;
       }
+      // The attempt is live, so a failed prompt keeps its credential. Transport failures settle through the prompt's
+      // own handlers; one thrown before the transport took the turn leaves it unsent, so the session goes back to ready.
+      const turnCount = session.turns.length;
+      if (prompt) await this.#promptUnlocked(session.id, prompt).catch(async (error) => {
+        this.#log('warn', 'Resume prompt failed', { sessionId: session.id, error: error?.message });
+        const unsent = session.turns[turnCount];
+        if (!unsent || session.lifecycle !== 'working' || session.activeTurnId !== unsent.turnId) return;
+        await this.#append(session, 'turn.updated', { turnId: unsent.turnId, patch: { status: 'cancelled', error: { code: 'prompt_not_sent', message: error?.message || 'Prompt was not sent' } } });
+        await this.#transition(session, 'ready', 'Ready for input');
+      });
+      return this.#public(session);
     });
   }
 

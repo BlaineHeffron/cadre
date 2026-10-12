@@ -257,10 +257,20 @@ describe('SessionService', () => {
     }), /provider unavailable/);
     assert.deepEqual(cleaned, ['provider_unavailable']);
     assert.equal(restarted.get(created.id).lifecycle, 'interrupted');
+    // So does a failed prepare, which runs while the session holds starting.
+    let preparing = '';
+    await assert.rejects(restarted.resume(created.id, { prepare: (session) => { preparing = session.lifecycle; throw new Error('bus down'); } }), /bus down/);
+    assert.deepEqual([preparing, restarted.get(created.id).lifecycle, restarted.get(created.id).detail], ['starting', 'interrupted', 'bus down']);
 
     failAttach = false;
-    const resumed = await restarted.resume(created.id, { prepare: (session) => ({ env: { MARKER: `${session.generation}` } }) });
-    assert.equal(resumed.lifecycle, 'ready');
+    // A resume prompt is admitted under the resume's lock, so input sent meanwhile cannot reach the attempt first.
+    const resuming = restarted.resume(created.id, { prepare: (session) => ({ env: { MARKER: `${session.generation}` } }),
+      prompt: { blocks: [{ type: 'text', text: 'note' }], idempotencyKey: 'note' } });
+    const racing = restarted.prompt(created.id, { blocks: [{ type: 'text', text: 'racing' }], idempotencyKey: 'racing' }).catch((error) => error.code);
+    const resumed = await resuming;
+    assert.equal(await racing, 'session_not_ready');
+    assert.deepEqual(resumed.turns.at(-1).blocks, [{ type: 'text', text: 'note' }]);
+    await waitFor(() => restarted.get(created.id).lifecycle === 'ready');
     assert.equal(resumed.generation, 3);
     assert.equal(resumed.nonResumable, false);
     assert.deepEqual(attaches.map((spec) => [spec.protocolSessionId, spec.permissionMode, spec.model, spec.env.MARKER, spec.cwd]), [
@@ -269,7 +279,7 @@ describe('SessionService', () => {
     ]);
     // The dead attempt's permission prompt can never be answered, so it no longer blocks.
     assert.deepEqual(resumed.interactions.map((item) => item.status), ['cancelled']);
-    assert.equal(resumed.canonicalState.execution, 'idle');
+    assert.equal(restarted.get(created.id).canonicalState.execution, 'idle');
     await restarted.prompt(created.id, { blocks: [{ type: 'text', text: 'continue' }], idempotencyKey: 'after-resume' });
     await waitFor(() => restarted.get(created.id).turns.at(-1)?.status === 'settled');
     assert.equal((await restarted.journal.read(created.id)).events
@@ -304,6 +314,37 @@ describe('SessionService', () => {
     await waitFor(() => harness.service.get(task.id).turns[0]?.status === 'settled');
     await harness.service.close({ interrupt: true });
     await assert.rejects(harness.service.resume(task.id), (error) => error.code === 'task_managed' && error.statusCode === 409);
+  });
+
+  it('keeps a resumed attempt live and ready when its resume prompt fails before reaching the transport', { timeout: 15000 }, async () => {
+    class ResumableTransport extends FakeTransport {
+      capabilities() { return createBaseCapabilities({ protocol: { name: 'acp', version: '1' }, sessionOps: { resume: 'supported' } }); }
+      async attach(spec) { return this.start(spec); }
+    }
+    let failNote = false;
+    const auditStore = { async record(entry) { if (failNote && entry.source === 'fleet_restart') throw new Error('audit write failed'); } };
+    const first = await fixture({ factory: () => new ResumableTransport({ settle: true }), auditStore });
+    const created = await first.service.start({ workDir: first.workDir, permissionMode: 'workspace-write' });
+    await first.service.prompt(created.id, { blocks: [{ type: 'text', text: 'hello' }], idempotencyKey: 'hello' });
+    await waitFor(() => first.service.get(created.id).turns[0]?.status === 'settled');
+    await first.service.close({ interrupt: true });
+
+    const transports = [];
+    const restarted = new SessionService({ journal: new FileJournalStore({ rootDir: join(first.root, 'journal') }), deliveryAuditStore: auditStore,
+      transportFactory: () => { const transport = new ResumableTransport({ settle: true }); transports.push(transport); return transport; } });
+    await restarted.init();
+    failNote = true;
+    const cleaned = [];
+    const resumed = await restarted.resume(created.id, { cleanup: (error) => cleaned.push(error.message),
+      prompt: { blocks: [{ type: 'text', text: 'note' }], idempotencyKey: 'note', source: 'fleet_restart' } });
+    // The live attempt's credential is not cleaned up, and the unsent note does not hold the session working.
+    assert.deepEqual(cleaned, []);
+    assert.deepEqual([resumed.lifecycle, resumed.turns.at(-1).status, resumed.turns.at(-1).error.code], ['ready', 'cancelled', 'prompt_not_sent']);
+    assert.equal(transports[0].promptCalls.length, 0);
+    await restarted.prompt(created.id, { blocks: [{ type: 'text', text: 'held delivery' }], idempotencyKey: 'held' });
+    await waitFor(() => restarted.get(created.id).turns.at(-1)?.status === 'settled');
+    assert.deepEqual(transports[0].promptCalls.map((call) => call.blocks[0].text), ['held delivery']);
+    await restarted.close({ interrupt: false });
   });
 
   it('journals transport interruption and keeps an unreturned prompt outcome unknown', { timeout: 15000 }, async () => {
