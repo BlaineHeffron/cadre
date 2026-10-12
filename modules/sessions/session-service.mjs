@@ -447,15 +447,23 @@ export class SessionService {
           throw Object.assign(new Error('Previous structured runtime did not exit'), { code: 'terminate_failed', statusCode: 409 });
         }
         await session.consumePromise;
-        const resumed = await this.#launch(session, { model: session.model, thinkingLevel: session.thinkingLevel, ...spec, resumeFrom });
-        if (!prompt) return resumed;
-        await this.#promptUnlocked(session.id, prompt);
-        return this.#public(session);
+        await this.#launch(session, { model: session.model, thinkingLevel: session.thinkingLevel, ...spec, resumeFrom });
       } catch (error) {
         if (session.lifecycle === 'starting') await this.#append(session, 'session.interrupted', { reason: 'resume_failed', detail: error?.message || 'Resume failed' });
         await cleanup(error);
         throw error;
       }
+      // The attempt is live, so a failed prompt keeps its credential. Transport failures settle through the prompt's
+      // own handlers; one thrown before the transport took the turn leaves it unsent, so the session goes back to ready.
+      const turnCount = session.turns.length;
+      if (prompt) await this.#promptUnlocked(session.id, prompt).catch(async (error) => {
+        this.#log('warn', 'Resume prompt failed', { sessionId: session.id, error: error?.message });
+        const unsent = session.turns[turnCount];
+        if (!unsent || session.lifecycle !== 'working' || session.activeTurnId !== unsent.turnId) return;
+        await this.#append(session, 'turn.updated', { turnId: unsent.turnId, patch: { status: 'cancelled', error: { code: 'prompt_not_sent', message: error?.message || 'Prompt was not sent' } } });
+        await this.#transition(session, 'ready', 'Ready for input');
+      });
+      return this.#public(session);
     });
   }
 

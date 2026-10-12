@@ -316,6 +316,37 @@ describe('SessionService', () => {
     await assert.rejects(harness.service.resume(task.id), (error) => error.code === 'task_managed' && error.statusCode === 409);
   });
 
+  it('keeps a resumed attempt live and ready when its resume prompt fails before reaching the transport', { timeout: 15000 }, async () => {
+    class ResumableTransport extends FakeTransport {
+      capabilities() { return createBaseCapabilities({ protocol: { name: 'acp', version: '1' }, sessionOps: { resume: 'supported' } }); }
+      async attach(spec) { return this.start(spec); }
+    }
+    let failNote = false;
+    const auditStore = { async record(entry) { if (failNote && entry.source === 'fleet_restart') throw new Error('audit write failed'); } };
+    const first = await fixture({ factory: () => new ResumableTransport({ settle: true }), auditStore });
+    const created = await first.service.start({ workDir: first.workDir, permissionMode: 'workspace-write' });
+    await first.service.prompt(created.id, { blocks: [{ type: 'text', text: 'hello' }], idempotencyKey: 'hello' });
+    await waitFor(() => first.service.get(created.id).turns[0]?.status === 'settled');
+    await first.service.close({ interrupt: true });
+
+    const transports = [];
+    const restarted = new SessionService({ journal: new FileJournalStore({ rootDir: join(first.root, 'journal') }), deliveryAuditStore: auditStore,
+      transportFactory: () => { const transport = new ResumableTransport({ settle: true }); transports.push(transport); return transport; } });
+    await restarted.init();
+    failNote = true;
+    const cleaned = [];
+    const resumed = await restarted.resume(created.id, { cleanup: (error) => cleaned.push(error.message),
+      prompt: { blocks: [{ type: 'text', text: 'note' }], idempotencyKey: 'note', source: 'fleet_restart' } });
+    // The live attempt's credential is not cleaned up, and the unsent note does not hold the session working.
+    assert.deepEqual(cleaned, []);
+    assert.deepEqual([resumed.lifecycle, resumed.turns.at(-1).status, resumed.turns.at(-1).error.code], ['ready', 'cancelled', 'prompt_not_sent']);
+    assert.equal(transports[0].promptCalls.length, 0);
+    await restarted.prompt(created.id, { blocks: [{ type: 'text', text: 'held delivery' }], idempotencyKey: 'held' });
+    await waitFor(() => restarted.get(created.id).turns.at(-1)?.status === 'settled');
+    assert.deepEqual(transports[0].promptCalls.map((call) => call.blocks[0].text), ['held delivery']);
+    await restarted.close({ interrupt: false });
+  });
+
   it('journals transport interruption and keeps an unreturned prompt outcome unknown', { timeout: 15000 }, async () => {
     let transport;
     const harness = await fixture({ factory: () => { transport = new FakeTransport(); return transport; } });
