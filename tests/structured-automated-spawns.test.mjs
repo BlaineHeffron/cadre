@@ -29,6 +29,7 @@ const originalCwd = process.cwd();
 Object.assign(process.env, {
   HOME: root, PATH: `${bin}:${process.env.PATH}`, DM_STATE_DIR: join(root, 'state'), APP_STATE_STORAGE: 'file',
   CLAUDE_SESSIONS_STORAGE: 'file', DATABASE_URL: '', LOG_LEVEL: 'error',
+  AGENT_BUS_STORAGE: 'file', AGENT_BUS_STATE_DIR: join(root, 'agent-bus'), AGENT_BUS_POLL_MS: '20',
 });
 for (const name of ['DUENO_DEFAULT_AGENT_WORKDIR', 'CADRE_DEFAULT_AGENT_WORKDIR']) delete process.env[name];
 process.chdir(root);
@@ -46,6 +47,7 @@ const { buildAgentBusMcpServer } = await import('../modules/agent-bus/mcp.mjs');
 const { buildMonitorMcpServer } = await import('../modules/platform/monitor-mcp.mjs');
 const { buildInProcessFastifyRequest } = await import('../modules/agent-bus/in-process-mcp.mjs');
 const { createAgentAdapters } = await import('../modules/agent-bus/adapters.mjs');
+const { agentBusPlugin } = await import('../modules/agent-bus/index.mjs');
 
 class FakeTransport {
   constructor() { this.queue = new AsyncEventQueue(); this.prompts = []; }
@@ -68,6 +70,7 @@ class FakeTransport {
       });
       return new Promise(() => {});
     }
+    if (blocks[0]?.text === 'long task') await new Promise((resolve) => { this.finishTurn = resolve; });
     this.emit('message.committed', { turnId, blocks: [{ type: 'text', text: 'Structured reply' }] });
     this.emit('turn.settled', { turnId, stopReason: 'end_turn', evidence: { accepted: true, settled: true, quiescent: true } });
     return { stopReason: 'end_turn' };
@@ -99,7 +102,7 @@ const PRINCIPALS = {
   },
 };
 
-async function buildApp() {
+async function buildApp({ agentBus = false } = {}) {
   let credentialState = null;
   const credentialStore = new AgentBusCredentialStore({
     mode: 'issue_only',
@@ -124,6 +127,7 @@ async function buildApp() {
     idempotencyStore: { async get() { return null; }, async set() {}, async close() {} },
     getPreferences: async () => ({ claudeEnabled: true, codexEnabled: true, piEnabled: true, preferredSingleProvider: 'claude' }),
   });
+  if (agentBus) await app.register(agentBusPlugin, { wsManager: ws, credentialStore });
   await app.ready();
   const request = (method, url, { principal, payload } = {}) => app.inject({
     method, url, payload, headers: principal ? { 'x-test-principal': principal } : {},
@@ -221,6 +225,32 @@ describe('structured automated spawns', () => {
       // No merged list ever dropped the tmux session, even before tmux first broadcast.
       assert.equal(ws.broadcasts.filter((entry) => entry.channel === 'claude:sessions')
         .every((entry) => entry.data.sessions.some((item) => item.id === 'tmux1')), true);
+    } finally {
+      await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('holds a room message to a busy structured participant and delivers it when the turn ends', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, transports, request } = await buildApp({ agentBus: true });
+    try {
+      const { id } = (await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir } })).json();
+      await request('POST', `/api/claude/sessions/${id}/input`, { payload: { text: 'long task', source: 'agent_bus' } });
+      await waitFor(() => transports[0].finishTurn);
+      const created = await request('POST', '/api/agent-bus/threads', { principal: 'ui', payload: {
+        title: 'busy', participants: [{ kind: 'claude', sessionId: 'tmux1' }, { kind: 'claude', sessionId: id }] } });
+      assert.equal(created.statusCode, 200, created.body);
+      const threadId = created.json().thread.id;
+      const sent = await request('POST', '/api/agent-bus/messages', { principal: 'ui', payload: {
+        threadId, from: { kind: 'claude', sessionId: 'tmux1' }, targets: [{ kind: 'claude', sessionId: id }], body: 'mid-turn note' } });
+      assert.equal(sent.statusCode, 200, sent.body);
+      const delivery = async () => (await request('GET', `/api/agent-bus/threads/${threadId}`, { principal: 'ui' })).json().deliveries[0];
+      assert.deepEqual([(await delivery()).status, (await delivery()).holdReason], ['queued', 'target_busy']);
+
+      transports[0].finishTurn();
+      await waitFor(async () => (await delivery()).status === 'injected');
+      assert.match(transports[0].prompts[1][0].text, /mid-turn note/);
     } finally {
       await app.close();
       delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;

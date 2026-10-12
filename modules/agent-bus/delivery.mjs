@@ -13,11 +13,13 @@ const BLOCKED_NOTIFY_MS = 5 * 60_000;
 
 // Codex submits Enter mid-turn as a steer into the running turn; Claude Code
 // queues it and reads it at the next tool boundary. So working Codex and Claude
-// panes accept room messages. Other providers wait for idle. Blocked,
+// panes accept room messages. Structured (protocol) sessions refuse input
+// mid-turn, so they and other providers wait for idle. Blocked,
 // awaiting_response, and unknown sessions still hold.
 function canDeliverNow(kind, state) {
   if (state?.capabilities?.canSendNow === true) return true;
-  return ['codex', 'claude'].includes(kind) && state?.capabilities?.canQueueMessage === true
+  return ['codex', 'claude'].includes(kind) && state?.executionSource !== 'protocol'
+    && state?.capabilities?.canQueueMessage === true
     && ['working', 'thinking'].includes(state?.status);
 }
 

@@ -462,7 +462,8 @@ export class ClaudeStreamJsonTransport {
     this.toolCallByIndex.clear();
     this.#cancelInteractions('turn_failed');
     this.lifecycle = remotelySettled ? 'ready' : 'failed';
-    error.responseReceived = remotelySettled;
+    // The settled evidence lets SessionService reduce the turn.settled event instead of interrupting the session.
+    Object.assign(error, { responseReceived: remotelySettled, evidence: event.evidence });
     turn.reject(error);
     if (!remotelySettled) this.#emit('transport.error', { kind: error.code || 'transport_error', message: error.message }, 'secret');
     return event;
