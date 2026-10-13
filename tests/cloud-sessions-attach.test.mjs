@@ -25,7 +25,8 @@ process.stdout.write(JSON.stringify({ ok: true, session_id: args[args.indexOf('-
     { sequence_num: '2', event_type: 'assistant', payload: { message: { content: [{ type: 'text', text: 'old reply' }] } } },
   );
   f.routes['GET /v1/code/sessions/cse_a/events'] = eventsRoute(f.events);
-  f.routes['GET /v1/code/sessions/cse_a'] = () => [200, { response_shape: cloudSession('cse_a', { external_metadata: {} }) }];
+  let shape = { external_metadata: {} };
+  f.routes['GET /v1/code/sessions/cse_a'] = () => [200, { response_shape: cloudSession('cse_a', shape) }];
 
   const h = await createAgentBusHarness({ pollMs: 60000, beforeReady: (app) => cloudSessionsPlugin(app, { store: memoryStore(), cloudOpts: { ...f.opts, claudeBin } }) });
   t.after(() => h.cleanup());
@@ -76,4 +77,13 @@ process.stdout.write(JSON.stringify({ ok: true, session_id: args[args.indexOf('-
   assert.equal((await sends()).length, 1);
   await request('/api/agent-bus/messages', { method: 'POST', body: { threadId: thread.id, from: owner, body: 'One more thing' } });
   assert.equal((await sends()).length, 2);
+
+  // An attached session finishing a turn is not DMed to its owner as done; its reply is already in the room.
+  const dms = () => h.store.listThreads().filter((item) => item.metadata?.dm).flatMap((item) => h.store.getThread(item.id).messages).filter((m) => m.from.kind === 'cloud').length;
+  const before = dms();
+  shape = { worker_status: 'running', status_bucket: 'working', external_metadata: {} };
+  await h.app.agentBusLifecycle.cloudSessions.step();
+  shape = { external_metadata: { post_turn_summary: { status_detail: 'waiting on gate' } } };
+  await h.app.agentBusLifecycle.cloudSessions.step();
+  assert.equal(dms(), before);
 });

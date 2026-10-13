@@ -18,7 +18,8 @@ function cloudNotices(seen, view) {
   const asks = Boolean(view.needs_action) && view.needs_action !== seen.needs_action;
   if (view.state === 'blocked' && (view.state !== seen.state || asks)) lines.push(`blocked: ${view.needs_action || view.detail || 'needs input'}`);
   else if (view.state !== seen.state && view.state === 'failed') lines.push(`failed: ${view.detail}`);
-  else if (view.state === 'done' && seen.state === 'working') lines.push(`done: ${view.detail}`);
+  // An attached session's replies already reach its room, so its end of turn is not news.
+  else if (view.state === 'done' && seen.state === 'working' && !seen.threadId) lines.push(`done: ${view.detail}`);
   if (asks && view.state !== 'blocked') lines.push(`needs action: ${view.needs_action}`);
   if (view.pr && !seen.prs.includes(view.pr.number)) lines.push(`PR opened #${view.pr.number} ${view.pr.url}`);
   return lines;
