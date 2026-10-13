@@ -249,7 +249,8 @@ function buildProtocolAdapter({ kind, detailPath, inputPath }) {
 }
 
 // A Claude Code cloud session registered with Cadre (cloud-sessions-plugin.mjs). It always
-// accepts input, takes room messages through cloudSend and is never archived by the bus.
+// accepts input and is never archived by the bus. Only messages from the room it is attached
+// to reach it (through cloudSend); owner notice DMs and other rooms are never forwarded.
 function buildCloudAdapter() {
   function tracked(app, sessionId) {
     if (app.agentBusLifecycle?.cloudSessions?.get(sessionId)) return;
@@ -266,6 +267,8 @@ function buildCloudAdapter() {
     async deleteSession() { return { ok: true, status: 'detached' }; },
     async injectEnvelope(app, sessionId, envelopeText) {
       tracked(app, sessionId);
+      const room = /^\[ROOM_MESSAGE \S+ room=(\S+) /.exec(envelopeText)?.[1];
+      if (!room || room !== app.agentBusLifecycle.cloudSessions.get(sessionId).threadId) return { ok: true, resolution: 'not_forwarded' };
       // The room_send hint does not apply: the session has no Cadre tools and its replies are relayed.
       return app.agentBusLifecycle.cloudSessions.send(sessionId, envelopeText.replace(/\nReply: room_send\(.*$/, ''));
     },

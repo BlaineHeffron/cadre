@@ -15,10 +15,11 @@ const cloudRef = (id) => ({ kind: 'cloud', sessionId: id });
 /** Owner notices for one session, from its last-seen record to its current cloudStatus view. */
 function cloudNotices(seen, view) {
   const lines = [];
-  if (view.state !== seen.state && view.state === 'blocked') lines.push(`blocked: ${view.needs_action || view.detail || 'needs input'}`);
+  const asks = Boolean(view.needs_action) && view.needs_action !== seen.needs_action;
+  if (view.state === 'blocked' && (view.state !== seen.state || asks)) lines.push(`blocked: ${view.needs_action || view.detail || 'needs input'}`);
   else if (view.state !== seen.state && view.state === 'failed') lines.push(`failed: ${view.detail}`);
   else if (view.state === 'done' && seen.state === 'working') lines.push(`done: ${view.detail}`);
-  if (view.needs_action && view.needs_action !== seen.needs_action && view.state !== 'blocked') lines.push(`needs action: ${view.needs_action}`);
+  if (asks && view.state !== 'blocked') lines.push(`needs action: ${view.needs_action}`);
   if (view.pr && !seen.prs.includes(view.pr.number)) lines.push(`PR opened #${view.pr.number} ${view.pr.url}`);
   return lines;
 }
@@ -49,11 +50,14 @@ export async function cloudSessionsPlugin(app, {
     return state.sessions[id];
   }
 
+  // True once the bus accepted the DM; until then the last-seen state stays put so the next pass retries.
   async function notify(id, owner, body) {
     try {
       const result = await app.agentBusLifecycle.directMessage({ from: cloudRef(id), target: owner, body });
-      if (result.statusCode !== 200) app.log.warn({ id, owner, error: result.payload?.error }, 'Cloud session owner DM failed');
+      if (result.statusCode === 200) return true;
+      app.log.warn({ id, owner, error: result.payload?.error }, 'Cloud session owner DM failed');
     } catch (err) { app.log.warn({ id, owner, err: err.message }, 'Cloud session owner DM failed'); }
+    return false;
   }
 
   async function relay(id, seen) {
@@ -73,13 +77,14 @@ export async function cloudSessionsPlugin(app, {
       try {
         const view = await cloudStatus({ id }, cloudOpts);
         const lines = cloudNotices(seen, view);
-        if (lines.length) await notify(id, seen.owner, `Cloud session ${id} (${view.title}) ${lines.join('\n')}\n${view.url || ''}`.trim());
-        if (view.pr && !seen.prs.includes(view.pr.number)) {
-          seen.prs.push(view.pr.number);
-          const repo = /github\.com\/([^/]+\/[^/]+)\/pull\//.exec(view.pr.url || '')?.[1];
-          await watchPr({ repo, number: view.pr.number }, seen.owner).catch((err) => app.log.warn({ id, repo, err: err.message }, 'Cloud session PR watch not registered'));
+        if (!lines.length || await notify(id, seen.owner, `Cloud session ${id} (${view.title}) ${lines.join('\n')}\n${view.url || ''}`.trim())) {
+          if (view.pr && !seen.prs.includes(view.pr.number)) {
+            seen.prs.push(view.pr.number);
+            const repo = /github\.com\/([^/]+\/[^/]+)\/pull\//.exec(view.pr.url || '')?.[1];
+            await watchPr({ repo, number: view.pr.number }, seen.owner).catch((err) => app.log.warn({ id, repo, err: err.message }, 'Cloud session PR watch not registered'));
+          }
+          Object.assign(seen, { state: view.state, needs_action: view.needs_action });
         }
-        Object.assign(seen, { state: view.state, needs_action: view.needs_action });
         if (seen.threadId) await relay(id, seen);
       } catch (err) {
         if (/HTTP 404/.test(err.message)) delete state.sessions[id];

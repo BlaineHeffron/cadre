@@ -365,14 +365,20 @@ async function watcherApp(t, f, store, owner) {
   const app = Fastify();
   const dms = [];
   const watches = [];
+  const bus = { dmStatus: 200 };
+  // Records accepted DMs; a DM the bus refuses is counted as an attempt only.
   app.decorate('agentBusLifecycle', {
-    directMessage: async (dm) => { dms.push(dm); return { statusCode: 200, payload: {} }; },
+    directMessage: async (dm) => {
+      bus.attempts = (bus.attempts || 0) + 1;
+      if (bus.dmStatus === 200) dms.push(dm);
+      return { statusCode: bus.dmStatus, payload: {} };
+    },
   });
   app.addHook('onRequest', async (req) => { req.duenoAuth = { principal: { type: 'agent', ...owner } }; });
   await cloudSessionsPlugin(app, { store, cloudOpts: f.opts, watchPr: async (watch, creator) => { watches.push({ watch, creator }); } });
   await app.ready();
   t.after(() => app.close());
-  return { app, dms, watches, step: () => app.agentBusLifecycle.cloudSessions.step() };
+  return { app, dms, watches, bus, step: () => app.agentBusLifecycle.cloudSessions.step() };
 }
 
 test('the watcher DMs the launching owner on each transition once, across a restart, and registers new PRs', async (t) => {
@@ -413,7 +419,25 @@ test('the watcher DMs the launching owner on each transition once, across a rest
   set({ status_bucket: 'blocked', external_metadata: { current_branches: { '': 'claude/has-pr' }, post_turn_summary: { needs_action: 'Which DB?' } } });
   await second.step();
   await second.step();
-  assert.deepEqual(second.dms.map((dm) => dm.body.split('\n')[0].replace(/^Cloud session cse_w \(Title cse_w\) /, '')), ['failed: tests broke', 'blocked: Which DB?']);
+  // A new question while still blocked is a new notice.
+  set({ status_bucket: 'blocked', external_metadata: { current_branches: { '': 'claude/has-pr' }, post_turn_summary: { needs_action: 'Which port?' } } });
+  await second.step();
+  const notices = () => second.dms.map((dm) => dm.body.split('\n')[0].replace(/^Cloud session cse_w \(Title cse_w\) /, ''));
+  assert.deepEqual(notices(), ['failed: tests broke', 'blocked: Which DB?', 'blocked: Which port?']);
+
+  // A refused DM leaves the last-seen state alone, so later passes (and restarts) retry it.
+  second.bus.dmStatus = 500;
+  second.bus.attempts = 0;
+  set({ status_bucket: 'failed', external_metadata: { current_branches: { '': 'claude/has-pr' }, post_turn_summary: { status_detail: 'disk full' } } });
+  await second.step();
+  await second.step();
+  assert.equal(second.bus.attempts, 2);
+  assert.equal(second.app.agentBusLifecycle.cloudSessions.get('cse_w').state, 'blocked');
+  second.bus.dmStatus = 200;
+  await second.step();
+  await second.step();
+  assert.equal(second.bus.attempts, 3);
+  assert.deepEqual(notices().slice(3), ['failed: disk full']);
 
   // A deleted session stops being tracked.
   session = null;
@@ -495,4 +519,13 @@ process.stdout.write(JSON.stringify({ ok: true, session_id: args[args.indexOf('-
   assert.deepEqual(relayed.map((d) => d.target).sort((a, b) => a.kind.localeCompare(b.kind)), [peer, owner].sort((a, b) => a.kind.localeCompare(b.kind)));
   assert.equal(relayed.some((d) => d.target.kind === cloud.kind), false);
   assert.equal((await sends()).length, 1);
+
+  // An owner reply in the watcher's notice DM is never forwarded; room messages still are.
+  const dm = await h.app.agentBusLifecycle.directMessage({ from: cloud, target: owner, body: 'Cloud session cse_a done: ok' });
+  assert.equal(dm.statusCode, 200);
+  const reply = await request('/api/agent-bus/messages', { method: 'POST', body: { threadId: dm.payload.thread.id, from: owner, body: 'done, thanks' } });
+  assert.equal(reply.deliveries[0].resolution, 'not_forwarded');
+  assert.equal((await sends()).length, 1);
+  await request('/api/agent-bus/messages', { method: 'POST', body: { threadId: thread.id, from: owner, body: 'One more thing' } });
+  assert.equal((await sends()).length, 2);
 });

@@ -1366,7 +1366,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'cloud_launch',
-      description: 'Launch a Claude Code cloud session on a GitHub repo, owned by you: Cadre DMs you when it blocks, fails, finishes or opens a PR (the PR is then registered with watch_pr). Replies in that DM go to the cloud session. Returns id and url.',
+      description: 'Launch a Claude Code cloud session on a GitHub repo, owned by you: Cadre DMs you when it blocks, fails, finishes or opens a PR (the PR is then registered with watch_pr). Returns id and url.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1383,7 +1383,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'cloud_watch',
-      description: 'Become the owner of an existing Claude Code cloud session: Cadre DMs you when it blocks, fails, finishes or opens a PR. Replies in that DM go to the cloud session. Returns id, state and status.',
+      description: 'Become the owner of an existing Claude Code cloud session: Cadre DMs you when it blocks, fails, finishes or opens a PR. Returns id, state and status.',
       inputSchema: {
         type: 'object',
         properties: { id: { type: 'string', minLength: 1, description: 'Cloud session id.' } },
