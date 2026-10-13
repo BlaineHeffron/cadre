@@ -16,6 +16,7 @@ import {
   assertMcpProviderModel,
 } from './mcp-model-schemas.mjs';
 import { buildPromptProfileFieldSchema } from '../integrations/prompt-profile-catalog.mjs';
+import { cloudOutput, cloudSend, cloudStatus } from '../integrations/cloud-sessions.mjs';
 import {
   COORDINATOR_SCHEDULE_PROFILE,
   coordinatorPolicyForContext,
@@ -1322,6 +1323,48 @@ export function buildMonitorMcpServer({ requestImpl }) {
         })),
     },
 
+    // ── Claude Code cloud sessions (internal, undocumented endpoints; see cloud-sessions.mjs) ──
+    {
+      name: 'cloud_status',
+      description: 'List Claude Code cloud (anthropic_cloud) sessions with account usage, or get one session by id. Returns id, title, state (working|blocked|done|failed|stopped), detail, needs_action, branches, pr, url and cost_usd.',
+      inputSchema: {
+        type: 'object',
+        properties: { id: { type: 'string', description: 'Cloud session id (session_… or cse_…). Omit to list.' } },
+        additionalProperties: false,
+      },
+      handler: async (args = {}) => cloudStatus(args),
+    },
+    {
+      name: 'cloud_output',
+      description: 'Tail a Claude Code cloud session transcript as compact role/text lines. Returns lines, last_assistant_text and next_seq; pass next_seq back as after_seq to continue.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Cloud session id.' },
+          after_seq: { type: 'integer', minimum: 0, description: 'Return events after this sequence number. Omit for the newest events.' },
+          limit: { type: 'integer', minimum: 1, maximum: 200, description: 'Maximum events to read. Defaults to 50.' },
+        },
+        required: ['id'],
+        additionalProperties: false,
+      },
+      handler: async (args) => cloudOutput(args),
+    },
+    {
+      name: 'cloud_send',
+      description: 'Send a message to a Claude Code cloud session via `claude -p --cloud`. With wait_s > 0, wait up to wait_s seconds and return the reply; otherwise return once sent.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Cloud session id.' },
+          text: { type: 'string', minLength: 1, description: 'Message to send.' },
+          wait_s: { type: 'integer', minimum: 0, maximum: 600, description: 'Seconds to wait for the reply. Defaults to 0 (do not wait).' },
+        },
+        required: ['id', 'text'],
+        additionalProperties: false,
+      },
+      handler: async (args) => cloudSend(args),
+    },
+
     // ── System ──
     {
       name: 'monitor_health',
@@ -1380,6 +1423,9 @@ export function buildMonitorMcpServer({ requestImpl }) {
     'monitor_read_audio_recording',
     'monitor_read_audio_recording_evidence',
     'monitor_act_on_audio_recording',
+    'cloud_status',
+    'cloud_output',
+    'cloud_send',
   ]);
 
   const discoverableTools = tools.filter((t) => (
