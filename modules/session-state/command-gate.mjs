@@ -1166,10 +1166,11 @@ export function createTmuxCommandExecutor({
       try {
         await sendTmuxText(execFn, { target: tmuxTarget, text: '/mcp', delayMs, sleepFn, bufferPrefix });
         const list = await screen((pane) => menu(pane, 'Manage MCP servers'));
-        if (!/✘\s+dueno(?:\s|$)/i.test(menu(list, 'Manage MCP servers'))) {
+        // Reconnect a connected dueno too: a new build may add tools, and only a reconnect refetches tools/list.
+        if (!/[✔✘]\s+dueno(?:\s|$)/i.test(menu(list, 'Manage MCP servers'))) {
           return { ok: true, pending: /^\s*[❯>]?\s*[^✔✘\s]\s+dueno(?:\s|$)/im.test(menu(list, 'Manage MCP servers')) };
         }
-        const server = await select(list, 'Manage MCP servers', /✘\s+dueno(?:\s|$)/i);
+        await select(list, 'Manage MCP servers', /[✔✘]\s+dueno(?:\s|$)/i);
         await key('Enter');
         const detail = await screen((pane) => menu(pane, 'Dueno MCP Server'));
         const before = await select(detail, 'Dueno MCP Server', /^\s*[❯>]?\s*\d+\.\s+Reconnect\s*$/i);
