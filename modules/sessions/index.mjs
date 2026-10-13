@@ -2195,7 +2195,7 @@ async function sessionsPlugin(app, {
   const mcpReconnectAfter = Date.now() + 20_000;
   const pendingMcpReconnect = new Map(config.id === 'claude'
     && !shouldSuppressSideEffectLoops({ port: appConfig.port })
-    ? [...sessions.keys()].map((id) => [id, 0]) : []);
+    ? [...sessions].filter(([, meta]) => meta.mcpCapabilities?.serverIds?.includes('dueno')).map(([id]) => [id, 0]) : []);
   const unregisterHookSessions = registerHookSessionRegistry(config.id, () => sessions);
   await sessionDeliveryAuditStore?.init?.();
   const interruptedTransactions = new Set();
