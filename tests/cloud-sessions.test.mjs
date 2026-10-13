@@ -4,7 +4,11 @@ import { createServer } from 'node:http';
 import { chmod, mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Fastify from 'fastify';
+import { cloudSessionsPlugin } from '../modules/integrations/cloud-sessions-plugin.mjs';
+import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
 import {
+  cloudLaunch,
   cloudOutput,
   cloudSend,
   cloudSessionState,
@@ -312,8 +316,183 @@ test('monitor MCP exposes the cloud tools and validates their arguments', async 
   const { buildMonitorMcpServer } = await import('../modules/platform/monitor-mcp.mjs');
   const mcp = buildMonitorMcpServer({ requestImpl: async () => ({}) });
   const names = mcp.listTools().map((tool) => tool.name);
-  for (const name of ['cloud_status', 'cloud_output', 'cloud_send']) assert.ok(names.includes(name), name);
+  for (const name of ['cloud_status', 'cloud_output', 'cloud_send', 'cloud_launch', 'cloud_watch', 'cloud_attach']) assert.ok(names.includes(name), name);
+  await assert.rejects(mcp.handleToolCall('cloud_launch', { prompt: 'hi', repo: 'not a repo' }));
+  await assert.rejects(mcp.handleToolCall('cloud_attach', { id: 'cse_a' }));
   await assert.rejects(mcp.handleToolCall('cloud_send', { id: 'cse_a' }));
   await assert.rejects(mcp.handleToolCall('cloud_send', { id: 'cse_a', text: 'hi', wait_s: 601 }));
   await assert.rejects(mcp.handleToolCall('cloud_output', { id: 'cse_a', limit: 0 }));
+});
+
+test('cloudLaunch posts the CLI launch shape to the anthropic_cloud environment', async (t) => {
+  const f = await fixture(t);
+  f.routes['GET /v1/environment_providers'] = () => [200, { environments: [
+    { kind: 'bridge', environment_id: 'env_rc' }, { kind: 'anthropic_cloud', environment_id: 'env_cloud' },
+  ] }];
+  f.routes['POST /v1/code/sessions'] = () => [201, { session: { id: 'cse_new', session_url: 'https://claude.ai/code/cse_new' } }];
+
+  const launched = await cloudLaunch({ prompt: 'Fix the bug', repo: 'o/r', ref: 'main', name: 'Fix: the bug!', model: 'claude-opus-5-5' }, f.opts);
+
+  assert.deepEqual(launched, { id: 'cse_new', url: 'https://claude.ai/code/cse_new' });
+  const post = f.requests.find((r) => r.method === 'POST');
+  assert.equal(post.headers['content-type'], 'application/json');
+  assert.equal(post.headers.authorization, `Bearer ${ACCESS}`);
+  const body = JSON.parse(post.body);
+  assert.match(body.events[0].payload.uuid, /^[0-9a-f-]{36}$/);
+  delete body.events[0].payload.uuid;
+  assert.deepEqual(body, {
+    title: 'Fix: the bug!',
+    environment_id: 'env_cloud',
+    events: [{ payload: { session_id: '', type: 'user', parent_tool_use_id: null, message: { role: 'user', content: 'Fix the bug' } } }],
+    config: {
+      sources: [{ type: 'git_repository', url: 'https://github.com/o/r', revision: 'main' }],
+      outcomes: [{ type: 'git_repository', git_info: { type: 'github', repo: 'o/r', branches: ['claude/fix-the-bug'] } }],
+      model: 'claude-opus-5-5',
+    },
+  });
+
+  f.routes['GET /v1/environment_providers'] = () => [200, { environments: [{ kind: 'bridge', environment_id: 'env_rc' }] }];
+  await assert.rejects(cloudLaunch({ prompt: 'x', repo: 'o/r' }, f.opts), /No anthropic_cloud environment/);
+});
+
+function memoryStore() {
+  let data = null;
+  return { load: async () => structuredClone(data), save: async (next) => { data = structuredClone(next); } };
+}
+
+// A bare app: the watcher's agent-bus edges (DM, rooms) are recorded, and requests run as `owner`.
+async function watcherApp(t, f, store, owner) {
+  const app = Fastify();
+  const dms = [];
+  const watches = [];
+  app.decorate('agentBusLifecycle', {
+    directMessage: async (dm) => { dms.push(dm); return { statusCode: 200, payload: {} }; },
+  });
+  app.addHook('onRequest', async (req) => { req.duenoAuth = { principal: { type: 'agent', ...owner } }; });
+  await cloudSessionsPlugin(app, { store, cloudOpts: f.opts, watchPr: async (watch, creator) => { watches.push({ watch, creator }); } });
+  await app.ready();
+  t.after(() => app.close());
+  return { app, dms, watches, step: () => app.agentBusLifecycle.cloudSessions.step() };
+}
+
+test('the watcher DMs the launching owner on each transition once, across a restart, and registers new PRs', async (t) => {
+  const f = await fixture(t);
+  const owner = { kind: 'claude', sessionId: 'claude-1' };
+  const store = memoryStore();
+  let session = cloudSession('cse_w', { worker_status: 'running', status_bucket: 'working', external_metadata: { current_branches: { '': 'claude/none' } } });
+  f.routes['GET /v1/environment_providers'] = () => [200, { environments: [{ kind: 'anthropic_cloud', environment_id: 'env_cloud' }] }];
+  f.routes['POST /v1/code/sessions'] = () => [200, { session: { id: 'cse_w', session_url: 'https://claude.ai/code/cse_w' } }];
+  f.routes['GET /v1/code/sessions/cse_w'] = () => (session ? [200, { response_shape: session }] : [404, {}]);
+  const set = (extra) => { session = cloudSession('cse_w', extra); };
+
+  const first = await watcherApp(t, f, store, owner);
+  const launched = await first.app.inject({ method: 'POST', url: '/api/cloud/sessions', payload: { prompt: 'go', repo: 'o/r' } });
+  assert.deepEqual(launched.json(), { id: 'cse_w', url: 'https://claude.ai/code/cse_w' });
+  await first.step();
+  assert.deepEqual(first.dms, []);
+
+  set({ external_metadata: { current_branches: { '': 'claude/has-pr' }, post_turn_summary: { status_detail: 'Fixed it' } } });
+  await first.step();
+  assert.equal(first.dms.length, 1);
+  assert.deepEqual(first.dms[0].from, { kind: 'cloud', sessionId: 'cse_w' });
+  assert.deepEqual(first.dms[0].target, owner);
+  assert.match(first.dms[0].body, /done: Fixed it\nPR opened #7 https:\/\/github.com\/o\/r\/pull\/7/);
+  assert.deepEqual(first.watches, [{ watch: { repo: 'o/r', number: 7 }, creator: owner }]);
+  await first.step();
+  assert.equal(first.dms.length, 1);
+
+  // A restarted Cadre reads the last-seen state and does not repeat the notice.
+  await first.app.close();
+  const second = await watcherApp(t, f, store, owner);
+  await second.step();
+  assert.deepEqual(second.dms, []);
+  assert.deepEqual(second.watches, []);
+
+  set({ status_bucket: 'failed', external_metadata: { current_branches: { '': 'claude/has-pr' }, post_turn_summary: { status_detail: 'tests broke' } } });
+  await second.step();
+  set({ status_bucket: 'blocked', external_metadata: { current_branches: { '': 'claude/has-pr' }, post_turn_summary: { needs_action: 'Which DB?' } } });
+  await second.step();
+  await second.step();
+  assert.deepEqual(second.dms.map((dm) => dm.body.split('\n')[0].replace(/^Cloud session cse_w \(Title cse_w\) /, '')), ['failed: tests broke', 'blocked: Which DB?']);
+
+  // A deleted session stops being tracked.
+  session = null;
+  await second.step();
+  assert.equal(second.app.agentBusLifecycle.cloudSessions.get('cse_w'), null);
+});
+
+test('cloud_watch baselines an existing session without notifying and keeps its first owner', async (t) => {
+  const f = await fixture(t);
+  f.routes['GET /v1/code/sessions/cse_a'] = () => [200, { response_shape: cloudSession('cse_a') }];
+  const w = await watcherApp(t, f, memoryStore(), { kind: 'claude', sessionId: 'claude-1' });
+  const watched = await w.app.inject({ method: 'POST', url: '/api/cloud/watch', payload: { id: 'cse_a' } });
+  assert.deepEqual(watched.json(), { id: 'cse_a', state: 'done', status: 'watching' });
+  await w.step();
+  assert.deepEqual(w.dms, []);
+  assert.deepEqual(w.watches, []);
+  w.app.agentBusLifecycle.cloudSessions.get('cse_a').owner = { kind: 'codex', sessionId: 'codex-1' };
+  const taken = await w.app.inject({ method: 'POST', url: '/api/cloud/watch', payload: { id: 'cse_a' } });
+  assert.equal(taken.statusCode, 403);
+});
+
+test('cloud_attach relays room messages to the cloud session and its replies back, without echoing', async (t) => {
+  const f = await fixture(t);
+  process.env.INTERNAL_BYPASS_TOKEN = 'cloud-attach-test';
+  t.after(() => { delete process.env.INTERNAL_BYPASS_TOKEN; });
+  const sendLog = join(f.dir, 'sends.log');
+  const claudeBin = join(f.dir, 'claude');
+  await writeFile(claudeBin, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+require('node:fs').appendFileSync(${JSON.stringify(sendLog)}, JSON.stringify(args) + '\\n');
+process.stdout.write(JSON.stringify({ ok: true, session_id: args[args.indexOf('--cloud') + 1] }));
+`);
+  await chmod(claudeBin, 0o755);
+  const sends = async () => (await readFile(sendLog, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  f.events.push(
+    { sequence_num: '1', event_type: 'user', source: 'client', payload: { message: { content: 'old task' } } },
+    { sequence_num: '2', event_type: 'assistant', payload: { message: { content: [{ type: 'text', text: 'old reply' }] } } },
+  );
+  f.routes['GET /v1/code/sessions/cse_a/events'] = eventsRoute(f.events);
+  f.routes['GET /v1/code/sessions/cse_a'] = () => [200, { response_shape: cloudSession('cse_a', { external_metadata: {} }) }];
+
+  const h = await createAgentBusHarness({ pollMs: 60000, beforeReady: (app) => cloudSessionsPlugin(app, { store: memoryStore(), cloudOpts: { ...f.opts, claudeBin } }) });
+  t.after(() => h.cleanup());
+  const owner = { kind: 'claude', sessionId: 'claude-1' };
+  const peer = { kind: 'codex', sessionId: 'codex-1' };
+  const cloud = { kind: 'cloud', sessionId: 'cse_a' };
+  const thread = await h.store.createThread({ title: 'cloud room', participants: [owner, peer], createdBy: owner });
+  const { buildMonitorMcpServer } = await import('../modules/platform/monitor-mcp.mjs');
+  const { buildInProcessFastifyRequest } = await import('../modules/agent-bus/in-process-mcp.mjs');
+  const { buildInternalBypassHeaders } = await import('../modules/platform/auth.mjs');
+  const request = buildInProcessFastifyRequest({ app: h.app, buildHeaders: () => buildInternalBypassHeaders({ authToken: h.authToken }) });
+  const mcp = buildMonitorMcpServer({ requestImpl: request });
+  const as = (ref) => ({ authContext: { authenticated: true, principal: { type: 'agent', ...ref } } });
+
+  await assert.rejects(mcp.handleToolCall('cloud_attach', { id: 'cse_a', thread_id: thread.id }, as({ kind: 'pi', sessionId: 'pi-1' })), /Room owner or participant/);
+  const attached = await mcp.handleToolCall('cloud_attach', { id: 'cse_a', thread_id: thread.id }, as(owner));
+  assert.deepEqual(attached, { id: 'cse_a', thread_id: thread.id, status: 'attached' });
+  assert.ok(h.store.getThread(thread.id).thread.participants.some((p) => p.kind === 'cloud' && p.sessionId === 'cse_a'));
+
+  // Room -> cloud: a peer's message goes out through `claude -p --cloud`, without the room_send hint.
+  const sent = await request('/api/agent-bus/messages', { method: 'POST', body: { threadId: thread.id, from: peer, body: 'Please add tests' } });
+  assert.equal(sent.deliveries.find((d) => d.target.kind === 'cloud').status, 'injected');
+  const [args] = await sends();
+  assert.deepEqual([args[0], args[2], args[3]], ['-p', '--cloud', 'cse_a']);
+  assert.match(args[1], /from=codex:codex-1\]\nPlease add tests\n\[\/ROOM_MESSAGE\]$/);
+
+  // Cloud -> room: new assistant text after the attach cursor comes back as the cloud participant.
+  f.events.push(
+    { sequence_num: '3', event_type: 'user', source: 'client', payload: { message: { content: args[1] } } },
+    { sequence_num: '4', event_type: 'assistant', payload: { message: { content: [{ type: 'text', text: 'Tests added' }, { type: 'tool_use', name: 'Bash' }] } } },
+    { sequence_num: '5', event_type: 'assistant', payload: { message: { content: [{ type: 'tool_use', name: 'Edit' }] } } },
+    { sequence_num: '6', event_type: 'result', payload: { result: 'Tests added' } },
+  );
+  await h.app.agentBusLifecycle.cloudSessions.step();
+  await h.app.agentBusLifecycle.cloudSessions.step();
+  const fromCloud = h.store.getThread(thread.id).messages.filter((m) => m.from.kind === 'cloud');
+  assert.deepEqual(fromCloud.map((m) => m.body), ['Tests added']);
+  const relayed = h.store.getThread(thread.id).deliveries.filter((d) => d.messageId === fromCloud[0].id);
+  assert.deepEqual(relayed.map((d) => d.target).sort((a, b) => a.kind.localeCompare(b.kind)), [peer, owner].sort((a, b) => a.kind.localeCompare(b.kind)));
+  assert.equal(relayed.some((d) => d.target.kind === cloud.kind), false);
+  assert.equal((await sends()).length, 1);
 });

@@ -26,6 +26,8 @@ import { commandCenterAIPlugin, onHumanQueueChange } from './modules/integration
 import { agentProviderPreferencesPlugin } from './modules/agent/provider-preferences.mjs';
 import { fleetPlugin } from './modules/fleet/index.mjs';
 import { githubAgentsPlugin } from './modules/integrations/github-agents-plugin.mjs';
+import { buildGithubAgentRepoStore } from './modules/integrations/github-agents.mjs';
+import { cloudSessionsPlugin } from './modules/integrations/cloud-sessions-plugin.mjs';
 import { scheduledAgentsPlugin } from './modules/integrations/scheduled-agents-plugin.mjs';
 import { buildScheduledAgentStore, SchedulerLoop } from './modules/integrations/scheduled-agents.mjs';
 import { audioPlugin } from './modules/audio/index.mjs';
@@ -193,7 +195,14 @@ await app.register(scheduledAgentsPlugin, {
 });
 
 // GitHub PR/issue listener agents
-await app.register(githubAgentsPlugin, { wsManager });
+const githubAgentRepoStore = buildGithubAgentRepoStore({ defaultAutoReviewEnabled: config.githubAgents.autoReviewEnabled });
+await app.register(githubAgentsPlugin, { wsManager, repoStore: githubAgentRepoStore });
+
+// Claude Code cloud sessions: owners, the 60 s state watcher (a side-effect loop) and room attach
+await app.register(cloudSessionsPlugin, {
+  pollEnabled: !sideEffectLoopsSuppressed,
+  watchPr: (watch, owner) => githubAgentRepoStore.putWatch(watch, owner),
+});
 
 // Audio recording transcript/summary evidence ingestion
 await app.register(audioPlugin, { wsManager });

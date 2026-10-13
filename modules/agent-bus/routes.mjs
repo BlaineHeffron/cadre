@@ -482,6 +482,8 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     return { statusCode: result.statusCode, payload: { thread: normalizeThreadSummary(await enrichThread(thread)), ...result.payload } };
   }
   app.agentBusLifecycle.directMessage = directMessage;
+  app.agentBusLifecycle.send = send;
+  app.agentBusLifecycle.addParticipant = (threadId, participant) => store.addThreadParticipant(threadId, participant);
 
   app.post('/api/agent-bus/dm', { schema: { body: bodySchema({ from: agentRef, target: agentRef,
     body: string(BODY_MAX, 1), summary: string(200), replyTo: string(ID_MAX) }, ['from', 'target', 'body']) } }, async (req, reply) => {

@@ -248,6 +248,30 @@ function buildProtocolAdapter({ kind, detailPath, inputPath }) {
   };
 }
 
+// A Claude Code cloud session registered with Cadre (cloud-sessions-plugin.mjs). It always
+// accepts input, takes room messages through cloudSend and is never archived by the bus.
+function buildCloudAdapter() {
+  function tracked(app, sessionId) {
+    if (app.agentBusLifecycle?.cloudSessions?.get(sessionId)) return;
+    throw Object.assign(new Error(`Cloud session not tracked: ${sessionId}`), { statusCode: 404, code: 'session_not_found' });
+  }
+  return {
+    kind: 'cloud',
+    async listSessions() { return []; },
+    async getSession(app, sessionId) {
+      tracked(app, sessionId);
+      return { id: sessionId, state: { status: 'ready', capabilities: { canSendNow: true } } };
+    },
+    async captureSession() { return ''; },
+    async deleteSession() { return { ok: true, status: 'detached' }; },
+    async injectEnvelope(app, sessionId, envelopeText) {
+      tracked(app, sessionId);
+      // The room_send hint does not apply: the session has no Cadre tools and its replies are relayed.
+      return app.agentBusLifecycle.cloudSessions.send(sessionId, envelopeText.replace(/\nReply: room_send\(.*$/, ''));
+    },
+  };
+}
+
 export function createAgentAdapters() {
   return {
     claude: buildAdapter({
@@ -277,5 +301,6 @@ export function createAgentAdapters() {
       detailPath: (sessionId) => `/api/codex-app-server/sessions/${encodeURIComponent(sessionId)}`,
       inputPath: (sessionId) => `/api/codex-app-server/sessions/${encodeURIComponent(sessionId)}/input`,
     }),
+    cloud: buildCloudAdapter(),
   };
 }
