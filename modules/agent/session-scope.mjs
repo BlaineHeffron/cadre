@@ -37,14 +37,14 @@ export function buildAgentScopeLaunch(command, {
   // systemd-run --user needs the user bus; without it (an `env -i` start) the pane, and a cold tmux server, exit at once.
   if (!unit || !enabled(readEnv('DUENO_AGENT_CGROUP_ISOLATION', env), platform)
     || !(env.XDG_RUNTIME_DIR || env.DBUS_SESSION_BUS_ADDRESS)) {
-    return { command, enabled: false, unit: '', slice: '' };
+    return { command, prefix: [], enabled: false, unit: '', slice: '' };
   }
 
   const tasksMax = boundedSetting(readEnv('DUENO_AGENT_SCOPE_TASKS_MAX', env), '1024', TASK_LIMIT_RE);
   const memoryHigh = boundedSetting(readEnv('DUENO_AGENT_SCOPE_MEMORY_HIGH', env), '4G', MEMORY_LIMIT_RE);
   const memoryMax = boundedSetting(readEnv('DUENO_AGENT_SCOPE_MEMORY_MAX', env), '8G', MEMORY_LIMIT_RE);
-  const args = [
-    'exec',
+  // Structured agents exec `prefix` with their argv directly, keeping their stdio pipes and pid.
+  const prefix = [
     'systemd-run',
     '--user',
     '--scope',
@@ -57,12 +57,10 @@ export function buildAgentScopeLaunch(command, {
     `--property=MemoryMax=${memoryMax}`,
     '--property=TimeoutStopSec=3s',
     '--property=KillMode=control-group',
-    'bash',
-    '-lc',
-    shellQuote(command),
   ];
   return {
-    command: args.join(' '),
+    command: ['exec', ...prefix, 'bash', '-lc', shellQuote(command)].join(' '),
+    prefix,
     enabled: true,
     unit,
     slice: 'dueno-agents.slice',

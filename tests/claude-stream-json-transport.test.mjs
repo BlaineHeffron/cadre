@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -8,7 +9,8 @@ import {
   ClaudeStreamJsonTransport,
 } from '../modules/agent/claude-stream-json-transport.mjs';
 import { CLAUDE_FLEET_PLUGIN_DIR } from '../modules/agent/hook-events.mjs';
-import { ProcessSupervisor } from '../modules/agent/process-supervisor.mjs';
+import { ProcessSupervisor, isProcessAlive } from '../modules/agent/process-supervisor.mjs';
+import { exec } from '../lib/exec.mjs';
 import { createJournalStore } from '../modules/sessions/journal-store.mjs';
 import { SessionService } from '../modules/sessions/session-service.mjs';
 
@@ -346,6 +348,108 @@ setInterval(() => {}, 1000);
     assert.equal(cursor.events.some((entry) => entry.type === 'transport.event'), true);
     assert.equal(JSON.stringify({ settled, cursor }).includes(token), false);
     await service.close();
+  });
+
+  it('launches Claude in its session scope and stops that scope on terminate', async () => {
+    const { root, workDir } = await harness();
+    const launches = [];
+    const systemctl = [];
+    let scopeState = 'inactive';
+    const supervisor = new ProcessSupervisor({
+      ledgerPath: join(root, 'scoped-ledger.json'),
+      spawnImpl: (command, args, options) => {
+        launches.push({ command, args, env: options.env });
+        scopeState = 'active';
+        const agent = args.indexOf(process.execPath);
+        return spawn(process.execPath, args.slice(agent + 1), options);
+      },
+    });
+    const scopeExec = async (command, args) => {
+      systemctl.push(args.slice(1, 3).join(' '));
+      if (args[1] === 'stop') scopeState = 'inactive';
+      return { code: 0, stdout: `LoadState=loaded\nActiveState=${scopeState}\n`, stderr: '' };
+    };
+    const transport = new ClaudeStreamJsonTransport({
+      binary: process.execPath,
+      env: { PATH: process.env.PATH, HOME: root, XDG_RUNTIME_DIR: '/run/user/1000' },
+      supervisor,
+      scopeSessionId: 'abc123',
+      scopeExec,
+    });
+    transports.push(transport);
+    await transport.start({ cwd: workDir, args: ['-e', FAKE_CLAUDE] });
+    const [launch] = launches;
+    assert.equal(launch.command, 'systemd-run');
+    assert.equal(launch.args.includes('--unit=dueno-agent-claude-abc123'), true);
+    assert.equal(launch.args.includes('--slice=dueno-agents.slice'), true);
+    assert.deepEqual(launch.args.slice(launch.args.indexOf(process.execPath) + 1), ['-e', FAKE_CLAUDE]);
+    assert.equal(launch.env.XDG_RUNTIME_DIR, '/run/user/1000');
+    const result = await transport.prompt({ turnId: 'scoped', idempotencyKey: 'scoped', blocks: [{ type: 'text', text: 'scoped' }] });
+    assert.equal(result.events.some((event) => event.type === 'message.committed'), true);
+    assert.deepEqual(systemctl, ['show dueno-agent-claude-abc123.scope']);
+
+    const verdict = await transport.terminate({ grace: 100 });
+    assert.equal(verdict.ok, true);
+    assert.deepEqual(systemctl.slice(1), [
+      'show dueno-agent-claude-abc123.scope', 'stop dueno-agent-claude-abc123.scope', 'show dueno-agent-claude-abc123.scope',
+    ]);
+  });
+
+  it('never names a scope after the session id in its environment', async () => {
+    const { root, workDir } = await harness();
+    const launches = [];
+    const systemctl = [];
+    const supervisor = new ProcessSupervisor({
+      ledgerPath: join(root, 'unscoped-ledger.json'),
+      spawnImpl: (command, args, options) => { launches.push(command); return spawn(command, args, options); },
+    });
+    const transport = new ClaudeStreamJsonTransport({
+      binary: process.execPath,
+      env: { PATH: process.env.PATH, HOME: root, XDG_RUNTIME_DIR: '/run/user/1000', DUENO_SESSION_ID: 'abc123', CADRE_SESSION_ID: 'abc123' },
+      supervisor,
+      scopeExec: async (command, args) => { systemctl.push(args); return { code: 0, stdout: '', stderr: '' }; },
+    });
+    transports.push(transport);
+    await transport.start({ cwd: workDir, args: ['-e', FAKE_CLAUDE] });
+    assert.equal((await transport.terminate({ grace: 100 })).ok, true);
+    assert.deepEqual(launches, [process.execPath]);
+    assert.deepEqual(systemctl, []);
+  });
+
+  it('runs a real Claude stream-json process in its user scope when systemd is available', async (t) => {
+    if (process.platform !== 'linux') return t.skip('systemd scopes require Linux');
+    if ((await exec('systemctl', ['--user', 'show-environment'])).code !== 0) return t.skip('systemd user manager unavailable');
+    const { root, workDir, supervisor } = await harness();
+    // A unique test-only id: the scope this test creates is the only one it may stop.
+    const id = `test-${process.pid}-${Date.now().toString(36)}`;
+    const unit = `dueno-agent-claude-${id}.scope`;
+    const create = () => {
+      const created = new ClaudeStreamJsonTransport({
+        binary: process.execPath,
+        env: { PATH: process.env.PATH, HOME: root, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR },
+        supervisor,
+        scopeSessionId: id,
+      });
+      transports.push(created);
+      return created;
+    };
+    try {
+      // A resumed attempt reuses the unit name; it replaces a scope that outlived its previous attempt.
+      const stale = create();
+      await stale.start({ cwd: workDir, args: ['-e', FAKE_CLAUDE] });
+      const stalePid = stale.snapshot().runtime.pid;
+      const transport = create();
+      await transport.start({ cwd: workDir, args: ['-e', FAKE_CLAUDE] });
+      assert.equal(isProcessAlive(stalePid), false);
+      const result = await transport.prompt({ turnId: 'real', idempotencyKey: 'real', blocks: [{ type: 'text', text: 'real' }] });
+      assert.equal(result.events.some((event) => event.type === 'message.committed'), true);
+      const cgroup = await readFile(`/proc/${transport.snapshot().runtime.pid}/cgroup`, 'utf8');
+      assert.match(cgroup, new RegExp(`/dueno-agents\\.slice/${unit.replaceAll('.', '\\.')}$`, 'mu'));
+      assert.equal((await transport.terminate({ grace: 100 })).ok, true);
+      assert.notEqual((await exec('systemctl', ['--user', 'is-active', unit])).stdout.trim(), 'active');
+    } finally {
+      await exec('systemctl', ['--user', 'stop', unit]).catch(() => {});
+    }
   });
 
   it('fails closed on malformed stream-json output', async () => {

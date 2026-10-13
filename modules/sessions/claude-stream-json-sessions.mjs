@@ -114,7 +114,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
     attachmentStore: attachmentStore || new AttachmentStore({ rootDir: resolve(sessionRoot, 'attachments') }),
     deliveryAuditStore: sessionDeliveryAuditStore, logger: app.log,
     transportFactory: (spec) => transportFactory?.(spec) || (claude ? new ClaudeStreamJsonTransport({
-      binary, env: spec.env, supervisor: processSupervisor, capabilityEvidence: spec.capabilityEvidence,
+      binary, env: spec.env, supervisor: processSupervisor, capabilityEvidence: spec.capabilityEvidence, scopeSessionId: spec.sessionId,
     }) : new CodexAppServerTransport({ binary, env: spec.env, supervisor: processSupervisor })),
   });
   await service.init();

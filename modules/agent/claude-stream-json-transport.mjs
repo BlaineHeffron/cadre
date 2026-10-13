@@ -8,11 +8,14 @@ import {
 import { CLAUDE_FLEET_PLUGIN_DIR } from './hook-events.mjs';
 import { mapPromptBlocksForClaude } from './prompt-blocks.mjs';
 import { ProcessSupervisor } from './process-supervisor.mjs';
+import { buildAgentScopeLaunch, stopAgentScope } from './session-scope.mjs';
 
 const DEFAULT_MAX_FRAME_BYTES = 8 * 1024 * 1024;
 export const CLAUDE_STREAM_JSON_ENV_ALLOWLIST = Object.freeze([
   'PATH', 'HOME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'CLAUDE_CODE_OAUTH_TOKEN',
   'DUENO_AGENT_BUS_TOKEN', 'DUENO_SESSION_ID', 'DUENO_PROVIDER', 'DUENO_SESSION_WORK_DIR',
+  // systemd-run --user reaches the user manager through these.
+  'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS',
 ]);
 
 export function buildClaudeStreamJsonArgs({
@@ -51,7 +54,7 @@ export class ClaudeStreamJsonTransport {
   constructor({
     binary = 'claude', env = process.env, allowedEnvKeys = CLAUDE_STREAM_JSON_ENV_ALLOWLIST,
     supervisor = null, spawnImpl, maxFrameBytes = DEFAULT_MAX_FRAME_BYTES,
-    provider = 'claude', driverVersion = '', capabilityEvidence = null,
+    provider = 'claude', driverVersion = '', capabilityEvidence = null, scopeSessionId = '', scopeExec,
   } = {}) {
     this.binary = binary;
     this.env = env;
@@ -60,6 +63,10 @@ export class ClaudeStreamJsonTransport {
     this.maxFrameBytes = maxFrameBytes;
     this.provider = provider;
     this.driverVersion = driverVersion;
+    // The Cadre session id names the scope; never read it from the environment, which names the caller's own session.
+    this.scopeSessionId = scopeSessionId;
+    this.scopeExec = scopeExec;
+    this.scopeUnit = '';
     this.eventQueue = new AsyncEventQueue();
     this.eventHistory = [];
     this.toolCalls = new Set();
@@ -108,19 +115,27 @@ export class ClaudeStreamJsonTransport {
     // Claude Code rejects --session-id values that are not UUIDs; Fleet session ids are 16 hex chars.
     this.protocolSessionId = String(spec.protocolSessionId || randomUUID());
     this.lifecycle = 'starting';
+    const env = spec.env || this.env;
+    // The agent and its tools run in the tmux runtime's per-session scope, outside the Cadre service cgroup.
+    const scope = buildAgentScopeLaunch(this.binary, { kind: this.provider, sessionId: this.scopeSessionId, env });
+    this.scopeUnit = scope.unit;
     let runtime;
     try {
+      // A resumed session reuses the unit name; clear what is left of the previous attempt's scope.
+      if (scope.unit) await stopAgentScope(scope.unit, { execImpl: this.scopeExec }).catch(() => {});
+      const args = spec.args || buildClaudeStreamJsonArgs({
+        sessionId: this.protocolSessionId, resume: spec.resume, model: spec.model, thinkingLevel: spec.thinkingLevel, permissionMode: spec.permissionMode,
+        mcpConfigPath: spec.mcpConfigPath, promptArgs: spec.promptArgs,
+      });
+      const [command, ...argv] = [...scope.prefix, this.binary, ...args];
       runtime = await this.supervisor.spawn({
         instanceId: this.instanceId,
         driver: 'claude-stream-json',
         driverVersion: this.driverVersion,
-        command: this.binary,
-        args: spec.args || buildClaudeStreamJsonArgs({
-          sessionId: this.protocolSessionId, resume: spec.resume, model: spec.model, thinkingLevel: spec.thinkingLevel, permissionMode: spec.permissionMode,
-          mcpConfigPath: spec.mcpConfigPath, promptArgs: spec.promptArgs,
-        }),
+        command,
+        args: argv,
         cwd,
-        env: spec.env || this.env,
+        env,
         allowedEnvKeys: spec.allowedEnvKeys || this.allowedEnvKeys,
         negotiated: this.negotiated,
         metadata: { attemptId: this.attemptId, provider: this.provider, ...(spec.metadata || {}) },
@@ -251,7 +266,11 @@ export class ClaudeStreamJsonTransport {
     this.terminating = true;
     this.#cancelInteractions('attempt_terminated');
     try { this.child?.stdin?.end?.(); } catch { /* ignored */ }
-    const verdict = await this.supervisor.terminate(this.instanceId, { graceMs: Number(grace) || 0 });
+    let verdict = await this.supervisor.terminate(this.instanceId, { graceMs: Number(grace) || 0 });
+    // Tool processes that left the agent's process group stay in its scope until the scope stops.
+    const scope = this.scopeUnit ? await stopAgentScope(this.scopeUnit, { execImpl: this.scopeExec })
+      .catch((error) => ({ ok: false, residual: [{ type: 'cgroup', id: this.scopeUnit, error: error.message }] })) : null;
+    if (scope && !scope.ok) verdict = { ...verdict, ok: false, status: 'failed', residual: [...verdict.residual, ...scope.residual] };
     if (this.currentTurn) this.#settleError(new Error('Claude stream-json transport terminated'));
     this.lifecycle = verdict.ok ? 'ended' : 'failed';
     this.#emitExit({ code: null, signal: null, verdict });
