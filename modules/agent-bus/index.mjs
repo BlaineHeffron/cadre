@@ -8,7 +8,7 @@ import { createAgentBusDelivery } from './delivery.mjs';
 import { createAgentBusObserver } from './observer.mjs';
 import { registerAgentBusRoutes } from './routes.mjs';
 import { getAgentBusCredentialStore } from './mcp-auth.mjs';
-import { onAgentSessionDeleted } from '../agent/session-delete-events.mjs';
+import { notifyAgentSessionDeleted, onAgentSessionDeleted } from '../agent/session-delete-events.mjs';
 import { TaskService } from '../sessions/task-service.mjs';
 import { getProtocolSessionProvider } from '../sessions/protocol-session-registry.mjs';
 import { registerTaskRoutes } from './task-routes.mjs';
@@ -153,7 +153,20 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
     normalizeCollectionLimit, participantKey, participantRef, threadHasParticipant, threadHasOwner, uniqueAgentRefs, isAgentRef,
     taskService, managedWorktreeBaseDir, ...participants, ...delivery });
 
-  createAgentBusObserver({ app, store, wsManager, deliveryInFlight,
+  // Sessions removed without the delete hook (pruned external sessions, rooms stranded by older builds) leave their
+  // rooms through it. Ended sessions that can still resume keep theirs. Rooms are read first so a mid-sweep joiner is kept.
+  async function sweepStaleRooms() {
+    const refs = new Map(store.listThreads({ status: 'open' }).flatMap((thread) => thread.participants || [])
+      .filter((ref) => adapters[ref.kind]).map((ref) => [participantKey(ref), participantRef(ref)]));
+    for (const [kind, adapter] of Object.entries(adapters)) {
+      // A kind that cannot list its sessions (disabled or failing) keeps its rooms.
+      const ids = await adapter.listSessions(app).then((list) => new Set(list.map((session) => session.id)), () => null);
+      for (const [key, ref] of refs) if (ref.kind === kind && (!ids || ids.has(ref.sessionId))) refs.delete(key);
+    }
+    for (const ref of refs.values()) await notifyAgentSessionDeleted(ref);
+  }
+
+  createAgentBusObserver({ app, store, wsManager, deliveryInFlight, sweepStaleRooms,
     sessionDeliveryAuditStore,
     hookEventsRetentionDays: config.hookEventsRetentionDays,
     observerIntervalMs: config.agentBus.pollMs,

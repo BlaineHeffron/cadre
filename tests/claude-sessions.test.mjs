@@ -370,11 +370,14 @@ async function runMissingTmuxDeleteScenario({
 
   const fastifyModuleUrl = pathToFileURL(resolve('node_modules/fastify/fastify.js')).href;
   const pluginModuleUrl = pathToFileURL(resolve('modules/sessions/claude-sessions.mjs')).href;
+  const deleteEventsModuleUrl = pathToFileURL(resolve('modules/agent/session-delete-events.mjs')).href;
   const wrapped = `
     import Fastify from ${JSON.stringify(fastifyModuleUrl)};
     import { readFile } from 'node:fs/promises';
     process.chdir(${JSON.stringify(tempDir)});
     const pluginRef = await import(${JSON.stringify(pluginModuleUrl)});
+    const deleted = [];
+    (await import(${JSON.stringify(deleteEventsModuleUrl)})).onAgentSessionDeleted((event) => { deleted.push(event); });
     const app = Fastify();
     await app.register(pluginRef.claudeSessionsPlugin, {
       wsManager: { broadcast() {}, onChannel() {}, channels: new Map() },
@@ -383,7 +386,7 @@ async function runMissingTmuxDeleteScenario({
     const response = await app.inject({ method: 'DELETE', url: ${JSON.stringify(`/api/claude/sessions/${id}`)} });
     const stored = JSON.parse(await readFile(${JSON.stringify(migratedStoreFile)}, 'utf8'));
     await app.close();
-    console.log(JSON.stringify({ statusCode: response.statusCode, body: response.json(), stored }));
+    console.log(JSON.stringify({ statusCode: response.statusCode, body: response.json(), stored, deleted }));
   `;
 
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', wrapped], {
@@ -772,6 +775,7 @@ describe('Claude Sessions module', () => {
     assert.equal(result.body.ok, true);
     assert.equal(result.body.status, 'already_gone');
     assert.deepEqual(result.stored, []);
+    assert.deepEqual(result.deleted, [{ kind: 'claude', sessionId: 'claude-stale-1' }]);
   });
 
   it('preserves Claude metadata when kill fails for a non-stale tmux error', async () => {
@@ -787,6 +791,7 @@ describe('Claude Sessions module', () => {
     assert.match(result.body.error, /permission denied/);
     assert.equal(result.stored.length, 1);
     assert.equal(result.stored[0].id, 'claude-error-1');
+    assert.deepEqual(result.deleted, []);
   });
 
   it('preserves Claude metadata when tmux server is temporarily unavailable', async () => {

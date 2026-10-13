@@ -18,7 +18,7 @@ function terminalLookupError(err = {}) {
 
 export function createAgentBusObserver({ app, store, wsManager, deliveryInFlight, observerIntervalMs, broadcast,
   broadcastAlert, broadcastThreadSnapshot, broadcastThreadSummary, threadSnapshot, enrichThread, normalizeThreadSummary,
-  deliverMessage, failDelivery, hookEventsRetentionDays = 7, sessionDeliveryAuditStore = null }) {
+  deliverMessage, failDelivery, hookEventsRetentionDays = 7, sessionDeliveryAuditStore = null, sweepStaleRooms }) {
   const hookRetention = createHookEventRetention({
     retentionDays: hookEventsRetentionDays,
     store: buildPostgresJsonStore({ namespace: 'hook_event_roots', filePath: runtimeStatePath('hook_event_roots.json') }),
@@ -165,6 +165,7 @@ export function createAgentBusObserver({ app, store, wsManager, deliveryInFlight
       if (!shouldSuppressSideEffectLoops() && Date.now() - lastHookSweep >= 3_600_000) {
         lastHookSweep = Date.now();
         void app.agentBusLifecycle?.sweepWorktrees?.().catch((err) => app.log.warn({ err: err.message }, 'Managed worktree sweep failed'));
+        void sweepStaleRooms?.().catch((err) => app.log.warn({ err: err.message }, 'Stale room sweep failed'));
         void hookRetention.sweep().catch((err) => app.log.warn({ err: err.message }, 'Hook event retention failed'));
       }
     }

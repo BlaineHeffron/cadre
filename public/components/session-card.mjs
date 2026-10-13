@@ -3,6 +3,7 @@ import { html } from 'htm/preact';
 import { route } from 'preact-router';
 import { copyText, linkedThreadsForSession, sessionTitle, shortThreadId } from '../app/agent-bus-ui.mjs';
 import { providerDescriptor } from '../app/providers.mjs';
+import { isActiveThread } from '../pages/agent-collab/format.mjs';
 import { addToast, agentThreads, seenSessionStoreForKind, hasSeenPromptNotification, sessionDisplayStatus } from '../app/state.mjs';
 
 const STATE_CONFIG = {
@@ -44,7 +45,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
   const detailText = session.state?.interaction?.detail || session.state?.reason || '';
   const shouldPulseState = stateInfo.pulse && (session.state?.status !== 'ready' || hasPromptAttention);
   const shouldIdleState = stateInfo.idle && (session.state?.status !== 'ready' || hasPromptAttention);
-  const linkedThreads = linkedThreadsForSession(descriptor.kind, session.id, agentThreads.value);
+  const linkedThreads = linkedThreadsForSession(descriptor.kind, session.id, agentThreads.value.filter(isActiveThread));
   const primaryName = sessionTitle(session, descriptor.kind, agentThreads.value, label);
 
   function handleClick() {

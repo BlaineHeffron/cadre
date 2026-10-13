@@ -2564,6 +2564,7 @@ async function sessionsPlugin(app, {
     invalidateSessionCaches();
     await persistSessions();
     broadcastSessionList(wsManager);
+    await notifyAgentSessionDeleted({ kind: config.id, sessionId: id });
     void cleanupSessionArtifacts(id, meta, app.log).catch((error) => {
       app.log.warn({ id, path: meta.worktreePath || meta.launchLogPath, err: error.message }, 'Session artifact cleanup failed');
     });
@@ -3296,7 +3297,6 @@ async function sessionsPlugin(app, {
           code: error.code || 'cleanup_failed',
         });
       }
-      await notifyAgentSessionDeleted({ kind: config.id, sessionId: id });
       return { ok: true, status, kind: config.id, sessionId: id, residual: [], reason };
     };
     const failed = (reason, residual = [], error = '') => reply.code(409).send({
