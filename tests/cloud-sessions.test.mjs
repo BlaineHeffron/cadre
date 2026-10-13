@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -91,7 +91,7 @@ process.stdout.write(branch === 'claude/has-pr' ? '[{"number":7,"url":"https://g
 `);
   await chmod(ghBin, 0o755);
 
-  return { dir, claudeDir, requests, events, routes, ghLog, opts: { baseUrl, tokenUrl: `${baseUrl}/oauth/token`, claudeDir, claudeJsonPath, ghBin, pollMs: 10 } };
+  return { dir, claudeDir, requests, events, routes, ghLog, opts: { baseUrl, claudeDir, claudeJsonPath, ghBin, pollMs: 10, rereadMs: 10 } };
 }
 
 function eventsRoute(events) {
@@ -192,57 +192,32 @@ test('cloudStatus gets one session, falls back to outcome branches and reports H
   });
 });
 
-test('an expiring token is refreshed under the CLI lock and written back', async (t) => {
+test('an expired token is re-read once, never refreshed, and the error names the cause', async (t) => {
   const f = await fixture(t, { expiresAt: Date.now() + 60000 });
-  f.routes['POST /oauth/token'] = () => [200, { access_token: REFRESHED, refresh_token: 'refresh-secret-2', expires_in: 3600, refresh_token_expires_in: 86400, scope: 'user:inference user:sessions:claude_code' }];
-  f.routes['GET /v1/code/sessions/cse_a'] = () => [200, { response_shape: cloudSession('cse_a', { config: {} }) }];
-  // A stale lock left by a dead process is taken over.
-  await mkdir(join(f.claudeDir, '.oauth_refresh.lock'));
-  const old = new Date(Date.now() - 120000);
-  const { utimes } = await import('node:fs/promises');
-  await utimes(join(f.claudeDir, '.oauth_refresh.lock'), old, old);
-
-  await cloudStatus({ id: 'cse_a' }, f.opts);
-
-  const tokenReq = f.requests.find((r) => r.path === '/oauth/token');
-  assert.deepEqual(JSON.parse(tokenReq.body), {
-    grant_type: 'refresh_token', refresh_token: 'refresh-secret-1', client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e', scope: 'user:inference user:sessions:claude_code',
-  });
-  assert.equal(f.requests.find((r) => r.path === '/v1/code/sessions/cse_a').headers.authorization, `Bearer ${REFRESHED}`);
   const credsPath = join(f.claudeDir, '.credentials.json');
-  const saved = JSON.parse(await readFile(credsPath, 'utf8'));
-  assert.equal(saved.other, 'kept');
-  assert.equal(saved.claudeAiOauth.accessToken, REFRESHED);
-  assert.equal(saved.claudeAiOauth.refreshToken, 'refresh-secret-2');
-  assert.ok(saved.claudeAiOauth.expiresAt > Date.now() + 3000000);
-  assert.ok(Math.abs(saved.claudeAiOauth.refreshTokenExpiresAt - (Date.now() + 86400000)) < 60000);
-  assert.equal((await stat(credsPath)).mode & 0o777, 0o600);
-  await assert.rejects(stat(join(f.claudeDir, '.oauth_refresh.lock')), { code: 'ENOENT' });
+  const before = await readFile(credsPath, 'utf8');
+  f.routes['GET /v1/code/sessions/cse_a'] = () => [200, { response_shape: cloudSession('cse_a', { config: {} }) }];
+
+  await assert.rejects(cloudStatus({ id: 'cse_a' }, f.opts), {
+    message: 'Claude OAuth token expired; it refreshes when any Claude Code session runs.',
+  });
+
+  assert.equal(await readFile(credsPath, 'utf8'), before);
+  assert.deepEqual(await readdir(f.claudeDir), ['.credentials.json']);
+  assert.equal(f.requests.length, 0);
 });
 
-test('a refresh keeps refreshTokenExpiresAt when absent and defers to a token another process saved', async (t) => {
+test('a re-read that finds a token refreshed by a Claude Code session uses it without POSTing', async (t) => {
   const f = await fixture(t, { expiresAt: Date.now() + 60000 });
   const credsPath = join(f.claudeDir, '.credentials.json');
-  const creds = JSON.parse(await readFile(credsPath, 'utf8'));
-  creds.claudeAiOauth.refreshTokenExpiresAt = 12345;
-  await writeFile(credsPath, JSON.stringify(creds));
   f.routes['GET /v1/code/sessions/cse_a'] = () => [200, { response_shape: cloudSession('cse_a', { config: {} }) }];
-  f.routes['POST /oauth/token'] = () => [200, { access_token: REFRESHED, refresh_token: 'refresh-secret-2', expires_in: 3600 }];
-  await cloudStatus({ id: 'cse_a' }, f.opts);
-  const saved = JSON.parse(await readFile(credsPath, 'utf8')).claudeAiOauth;
-  assert.equal(saved.refreshTokenExpiresAt, 12345);
-  assert.deepEqual(saved.scopes, ['user:inference', 'user:sessions:claude_code']);
+  // The CLI rewrites the file while Cadre waits before its one re-read.
+  setTimeout(() => writeFile(credsPath, JSON.stringify({ claudeAiOauth: { accessToken: REFRESHED, expiresAt: Date.now() + 3600000 } })), 5);
 
-  // Another process rotates the token while our refresh is in flight: keep its write and use its token.
-  saved.expiresAt = Date.now() + 60000;
-  await writeFile(credsPath, JSON.stringify({ claudeAiOauth: saved }));
-  f.routes['POST /oauth/token'] = async () => {
-    await writeFile(credsPath, JSON.stringify({ claudeAiOauth: { ...saved, accessToken: 'other-access', refreshToken: 'other-refresh', expiresAt: Date.now() + 3600000 } }));
-    return [200, { access_token: 'lost-access', refresh_token: 'lost-refresh', expires_in: 3600 }];
-  };
-  await cloudStatus({ id: 'cse_a' }, f.opts);
-  assert.equal(f.requests.at(-1).headers.authorization, 'Bearer other-access');
-  assert.equal(JSON.parse(await readFile(credsPath, 'utf8')).claudeAiOauth.refreshToken, 'other-refresh');
+  await cloudStatus({ id: 'cse_a' }, { ...f.opts, rereadMs: 100 });
+
+  assert.deepEqual(f.requests.map((r) => `${r.method} ${r.path}`), ['GET /v1/code/sessions/cse_a']);
+  assert.equal(f.requests[0].headers.authorization, `Bearer ${REFRESHED}`);
 });
 
 test('cloudOutput tails newest events or continues after a sequence number', async (t) => {

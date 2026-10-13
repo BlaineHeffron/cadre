@@ -6,10 +6,11 @@
  * were checked against Claude Code CLI 2.1.296 and may break on any release.
  * Endpoint paths and the state mapping live in this file only.
  *
- * Tokens are read from the CLI's own files and are never logged or returned.
+ * Tokens are read (never refreshed or written) from the CLI's own files and are
+ * never logged or returned.
  */
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, rename, rmdir, stat, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -18,26 +19,23 @@ const run = promisify(execFile);
 
 // Internal endpoints (CLI 2.1.296).
 const API_BASE = 'https://api.anthropic.com';
-const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
-const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const SESSIONS_PATH = '/v1/code/sessions';
 const USAGE_PATH = '/api/oauth/usage';
 // Probable cloud-credit bucket: its reset time matches the ccr_promotional limit.
 const INFERRED_CLOUD_CREDIT_BUCKET = 'iguana_necktie';
 const LIST_PAGE_LIMIT = 100; // the CLI's own list walk: limit=100, at most 10 pages
 const LIST_MAX_PAGES = 10;
-const REFRESH_BUFFER_MS = 300000;
-const LOCK_STALE_MS = 60000;
+const EXPIRY_BUFFER_MS = 300000; // the CLI treats a token this close to expiry as expired
 const INIT_ERROR_STALE_MS = 120000;
 
 function defaults(opts = {}) {
   const claudeDir = opts.claudeDir || process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
   return {
     baseUrl: API_BASE,
-    tokenUrl: TOKEN_URL,
     claudeBin: 'claude',
     ghBin: 'gh',
     pollMs: 2000,
+    rereadMs: 1000,
     ...opts,
     claudeDir,
     claudeJsonPath: opts.claudeJsonPath || (process.env.CLAUDE_CONFIG_DIR ? join(claudeDir, '.claude.json') : join(homedir(), '.claude.json')),
@@ -47,62 +45,24 @@ function defaults(opts = {}) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const readJson = async (path) => JSON.parse(await readFile(path, 'utf8'));
 
-async function withRefreshLock(claudeDir, fn) {
-  // Same lock directory the CLI's proper-lockfile takes before it refreshes.
-  const lock = join(claudeDir, '.oauth_refresh.lock');
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await mkdir(lock);
-      break;
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-      const age = await stat(lock).then((s) => Date.now() - s.mtimeMs, () => 0);
-      if (age > LOCK_STALE_MS) await rmdir(lock).catch(() => {});
-      else if (attempt >= 5) throw new Error('OAuth refresh lock is held by another process');
-      else await sleep(1000 + Math.random() * 1000);
-    }
-  }
-  try { return await fn(); } finally { await rmdir(lock).catch(() => {}); }
-}
-
-async function refreshToken(o, credsPath) {
-  return withRefreshLock(o.claudeDir, async () => {
-    const file = await readJson(credsPath);
-    const oauth = file.claudeAiOauth;
-    if (oauth.expiresAt - Date.now() > REFRESH_BUFFER_MS) return oauth.accessToken; // another process refreshed
-    const res = await fetch(o.tokenUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: oauth.refreshToken, client_id: oauth.clientId || CLIENT_ID, scope: (oauth.scopes || []).join(' ') }),
-    });
-    if (res.status !== 200) throw new Error(`OAuth token refresh failed: HTTP ${res.status}`);
-    const body = await res.json();
-    const next = {
-      ...oauth,
-      accessToken: body.access_token,
-      refreshToken: body.refresh_token || oauth.refreshToken,
-      expiresAt: Date.now() + body.expires_in * 1000,
-      ...(body.scope ? { scopes: body.scope.split(' ') } : {}),
-      ...(typeof body.refresh_token_expires_in === 'number' ? { refreshTokenExpiresAt: Date.now() + body.refresh_token_expires_in * 1000 } : {}),
-    };
-    // Compare-and-swap like the CLI: skip the write if someone else rotated the token meanwhile.
-    const current = await readJson(credsPath);
-    if (current.claudeAiOauth?.refreshToken !== oauth.refreshToken) return current.claudeAiOauth.accessToken;
-    const tmp = `${credsPath}.cadre-${process.pid}`;
-    await writeFile(tmp, JSON.stringify({ ...current, claudeAiOauth: next }), { mode: 0o600 });
-    await rename(tmp, credsPath);
-    return next.accessToken;
-  });
+// Read-only: Cadre never refreshes the shared CLI login or writes under ~/.claude.
+async function readOAuth(o) {
+  const oauth = (await readJson(join(o.claudeDir, '.credentials.json'))).claudeAiOauth;
+  if (!oauth?.accessToken) throw new Error('Cloud sessions need a claude.ai sign-in: run `claude auth login`');
+  return oauth;
 }
 
 async function auth(o) {
-  const credsPath = join(o.claudeDir, '.credentials.json');
-  const oauth = (await readJson(credsPath)).claudeAiOauth;
-  if (!oauth?.accessToken) throw new Error('Cloud sessions need a claude.ai sign-in: run `claude auth login`');
+  let oauth = await readOAuth(o);
+  if (oauth.expiresAt - Date.now() <= EXPIRY_BUFFER_MS) {
+    // A running Claude Code session refreshes the file; give it one more look.
+    await sleep(o.rereadMs);
+    oauth = await readOAuth(o);
+    if (oauth.expiresAt - Date.now() <= EXPIRY_BUFFER_MS) throw new Error('Claude OAuth token expired; it refreshes when any Claude Code session runs.');
+  }
   const orgUuid = (await readJson(o.claudeJsonPath)).oauthAccount?.organizationUuid;
   if (!orgUuid) throw new Error('Unable to get organization UUID');
-  const accessToken = oauth.expiresAt - Date.now() > REFRESH_BUFFER_MS ? oauth.accessToken : await refreshToken(o, credsPath);
-  return { accessToken, orgUuid };
+  return { accessToken: oauth.accessToken, orgUuid };
 }
 
 async function api(o, path, { method = 'GET', headers = {} } = {}) {
