@@ -1074,7 +1074,9 @@ describe('Claude MCP reconnect through the command gate and tmux input', () => {
     const calls = [];
     // Claude's MCP screens draw ──── rules that look like composer separators.
     const list = () => `${history}❯ /mcp\n  Manage MCP servers\n${rule}\n  3 servers\n  Built-in MCPs (always available)\n  ${selected === 0 ? '❯' : ' '} ✔ other\n  ${selected === 1 ? '❯' : ' '} ${healthy ? '✔' : connecting ? '…' : '✘'} ${absent ? 'another-server' : 'dueno'}\n  ${selected === 2 ? '❯' : ' '} ✔ bevy_brp\n${rule}\n ↑/↓ to navigate · Enter to confirm · Esc to cancel`;
-    const detail = () => `${history}❯ /mcp\n  Dueno MCP Server\n${rule}\n  Status: ✘ failed\n  ${detailSelected === 0 ? '❯' : ' '} 1. Authenticate\n  ${detailSelected === 1 ? '❯' : ' '} 2. Reconnect\n    3. Disable\n${rule}\n ↑/↓ to navigate · Enter to select · Esc to back`;
+    // Real Claude 2.1.296 detail menus: a connected server offers Clear authentication before Reconnect.
+    const actions = healthy ? ['View tools', 'Clear authentication', 'Reconnect', 'Disable'] : ['Authenticate', 'Reconnect', 'Disable'];
+    const detail = () => `${history}❯ /mcp\n  Dueno MCP Server\n${rule}\n  Status: ${healthy ? '✔ connected' : '✘ failed'}\n${actions.map((action, index) => `  ${detailSelected === index ? '❯' : ' '} ${index + 1}. ${action}`).join('\n')}\n${rule}\n ↑/↓ to navigate · Enter to select · Esc to back`;
     const screens = {
       prompt: () => prompt(),
       list,
@@ -1102,7 +1104,7 @@ describe('Claude MCP reconnect through the command gate and tmux input', () => {
         if (key === 'Escape') show(back[stage] || 'prompt');
         else if (key === 'Down') {
           if (stage === 'list') { selected = Math.min(selected + 1, 2); pane = list(); }
-          else { detailSelected = Math.min(detailSelected + 1, 2); pane = detail(); }
+          else { detailSelected = Math.min(detailSelected + 1, actions.length - 1); pane = detail(); }
         } else if (key === 'Enter' && stage === 'prompt' && pasted === '/mcp') {
           show('list');
           if (unexpected === 'list') pane = `${history}Unrelated dialog`;
@@ -1115,7 +1117,7 @@ describe('Claude MCP reconnect through the command gate and tmux input', () => {
           }
         } else if (key === 'Enter' && stage === 'bevy') show('tools');
         else if (key === 'Enter' && stage === 'detail') {
-          assert.equal(detailSelected, 1, 'never Authenticate or Disable');
+          assert.equal(actions[detailSelected], 'Reconnect', 'never View tools, authentication or Disable');
           if (unexpected === 'confirmation') pane = detail();
           else if (unexpected === 'tools') show('tool');
           else {
@@ -1158,16 +1160,24 @@ describe('Claude MCP reconnect through the command gate and tmux input', () => {
     assert.deepEqual(fake.keys, ['Enter', 'Down', 'Enter', 'Down', 'Enter']);
   });
 
-  for (const connecting of [false, true]) {
-    it(connecting ? 'keeps a connecting dueno pending' : 'escapes from a healthy dueno without selecting it', async () => {
-      const test = harness();
-      const fake = reconnectPane({ healthy: !connecting, connecting });
-      test.setExecute(fake.executor);
-      const result = await test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' });
-      assert.equal(result.result.pending, connecting);
-      assert.deepEqual(fake.keys, ['Enter', 'Escape']);
-    });
-  }
+  it('reconnects a connected dueno so a new build\'s tools are refetched, skipping Clear authentication', async () => {
+    const test = harness();
+    const fake = reconnectPane({ healthy: true });
+    test.setExecute(fake.executor);
+    const result = await test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' });
+    assert.equal(result.ok, true);
+    assert.deepEqual(fake.keys, ['Enter', 'Down', 'Enter', 'Down', 'Down', 'Enter']);
+    assert.equal(fake.pane().endsWith(prompt()), true);
+  });
+
+  it('keeps a connecting dueno pending', async () => {
+    const test = harness();
+    const fake = reconnectPane({ connecting: true });
+    test.setExecute(fake.executor);
+    const result = await test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' });
+    assert.equal(result.result.pending, true);
+    assert.deepEqual(fake.keys, ['Enter', 'Escape']);
+  });
 
   it('does not keep sessions with no dueno row pending despite dueno in history', async () => {
     const test = harness();
@@ -1208,14 +1218,14 @@ describe('Claude MCP reconnect through the command gate and tmux input', () => {
     assert.ok(fake.pane().includes('⏵⏵ bypass permissions on'));
   });
 
-  it('exits a healthy dueno cleanly despite slow renders', async () => {
+  it('reconnects a connected dueno cleanly despite slow renders', async () => {
     const test = harness();
     const fake = reconnectPane({ healthy: true, lag: 2 });
     test.setExecute(fake.executor);
     const result = await test.gate.enqueue(test.sessionId, { operation: 'mcp_reconnect' });
-    assert.equal(result.result.pending, false);
-    assert.deepEqual(fake.keys, ['Enter', 'Escape']);
-    assert.equal(fake.pane(), prompt());
+    assert.equal(result.ok, true);
+    assert.deepEqual(fake.keys, ['Enter', 'Down', 'Enter', 'Down', 'Down', 'Enter']);
+    assert.ok(fake.pane().includes('Reconnected to dueno.'));
   });
 
   for (const placeholder of ['\x1b[2mTry "fix typecheck errors"\x1b[0m', '\x1b[2mTry\x1b[0m \x1b[2m"fix\x1b[0m \x1b[2mtypecheck\x1b[0m \x1b[2merrors"\x1b[0m']) {
