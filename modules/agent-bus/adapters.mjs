@@ -248,6 +248,33 @@ function buildProtocolAdapter({ kind, detailPath, inputPath }) {
   };
 }
 
+// A Claude Code cloud session registered with Cadre (cloud-sessions-plugin.mjs). It always
+// accepts input and is never archived by the bus. Only messages from the room it is attached
+// to reach it (through cloudSend); owner notice DMs and other rooms are never forwarded.
+function buildCloudAdapter() {
+  function tracked(app, sessionId) {
+    if (app.agentBusLifecycle?.cloudSessions?.get(sessionId)) return;
+    throw Object.assign(new Error(`Cloud session not tracked: ${sessionId}`), { statusCode: 404, code: 'session_not_found' });
+  }
+  return {
+    kind: 'cloud',
+    async listSessions() { return []; },
+    async getSession(app, sessionId) {
+      tracked(app, sessionId);
+      return { id: sessionId, state: { status: 'ready', capabilities: { canSendNow: true } } };
+    },
+    async captureSession() { return ''; },
+    async deleteSession() { return { ok: true, status: 'detached' }; },
+    async injectEnvelope(app, sessionId, envelopeText) {
+      tracked(app, sessionId);
+      const room = /^\[ROOM_MESSAGE \S+ room=(\S+) /.exec(envelopeText)?.[1];
+      if (!room || room !== app.agentBusLifecycle.cloudSessions.get(sessionId).threadId) return { ok: true, resolution: 'not_forwarded' };
+      // The room_send hint does not apply: the session has no Cadre tools and its replies are relayed.
+      return app.agentBusLifecycle.cloudSessions.send(sessionId, envelopeText.replace(/\nReply: room_send\(.*$/, ''));
+    },
+  };
+}
+
 export function createAgentAdapters() {
   return {
     claude: buildAdapter({
@@ -277,5 +304,6 @@ export function createAgentAdapters() {
       detailPath: (sessionId) => `/api/codex-app-server/sessions/${encodeURIComponent(sessionId)}`,
       inputPath: (sessionId) => `/api/codex-app-server/sessions/${encodeURIComponent(sessionId)}/input`,
     }),
+    cloud: buildCloudAdapter(),
   };
 }

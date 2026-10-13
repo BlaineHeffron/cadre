@@ -1364,6 +1364,48 @@ export function buildMonitorMcpServer({ requestImpl }) {
       },
       handler: async (args) => cloudSend(args),
     },
+    {
+      name: 'cloud_launch',
+      description: 'Launch a Claude Code cloud session on a GitHub repo, owned by you: Cadre DMs you when it blocks, fails, finishes or opens a PR (the PR is then registered with watch_pr). Returns id and url.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', minLength: 1, description: 'First message for the session.' },
+          repo: { type: 'string', pattern: '^[\\w.-]+/[\\w.-]+$', description: 'GitHub owner/name.' },
+          ref: { type: 'string', minLength: 1, description: 'Branch, tag or commit to start from. Defaults to the repo default branch.' },
+          name: { type: 'string', minLength: 1, description: 'Session title. Defaults to the start of the prompt.' },
+          model: { type: 'string', minLength: 1, description: 'Model id. Defaults to the account default.' },
+        },
+        required: ['prompt', 'repo'],
+        additionalProperties: false,
+      },
+      handler: async (args) => request('/api/cloud/sessions', { method: 'POST', body: args }),
+    },
+    {
+      name: 'cloud_watch',
+      description: 'Become the owner of an existing Claude Code cloud session: Cadre DMs you when it blocks, fails, finishes or opens a PR. Returns id, state and status.',
+      inputSchema: {
+        type: 'object',
+        properties: { id: { type: 'string', minLength: 1, description: 'Cloud session id.' } },
+        required: ['id'],
+        additionalProperties: false,
+      },
+      handler: async (args) => request('/api/cloud/watch', { method: 'POST', body: args }),
+    },
+    {
+      name: 'cloud_attach',
+      description: 'Add a Claude Code cloud session to a room you own or are in, and watch it as its owner. Room messages are sent to it; its new assistant replies are posted to the room as cloud:<id>. Returns id, thread_id and status.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', minLength: 1, description: 'Cloud session id.' },
+          thread_id: { type: 'string', minLength: 1, description: 'Room id.' },
+        },
+        required: ['id', 'thread_id'],
+        additionalProperties: false,
+      },
+      handler: async (args) => request('/api/cloud/attach', { method: 'POST', body: args }),
+    },
 
     // ── System ──
     {
@@ -1426,6 +1468,9 @@ export function buildMonitorMcpServer({ requestImpl }) {
     'cloud_status',
     'cloud_output',
     'cloud_send',
+    'cloud_launch',
+    'cloud_watch',
+    'cloud_attach',
   ]);
 
   const discoverableTools = tools.filter((t) => (

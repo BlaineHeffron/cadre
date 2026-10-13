@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
-import { chmod, mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { chmod, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import Fastify from 'fastify';
+import { cloudSessionsPlugin } from '../modules/integrations/cloud-sessions-plugin.mjs';
+import { ACCESS, REFRESHED, cloudSession, eventsRoute, fixture, memoryStore } from './helpers/cloud-sessions-fixture.mjs';
 import {
+  cloudLaunch,
   cloudOutput,
   cloudSend,
   cloudSessionState,
@@ -50,74 +52,6 @@ test('findCloudReply ignores the previous turn result until our own message appe
   assert.equal(findCloudReply([{ event_type: 'assistant' }, reply], state), reply);
 });
 
-const ACCESS = 'access-secret-1';
-const REFRESHED = 'access-secret-2';
-
-async function fixture(t, { expiresAt = Date.now() + 3600000 } = {}) {
-  const dir = await mkdtemp(join(tmpdir(), 'cadre-cloud-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const claudeDir = join(dir, '.claude');
-  await mkdir(claudeDir);
-  await writeFile(join(claudeDir, '.credentials.json'), JSON.stringify({
-    other: 'kept',
-    claudeAiOauth: { accessToken: ACCESS, refreshToken: 'refresh-secret-1', expiresAt, scopes: ['user:inference', 'user:sessions:claude_code'] },
-  }));
-  const claudeJsonPath = join(dir, '.claude.json');
-  await writeFile(claudeJsonPath, JSON.stringify({ oauthAccount: { organizationUuid: 'org-1' } }));
-
-  const requests = [];
-  const events = [];
-  const routes = {};
-  const server = createServer(async (req, res) => {
-    let body = '';
-    for await (const chunk of req) body += chunk;
-    const url = new URL(req.url, 'http://x');
-    requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers: req.headers, body });
-    const route = routes[`${req.method} ${url.pathname}`];
-    const [status, payload] = route ? await route(url, body) : [404, { error: 'nope' }];
-    res.writeHead(status, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(payload));
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => server.close());
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
-
-  const ghLog = join(dir, 'gh.log');
-  const ghBin = join(dir, 'gh');
-  await writeFile(ghBin, `#!/usr/bin/env node
-require('node:fs').appendFileSync(${JSON.stringify(ghLog)}, JSON.stringify(process.argv.slice(2)) + '\\n');
-const branch = process.argv[process.argv.indexOf('--head') + 1];
-process.stdout.write(branch === 'claude/has-pr' ? '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"OPEN"}]' : '[]');
-`);
-  await chmod(ghBin, 0o755);
-
-  return { dir, claudeDir, requests, events, routes, ghLog, opts: { baseUrl, claudeDir, claudeJsonPath, ghBin, pollMs: 10, rereadMs: 10 } };
-}
-
-function eventsRoute(events) {
-  return (url) => {
-    const desc = url.searchParams.get('sort_order') === 'desc';
-    const cursor = url.searchParams.has('cursor') ? Number(url.searchParams.get('cursor')) : null;
-    const limit = Number(url.searchParams.get('limit') || 50);
-    let rows = events.filter((e) => cursor === null || (desc ? Number(e.sequence_num) < cursor : Number(e.sequence_num) > cursor));
-    if (desc) rows = rows.slice().reverse();
-    rows = rows.slice(0, limit);
-    return [200, { data: rows, next_cursor: rows.at(-1)?.sequence_num ?? null }];
-  };
-}
-
-const cloudSession = (id, extra = {}) => ({
-  id,
-  title: `Title ${id}`,
-  environment_kind: 'anthropic_cloud',
-  status: 'active',
-  worker_status: 'idle',
-  status_bucket: 'completed',
-  session_url: `https://claude.ai/code/cshk_${id}`,
-  config: { outcomes: [{ type: 'git_repository', git_info: { repo: 'o/r', branches: ['claude/outcome'] } }] },
-  external_metadata: { current_branches: { '': 'claude/has-pr' }, usage: { cost_usd: 1.5 }, post_turn_summary: { status_detail: 'PR opened', needs_action: '' } },
-  ...extra,
-});
 
 test('cloudStatus lists cloud sessions with usage, sends auth headers and never returns tokens', async (t) => {
   const f = await fixture(t);
@@ -312,8 +246,140 @@ test('monitor MCP exposes the cloud tools and validates their arguments', async 
   const { buildMonitorMcpServer } = await import('../modules/platform/monitor-mcp.mjs');
   const mcp = buildMonitorMcpServer({ requestImpl: async () => ({}) });
   const names = mcp.listTools().map((tool) => tool.name);
-  for (const name of ['cloud_status', 'cloud_output', 'cloud_send']) assert.ok(names.includes(name), name);
+  for (const name of ['cloud_status', 'cloud_output', 'cloud_send', 'cloud_launch', 'cloud_watch', 'cloud_attach']) assert.ok(names.includes(name), name);
+  await assert.rejects(mcp.handleToolCall('cloud_launch', { prompt: 'hi', repo: 'not a repo' }));
+  await assert.rejects(mcp.handleToolCall('cloud_attach', { id: 'cse_a' }));
   await assert.rejects(mcp.handleToolCall('cloud_send', { id: 'cse_a' }));
   await assert.rejects(mcp.handleToolCall('cloud_send', { id: 'cse_a', text: 'hi', wait_s: 601 }));
   await assert.rejects(mcp.handleToolCall('cloud_output', { id: 'cse_a', limit: 0 }));
+});
+
+test('cloudLaunch posts the CLI launch shape to the anthropic_cloud environment', async (t) => {
+  const f = await fixture(t);
+  f.routes['GET /v1/environment_providers'] = () => [200, { environments: [
+    { kind: 'bridge', environment_id: 'env_rc' }, { kind: 'anthropic_cloud', environment_id: 'env_cloud' },
+  ] }];
+  f.routes['POST /v1/code/sessions'] = () => [201, { session: { id: 'cse_new', session_url: 'https://claude.ai/code/cse_new' } }];
+
+  const launched = await cloudLaunch({ prompt: 'Fix the bug', repo: 'o/r', ref: 'main', name: 'Fix: the bug!', model: 'claude-opus-5-5' }, f.opts);
+
+  assert.deepEqual(launched, { id: 'cse_new', url: 'https://claude.ai/code/cse_new' });
+  const post = f.requests.find((r) => r.method === 'POST');
+  assert.equal(post.headers['content-type'], 'application/json');
+  assert.equal(post.headers.authorization, `Bearer ${ACCESS}`);
+  const body = JSON.parse(post.body);
+  assert.match(body.events[0].payload.uuid, /^[0-9a-f-]{36}$/);
+  delete body.events[0].payload.uuid;
+  assert.deepEqual(body, {
+    title: 'Fix: the bug!',
+    environment_id: 'env_cloud',
+    events: [{ payload: { session_id: '', type: 'user', parent_tool_use_id: null, message: { role: 'user', content: 'Fix the bug' } } }],
+    config: {
+      sources: [{ type: 'git_repository', url: 'https://github.com/o/r', revision: 'main' }],
+      outcomes: [{ type: 'git_repository', git_info: { type: 'github', repo: 'o/r', branches: ['claude/fix-the-bug'] } }],
+      model: 'claude-opus-5-5',
+    },
+  });
+
+  f.routes['GET /v1/environment_providers'] = () => [200, { environments: [{ kind: 'bridge', environment_id: 'env_rc' }] }];
+  await assert.rejects(cloudLaunch({ prompt: 'x', repo: 'o/r' }, f.opts), /No anthropic_cloud environment/);
+});
+
+// A bare app: the watcher's agent-bus edges (DM, rooms) are recorded, and requests run as `owner`.
+async function watcherApp(t, f, store, owner) {
+  const app = Fastify();
+  const dms = [];
+  const watches = [];
+  const bus = { dmStatus: 200 };
+  // Records accepted DMs; a DM the bus refuses is counted as an attempt only.
+  app.decorate('agentBusLifecycle', {
+    directMessage: async (dm) => {
+      bus.attempts = (bus.attempts || 0) + 1;
+      if (bus.dmStatus === 200) dms.push(dm);
+      return { statusCode: bus.dmStatus, payload: {} };
+    },
+  });
+  app.addHook('onRequest', async (req) => { req.duenoAuth = { principal: { type: 'agent', ...owner } }; });
+  await cloudSessionsPlugin(app, { store, cloudOpts: f.opts, watchPr: async (watch, creator) => { watches.push({ watch, creator }); } });
+  await app.ready();
+  t.after(() => app.close());
+  return { app, dms, watches, bus, step: () => app.agentBusLifecycle.cloudSessions.step() };
+}
+
+test('the watcher DMs the launching owner on each transition once, across a restart, and registers new PRs', async (t) => {
+  const f = await fixture(t);
+  const owner = { kind: 'claude', sessionId: 'claude-1' };
+  const store = memoryStore();
+  let session = cloudSession('cse_w', { worker_status: 'running', status_bucket: 'working', external_metadata: { current_branches: { '': 'claude/none' } } });
+  f.routes['GET /v1/environment_providers'] = () => [200, { environments: [{ kind: 'anthropic_cloud', environment_id: 'env_cloud' }] }];
+  f.routes['POST /v1/code/sessions'] = () => [200, { session: { id: 'cse_w', session_url: 'https://claude.ai/code/cse_w' } }];
+  f.routes['GET /v1/code/sessions/cse_w'] = () => (session ? [200, { response_shape: session }] : [404, {}]);
+  const set = (extra) => { session = cloudSession('cse_w', extra); };
+
+  const first = await watcherApp(t, f, store, owner);
+  const launched = await first.app.inject({ method: 'POST', url: '/api/cloud/sessions', payload: { prompt: 'go', repo: 'o/r' } });
+  assert.deepEqual(launched.json(), { id: 'cse_w', url: 'https://claude.ai/code/cse_w' });
+  await first.step();
+  assert.deepEqual(first.dms, []);
+
+  set({ external_metadata: { current_branches: { '': 'claude/has-pr' }, post_turn_summary: { status_detail: 'Fixed it' } } });
+  await first.step();
+  assert.equal(first.dms.length, 1);
+  assert.deepEqual(first.dms[0].from, { kind: 'cloud', sessionId: 'cse_w' });
+  assert.deepEqual(first.dms[0].target, owner);
+  assert.match(first.dms[0].body, /done: Fixed it\nPR opened #7 https:\/\/github.com\/o\/r\/pull\/7/);
+  assert.deepEqual(first.watches, [{ watch: { repo: 'o/r', number: 7 }, creator: owner }]);
+  await first.step();
+  assert.equal(first.dms.length, 1);
+
+  // A restarted Cadre reads the last-seen state and does not repeat the notice.
+  await first.app.close();
+  const second = await watcherApp(t, f, store, owner);
+  await second.step();
+  assert.deepEqual(second.dms, []);
+  assert.deepEqual(second.watches, []);
+
+  set({ status_bucket: 'failed', external_metadata: { current_branches: { '': 'claude/has-pr' }, post_turn_summary: { status_detail: 'tests broke' } } });
+  await second.step();
+  set({ status_bucket: 'blocked', external_metadata: { current_branches: { '': 'claude/has-pr' }, post_turn_summary: { needs_action: 'Which DB?' } } });
+  await second.step();
+  await second.step();
+  // A new question while still blocked is a new notice.
+  set({ status_bucket: 'blocked', external_metadata: { current_branches: { '': 'claude/has-pr' }, post_turn_summary: { needs_action: 'Which port?' } } });
+  await second.step();
+  const notices = () => second.dms.map((dm) => dm.body.split('\n')[0].replace(/^Cloud session cse_w \(Title cse_w\) /, ''));
+  assert.deepEqual(notices(), ['failed: tests broke', 'blocked: Which DB?', 'blocked: Which port?']);
+
+  // A refused DM leaves the last-seen state alone, so later passes (and restarts) retry it.
+  second.bus.dmStatus = 500;
+  second.bus.attempts = 0;
+  set({ status_bucket: 'failed', external_metadata: { current_branches: { '': 'claude/has-pr' }, post_turn_summary: { status_detail: 'disk full' } } });
+  await second.step();
+  await second.step();
+  assert.equal(second.bus.attempts, 2);
+  assert.equal(second.app.agentBusLifecycle.cloudSessions.get('cse_w').state, 'blocked');
+  second.bus.dmStatus = 200;
+  await second.step();
+  await second.step();
+  assert.equal(second.bus.attempts, 3);
+  assert.deepEqual(notices().slice(3), ['failed: disk full']);
+
+  // A deleted session stops being tracked.
+  session = null;
+  await second.step();
+  assert.equal(second.app.agentBusLifecycle.cloudSessions.get('cse_w'), null);
+});
+
+test('cloud_watch baselines an existing session without notifying and keeps its first owner', async (t) => {
+  const f = await fixture(t);
+  f.routes['GET /v1/code/sessions/cse_a'] = () => [200, { response_shape: cloudSession('cse_a') }];
+  const w = await watcherApp(t, f, memoryStore(), { kind: 'claude', sessionId: 'claude-1' });
+  const watched = await w.app.inject({ method: 'POST', url: '/api/cloud/watch', payload: { id: 'cse_a' } });
+  assert.deepEqual(watched.json(), { id: 'cse_a', state: 'done', status: 'watching' });
+  await w.step();
+  assert.deepEqual(w.dms, []);
+  assert.deepEqual(w.watches, []);
+  w.app.agentBusLifecycle.cloudSessions.get('cse_a').owner = { kind: 'codex', sessionId: 'codex-1' };
+  const taken = await w.app.inject({ method: 'POST', url: '/api/cloud/watch', payload: { id: 'cse_a' } });
+  assert.equal(taken.statusCode, 403);
 });

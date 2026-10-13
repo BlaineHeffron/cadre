@@ -14,7 +14,7 @@ test('participant directory lists adapter-backed session rosters', async (t) => 
   const response = await h.app.inject({ method: 'GET', url: '/api/agent-bus/participants', headers: h.authHeaders });
   assert.equal(response.statusCode, 200, response.body);
   const payload = response.json();
-  assert.deepEqual(payload.supportedKinds, ['claude', 'codex', 'pi', 'deepseek', 'codex-app-server']);
+  assert.deepEqual(payload.supportedKinds, ['claude', 'codex', 'pi', 'deepseek', 'codex-app-server', 'cloud']);
   assert.equal(payload.sessions.codex[0].id, 'codex-1');
 });
 
@@ -87,7 +87,7 @@ test('DM get-or-create is idempotent, rejects self-DM, reopens archived pair roo
   const badKind = await h.app.inject({ method: 'POST', url: '/api/agent-bus/dm', headers: h.authHeaders,
     payload: { from: payload.from, target: { kind: 'message', sessionId: 'claude-1' }, body: 'x' } });
   assert.equal(badKind.statusCode, 404);
-  assert.equal(badKind.json().error, "kind must be the target's provider (claude, codex, pi, deepseek, codex-app-server), got 'message'");
+  assert.equal(badKind.json().error, "kind must be the target's provider (claude, codex, pi, deepseek, codex-app-server, cloud), got 'message'");
 });
 
 test('human DM participants stay in the roster without injection deliveries or failure alerts', async (t) => {

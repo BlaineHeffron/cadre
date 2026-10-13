@@ -1,5 +1,5 @@
 /**
- * Claude Code on the web ("cloud") sessions: status, transcript and send.
+ * Claude Code on the web ("cloud") sessions: status, transcript, send and launch.
  *
  * Only `claude -p --cloud <id>` (used by cloudSend) is documented. Everything
  * else uses internal, undocumented endpoints read from the CLI bundle; they
@@ -10,6 +10,7 @@
  * never logged or returned.
  */
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -20,6 +21,7 @@ const run = promisify(execFile);
 // Internal endpoints (CLI 2.1.296).
 const API_BASE = 'https://api.anthropic.com';
 const SESSIONS_PATH = '/v1/code/sessions';
+const ENVIRONMENTS_PATH = '/v1/environment_providers';
 const USAGE_PATH = '/api/oauth/usage';
 // Probable cloud-credit bucket: its reset time matches the ccr_promotional limit.
 const INFERRED_CLOUD_CREDIT_BUCKET = 'iguana_necktie';
@@ -65,13 +67,19 @@ async function auth(o) {
   return { accessToken: oauth.accessToken, orgUuid };
 }
 
-async function api(o, path, { method = 'GET', headers = {} } = {}) {
+async function api(o, path, { method = 'GET', headers = {}, body } = {}) {
   const { accessToken, orgUuid } = await auth(o);
   const res = await fetch(`${o.baseUrl}${path}`, {
     method,
-    headers: { authorization: `Bearer ${accessToken}`, 'anthropic-version': '2023-06-01', 'x-organization-uuid': orgUuid, ...headers },
+    headers: {
+      authorization: `Bearer ${accessToken}`, 'anthropic-version': '2023-06-01', 'x-organization-uuid': orgUuid,
+      ...(body ? { 'content-type': 'application/json' } : {}), ...headers,
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
   });
-  if (res.status !== 200) throw new Error(`${method} ${path.split('?')[0]} failed: HTTP ${res.status}`);
+  if (res.status !== 200 && res.status !== 201) {
+    throw new Error(`${method} ${path.split('?')[0]} failed: HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`.trim());
+  }
   return res.json();
 }
 
@@ -290,4 +298,31 @@ export async function cloudSend({ id, text: message, wait_s: waitS = 0 } = {}, o
     if (Date.now() >= deadline) return { ...base, status: 'timeout', next_seq: cursor };
     await sleep(Math.min(o.pollMs, Math.max(0, deadline - Date.now())));
   }
+}
+
+/**
+ * Start a cloud session on the account's anthropic_cloud environment, cloned
+ * from `repo` at `ref` and working on a claude/… outcome branch (the server
+ * adds a unique suffix). Verified live 2026-10-13: the API ignores the CLI's
+ * `session_context` field; `config` and `events[].payload` are honoured.
+ */
+export async function cloudLaunch({ prompt, repo, ref, name, model } = {}, opts = {}) {
+  const o = defaults(opts);
+  const { environments = [] } = await api(o, ENVIRONMENTS_PATH);
+  const env = environments.find((e) => e.kind === 'anthropic_cloud');
+  if (!env) throw new Error('No anthropic_cloud environment on this account');
+  const title = text(name) || text(prompt).slice(0, 75);
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'task';
+  const body = await api(o, SESSIONS_PATH, { method: 'POST', body: {
+    title,
+    environment_id: env.environment_id,
+    events: [{ payload: { uuid: randomUUID(), session_id: '', type: 'user', parent_tool_use_id: null, message: { role: 'user', content: prompt } } }],
+    config: {
+      sources: [{ type: 'git_repository', url: `https://github.com/${repo}`, ...(ref ? { revision: ref } : {}) }],
+      outcomes: [{ type: 'git_repository', git_info: { type: 'github', repo, branches: [`claude/${slug}`] } }],
+      ...(model ? { model } : {}),
+    },
+  } });
+  const s = body.session || body.response_shape || body;
+  return { id: s.id, url: s.session_url || null };
 }
