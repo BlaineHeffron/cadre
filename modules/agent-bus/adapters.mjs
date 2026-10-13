@@ -36,7 +36,7 @@ function buildAdapter({ kind, detailPath, inputPath }) {
         url: `/api/${kind}/sessions`,
       });
 
-      if (res.statusCode >= 400) {
+      if (res.statusCode >= 400 || payload?.stale) {
         throw new Error(payload?.error || `Session listing failed for ${kind}`);
       }
 

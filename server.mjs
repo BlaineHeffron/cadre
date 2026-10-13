@@ -329,6 +329,7 @@ async function lookupScheduledAgentSessionState(sessionId, targetKind = '') {
     let payload;
     try {
       payload = await internalRequest(`/api/${kind}/sessions`);
+      if (payload?.stale) throw new Error(`${kind} session list is stale`);
     } catch (error) {
       if (targetKind) throw error;
       continue;
