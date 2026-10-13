@@ -74,7 +74,7 @@ async function fixture(t, { expiresAt = Date.now() + 3600000 } = {}) {
     const url = new URL(req.url, 'http://x');
     requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers: req.headers, body });
     const route = routes[`${req.method} ${url.pathname}`];
-    const [status, payload] = route ? route(url, body) : [404, { error: 'nope' }];
+    const [status, payload] = route ? await route(url, body) : [404, { error: 'nope' }];
     res.writeHead(status, { 'content-type': 'application/json' });
     res.end(JSON.stringify(payload));
   });
@@ -121,8 +121,11 @@ const cloudSession = (id, extra = {}) => ({
 
 test('cloudStatus lists cloud sessions with usage, sends auth headers and never returns tokens', async (t) => {
   const f = await fixture(t);
-  f.routes['GET /v1/code/sessions'] = () => [200, { data: [cloudSession('cse_a'), { id: 'cse_rc', environment_kind: 'bridge' }], next_cursor: null }];
+  f.routes['GET /v1/code/sessions'] = (url) => (url.searchParams.get('cursor') === 'p2'
+    ? [200, { data: [{ id: 'cse_c', environment_kind: 'anthropic_cloud' }, { id: 'cse_rc2', environment_kind: 'bridge' }], next_cursor: null }]
+    : [200, { data: [cloudSession('cse_a'), { id: 'cse_rc', environment_kind: 'bridge' }], next_cursor: 'p2' }]);
   f.routes['GET /v1/code/sessions/cse_a'] = () => [200, { response_shape: cloudSession('cse_a') }];
+  f.routes['GET /v1/code/sessions/cse_c'] = () => [200, { response_shape: cloudSession('cse_c', { config: {}, external_metadata: {} }) }];
   f.routes['GET /api/oauth/usage'] = () => [200, {
     five_hour: { utilization: 16, resets_at: 'a', extra: 1 },
     seven_day: { utilization: 27, resets_at: 'b' },
@@ -131,10 +134,13 @@ test('cloudStatus lists cloud sessions with usage, sends auth headers and never 
 
   const result = await cloudStatus({}, f.opts);
 
-  assert.deepEqual(result.sessions, [{
+  assert.equal(result.truncated, undefined);
+  assert.deepEqual(result.sessions.map((s) => s.id), ['cse_a', 'cse_c']);
+  assert.deepEqual(f.requests.filter((r) => r.path === '/v1/code/sessions').map((r) => r.query), [{ limit: '100' }, { limit: '100', cursor: 'p2' }]);
+  assert.deepEqual(result.sessions[0], {
     id: 'cse_a', title: 'Title cse_a', state: 'done', detail: 'PR opened', needs_action: '', branches: ['claude/has-pr'],
     pr: { number: 7, url: 'https://github.com/o/r/pull/7', state: 'OPEN' }, url: 'https://claude.ai/code/cshk_cse_a', cost_usd: 1.5,
-  }]);
+  });
   assert.deepEqual(result.usage.five_hour, { utilization: 16, resets_at: 'a' });
   assert.deepEqual(result.usage.seven_day, { utilization: 27, resets_at: 'b' });
   assert.equal(result.usage.cloud_credit.inferred, true);
@@ -149,10 +155,22 @@ test('cloudStatus lists cloud sessions with usage, sends auth headers and never 
     assert.equal(r.headers['x-organization-uuid'], 'org-1');
     assert.equal(r.headers['anthropic-version'], '2023-06-01');
   }
-  // The bridge (Remote Control) session is never fetched.
-  assert.equal(f.requests.some((r) => r.path.endsWith('cse_rc')), false);
+  // Bridge (Remote Control) sessions are never fetched, on any page.
+  assert.equal(f.requests.some((r) => /cse_rc/.test(r.path)), false);
   const gh = (await readFile(f.ghLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
   assert.deepEqual(gh[0].slice(0, 6), ['pr', 'list', '--repo', 'o/r', '--head', 'claude/has-pr']);
+});
+
+test('cloudStatus stops the list walk at the CLI page cap and says so', async (t) => {
+  const f = await fixture(t);
+  let page = 0;
+  f.routes['GET /v1/code/sessions'] = () => [200, { data: [{ id: `cse_${++page}`, environment_kind: 'anthropic_cloud' }], next_cursor: `p${page}` }];
+  for (let i = 1; i <= 11; i++) f.routes[`GET /v1/code/sessions/cse_${i}`] = () => [200, { response_shape: cloudSession(`cse_${i}`, { config: {}, external_metadata: {} }) }];
+  f.routes['GET /api/oauth/usage'] = () => [500, {}];
+  const result = await cloudStatus({}, f.opts);
+  assert.equal(result.sessions.length, 10);
+  assert.match(result.truncated, /10 pages of 100/);
+  assert.match(result.usage.error, /HTTP 500/);
 });
 
 test('cloudStatus gets one session, falls back to outcome branches and reports HTTP errors without tokens', async (t) => {
@@ -176,7 +194,7 @@ test('cloudStatus gets one session, falls back to outcome branches and reports H
 
 test('an expiring token is refreshed under the CLI lock and written back', async (t) => {
   const f = await fixture(t, { expiresAt: Date.now() + 60000 });
-  f.routes['POST /oauth/token'] = () => [200, { access_token: REFRESHED, refresh_token: 'refresh-secret-2', expires_in: 3600, scope: 'user:inference user:sessions:claude_code' }];
+  f.routes['POST /oauth/token'] = () => [200, { access_token: REFRESHED, refresh_token: 'refresh-secret-2', expires_in: 3600, refresh_token_expires_in: 86400, scope: 'user:inference user:sessions:claude_code' }];
   f.routes['GET /v1/code/sessions/cse_a'] = () => [200, { response_shape: cloudSession('cse_a', { config: {} }) }];
   // A stale lock left by a dead process is taken over.
   await mkdir(join(f.claudeDir, '.oauth_refresh.lock'));
@@ -197,8 +215,34 @@ test('an expiring token is refreshed under the CLI lock and written back', async
   assert.equal(saved.claudeAiOauth.accessToken, REFRESHED);
   assert.equal(saved.claudeAiOauth.refreshToken, 'refresh-secret-2');
   assert.ok(saved.claudeAiOauth.expiresAt > Date.now() + 3000000);
+  assert.ok(Math.abs(saved.claudeAiOauth.refreshTokenExpiresAt - (Date.now() + 86400000)) < 60000);
   assert.equal((await stat(credsPath)).mode & 0o777, 0o600);
   await assert.rejects(stat(join(f.claudeDir, '.oauth_refresh.lock')), { code: 'ENOENT' });
+});
+
+test('a refresh keeps refreshTokenExpiresAt when absent and defers to a token another process saved', async (t) => {
+  const f = await fixture(t, { expiresAt: Date.now() + 60000 });
+  const credsPath = join(f.claudeDir, '.credentials.json');
+  const creds = JSON.parse(await readFile(credsPath, 'utf8'));
+  creds.claudeAiOauth.refreshTokenExpiresAt = 12345;
+  await writeFile(credsPath, JSON.stringify(creds));
+  f.routes['GET /v1/code/sessions/cse_a'] = () => [200, { response_shape: cloudSession('cse_a', { config: {} }) }];
+  f.routes['POST /oauth/token'] = () => [200, { access_token: REFRESHED, refresh_token: 'refresh-secret-2', expires_in: 3600 }];
+  await cloudStatus({ id: 'cse_a' }, f.opts);
+  const saved = JSON.parse(await readFile(credsPath, 'utf8')).claudeAiOauth;
+  assert.equal(saved.refreshTokenExpiresAt, 12345);
+  assert.deepEqual(saved.scopes, ['user:inference', 'user:sessions:claude_code']);
+
+  // Another process rotates the token while our refresh is in flight: keep its write and use its token.
+  saved.expiresAt = Date.now() + 60000;
+  await writeFile(credsPath, JSON.stringify({ claudeAiOauth: saved }));
+  f.routes['POST /oauth/token'] = async () => {
+    await writeFile(credsPath, JSON.stringify({ claudeAiOauth: { ...saved, accessToken: 'other-access', refreshToken: 'other-refresh', expiresAt: Date.now() + 3600000 } }));
+    return [200, { access_token: 'lost-access', refresh_token: 'lost-refresh', expires_in: 3600 }];
+  };
+  await cloudStatus({ id: 'cse_a' }, f.opts);
+  assert.equal(f.requests.at(-1).headers.authorization, 'Bearer other-access');
+  assert.equal(JSON.parse(await readFile(credsPath, 'utf8')).claudeAiOauth.refreshToken, 'other-refresh');
 });
 
 test('cloudOutput tails newest events or continues after a sequence number', async (t) => {

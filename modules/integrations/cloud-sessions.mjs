@@ -24,6 +24,8 @@ const SESSIONS_PATH = '/v1/code/sessions';
 const USAGE_PATH = '/api/oauth/usage';
 // Probable cloud-credit bucket: its reset time matches the ccr_promotional limit.
 const INFERRED_CLOUD_CREDIT_BUCKET = 'iguana_necktie';
+const LIST_PAGE_LIMIT = 100; // the CLI's own list walk: limit=100, at most 10 pages
+const LIST_MAX_PAGES = 10;
 const REFRESH_BUFFER_MS = 300000;
 const LOCK_STALE_MS = 60000;
 const INIT_ERROR_STALE_MS = 120000;
@@ -81,14 +83,14 @@ async function refreshToken(o, credsPath) {
       refreshToken: body.refresh_token || oauth.refreshToken,
       expiresAt: Date.now() + body.expires_in * 1000,
       ...(body.scope ? { scopes: body.scope.split(' ') } : {}),
+      ...(typeof body.refresh_token_expires_in === 'number' ? { refreshTokenExpiresAt: Date.now() + body.refresh_token_expires_in * 1000 } : {}),
     };
     // Compare-and-swap like the CLI: skip the write if someone else rotated the token meanwhile.
     const current = await readJson(credsPath);
-    if (current.claudeAiOauth?.refreshToken === oauth.refreshToken) {
-      const tmp = `${credsPath}.cadre-${process.pid}`;
-      await writeFile(tmp, JSON.stringify({ ...current, claudeAiOauth: next }), { mode: 0o600 });
-      await rename(tmp, credsPath);
-    }
+    if (current.claudeAiOauth?.refreshToken !== oauth.refreshToken) return current.claudeAiOauth.accessToken;
+    const tmp = `${credsPath}.cadre-${process.pid}`;
+    await writeFile(tmp, JSON.stringify({ ...current, claudeAiOauth: next }), { mode: 0o600 });
+    await rename(tmp, credsPath);
     return next.accessToken;
   });
 }
@@ -194,6 +196,19 @@ function bucket(b) {
   return b ? { utilization: b.utilization, resets_at: b.resets_at } : null;
 }
 
+async function listSessions(o) {
+  const rows = [];
+  let cursor = null;
+  for (let page = 0; page < LIST_MAX_PAGES; page++) {
+    const query = new URLSearchParams({ limit: LIST_PAGE_LIMIT, ...(cursor ? { cursor } : {}) });
+    const body = await api(o, `${SESSIONS_PATH}?${query}`);
+    rows.push(...(body.data || []).filter((s) => s.environment_kind === 'anthropic_cloud'));
+    cursor = body.next_cursor;
+    if (!cursor) return { rows, truncated: false };
+  }
+  return { rows, truncated: true };
+}
+
 /** List anthropic_cloud sessions with the account usage summary, or get one session. */
 export async function cloudStatus({ id } = {}, opts = {}) {
   const o = defaults(opts);
@@ -203,14 +218,15 @@ export async function cloudStatus({ id } = {}, opts = {}) {
   };
   if (id) return get(id);
   const [list, usage] = await Promise.all([
-    api(o, SESSIONS_PATH),
+    listSessions(o),
     api(o, USAGE_PATH, { headers: { 'anthropic-beta': 'oauth-2025-04-20' } }).catch((err) => ({ error: err.message })),
   ]);
   // List rows lack session_url and the post-turn summary, so read each cloud session in full.
-  const sessions = await Promise.all((list.data || []).filter((s) => s.environment_kind === 'anthropic_cloud').map((s) => get(s.id)));
+  const sessions = await Promise.all(list.rows.map((s) => get(s.id)));
   const credit = usage[INFERRED_CLOUD_CREDIT_BUCKET];
   return {
     sessions,
+    ...(list.truncated ? { truncated: `stopped after ${LIST_MAX_PAGES} pages of ${LIST_PAGE_LIMIT}; older sessions are not listed` } : {}),
     usage: usage.error ? { error: usage.error } : {
       five_hour: bucket(usage.five_hour),
       seven_day: bucket(usage.seven_day),
