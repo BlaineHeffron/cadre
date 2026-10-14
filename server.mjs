@@ -200,6 +200,7 @@ await app.register(githubAgentsPlugin, { wsManager, repoStore: githubAgentRepoSt
 
 // Claude Code cloud sessions: owners, the 60 s state watcher (a side-effect loop) and room attach
 await app.register(cloudSessionsPlugin, {
+  wsManager,
   pollEnabled: !sideEffectLoopsSuppressed,
   watchPr: (watch, owner) => githubAgentRepoStore.putWatch(watch, owner),
 });

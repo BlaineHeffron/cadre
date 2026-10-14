@@ -4,10 +4,13 @@
  * `cloud` agent-bus participant (see adapters.mjs): room messages reach it
  * through cloudSend, and its assistant replies are posted back as its own
  * messages, which the bus never delivers to their sender.
+ *
+ * A pending permission prompt becomes one Command Queue operator action, so only the
+ * operator can answer it: Approve runs the allow route below; Reject is sent as a deny.
  */
 import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
-import { cloudLaunch, cloudOutput, cloudSend, cloudStatus } from './cloud-sessions.mjs';
+import { cloudLaunch, cloudOutput, cloudRespond, cloudSend, cloudStatus } from './cloud-sessions.mjs';
 
 const POLL_MS = 60_000;
 const cloudRef = (id) => ({ kind: 'cloud', sessionId: id });
@@ -30,6 +33,7 @@ export async function cloudSessionsPlugin(app, {
   store = buildPostgresJsonStore({ namespace: 'cloud_sessions', filePath: runtimeStatePath('cloud_sessions.json') }),
   watchPr = async () => { throw new Error('PR watches unavailable'); },
   cloudOpts = {},
+  wsManager,
 } = {}) {
   const state = { sessions: {}, ...(await store.load().catch(() => null)) };
   const save = () => store.save(state);
@@ -72,6 +76,35 @@ export async function cloudSessionsPlugin(app, {
     seen.seq = out.next_seq;
   }
 
+  // One queue item per pending request, filed as the owner; withdrawn if the request clears unanswered.
+  async function permissionPass(id, seen, view) {
+    const { addHumanQueueItem, dismissHumanQueueItem, serializeWorkQueue } = await import('./command-center-ai.mjs');
+    const principal = { type: 'agent', ...seen.owner };
+    const asked = seen.permission;
+    const item = asked && (await serializeWorkQueue({ status: 'all' })).items.find((entry) => entry.id === asked.itemId);
+    const result = item?.operatorActionResult;
+    // An approval whose allow post failed is dropped, so the still-pending request gets a fresh item.
+    const allowFailed = result && result.status !== 'rejected' && !(result.statusCode >= 200 && result.statusCode < 300);
+    if (asked && (asked.request_id !== view.permission?.request_id || allowFailed)) {
+      if (item?.status === 'open') await dismissHumanQueueItem(item.id, { wsManager, principal });
+      delete seen.permission;
+    } else if (result?.status === 'rejected' && !asked.denied) {
+      await cloudRespond({ id, request_id: asked.request_id, allow: false }, cloudOpts);
+      asked.denied = true;
+    }
+    if (view.permission && !seen.permission) {
+      const { request_id: requestId, tool, action, input } = view.permission;
+      const filed = await addHumanQueueItem({
+        title: `Cloud session ${view.title}`,
+        question: `Allow ${tool}${action ? ` — ${action}` : ''}?`,
+        details: `Approve and run allows it; Reject denies it.\nInput: ${JSON.stringify(input).slice(0, 2000)}\n${view.url || id}`,
+        source: 'cloud_session',
+        operatorAction: { method: 'POST', path: `/api/cloud/sessions/${encodeURIComponent(id)}/permission`, body: { request_id: requestId } },
+      }, { wsManager, principal });
+      seen.permission = { request_id: requestId, itemId: filed.id };
+    }
+  }
+
   /** One watcher pass over every tracked session; the 60 s loop calls this. */
   async function step() {
     for (const [id, seen] of Object.entries(state.sessions)) {
@@ -86,6 +119,7 @@ export async function cloudSessionsPlugin(app, {
           }
           Object.assign(seen, { state: view.state, needs_action: view.needs_action });
         }
+        await permissionPass(id, seen, view);
         if (seen.threadId) await relay(id, seen);
       } catch (err) {
         if (/HTTP 404/.test(err.message)) delete state.sessions[id];
@@ -107,6 +141,12 @@ export async function cloudSessionsPlugin(app, {
     const launched = await cloudLaunch(req.body, cloudOpts);
     await track(launched.id, owner, { state: 'working' });
     return launched;
+  });
+
+  // Dashboard only (the queue item's operator action); agents hold the bearer token, never this cookie.
+  app.post('/api/cloud/sessions/:id/permission', async (req, reply) => {
+    if (req.duenoAuth?.principal?.kind !== 'dashboard') return reply.code(403).send({ error: 'Only the operator can answer a cloud permission prompt' });
+    return cloudRespond({ id: req.params.id, request_id: req.body?.request_id, allow: true }, cloudOpts);
   });
 
   app.post('/api/cloud/watch', async (req) => {

@@ -29,7 +29,8 @@ export function messageSummary(message) {
   return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }
 
-export function renderBusEnvelope(message, parent = null) {
+// `inlineCap` (characters) inlines the body for recipients without room_context, cut at the cap.
+export function renderBusEnvelope(message, parent = null, { inlineCap = 0 } = {}) {
   const dm = message.metadata?.dm === true;
   const marker = busMessageMarker(message);
   const opening = dm
@@ -39,9 +40,13 @@ export function renderBusEnvelope(message, parent = null) {
   const reply = 'Reply: room_send(thread_id=<room>, body="...", reply_to=<id>)';
   const body = String(message.body || '');
   // A returned spawn result arrives whole, like a subagent's answer.
-  const content = body.length > 1200 && message.type !== 'startup_prompt' && !(dm && message.type === 'result')
+  const summarize = body.length > 1200 && message.type !== 'startup_prompt' && !(dm && message.type === 'result');
+  let content = summarize
     ? `Summary: ${messageSummary(message)}\nBody length: ${body.length} characters\nFull body: room_context(thread_id="${message.threadId}", message_id="${message.id}")`
     : body.trim();
+  if (inlineCap) {
+    content = body.length > inlineCap ? `${body.slice(0, inlineCap)}\n[Body truncated: showing ${inlineCap} of ${body.length} characters]` : body.trim();
+  }
   const type = message.type && message.type !== 'message' ? `Type: ${message.type}` : null;
   return [opening, parentSnippet(parent), type, content, closing, reply].filter((line) => line != null && line !== '').join('\n');
 }

@@ -72,7 +72,7 @@ test('cloudStatus lists cloud sessions with usage, sends auth headers and never 
   assert.deepEqual(result.sessions.map((s) => s.id), ['cse_a', 'cse_c']);
   assert.deepEqual(f.requests.filter((r) => r.path === '/v1/code/sessions').map((r) => r.query), [{ limit: '100' }, { limit: '100', cursor: 'p2' }]);
   assert.deepEqual(result.sessions[0], {
-    id: 'cse_a', title: 'Title cse_a', state: 'done', detail: 'PR opened', needs_action: '', branches: ['claude/has-pr'],
+    id: 'cse_a', title: 'Title cse_a', state: 'done', detail: 'PR opened', needs_action: '', permission: null, branches: ['claude/has-pr'],
     pr: { number: 7, url: 'https://github.com/o/r/pull/7', state: 'OPEN' }, url: 'https://claude.ai/code/cshk_cse_a', cost_usd: 1.5,
   });
   assert.deepEqual(result.usage.five_hour, { utilization: 16, resets_at: 'a' });
