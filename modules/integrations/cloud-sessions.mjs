@@ -161,7 +161,7 @@ async function describe(o, s) {
     state,
     detail: reason || text(summary?.status_detail) || text(s.external_metadata?.task_summary) || '',
     needs_action: text(summary?.needs_action),
-    permission: permission && { request_id: permission.request_id, tool: permission.display_tool_name || permission.tool_name, action: text(permission.action_description), input: permission.input ?? null },
+    permission: permission && { request_id: permission.request_id, name: permission.tool_name, tool: permission.display_tool_name || permission.tool_name, action: text(permission.action_description), input: permission.input ?? null },
     branches,
     pr: repo && branches.length ? await findPr(o, repo, branches) : null,
     url: s.session_url || null,

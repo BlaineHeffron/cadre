@@ -17,10 +17,11 @@ test('a cloud permission prompt becomes one operator-only queue item whose answe
     await rm(stateDir, { recursive: true, force: true });
   });
   let shape = {};
-  const ask = (requestId) => {
+  const ask = (requestId, action = 'Create Trigger') => {
+    const tool = action.toLowerCase().replace(' ', '_');
     shape = { worker_status: 'requires_action', external_metadata: {
-      post_turn_summary: { needs_action: `Approve or deny claude-code-remote — Delete Trigger (${requestId})` },
-      pending_action: { tool_name: 'mcp__claude-code-remote__delete_trigger', display_tool_name: 'claude-code-remote', action_description: 'Delete Trigger',
+      post_turn_summary: { needs_action: `Approve or deny claude-code-remote — ${action} (${requestId})` },
+      pending_action: { tool_name: `mcp__claude-code-remote__${tool}`, display_tool_name: 'claude-code-remote', action_description: action,
         request_id: requestId, tool_use_id: `toolu_${requestId}`, input: { trigger_id: 'trig_1' } },
     } };
   };
@@ -61,10 +62,10 @@ test('a cloud permission prompt becomes one operator-only queue item whose answe
   const [item] = await items();
   assert.equal((await items()).length, 1);
   assert.equal(item.status, 'open');
-  assert.equal(item.question, 'Allow claude-code-remote — Delete Trigger?');
+  assert.equal(item.question, 'Allow claude-code-remote — Create Trigger?');
   assert.match(item.details, /Input: \{"trigger_id":"trig_1"\}/);
   assert.deepEqual(item.options.map((option) => option.id), ['approve', 'reject']);
-  assert.match(notices().join('\n'), /needs action: Approve or deny claude-code-remote — Delete Trigger \(req_1\)/);
+  assert.match(notices().join('\n'), /needs action: Approve or deny claude-code-remote — Create Trigger \(req_1\)/);
 
   // No agent can answer: not the queue item, and not the allow route directly.
   await assert.rejects(mcp.handleToolCall('monitor_answer_human_queue_item', { id: item.id, optionId: 'approve' }, asOwner), /authenticated operator/);
@@ -130,4 +131,14 @@ test('a cloud permission prompt becomes one operator-only queue item whose answe
   assert.equal(posted.length, 3);
   assert.equal(posted[2].events[0].payload.response.request_id, 'req_4');
   assert.equal(posted[2].events[0].payload.response.response.behavior, 'allow');
+
+  // Deleting the session's own trigger is pre-approved: allowed once, with no queue item.
+  const filed = (await items()).length;
+  ask('req_5', 'Delete Trigger');
+  await step();
+  await step();
+  assert.equal((await items()).length, filed);
+  assert.equal(posted.length, 4);
+  assert.deepEqual(posted[3].events[0].payload.response, { subtype: 'success', request_id: 'req_5',
+    response: { behavior: 'allow', updatedInput: { trigger_id: 'trig_1' }, toolUseID: 'toolu_req_5' } });
 });
