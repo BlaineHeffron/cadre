@@ -360,9 +360,13 @@ describe('scheduled agents', () => {
     const launches = [];
     const sessionLauncher = async (input) => { launches.push(input); return { id: 'sess_next' }; };
 
-    const skipped = await stepDue(3000, { store, sessionLauncher, lookupSessionState });
-    assert.equal(skipped.skippedRunning, 1);
+    for (let tick = 0; tick < 5; tick += 1) {
+      const { nextRunAtEpochMs } = await store.get('sched_stale');
+      const skipped = await stepDue(nextRunAtEpochMs, { store, sessionLauncher, lookupSessionState });
+      assert.equal(skipped.skippedRunning, 1);
+    }
     assert.equal(launches.length, 0);
+    assert.equal((await store.get('sched_stale')).consecutiveSkips, 0);
 
     stale = false;
     assert.equal(await lookupSessionState('sess_hidden'), null);

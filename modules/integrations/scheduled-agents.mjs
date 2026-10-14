@@ -355,8 +355,9 @@ export async function stepDue(nowMs = Date.now(), {
         ? await lookupSessionState(task.lastSessionId)
         : { state: 'unknown' };
       if (sessionBlocksNextRun(state, { nowMs, idleSessionGraceMs, task })) {
-        const skips = normalizeInt(task.consecutiveSkips, 0, { min: 0 }) + 1;
-        const capped = maxConsecutiveSkips > 0 && skips > maxConsecutiveSkips;
+        // The skip cap covers pane state that lies busy; a stale list never launches past it.
+        const skips = normalizeInt(task.consecutiveSkips, 0, { min: 0 }) + (state.listStale ? 0 : 1);
+        const capped = !state.listStale && maxConsecutiveSkips > 0 && skips > maxConsecutiveSkips;
         if (!capped) {
           const nextRunAtEpochMs = advanceNextRunAt(task, nowMs);
           const updated = await store.update(task.id, {
@@ -726,8 +727,8 @@ async function recordLauncherSkip({ store, task, session, claimMetadata, nowMs }
   };
 }
 
-// A stale list does not prove a session ended. Report it as live so a spawn tick skips
-// rather than launching a duplicate next to a session the list could not see.
+// A stale list does not prove a session ended. Report it so a spawn tick skips rather
+// than launching a duplicate next to a session the list could not see.
 export async function lookupSessionStateVia(request, sessionId, targetKind = '') {
   const id = String(sessionId || '').trim();
   if (!id) return null;
@@ -755,7 +756,7 @@ export async function lookupSessionStateVia(request, sessionId, targetKind = '')
     }
   }
   if (targetKind) return { status: 'ended', lifecycle: 'missing', error: `Target ${targetKind}:${id} not found` };
-  return stale ? { lifecycle: 'running', status: 'unknown' } : null;
+  return stale ? { listStale: true } : null;
 }
 
 export async function listEnabledAgentBackendKinds(request) {
