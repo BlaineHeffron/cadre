@@ -3,7 +3,7 @@
  * DMs the owner on state changes, and room attach. An attached session is a
  * `cloud` agent-bus participant (see adapters.mjs): room messages reach it
  * through cloudSend, and its assistant replies are posted back as its own
- * messages, which the bus never delivers to their sender.
+ * messages, which the bus never delivers to their sender. cloud_detach takes it out of the room.
  *
  * A pending permission prompt becomes one Command Queue operator action, so only the
  * operator can answer it: Approve runs the allow route below; Reject is sent as a deny.
@@ -160,18 +160,40 @@ export async function cloudSessionsPlugin(app, {
     return { id: req.body.id, state: seen.state, status: 'watching' };
   });
 
+  // Attach and detach take the same caller, the room's owner or one of its participants; [status, error] otherwise.
+  function roomDenied(owner, threadId) {
+    const thread = app.agentBusLifecycle.getThread(threadId)?.thread;
+    if (!thread || thread.status !== 'open') return [404, 'Open room not found'];
+    if (thread.metadata?.dm) return [400, 'Cloud sessions attach to rooms, not DMs'];
+    const same = (ref) => ref?.kind === owner.kind && ref?.sessionId === owner.sessionId;
+    if (!same(thread.createdBy) && !thread.participants?.some(same)) return [403, 'Room owner or participant required'];
+    return null;
+  }
+
   app.post('/api/cloud/attach', async (req, reply) => {
     const owner = caller(req);
     const { id, thread_id: threadId } = req.body;
-    const thread = app.agentBusLifecycle.getThread(threadId)?.thread;
-    if (!thread || thread.status !== 'open') return reply.code(404).send({ error: 'Open room not found' });
-    if (thread.metadata?.dm) return reply.code(400).send({ error: 'Cloud sessions attach to rooms, not DMs' });
-    const same = (ref) => ref?.kind === owner.kind && ref?.sessionId === owner.sessionId;
-    if (!same(thread.createdBy) && !thread.participants?.some(same)) return reply.code(403).send({ error: 'Room owner or participant required' });
+    const denied = roomDenied(owner, threadId);
+    if (denied) return reply.code(denied[0]).send({ error: denied[1] });
     const [view, tail] = await Promise.all([cloudStatus({ id }, cloudOpts), cloudOutput({ id, limit: 1 }, cloudOpts)]);
-    await track(id, owner, view, { threadId, seq: tail.next_seq ?? 0 });
+    await track(id, owner, view, { threadId, seq: tail.next_seq ?? 0, title: view.title });
     await app.agentBusLifecycle.addParticipant(threadId, cloudRef(id));
     return { id, thread_id: threadId, status: 'attached' };
+  });
+
+  // The session keeps running and stays watched; it just leaves the room. Without its threadId
+  // the watcher stops posting its turns and the adapter stops forwarding room messages to it.
+  app.post('/api/cloud/detach', async (req, reply) => {
+    const { id, thread_id: threadId } = req.body;
+    const denied = roomDenied(caller(req), threadId);
+    if (denied) return reply.code(denied[0]).send({ error: denied[1] });
+    await app.agentBusLifecycle.removeParticipant(threadId, cloudRef(id));
+    const seen = state.sessions[id];
+    if (seen?.threadId === threadId) {
+      delete seen.threadId;
+      await save();
+    }
+    return { id, thread_id: threadId, status: 'detached' };
   });
 
   if (pollEnabled) {

@@ -1394,7 +1394,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'cloud_attach',
-      description: 'Add a Claude Code cloud session to a room you own or are in, and watch it as its owner. Room messages are sent to it; its new assistant replies are posted to the room as cloud:<id>. Returns id, thread_id and status.',
+      description: 'Add a Claude Code cloud session to a room you own or are in, and watch it as its owner. Room messages addressed to it (a reply to it, its id or title, @clouds) are sent to it; its new assistant replies are posted to the room as cloud:<id>. Returns id, thread_id and status.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1405,6 +1405,20 @@ export function buildMonitorMcpServer({ requestImpl }) {
         additionalProperties: false,
       },
       handler: async (args) => request('/api/cloud/attach', { method: 'POST', body: args }),
+    },
+    {
+      name: 'cloud_detach',
+      description: 'Remove a Claude Code cloud session from a room you own or are in. Room messages stop reaching it and its replies stop being posted; the session keeps running. Returns id, thread_id and status.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', minLength: 1, description: 'Cloud session id.' },
+          thread_id: { type: 'string', minLength: 1, description: 'Room id.' },
+        },
+        required: ['id', 'thread_id'],
+        additionalProperties: false,
+      },
+      handler: async (args) => request('/api/cloud/detach', { method: 'POST', body: args }),
     },
 
     // ── System ──
@@ -1471,6 +1485,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     'cloud_launch',
     'cloud_watch',
     'cloud_attach',
+    'cloud_detach',
   ]);
 
   const discoverableTools = tools.filter((t) => (
