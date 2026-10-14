@@ -212,6 +212,10 @@ test('the hourly sweep closes rooms whose agents left without the delete hook', 
     { kind: 'claude', sessionId: 'claude-1' }], metadata: { dm: true } });
   const collab = await room(h, [{ kind: 'codex', sessionId: 'codex-1' }, { kind: 'pi', sessionId: 'pi-1' }]);
   const live = await room(h, [{ kind: 'codex', sessionId: 'codex-1' }, { kind: 'pi', sessionId: 'pi-2' }]);
+  // Unlisted but still found on lookup, like an attached cloud session.
+  h.sessionDetailResponders.claude = ({ sessionId }) => sessionId === 'claude-unlisted'
+    ? { payload: { id: sessionId, state: { state: 'idle', needsInput: false } } } : null;
+  const unlisted = await room(h, [{ kind: 'codex', sessionId: 'codex-1' }, { kind: 'claude', sessionId: 'claude-unlisted' }]);
   h.sessionCatalog.codex.delete('codex-1');
   h.sessionCatalog.pi.delete('pi-1');
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
@@ -221,5 +225,6 @@ test('the hourly sweep closes rooms whose agents left without the delete hook', 
   assert.equal(status(dm), 'closed');
   assert.equal(status(collab), 'closed');
   assert.equal(status(live), 'open');
+  assert.deepEqual(h.store.getThread(unlisted.id).thread.participants, [{ kind: 'claude', sessionId: 'claude-unlisted' }]);
   assert.deepEqual(h.store.getThread(live.id).thread.participants, [{ kind: 'pi', sessionId: 'pi-2' }]);
 });

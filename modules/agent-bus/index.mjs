@@ -163,7 +163,11 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
       const ids = await adapter.listSessions(app).then((list) => new Set(list.map((session) => session.id)), () => null);
       for (const [key, ref] of refs) if (ref.kind === kind && (!ids || ids.has(ref.sessionId))) refs.delete(key);
     }
-    for (const ref of refs.values()) await notifyAgentSessionDeleted(ref);
+    // A listing is not proof of absence (cloud sessions are never listed); only a 404 lookup removes the agent.
+    for (const ref of refs.values()) {
+      const gone = await adapters[ref.kind].getSession(app, ref.sessionId).then(() => false, (err) => err?.statusCode === 404);
+      if (gone) await notifyAgentSessionDeleted(ref);
+    }
   }
 
   createAgentBusObserver({ app, store, wsManager, deliveryInFlight, sweepStaleRooms,
