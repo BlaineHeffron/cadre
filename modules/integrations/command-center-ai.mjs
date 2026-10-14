@@ -22,6 +22,7 @@ export const OPERATOR_ACTION_ROUTES = [
   { method: 'POST', path: /^\/api\/agents\/github$/ },
   { method: 'DELETE', path: /^\/api\/agents\/github\/watches$/ },
   { method: 'POST', path: /^\/api\/agent-bus\/threads\/[A-Za-z0-9_-]+\/end$/ },
+  { method: 'POST', path: /^\/api\/cloud\/sessions\/[A-Za-z0-9_-]+\/permission$/ },
 ];
 
 function validateOperatorAction(action) {

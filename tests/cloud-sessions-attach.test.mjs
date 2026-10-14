@@ -78,6 +78,16 @@ process.stdout.write(JSON.stringify({ ok: true, session_id: args[args.indexOf('-
   await request('/api/agent-bus/messages', { method: 'POST', body: { threadId: thread.id, from: owner, body: 'One more thing' } });
   assert.equal((await sends()).length, 2);
 
+  // A cloud session has no room_context, so long bodies arrive whole, up to the cap, and say when cut.
+  const long = `Plan:\n${'a'.repeat(5000)}`;
+  await request('/api/agent-bus/messages', { method: 'POST', body: { threadId: thread.id, from: peer, body: long } });
+  const whole = (await sends()).at(-1)[1];
+  assert.ok(whole.includes(long));
+  assert.doesNotMatch(whole, /room_context|Summary:/);
+  await request('/api/agent-bus/messages', { method: 'POST', body: { threadId: thread.id, from: peer, body: 'b'.repeat(25000) } });
+  const cut = (await sends()).at(-1)[1];
+  assert.match(cut, /\nb{20000}\n\[Body truncated: showing 20000 of 25000 characters\]\n\[\/ROOM_MESSAGE\]$/);
+
   // An attached session finishing a turn is not DMed to its owner as done; its reply is already in the room.
   const dms = () => h.store.listThreads().filter((item) => item.metadata?.dm).flatMap((item) => h.store.getThread(item.id).messages).filter((m) => m.from.kind === 'cloud').length;
   const before = dms();

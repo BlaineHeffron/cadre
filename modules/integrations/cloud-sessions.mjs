@@ -142,17 +142,26 @@ async function findPr(o, repo, branches) {
   return null;
 }
 
+// A permission prompt the session is blocked on, as the CLI reads it (`oEr` in CLI 2.1.296).
+// Questions and plans carry an empty request_id; only tool permissions are answerable here.
+function pendingPermission(s) {
+  const p = s.worker_status === 'requires_action' ? s.external_metadata?.pending_action : null;
+  return p?.request_id && p.tool_name ? p : null;
+}
+
 async function describe(o, s) {
   const { state, reason } = cloudSessionState(s);
   const summary = summaryOf(s);
   const branches = branchesOf(s);
   const repo = s.config?.outcomes?.find((x) => x?.type === 'git_repository')?.git_info?.repo;
+  const permission = pendingPermission(s);
   return {
     id: s.id,
     title: s.title || 'Untitled',
     state,
     detail: reason || text(summary?.status_detail) || text(s.external_metadata?.task_summary) || '',
     needs_action: text(summary?.needs_action),
+    permission: permission && { request_id: permission.request_id, tool: permission.display_tool_name || permission.tool_name, action: text(permission.action_description), input: permission.input ?? null },
     branches,
     pr: repo && branches.length ? await findPr(o, repo, branches) : null,
     url: s.session_url || null,
@@ -180,10 +189,7 @@ async function listSessions(o) {
 /** List anthropic_cloud sessions with the account usage summary, or get one session. */
 export async function cloudStatus({ id } = {}, opts = {}) {
   const o = defaults(opts);
-  const get = async (sid) => {
-    const body = await api(o, `${SESSIONS_PATH}/${encodeURIComponent(sid)}`);
-    return describe(o, body.response_shape || body.session);
-  };
+  const get = async (sid) => describe(o, await getSession(o, sid));
   if (id) return get(id);
   const [list, usage] = await Promise.all([
     listSessions(o),
@@ -208,6 +214,29 @@ export async function cloudStatus({ id } = {}, opts = {}) {
       } : null,
     },
   };
+}
+
+async function getSession(o, id) {
+  const body = await api(o, `${SESSIONS_PATH}/${encodeURIComponent(id)}`);
+  return body.response_shape || body.session;
+}
+
+/**
+ * Answer a pending permission request the way the CLI's RemoteSessionManager does: a
+ * control_response event. Refuses unless `request_id` is still the session's pending one.
+ */
+export async function cloudRespond({ id, request_id: requestId, allow } = {}, opts = {}) {
+  const o = defaults(opts);
+  const pending = pendingPermission(await getSession(o, id));
+  if (!requestId || pending?.request_id !== requestId) throw Object.assign(new Error('Permission request is no longer pending'), { statusCode: 409 });
+  const response = allow
+    ? { behavior: 'allow', updatedInput: pending.input || {}, toolUseID: pending.tool_use_id }
+    : { behavior: 'deny', message: 'Denied by the operator', toolUseID: pending.tool_use_id };
+  await api(o, `${SESSIONS_PATH}/${encodeURIComponent(id)}/events`, { method: 'POST', body: {
+    session_id: id,
+    events: [{ payload: { type: 'control_response', uuid: randomUUID(), response: { subtype: 'success', request_id: requestId, response } } }],
+  } });
+  return { id, request_id: requestId, behavior: response.behavior };
 }
 
 function eventsPath(id, query) {

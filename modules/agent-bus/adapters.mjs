@@ -258,6 +258,8 @@ function buildCloudAdapter() {
   }
   return {
     kind: 'cloud',
+    // No room_context in a cloud session, so room messages arrive whole up to this cap.
+    inlineBodyCap: 20000,
     async listSessions() { return []; },
     async getSession(app, sessionId) {
       tracked(app, sessionId);
