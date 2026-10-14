@@ -13,6 +13,7 @@ import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { cloudLaunch, cloudOutput, cloudRespond, cloudSend, cloudStatus } from './cloud-sessions.mjs';
 
 const POLL_MS = 60_000;
+const PREAPPROVED_TOOLS = new Set(['mcp__claude-code-remote__delete_trigger']);
 const cloudRef = (id) => ({ kind: 'cloud', sessionId: id });
 
 /** Owner notices for one session, from its last-seen record to its current cloudStatus view. */
@@ -81,6 +82,7 @@ export async function cloudSessionsPlugin(app, {
   }
 
   // One queue item per pending request, filed as the owner; withdrawn if the request clears unanswered.
+  // The operator pre-approved removing a session's own PR-activity trigger (Cadre watches the PR).
   async function permissionPass(id, seen, view) {
     const { addHumanQueueItem, dismissHumanQueueItem, serializeWorkQueue } = await import('./command-center-ai.mjs');
     const principal = { type: 'agent', ...seen.owner };
@@ -95,6 +97,11 @@ export async function cloudSessionsPlugin(app, {
     } else if (result?.status === 'rejected' && !asked.denied) {
       await cloudRespond({ id, request_id: asked.request_id, allow: false }, cloudOpts);
       asked.denied = true;
+    }
+    if (view.permission && !seen.permission && PREAPPROVED_TOOLS.has(view.permission.name)) {
+      await cloudRespond({ id, request_id: view.permission.request_id, allow: true }, cloudOpts);
+      seen.permission = { request_id: view.permission.request_id, auto: true };
+      app.log.info({ id, tool: view.permission.name }, 'Cloud permission auto-approved');
     }
     if (view.permission && !seen.permission) {
       const { request_id: requestId, tool, action, input } = view.permission;
