@@ -34,8 +34,9 @@ test('a cloud permission prompt becomes one operator-only queue item whose answe
   };
 
   const commands = [];
-  const { commandCenterAIPlugin } = await import('../modules/integrations/command-center-ai.mjs');
   const h = await createAgentBusHarness({ pollMs: 60000, beforeReady: async (app) => {
+    // Loads config.mjs, so only after the harness has set AUTH_TOKEN.
+    const { commandCenterAIPlugin } = await import('../modules/integrations/command-center-ai.mjs');
     await app.register(commandCenterAIPlugin, { enqueueSessionCommand: async (kind, sessionId, input) => { commands.push({ kind, sessionId, ...input }); return { ok: true }; } });
     await cloudSessionsPlugin(app, { store: memoryStore(), cloudOpts: f.opts });
   } });
