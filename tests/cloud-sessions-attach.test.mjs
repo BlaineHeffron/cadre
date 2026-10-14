@@ -53,21 +53,29 @@ process.stdout.write(JSON.stringify({ ok: true, session_id: args[args.indexOf('-
   assert.deepEqual([args[0], args[2], args[3]], ['-p', '--cloud', 'cse_a']);
   assert.match(args[1], /from=codex:codex-1\]\nPlease add tests\n\[\/ROOM_MESSAGE\]$/);
 
-  // Cloud -> room: new assistant text after the attach cursor comes back as the cloud participant.
+  // Cloud -> room: one message per turn, its final reply; progress notes stay in cloud_output.
+  const fromCloudBodies = () => h.store.getThread(thread.id).messages.filter((m) => m.from.kind === 'cloud').map((m) => m.body);
   f.events.push(
     { sequence_num: '3', event_type: 'user', source: 'client', payload: { message: { content: args[1] } } },
-    { sequence_num: '4', event_type: 'assistant', payload: { message: { content: [{ type: 'text', text: 'Tests added' }, { type: 'tool_use', name: 'Bash' }] } } },
+    { sequence_num: '4', event_type: 'assistant', payload: { message: { content: [{ type: 'text', text: 'Reading the suite' }, { type: 'tool_use', name: 'Bash' }] } } },
     { sequence_num: '5', event_type: 'assistant', payload: { message: { content: [{ type: 'tool_use', name: 'Edit' }] } } },
-    { sequence_num: '6', event_type: 'result', payload: { result: 'Tests added' } },
+    { sequence_num: '6', event_type: 'assistant', payload: { message: { content: [{ type: 'text', text: 'Tests added' }] } } },
   );
   await h.app.agentBusLifecycle.cloudSessions.step();
+  assert.deepEqual(fromCloudBodies(), []);
+  f.events.push({ sequence_num: '7', event_type: 'result', payload: { result: 'Tests added' } });
   await h.app.agentBusLifecycle.cloudSessions.step();
+  await h.app.agentBusLifecycle.cloudSessions.step();
+  assert.deepEqual(fromCloudBodies(), ['Tests added']);
   const fromCloud = h.store.getThread(thread.id).messages.filter((m) => m.from.kind === 'cloud');
-  assert.deepEqual(fromCloud.map((m) => m.body), ['Tests added']);
   const relayed = h.store.getThread(thread.id).deliveries.filter((d) => d.messageId === fromCloud[0].id);
   assert.deepEqual(relayed.map((d) => d.target).sort((a, b) => a.kind.localeCompare(b.kind)), [peer, owner].sort((a, b) => a.kind.localeCompare(b.kind)));
   assert.equal(relayed.some((d) => d.target.kind === cloud.kind), false);
   assert.equal((await sends()).length, 1);
+  // A turn with no assistant text relays its result text.
+  f.events.push({ sequence_num: '8', event_type: 'result', payload: { subtype: 'success', result: 'Nothing to change' } });
+  await h.app.agentBusLifecycle.cloudSessions.step();
+  assert.deepEqual(fromCloudBodies(), ['Tests added', 'success: Nothing to change']);
 
   // An owner reply in the watcher's notice DM is never forwarded; room messages still are.
   const dm = await h.app.agentBusLifecycle.directMessage({ from: cloud, target: owner, body: 'Cloud session cse_a done: ok' });
