@@ -43,7 +43,9 @@ function isSharedFooter(line) {
     || /(?:^|\s·\s)\?\s+for shortcuts/i.test(line)
     || /^new task\?\s+\/clear\b/i.test(line)
     || /\btokens? left\b/i.test(line)
-    || /\bbypass permissions\b/i.test(line);
+    || /\bbypass permissions\b/i.test(line)
+    // Claude's Remote Control link wraps onto its own row when the footer line is full.
+    || /^\/rc$/.test(line);
 }
 
 function isTrailingBanner(line) {

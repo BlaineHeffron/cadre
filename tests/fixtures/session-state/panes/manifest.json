@@ -702,6 +702,22 @@
       "currentExecution": "unknown",
       "currentInteraction": "none",
       "knownDefect": false
+    },
+    {
+      "id": "claude-795ad3c7-queued-pastes-rc-wrap",
+      "file": "claude-795ad3c7-queued-pastes-rc-wrap.pane",
+      "provider": "claude",
+      "source": "reconstructed",
+      "capturedFrom": "claude-795ad3c7",
+      "intendedState": "queued-input",
+      "intendedLegacyState": "active",
+      "intendedExecution": "unknown",
+      "intendedInteraction": "none",
+      "notes": "Reconstructed from a live busy Claude pane with queued room pastes: its footer was full, so the Remote Control /rc link wrapped onto its own row, hid the footer, and the pane read as an unknown blocking screen. Session URL scrubbed.",
+      "currentLegacyState": "active",
+      "currentExecution": "unknown",
+      "currentInteraction": "none",
+      "knownDefect": false
     }
   ],
   "reconstructedOnlyStates": [
