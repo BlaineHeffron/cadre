@@ -6,6 +6,7 @@ import Fastify from 'fastify';
 import { cloudSessionsPlugin } from '../modules/integrations/cloud-sessions-plugin.mjs';
 import { ACCESS, REFRESHED, cloudSession, eventsRoute, fixture, memoryStore } from './helpers/cloud-sessions-fixture.mjs';
 import {
+  CLOUD_LAUNCH_NOTE,
   cloudLaunch,
   cloudOutput,
   cloudSend,
@@ -273,7 +274,7 @@ test('cloudLaunch posts the CLI launch shape to the anthropic_cloud environment'
   assert.deepEqual(body, {
     title: 'Fix: the bug!',
     environment_id: 'env_cloud',
-    events: [{ payload: { session_id: '', type: 'user', parent_tool_use_id: null, message: { role: 'user', content: 'Fix the bug' } } }],
+    events: [{ payload: { session_id: '', type: 'user', parent_tool_use_id: null, message: { role: 'user', content: `Fix the bug\n\n${CLOUD_LAUNCH_NOTE}` } } }],
     config: {
       sources: [{ type: 'git_repository', url: 'https://github.com/o/r', revision: 'main' }],
       outcomes: [{ type: 'git_repository', git_info: { type: 'github', repo: 'o/r', branches: ['claude/fix-the-bug'] } }],
