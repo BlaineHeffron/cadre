@@ -335,6 +335,10 @@ export async function cloudSend({ id, text: message, wait_s: waitS = 0 } = {}, o
  * adds a unique suffix). Verified live 2026-10-13: the API ignores the CLI's
  * `session_context` field; `config` and `events[].payload` are honoured.
  */
+// Cadre's watcher already follows the session's PR; a PR-activity trigger only adds a
+// "Delete Trigger" permission prompt for the operator when the session cleans it up.
+export const CLOUD_LAUNCH_NOTE = 'Cadre already watches this session and its PR. Do not create PR-activity triggers or subscriptions.';
+
 export async function cloudLaunch({ prompt, repo, ref, name, model } = {}, opts = {}) {
   const o = defaults(opts);
   const { environments = [] } = await api(o, ENVIRONMENTS_PATH);
@@ -345,7 +349,7 @@ export async function cloudLaunch({ prompt, repo, ref, name, model } = {}, opts 
   const body = await api(o, SESSIONS_PATH, { method: 'POST', body: {
     title,
     environment_id: env.environment_id,
-    events: [{ payload: { uuid: randomUUID(), session_id: '', type: 'user', parent_tool_use_id: null, message: { role: 'user', content: prompt } } }],
+    events: [{ payload: { uuid: randomUUID(), session_id: '', type: 'user', parent_tool_use_id: null, message: { role: 'user', content: `${prompt}\n\n${CLOUD_LAUNCH_NOTE}` } } }],
     config: {
       sources: [{ type: 'git_repository', url: `https://github.com/${repo}`, ...(ref ? { revision: ref } : {}) }],
       outcomes: [{ type: 'git_repository', git_info: { type: 'github', repo, branches: [`claude/${slug}`] } }],
