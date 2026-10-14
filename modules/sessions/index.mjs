@@ -123,6 +123,7 @@ const DISCOVERY_CACHE_TTL_MS = 10000;
 const STATE_CACHE_TTL_MS = 5000;
 const UNCHANGED_PANE_POLL_MS = 10_000;
 const LIST_STATE_CAPTURE_LINES = 120;
+const LIST_RESPONSE_DEADLINE_MS = 2000;
 export const HOOK_STATE_TTL_MS = 90000;
 const PROMPT_READY_SNIPPET_MAX = 160;
 const TOOL_BUSY_STATUSES = new Set(['working', 'thinking', 'awaiting_response']);
@@ -1641,13 +1642,6 @@ function invalidateSessionCaches() {
   paneCache.clear();
 }
 
-function parseIncludeReadOnly(value, fallback = true) {
-  if (value === undefined || value === null || value === '') return fallback;
-  if (value === true || value === 1) return true;
-  const normalized = String(value || '').trim().toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes';
-}
-
 function forgetSession(id) {
   sessions.delete(id);
   lastStates.delete(id);
@@ -2572,14 +2566,20 @@ async function sessionsPlugin(app, {
     });
   });
 
-  app.get(`/api/${config.id}/sessions`, async (req) => {
-    const includeReadOnly = parseIncludeReadOnly(req.query?.includeReadOnly);
-    const list = await discoverSessions({ includeReadOnly });
-    const sessionsWithState = await Promise.all(list.map(async (s) => {
+  // Every list step shells out to the one tmux server, which stalls when the service cgroup
+  // is near MemoryHigh. Share one refresh and answer from the last list past the deadline.
+  let listRefresh = null;
+  let lastSessionList = null;
+  app.get(`/api/${config.id}/sessions`, async () => {
+    listRefresh ||= discoverSessions().then((list) => Promise.all(list.map(async (s) => {
       const { state, canonicalState, attention, pendingResponse } = await getSessionState(s);
       return { ...s, state, canonicalState, attention, pendingResponse };
-    }));
-    return { sessions: sessionsWithState };
+    }))).then((list) => (lastSessionList = list)).finally(() => { listRefresh = null; });
+    let timer;
+    const fresh = await Promise.race([listRefresh, new Promise((resolve) => {
+      timer = setTimeout(resolve, LIST_RESPONSE_DEADLINE_MS, null);
+    })]).finally(() => clearTimeout(timer));
+    return fresh != null ? { sessions: fresh } : { sessions: lastSessionList || [], stale: true };
   });
 
   app.post(`/api/${config.id}/sessions`, async (req, reply) => {
@@ -3400,7 +3400,10 @@ async function sessionsPlugin(app, {
     }
   });
 
+  let discovering = false;
   const discoverInterval = setInterval(async () => {
+    if (discovering) return; // Overlapping sweeps only queue more clients on a stalled tmux server.
+    discovering = true;
     try {
       const list = await discoverSessions({ includeReadOnly: true, forceRefresh: true });
 
@@ -3494,6 +3497,8 @@ async function sessionsPlugin(app, {
       await broadcastSessionList(wsManager, list.filter((s) => sessions.has(s.id)));
     } catch {
       // Best effort
+    } finally {
+      discovering = false;
     }
   }, PANE_OBSERVER_CADENCE_MS);
 
@@ -3506,6 +3511,7 @@ async function sessionsPlugin(app, {
       const { state, canonicalState, attention, pendingResponse } = await getSessionState(s);
       return { ...s, state, canonicalState, attention, pendingResponse };
     }));
+    lastSessionList = withState;
     wsMgr.broadcast(`${config.id}:sessions`, 'sessions', { sessions: withState });
   }
 

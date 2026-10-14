@@ -531,7 +531,10 @@ export async function hybridSessionsPlugin(app, { tmuxPlugin, ...options }) {
     const tmux = route.handler;
     routes.delete(key);
     if (key === `GET /api/${kind}/sessions`) {
-      route.handler = async (req, reply) => ({ sessions: [...(await tmux(req, reply)).sessions, ...(await own(req, reply)).sessions] });
+      route.handler = async (req, reply) => {
+        const listed = await tmux(req, reply);
+        return { ...listed, sessions: [...listed.sessions, ...(await own(req, reply)).sessions] };
+      };
     } else if (own) {
       route.handler = (req, reply) => {
         const structured = req.params?.id ? owned(req.params.id)

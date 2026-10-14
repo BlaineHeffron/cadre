@@ -8,6 +8,7 @@ import { buildMonitorMcpServer } from '../modules/platform/monitor-mcp.mjs';
 import { scheduledAgentsPlugin } from '../modules/integrations/scheduled-agents-plugin.mjs';
 import {
   buildScheduledAgentStore,
+  lookupSessionStateVia,
   SchedulerLoop,
   stepDue,
 } from '../modules/integrations/scheduled-agents.mjs';
@@ -346,6 +347,30 @@ describe('scheduled agents', () => {
     assert.equal(updated.currentIteration, 0);
     assert.equal(updated.nextRunAtEpochMs, 18000);
     assert.equal(updated.lastSessionId, 'sess_running');
+  });
+
+  it('skips rather than respawns when the last session kind lists stale', async () => {
+    const store = memoryStore({ now: () => 3000 });
+    await store.register(baseTask({ id: 'sched_stale', nextRunAtEpochMs: 3000, lastSessionId: 'sess_hidden' }));
+    let stale = true;
+    const request = async (url) => (url === '/api/agents/providers'
+      ? { providers: [{ backendType: 'claude' }, { backendType: 'codex' }] }
+      : { sessions: [], ...(stale && url === '/api/codex/sessions' ? { stale: true } : {}) });
+    const lookupSessionState = (id) => lookupSessionStateVia(request, id);
+    const launches = [];
+    const sessionLauncher = async (input) => { launches.push(input); return { id: 'sess_next' }; };
+
+    for (let tick = 0; tick < 5; tick += 1) {
+      const { nextRunAtEpochMs } = await store.get('sched_stale');
+      const skipped = await stepDue(nextRunAtEpochMs, { store, sessionLauncher, lookupSessionState });
+      assert.equal(skipped.skippedRunning, 1);
+    }
+    assert.equal(launches.length, 0);
+    assert.equal((await store.get('sched_stale')).consecutiveSkips, 0);
+
+    stale = false;
+    assert.equal(await lookupSessionState('sess_hidden'), null);
+    await assert.rejects(lookupSessionStateVia(async () => ({ sessions: [], stale: true }), 'sess_hidden', 'codex'), /stale/);
   });
 
   it('claims a due run before launch so concurrent steps spawn once', async () => {
