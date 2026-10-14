@@ -201,3 +201,30 @@ test('hung credential revocation does not prevent bounded room cleanup', async (
   assert.equal(killed.json().status, 'terminated');
   assert.deepEqual(h.store.getThread(thread.id).thread.participants, [{ kind: 'codex', sessionId: 'codex-1' }]);
 });
+
+test('the hourly sweep closes rooms whose agents left without the delete hook', async (t) => {
+  const priorEnv = { ...process.env };
+  process.env.CADRE_ALLOW_SIDE_EFFECTS = '1';
+  t.after(() => { process.env = priorEnv; });
+  const h = await createAgentBusHarness({ pollMs: 10 }); t.after(() => h.cleanup());
+  h.sessionCatalog.pi.add('pi-2');
+  const dm = await h.store.createThread({ title: 'dm', participants: [{ kind: 'codex', sessionId: 'codex-1' },
+    { kind: 'claude', sessionId: 'claude-1' }], metadata: { dm: true } });
+  const collab = await room(h, [{ kind: 'codex', sessionId: 'codex-1' }, { kind: 'pi', sessionId: 'pi-1' }]);
+  const live = await room(h, [{ kind: 'codex', sessionId: 'codex-1' }, { kind: 'pi', sessionId: 'pi-2' }]);
+  // Unlisted but still found on lookup, like an attached cloud session.
+  h.sessionDetailResponders.claude = ({ sessionId }) => sessionId === 'claude-unlisted'
+    ? { payload: { id: sessionId, state: { state: 'idle', needsInput: false } } } : null;
+  const unlisted = await room(h, [{ kind: 'codex', sessionId: 'codex-1' }, { kind: 'claude', sessionId: 'claude-unlisted' }]);
+  h.sessionCatalog.codex.delete('codex-1');
+  h.sessionCatalog.pi.delete('pi-1');
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  t.mock.timers.tick(3_600_000);
+  const status = (thread) => h.store.getThread(thread.id).thread.status;
+  for (let attempt = 0; attempt < 150 && status(collab) !== 'closed'; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(status(dm), 'closed');
+  assert.equal(status(collab), 'closed');
+  assert.equal(status(live), 'open');
+  assert.deepEqual(h.store.getThread(unlisted.id).thread.participants, [{ kind: 'claude', sessionId: 'claude-unlisted' }]);
+  assert.deepEqual(h.store.getThread(live.id).thread.participants, [{ kind: 'pi', sessionId: 'pi-2' }]);
+});
