@@ -704,6 +704,22 @@
       "knownDefect": false
     },
     {
+      "id": "claude-795ad3c7-osc-rc-footer",
+      "file": "claude-795ad3c7-osc-rc-footer.pane",
+      "provider": "claude",
+      "source": "live-tmux",
+      "capturedFrom": "claude-795ad3c7",
+      "intendedState": "queued-input",
+      "intendedLegacyState": "active",
+      "intendedExecution": "unknown",
+      "intendedInteraction": "none",
+      "notes": "Live ANSI capture of a busy Claude with queued room pastes; the wrapped /rc footer row is an OSC 8 hyperlink, which normalization left in place, so the footer was not recognised and the pane read as unknown_blocking. Session URL scrubbed.",
+      "currentLegacyState": "active",
+      "currentExecution": "unknown",
+      "currentInteraction": "none",
+      "knownDefect": false
+    },
+    {
       "id": "claude-795ad3c7-queued-pastes-rc-wrap",
       "file": "claude-795ad3c7-queued-pastes-rc-wrap.pane",
       "provider": "claude",

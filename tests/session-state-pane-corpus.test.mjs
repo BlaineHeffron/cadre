@@ -192,7 +192,7 @@ describe('captured pane corpus', () => {
     }
   });
 
-  for (const file of ['claude-9a13000f-queued-pastes.pane', 'claude-795ad3c7-queued-pastes-rc-wrap.pane']) it(`does not hold a Claude composer of queued pastes for an operator (${file})`, async () => {
+  for (const file of ['claude-9a13000f-queued-pastes.pane', 'claude-795ad3c7-queued-pastes-rc-wrap.pane', 'claude-795ad3c7-osc-rc-footer.pane']) it(`does not hold a Claude composer of queued pastes for an operator (${file})`, async () => {
     const content = (await loadPane(file)).toString('utf8');
     const snapshot = createSessionStateTracker({ now: () => 100 }).observe('claude', [
       { source: 'process', kind: 'lifecycle', value: { lifecycle: 'running' }, observedAt: 100, expiresAt: 0, fingerprint: 'process:running' },

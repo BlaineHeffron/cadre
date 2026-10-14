@@ -1,4 +1,6 @@
 const ANSI_ESCAPE_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
+// OSC sequences, such as the hyperlink Claude wraps around its /rc footer link.
+const OSC_RE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 const ANSI_PREFIX_RE = /^((?:\r|\x1b\[[0-9;?]*[ -/]*[@-~])*)/;
 const MAX_CODEX_GUTTER_WIDTH = 2;
 
@@ -22,6 +24,7 @@ export function stripCodexIndent(content) {
 
 function normalizeLine(line = '') {
   return String(line)
+    .replace(OSC_RE, '')
     .replace(ANSI_ESCAPE_RE, '')
     .replace(/\u00a0/g, ' ')
     .replace(/\s+/g, ' ')
