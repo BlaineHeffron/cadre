@@ -192,6 +192,16 @@ describe('captured pane corpus', () => {
     }
   });
 
+  it('does not hold a Claude composer of queued pastes for an operator', async () => {
+    const content = (await loadPane('claude-9a13000f-queued-pastes.pane')).toString('utf8');
+    const snapshot = createSessionStateTracker({ now: () => 100 }).observe('claude', [
+      { source: 'process', kind: 'lifecycle', value: { lifecycle: 'running' }, observedAt: 100, expiresAt: 0, fingerprint: 'process:running' },
+      ...observeClaudePane(content, { observedAt: 100, expiresAt: 0 }),
+    ]);
+    assert.notEqual(snapshot.status, 'blocked');
+    assert.equal(snapshot.capabilities.needsAttention, false);
+  });
+
   it('keeps knownDefect flags aligned with intended vs current classification', async () => {
     const manifest = await loadManifest();
     for (const fixture of manifest.fixtures) {

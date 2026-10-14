@@ -69,9 +69,13 @@ export async function cloudSessionsPlugin(app, {
     const thread = app.agentBusLifecycle.getThread(seen.threadId)?.thread;
     if (thread?.status !== 'open') return;
     const out = await cloudOutput({ id, after_seq: seen.seq, limit: 200 }, cloudOpts);
+    // One room message per turn: its last assistant text, posted when the turn's result arrives.
     for (const line of out.lines) {
-      const body = line.role === 'assistant' && line.text.split('\n').filter((l) => !/^\[[^\]]+\]$/.test(l)).join('\n').trim();
+      if (line.role === 'assistant') seen.reply = line.text.split('\n').filter((l) => !/^\[[^\]]+\]$/.test(l)).join('\n').trim() || seen.reply;
+      if (line.role !== 'result') continue;
+      const body = seen.reply || line.text;
       if (body) await app.agentBusLifecycle.send({ threadId: seen.threadId, from: cloudRef(id), body, deliveryMode: 'enqueue' });
+      delete seen.reply;
     }
     seen.seq = out.next_seq;
   }

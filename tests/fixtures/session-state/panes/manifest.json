@@ -686,6 +686,22 @@
       "currentExecution": "working",
       "currentInteraction": "none",
       "notes": "Same --no-alt-screen session running a shell command. Footer path redacted to /work."
+    },
+    {
+      "id": "claude-9a13000f-queued-pastes",
+      "file": "claude-9a13000f-queued-pastes.pane",
+      "provider": "claude",
+      "source": "live-tmux",
+      "capturedFrom": "claude-9a13000f",
+      "intendedState": "queued-input",
+      "intendedLegacyState": "active",
+      "intendedExecution": "unknown",
+      "intendedInteraction": "none",
+      "notes": "Busy Claude whose composer holds 66 queued room pastes; the composer outgrew the 24-line pane so ❯ and the spinner are off-screen. Session URL scrubbed.",
+      "currentLegacyState": "active",
+      "currentExecution": "unknown",
+      "currentInteraction": "none",
+      "knownDefect": false
     }
   ],
   "reconstructedOnlyStates": [

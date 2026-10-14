@@ -321,6 +321,12 @@ export function detectProviderState(provider, content) {
     return { state: STATES.WORKING, needsInput: false, inputType: null, detail: 'Working' };
   }
 
+  // Queued pastes can make Claude's composer taller than the pane, pushing ❯ and the spinner
+  // off-screen. That is pending input, not a dialog an operator must answer.
+  if (/^\[Pasted text #\d+/.test(lastLine)) {
+    return { state: STATES.ACTIVE, needsInput: false, inputType: null, detail: 'Composer holds queued input' };
+  }
+
   return { state: STATES.UNKNOWN, needsInput: true, inputType: 'attention', detail: 'Unknown session screen' };
 }
 
