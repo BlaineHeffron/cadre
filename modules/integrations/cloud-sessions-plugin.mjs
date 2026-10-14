@@ -82,10 +82,13 @@ export async function cloudSessionsPlugin(app, {
     const principal = { type: 'agent', ...seen.owner };
     const asked = seen.permission;
     const item = asked && (await serializeWorkQueue({ status: 'all' })).items.find((entry) => entry.id === asked.itemId);
-    if (asked && asked.request_id !== view.permission?.request_id) {
+    const result = item?.operatorActionResult;
+    // An approval whose allow post failed is dropped, so the still-pending request gets a fresh item.
+    const allowFailed = result && result.status !== 'rejected' && !(result.statusCode >= 200 && result.statusCode < 300);
+    if (asked && (asked.request_id !== view.permission?.request_id || allowFailed)) {
       if (item?.status === 'open') await dismissHumanQueueItem(item.id, { wsManager, principal });
       delete seen.permission;
-    } else if (item?.operatorActionResult?.status === 'rejected' && !asked.denied) {
+    } else if (result?.status === 'rejected' && !asked.denied) {
       await cloudRespond({ id, request_id: asked.request_id, allow: false }, cloudOpts);
       asked.denied = true;
     }
@@ -140,9 +143,9 @@ export async function cloudSessionsPlugin(app, {
     return launched;
   });
 
-  // Operator only: reached through the queue item's operator action, never by an agent.
+  // Dashboard only (the queue item's operator action); agents hold the bearer token, never this cookie.
   app.post('/api/cloud/sessions/:id/permission', async (req, reply) => {
-    if (req.duenoAuth?.principal?.type !== 'ui') return reply.code(403).send({ error: 'Only the operator can answer a cloud permission prompt' });
+    if (req.duenoAuth?.principal?.kind !== 'dashboard') return reply.code(403).send({ error: 'Only the operator can answer a cloud permission prompt' });
     return cloudRespond({ id: req.params.id, request_id: req.body?.request_id, allow: true }, cloudOpts);
   });
 

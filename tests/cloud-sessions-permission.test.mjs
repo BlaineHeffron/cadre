@@ -26,7 +26,12 @@ test('a cloud permission prompt becomes one operator-only queue item whose answe
   };
   f.routes['GET /v1/code/sessions/cse_p'] = () => [200, { response_shape: cloudSession('cse_p', shape) }];
   const posted = [];
-  f.routes['POST /v1/code/sessions/cse_p/events'] = (_url, body) => { posted.push(JSON.parse(body)); return [200, { results: [{ sequence_num: 9 }] }]; };
+  let eventsDown = false;
+  f.routes['POST /v1/code/sessions/cse_p/events'] = (_url, body) => {
+    if (eventsDown) return [500, { error: 'unavailable' }];
+    posted.push(JSON.parse(body));
+    return [200, { results: [{ sequence_num: 9 }] }];
+  };
 
   const commands = [];
   const { commandCenterAIPlugin } = await import('../modules/integrations/command-center-ai.mjs');
@@ -63,7 +68,12 @@ test('a cloud permission prompt becomes one operator-only queue item whose answe
   // No agent can answer: not the queue item, and not the allow route directly.
   await assert.rejects(mcp.handleToolCall('monitor_answer_human_queue_item', { id: item.id, optionId: 'approve' }, asOwner), /authenticated operator/);
   await assert.rejects(request('/api/cloud/sessions/cse_p/permission', { method: 'POST', body: { request_id: 'req_1' }, ...asOwner }), /Only the operator/);
+  // Agent sessions inherit the bearer AUTH_TOKEN (a `ui` principal); it cannot approve either.
+  const bearer = { authorization: `Bearer ${h.authToken}` };
+  assert.equal((await h.app.inject({ method: 'POST', url: `/api/command-center/work-queue/${item.id}/answer`, headers: bearer, payload: { optionId: 'approve' } })).statusCode, 403);
+  assert.equal((await h.app.inject({ method: 'POST', url: '/api/cloud/sessions/cse_p/permission', headers: bearer, payload: { request_id: 'req_1' } })).statusCode, 403);
   assert.equal(posted.length, 0);
+  assert.equal((await items())[0].status, 'open');
 
   // The operator's Approve posts the allow control_response with the pending input, once.
   assert.equal((await answer(item.id, 'approve')).statusCode, 200);
@@ -99,4 +109,24 @@ test('a cloud permission prompt becomes one operator-only queue item whose answe
   assert.equal(stale.statusCode, 409);
   assert.equal(posted.length, 2);
   assert.equal((await items()).length, 3);
+
+  // A failed allow post is not terminal: the still-pending request gets one fresh item, approved once.
+  ask('req_4');
+  await step();
+  const fourth = (await items()).find((entry) => entry.status === 'open');
+  eventsDown = true;
+  assert.equal((await answer(fourth.id, 'approve')).statusCode, 200);
+  assert.equal((await items()).find((entry) => entry.id === fourth.id).operatorActionResult.statusCode, 500);
+  eventsDown = false;
+  await step();
+  await step();
+  const retry = (await items()).filter((entry) => entry.status === 'open');
+  assert.equal(retry.length, 1);
+  assert.equal(retry[0].operatorAction.body.request_id, 'req_4');
+  assert.equal(posted.length, 2);
+  assert.equal((await answer(retry[0].id, 'approve')).statusCode, 200);
+  await step();
+  assert.equal(posted.length, 3);
+  assert.equal(posted[2].events[0].payload.response.request_id, 'req_4');
+  assert.equal(posted[2].events[0].payload.response.response.behavior, 'allow');
 });

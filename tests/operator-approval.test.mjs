@@ -102,7 +102,7 @@ test('operator actions use the real queue, auth, MCP transport and GitHub routes
     assert.equal(persisted.items.find((entry) => entry.id === id).operatorActionResult.statusCode, 200);
     const reloaded = await import('../modules/integrations/command-center-ai.mjs?operatorApprovalReload');
     await assert.rejects(reloaded.answerHumanQueueItem(id, { optionId: 'approve' }, {
-      principal: { type: 'ui' }, executeOperatorAction: () => { throw new Error('Must not execute after reload'); },
+      principal: { type: 'ui', kind: 'dashboard', sessionId: 'browser' }, executeOperatorAction: () => { throw new Error('Must not execute after reload'); },
     }), /already routed/);
   });
 

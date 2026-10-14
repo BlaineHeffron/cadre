@@ -440,7 +440,9 @@ export async function answerHumanQueueItem(id, input = {}, {
     error.statusCode = 404;
     throw error;
   }
-  if ((item.operatorAction || item.sessionInteraction) && principal?.type !== 'ui') {
+  // Operator actions run with dashboard authority, so only the dashboard may approve them: agent
+  // sessions inherit the bearer AUTH_TOKEN, which is also a `ui` principal.
+  if ((item.operatorAction && principal?.kind !== 'dashboard') || (item.sessionInteraction && principal?.type !== 'ui')) {
     const error = new Error(`${item.operatorAction ? 'Operator action' : 'Session interaction'} answers require an authenticated operator`);
     error.statusCode = 403;
     throw error;
