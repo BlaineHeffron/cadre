@@ -27,7 +27,7 @@ import { agentProviderPreferencesPlugin } from './modules/agent/provider-prefere
 import { fleetPlugin } from './modules/fleet/index.mjs';
 import { githubAgentsPlugin } from './modules/integrations/github-agents-plugin.mjs';
 import { scheduledAgentsPlugin } from './modules/integrations/scheduled-agents-plugin.mjs';
-import { buildScheduledAgentStore, SchedulerLoop } from './modules/integrations/scheduled-agents.mjs';
+import { buildScheduledAgentStore, listEnabledAgentBackendKinds, lookupSessionStateVia, SchedulerLoop } from './modules/integrations/scheduled-agents.mjs';
 import { audioPlugin } from './modules/audio/index.mjs';
 import { quickCapturePlugin } from './modules/integrations/quick-capture.mjs';
 import { pushPlugin } from './modules/platform/push.mjs';
@@ -321,42 +321,8 @@ async function launchScheduledAgentSession({
   }, authContext ? { authContext } : null);
 }
 
-async function lookupScheduledAgentSessionState(sessionId, targetKind = '') {
-  const id = String(sessionId || '').trim();
-  if (!id) return null;
-  const kinds = targetKind ? [String(targetKind).trim().toLowerCase()] : await listEnabledAgentBackendKinds();
-  for (const kind of kinds) {
-    let payload;
-    try {
-      payload = await internalRequest(`/api/${kind}/sessions`);
-      if (payload?.stale) throw new Error(`${kind} session list is stale`);
-    } catch (error) {
-      if (targetKind) throw error;
-      continue;
-    }
-    const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
-    const session = sessions.find((entry) => entry?.id === id);
-    if (session) {
-      const state = session.state && typeof session.state === 'object' ? session.state : {};
-      return {
-        ...state,
-        lifecycle: state.lifecycle || (session.lifecycle || ''),
-        capabilities: state.capabilities || session.capabilities || {},
-      };
-    }
-  }
-  return targetKind
-    ? { status: 'ended', lifecycle: 'missing', error: `Target ${targetKind}:${id} not found` }
-    : null;
-}
-
-async function listEnabledAgentBackendKinds() {
-  const payload = await internalRequest('/api/agents/providers').catch(() => null);
-  const kinds = (payload?.providers || [])
-    .filter((entry) => entry?.enabled !== false)
-    .map((entry) => String(entry?.backendType || entry?.sessionKind || '').trim().toLowerCase())
-    .filter(Boolean);
-  return [...new Set(kinds.length > 0 ? kinds : ['claude', 'codex', 'pi'])];
+function lookupScheduledAgentSessionState(sessionId, targetKind = '') {
+  return lookupSessionStateVia(internalRequest, sessionId, targetKind);
 }
 
 const telegramBusThreads = new BusThreadIndex();
@@ -376,7 +342,7 @@ async function listTelegramBusThreadsBySession() {
 async function listTelegramSessions() {
   const output = [];
   const busThreads = await listTelegramBusThreadsBySession();
-  for (const kind of await listEnabledAgentBackendKinds()) {
+  for (const kind of await listEnabledAgentBackendKinds(internalRequest)) {
     const payload = await internalRequest(`/api/${kind}/sessions?includeReadOnly=true`).catch((error) => {
       app.log.warn(`telegram session discovery ${kind} failed: ${error.message || error}`);
       return null;

@@ -2576,7 +2576,7 @@ async function sessionsPlugin(app, {
     const fresh = await Promise.race([listRefresh, new Promise((resolve) => {
       timer = setTimeout(resolve, LIST_RESPONSE_DEADLINE_MS, null);
     })]).finally(() => clearTimeout(timer));
-    return fresh ? { sessions: fresh } : { sessions: lastSessionList || [], stale: true };
+    return fresh != null ? { sessions: fresh } : { sessions: lastSessionList || [], stale: true };
   });
 
   app.post(`/api/${config.id}/sessions`, async (req, reply) => {

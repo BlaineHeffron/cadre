@@ -46,11 +46,13 @@ exec /usr/bin/tmux -L '${socket}' "$@"
     import assert from 'node:assert/strict';
     import Fastify from ${JSON.stringify(fastifyUrl)};
     import { readFile, rm, writeFile } from 'node:fs/promises';
+
     const { createAgentSessionsProvider } = await import(${JSON.stringify(sessionsUrl)});
     const { createAgentAdapters } = await import(${JSON.stringify(adaptersUrl)});
     const app = Fastify({ logger: false });
     const wsManager = { channels: new Map(), broadcast() {}, onChannel() {} };
     await app.register(createAgentSessionsProvider('codex').plugin, { wsManager });
+    await app.register(createAgentSessionsProvider('pi').plugin, { wsManager });
     await app.ready();
     let now = Date.now();
     Date.now = () => now;
@@ -61,6 +63,9 @@ exec /usr/bin/tmux -L '${socket}' "$@"
       assert.equal(response.statusCode, 200, response.body);
       return { ...response.json(), elapsedMs: performance.now() - startedAt };
     };
+
+    const empty = await app.inject({ method: 'GET', url: '/api/pi/sessions' });
+    assert.deepEqual(empty.json(), { sessions: [] }, 'a finished empty list is not stale');
 
     const fresh = await list();
     assert.equal(fresh.stale, undefined);
@@ -83,6 +88,7 @@ exec /usr/bin/tmux -L '${socket}' "$@"
     const recovered = await list();
     assert.equal(recovered.stale, undefined);
     assert.deepEqual(recovered.sessions.map((s) => s.id), ['${sessionId}']);
+
     await app.close();
   `;
   const env = {

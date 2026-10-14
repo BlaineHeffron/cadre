@@ -726,6 +726,47 @@ async function recordLauncherSkip({ store, task, session, claimMetadata, nowMs }
   };
 }
 
+// A stale list does not prove a session ended. Report it as live so a spawn tick skips
+// rather than launching a duplicate next to a session the list could not see.
+export async function lookupSessionStateVia(request, sessionId, targetKind = '') {
+  const id = String(sessionId || '').trim();
+  if (!id) return null;
+  const kinds = targetKind ? [String(targetKind).trim().toLowerCase()] : await listEnabledAgentBackendKinds(request);
+  let stale = false;
+  for (const kind of kinds) {
+    let payload;
+    try {
+      payload = await request(`/api/${kind}/sessions`);
+      if (payload?.stale) throw new Error(`${kind} session list is stale`);
+    } catch (error) {
+      if (targetKind) throw error;
+      stale ||= Boolean(payload?.stale);
+      continue;
+    }
+    const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+    const session = sessions.find((entry) => entry?.id === id);
+    if (session) {
+      const state = session.state && typeof session.state === 'object' ? session.state : {};
+      return {
+        ...state,
+        lifecycle: state.lifecycle || (session.lifecycle || ''),
+        capabilities: state.capabilities || session.capabilities || {},
+      };
+    }
+  }
+  if (targetKind) return { status: 'ended', lifecycle: 'missing', error: `Target ${targetKind}:${id} not found` };
+  return stale ? { lifecycle: 'running', status: 'unknown' } : null;
+}
+
+export async function listEnabledAgentBackendKinds(request) {
+  const payload = await request('/api/agents/providers').catch(() => null);
+  const kinds = (payload?.providers || [])
+    .filter((entry) => entry?.enabled !== false)
+    .map((entry) => String(entry?.backendType || entry?.sessionKind || '').trim().toLowerCase())
+    .filter(Boolean);
+  return [...new Set(kinds.length > 0 ? kinds : ['claude', 'codex', 'pi'])];
+}
+
 function isTerminalSessionState(value) {
   if (value == null || value === false) return true;
   return value?.status === 'ended' || ['ended', 'missing'].includes(value?.lifecycle);
