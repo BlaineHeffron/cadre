@@ -267,6 +267,15 @@ function buildCloudAdapter() {
     },
     async captureSession() { return ''; },
     async deleteSession() { return { ok: true, status: 'detached' }; },
+    // Every turn costs credits and is posted back, so a cloud hears only messages addressed to it,
+    // and never another cloud's: a reply to it, its id or title, or @clouds / "all clouds".
+    addressed(app, sessionId, { from, body, parent }) {
+      if (from?.kind === 'cloud') return false;
+      if (parent?.from?.kind === 'cloud' && parent.from.sessionId === sessionId) return true;
+      const text = String(body || '').toLowerCase();
+      const title = app.agentBusLifecycle?.cloudSessions?.get(sessionId)?.title?.toLowerCase();
+      return /@clouds\b|\ball clouds\b/.test(text) || text.includes(sessionId.toLowerCase()) || Boolean(title && text.includes(title));
+    },
     async injectEnvelope(app, sessionId, envelopeText) {
       tracked(app, sessionId);
       const room = /^\[ROOM_MESSAGE \S+ room=(\S+) /.exec(envelopeText)?.[1];

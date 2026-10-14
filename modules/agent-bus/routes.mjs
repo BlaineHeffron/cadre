@@ -409,8 +409,10 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (duplicate) {
       return { statusCode: 200, payload: { message: duplicate, deliveries: (snapshot.deliveries || []).filter((item) => item.messageId === duplicate.id), deduped: true } };
     }
+    const parent = replyTo ? store.getMessage(replyTo) : null;
     const targets = snapshot.thread.participants.filter((item) => adapters[item.kind]
-      && participantKey(item) !== participantKey(from)).map(participantRef);
+      && participantKey(item) !== participantKey(from)
+      && (adapters[item.kind].addressed?.(app, item.sessionId, { from, body, parent }) ?? true)).map(participantRef);
     const owner = snapshot.thread.createdBy;
     if (resolvedType === 'result' && adapters[owner?.kind] && !threadHasParticipant(snapshot.thread, owner)
       && participantKey(owner) !== participantKey(from)) targets.push(participantRef(owner));
@@ -484,6 +486,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
   app.agentBusLifecycle.directMessage = directMessage;
   app.agentBusLifecycle.send = send;
   app.agentBusLifecycle.addParticipant = (threadId, participant) => store.addThreadParticipant(threadId, participant);
+  app.agentBusLifecycle.removeParticipant = (threadId, participant) => store.removeThreadParticipant(threadId, participant);
 
   app.post('/api/agent-bus/dm', { schema: { body: bodySchema({ from: agentRef, target: agentRef,
     body: string(BODY_MAX, 1), summary: string(200), replyTo: string(ID_MAX) }, ['from', 'target', 'body']) } }, async (req, reply) => {
