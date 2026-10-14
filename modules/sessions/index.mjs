@@ -2242,6 +2242,8 @@ async function sessionsPlugin(app, {
         delayMs: config.startupDelayMs,
         startupDelayMs: config.initialPromptDelayMs || config.startupDelayMs,
         bufferPrefix: config.bufferPrefix,
+        icrnlOff: config.id === 'claude',
+        warn: (err) => app.log.warn({ id, err: err.message }, 'Claude pane icrnl reset failed'),
       }),
       audit: async (transition) => {
         if (transition.state === 'sending' || transition.state === 'completed') resetSessionPolling(id);
@@ -2981,6 +2983,8 @@ async function sessionsPlugin(app, {
           enter,
           delayMs: config.startupDelayMs,
           bufferPrefix: config.bufferPrefix,
+          icrnlOff: config.id === 'claude',
+          warn: (err) => app.log.warn({ id, err: err.message }, 'Claude pane icrnl reset failed'),
         });
         resetSessionPolling(id);
         const sentAt = Date.now();

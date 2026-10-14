@@ -50,6 +50,15 @@ describe('tmux input', () => {
     assert.deepEqual(execFn.calls.map((call) => call.args[0]), ['send-keys']);
   });
 
+  it('logs a failed icrnl reset and still sends Enter', async () => {
+    const execFn = makeExec({ failCommand: 'display-message' });
+    const warnings = [];
+    await sendTmuxText(execFn, { target: 'sess:1.0', text: 'hi', delayMs: 0, icrnlOff: true, warn: (err) => warnings.push(err.message) });
+
+    assert.deepEqual(execFn.calls.map((call) => call.args[0]), ['load-buffer', 'paste-buffer', 'display-message', 'send-keys']);
+    assert.deepEqual(warnings, ['display-message failed']);
+  });
+
   it('surfaces tmux command failures with stderr', async () => {
     const execFn = makeExec({ failCommand: 'paste-buffer' });
     await assert.rejects(
