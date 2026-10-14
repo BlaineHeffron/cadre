@@ -9,6 +9,20 @@ export async function sendTmuxEnter(execFn, target) {
   if (code !== 0) throw new Error(stderr || 'Failed to send Enter');
 }
 
+// Claude Code runs its pane with -icrnl. A child that restores "sane" stty flips
+// it back, and the kernel then turns Enter into Ctrl+J: a newline, not a submit.
+async function keepIcrnlOff(execFn, target, warn) {
+  try {
+    const tty = await execFn('tmux', ['display-message', '-p', '-t', target, '#{pane_tty}']);
+    const path = tty.code === 0 ? tty.stdout.trim() : '';
+    if (!path) throw new Error(tty.stderr || 'Failed to read pane tty');
+    const stty = await execFn('stty', ['-F', path, '-icrnl']);
+    if (stty.code !== 0) throw new Error(stty.stderr || 'Failed to clear icrnl');
+  } catch (err) {
+    warn(err);
+  }
+}
+
 export async function sendTmuxText(execFn, {
   target,
   text = '',
@@ -16,6 +30,8 @@ export async function sendTmuxText(execFn, {
   delayMs = 300,
   sleepFn = sleep,
   bufferPrefix = 'dueno',
+  icrnlOff = false,
+  warn = () => {},
 } = {}) {
   if (typeof text !== 'string') {
     throw new Error('Missing text in request body');
@@ -32,6 +48,7 @@ export async function sendTmuxText(execFn, {
 
   if (enter !== false) {
     if (text && delayMs > 0) await sleepFn(delayMs);
+    if (icrnlOff) await keepIcrnlOff(execFn, target, warn);
     await sendTmuxEnter(execFn, target);
   }
 

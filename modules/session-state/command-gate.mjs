@@ -1107,6 +1107,8 @@ export function createTmuxCommandExecutor({
   dialogKeyDelayMs = 75,
   sleepFn = sleep,
   bufferPrefix = 'dueno-command-gate',
+  icrnlOff = false,
+  warn,
 } = {}) {
   if (typeof execFn !== 'function') throw new TypeError('execFn is required');
   const tmuxTarget = text(target);
@@ -1164,7 +1166,7 @@ export function createTmuxCommandExecutor({
       // Do not submit a user's draft or interrupt an active turn.
       if (/esc to interrupt/i.test(pane) || !/^[❯>]\s*$/.test(draft)) throw new Error('Claude composer is not empty and idle');
       try {
-        await sendTmuxText(execFn, { target: tmuxTarget, text: '/mcp', delayMs, sleepFn, bufferPrefix });
+        await sendTmuxText(execFn, { target: tmuxTarget, text: '/mcp', delayMs, sleepFn, bufferPrefix, icrnlOff, warn });
         const list = await screen((pane) => menu(pane, 'Manage MCP servers'));
         // Reconnect a connected dueno too: a new build may add tools, and only a reconnect refetches tools/list.
         if (!/[✔✘]\s+dueno(?:\s|$)/i.test(menu(list, 'Manage MCP servers'))) {
@@ -1212,6 +1214,8 @@ export function createTmuxCommandExecutor({
       delayMs: operation.operation === 'startup' ? startupDelayMs : delayMs,
       sleepFn,
       bufferPrefix,
+      icrnlOff,
+      warn,
     });
   };
 }

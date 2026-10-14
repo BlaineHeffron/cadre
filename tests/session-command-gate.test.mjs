@@ -695,6 +695,24 @@ describe('session command gate', () => {
     assert.deepEqual(calls[4].args, ['send-keys', '-t', 'codex-command-gate', '--', 'Enter']);
   });
 
+  it('clears icrnl on a Claude pane tty before every Enter, including the bare submit retry', async () => {
+    const calls = [];
+    const execFn = async (command, args) => {
+      calls.push([command, ...args].join(' '));
+      return { code: 0, stdout: args[0] === 'display-message' ? '/dev/pts/9\n' : '', stderr: '' };
+    };
+    const execute = createTmuxCommandExecutor({ execFn, target: 'claude-pane', delayMs: 0, icrnlOff: true });
+
+    await execute({ type: 'message', text: 'hello', enter: true });
+    await execute({ operation: 'startup', text: '', enter: true });
+
+    const reset = ['tmux display-message -p -t claude-pane #{pane_tty}', 'stty -F /dev/pts/9 -icrnl'];
+    assert.deepEqual(calls.filter((call) => !/buffer/.test(call)), [
+      ...reset, 'tmux send-keys -t claude-pane -- Enter',
+      ...reset, 'tmux send-keys -t claude-pane -- Enter',
+    ]);
+  });
+
   it('uses the longer submit delay for startup prompts', async () => {
     const delays = [];
     const execute = createTmuxCommandExecutor({
