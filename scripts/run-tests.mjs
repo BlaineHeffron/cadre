@@ -1,4 +1,5 @@
-import { readdirSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -28,6 +29,13 @@ for (let index = 0; index < forwardedArgs.length; index += 1) {
   explicitTestTargets.push(arg);
 }
 
+// Tests get only what node, git and the OS need plus a temp HOME, so host Cadre config,
+// agent session vars and home-dir state never leak in. A test needing a var sets it itself.
+const testHome = mkdtempSync(join(tmpdir(), 'cadre-test-home-'));
+process.on('exit', () => rmSync(testHome, { recursive: true, force: true }));
+const allowedVar = /^(PATH|TMPDIR|TEMP|TMP|LANG|LC_\w+|TERM|SHELL|USER|LOGNAME|TZ|NODE_\w+|CI|GITHUB_ACTIONS)$/;
+const testEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => allowedVar.test(key)));
+
 const testArgs = explicitTestTargets.length > 0 ? explicitTestTargets : listDefaultTests();
 
 function runNodeTests(targets, extraFlags = []) {
@@ -41,7 +49,8 @@ function runNodeTests(targets, extraFlags = []) {
   ], {
     stdio: 'inherit',
     env: {
-      ...process.env,
+      ...testEnv,
+      HOME: testHome,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
     },
   });
