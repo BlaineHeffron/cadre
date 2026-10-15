@@ -280,7 +280,7 @@ describe('GitHub agent lifecycle', () => {
       assert.match(pr, /- \[N\] <file:line> <one line>/);
       assert.match(pr, /exit the session \(end the agent process\)/);
       assert.match(pr, /Do not push commits, merge, force-push, change branches/);
-      assert.match(pr, /If the worktree has `\.cadre\/review\.md`, read it first and follow it/);
+      assert.match(pr, /If the worktree has `\.cadre\/review\.md`, read it first .*never overrides its rules/);
       assert.match(pr, autoReviewEnabled ? /REQUEST_CHANGES only when BLOCKING > 0/ : /use COMMENT only/);
     }
     const issue = buildGithubAgentPrompt({ kind: 'issue' });

@@ -78,17 +78,44 @@ test('authenticated operator can delete an agent watch linked to a room it does 
   assert.deepEqual(await s.store.listWatches(), []);
 });
 
-test('a watched PR whose head moves is returned once for a fresh review, only when PR review is on', async (t) => {
+test('pollRepo reviews a moved trusted head once, after the live reviewer ends, without touching lastSeen', async (t) => {
   const s = await setup(t);
   await s.watch();
-  const repo = async (prEnabled) => s.store.upsertRepo({ owner: 'octo', repo: 'demo', authRef: 'TEST_GITHUB_TOKEN', enabled: true, prEnabled, issueEnabled: false });
-  assert.deepEqual(await s.poller.pollWatches(await repo(true)), []);
-  s.setPr({ head: { sha: 'fff999' }, number: 1, title: 'Fix' });
-  const moved = await s.poller.pollWatches(await repo(true));
-  assert.deepEqual(moved.map((item) => [item.number, item.headSha]), [[1, 'fff999']]);
-  assert.deepEqual(await s.poller.pollWatches(await repo(true)), []);
-  s.setPr({ head: { sha: 'eee888' } });
-  assert.deepEqual(await s.poller.pollWatches(await repo(false)), []);
+  await s.store.upsertRepo({ owner: 'octo', repo: 'demo', authRef: 'TEST_GITHUB_TOKEN', enabled: true, prEnabled: true, issueEnabled: false });
+  const launches = [];
+  let sessions = [];
+  let launch = async () => ({ sessionId: `sess_${launches.length}` });
+  Object.assign(s.poller, {
+    resolveScratchWorkDir: async () => '/tmp/github-agents-scratch',
+    listExistingSessions: async () => sessions,
+    sessionLauncher: async (input) => { launches.push(input.metadata.github_number); return launch(); },
+  });
+  s.poller.config.workDir = '/tmp/github-agents';
+  const list = s.poller.fetchImpl;
+  s.poller.fetchImpl = async (url) => (new URL(url).pathname.endsWith('/pulls') ? new Response(JSON.stringify([await (await list(`${url}/1`)).json()])) : list(url));
+  const poll = async (lastSeenPrNumber = 5) => {
+    await s.store.updateRepo('octo/demo', { lastSeenPrNumber });
+    const result = await s.poller.pollRepo(await s.store.getRepo('octo/demo'));
+    return { lastSeen: (await s.store.getRepo('octo/demo')).lastSeenPrNumber, head: (await s.store.listWatches())[0].headSha, result };
+  };
+  s.setPr({ number: 1, title: 'Fix', author_association: 'MEMBER' });
+  assert.equal((await poll()).head, 'abcdef123');
+  s.setPr({ head: { sha: 'bbb222' } });
+  sessions = [{ id: 'old', source: 'dashboard', workDir: '/tmp/github-agents/worktrees/octo-demo/pr-1-abc/demo' }];
+  assert.deepEqual([(await poll()).head, launches], ['abcdef123', []]);
+  sessions = [];
+  launch = async () => ({ sessionId: '' });
+  assert.deepEqual(await poll().then(({ lastSeen, head }) => [lastSeen, head]), [5, 'abcdef123']);
+  s.poller.spawnBackoff.clear();
+  launch = async () => ({ sessionId: `sess_${launches.length}` });
+  assert.deepEqual(await poll().then(({ lastSeen, head }) => [lastSeen, head]), [5, 'bbb222']);
+  await poll();
+  s.setPr({ head: { sha: 'ccc333' }, author_association: 'NONE' });
+  await poll();
+  assert.deepEqual(launches, [1, 1]);
+  s.setPr({ head: { sha: 'ddd444' }, author_association: 'MEMBER' });
+  await poll(0);
+  assert.deepEqual(launches, [1, 1, 1]);
 });
 
 test('reviews and conflicts notify once, re-arm, ignore comments, and follow room transfer', async (t) => {
