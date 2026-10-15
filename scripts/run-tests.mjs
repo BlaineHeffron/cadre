@@ -1,4 +1,5 @@
-import { readdirSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -28,6 +29,13 @@ for (let index = 0; index < forwardedArgs.length; index += 1) {
   explicitTestTargets.push(arg);
 }
 
+// Tests must not see the host's Cadre config, the running agent's session vars, or its
+// home-dir state: drop CADRE_/DM_/DUENO_ and per-user config vars and use a temp HOME.
+const testHome = mkdtempSync(join(tmpdir(), 'cadre-test-home-'));
+process.on('exit', () => rmSync(testHome, { recursive: true, force: true }));
+const hostVar = /^(CADRE|DM|DUENO)_|^(CLAUDE_CONFIG_DIR|CODEX_HOME|XDG_(CONFIG|DATA|STATE|CACHE)_HOME)$/;
+const testEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !hostVar.test(key)));
+
 const testArgs = explicitTestTargets.length > 0 ? explicitTestTargets : listDefaultTests();
 
 function runNodeTests(targets, extraFlags = []) {
@@ -41,7 +49,8 @@ function runNodeTests(targets, extraFlags = []) {
   ], {
     stdio: 'inherit',
     env: {
-      ...process.env,
+      ...testEnv,
+      HOME: testHome,
       CADRE_AGENT_CGROUP_ISOLATION: '0',
     },
   });

@@ -10,5 +10,7 @@ if (process.env.NODE_TEST_CONTEXT) {
   const dir = mkdtempSync(join(tmpdir(), 'cadre-test-state-'));
   delete process.env.CADRE_STATE_DIR;
   process.env.DM_STATE_DIR = dir;
+  // The default UI-skills overlay is the checkout's git-ignored state/skills.
+  process.env.DM_LAUNCH_SKILLS_LOCAL_DIR = join(dir, 'skills');
   process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
 }
