@@ -382,7 +382,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       limit: normalizeLimit(limit, DEFAULT_LIST_LIMIT),
       offset: normalizeOffset(offset),
     });
-    const items = page.items.map((session) => pickFields(compact ? compactSession(session) : session, fields));
+    const items = page.items.map((session) => pickFields(compact && !fields?.length ? compactSession(session) : session, fields));
     return {
       sessionCount: items.length,
       total: page.total,
@@ -408,7 +408,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
           compact: { type: 'boolean', description: 'Return compact summaries by default. Set false for full session objects.' },
           fields: {
             type: 'array',
-            description: 'Optional list of session fields to keep in each result.',
+            description: 'Optional list of session fields to keep in each result, selected from the full session object (overrides compact).',
             items: { type: 'string' },
           },
         },
@@ -427,7 +427,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
           compact: { type: 'boolean', description: 'Return compact summaries by default. Set false for full session objects.' },
           fields: {
             type: 'array',
-            description: 'Optional list of session fields to keep in each result.',
+            description: 'Optional list of session fields to keep in each result, selected from the full session object (overrides compact).',
             items: { type: 'string' },
           },
         },
@@ -446,7 +446,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
           compact: { type: 'boolean', description: 'Return compact summaries by default. Set false for full session objects.' },
           fields: {
             type: 'array',
-            description: 'Optional list of session fields to keep in each result.',
+            description: 'Optional list of session fields to keep in each result, selected from the full session object (overrides compact).',
             items: { type: 'string' },
           },
         },

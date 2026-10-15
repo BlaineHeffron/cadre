@@ -279,7 +279,7 @@ describe('Monitor MCP server', () => {
 
     const result = await server.handleToolCall('monitor_list_claude_sessions', {
       limit: 1,
-      fields: ['id', 'displayName', 'status'],
+      fields: ['id', 'workDir', 'source'],
     });
 
     assert.deepEqual(requests, ['/api/claude/sessions']);
@@ -293,8 +293,8 @@ describe('Monitor MCP server', () => {
       sessions: [
         {
           id: 'claude_2',
-          displayName: 'claude-2',
-          status: 'unknown',
+          workDir: '/tmp/project-2',
+          source: 'tmux-external',
         },
       ],
     });

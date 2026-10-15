@@ -609,7 +609,8 @@ export function buildAgentBusMcpServer({
         const payload = await request(args.scope === 'all' ? '/api/agent-bus/threads?status=open'
           : `/api/agent-bus/threads/by-participant?kind=${encodeURIComponent(actor.kind)}&sessionId=${encodeURIComponent(actor.sessionId)}&status=all`);
         const rooms = (payload?.threads || []).filter((thread) => args.scope !== 'all' || !thread.metadata?.dm).map((thread) => ({ id: thread.id, title: thread.title,
-          kind: thread.metadata?.dm ? 'dm' : 'room', status: thread.status }));
+          kind: thread.metadata?.dm ? 'dm' : 'room', status: thread.status,
+          participants: (thread.participants || []).filter((item) => item.kind !== 'user').length, owner: thread.createdBy || null }));
         const { items, ...page } = paginate(rooms, args);
         const result = { rooms: items, ...page };
         return textResult(JSON.stringify(result), result);
