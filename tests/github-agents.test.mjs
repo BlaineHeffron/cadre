@@ -280,6 +280,7 @@ describe('GitHub agent lifecycle', () => {
       assert.match(pr, /- \[N\] <file:line> <one line>/);
       assert.match(pr, /exit the session \(end the agent process\)/);
       assert.match(pr, /Do not push commits, merge, force-push, change branches/);
+      assert.match(pr, /If the worktree has `\.cadre\/review\.md`, read it first and follow it/);
       assert.match(pr, autoReviewEnabled ? /REQUEST_CHANGES only when BLOCKING > 0/ : /use COMMENT only/);
     }
     const issue = buildGithubAgentPrompt({ kind: 'issue' });
@@ -772,6 +773,24 @@ describe('GitHub agents poller', () => {
     assert.equal(result.spawned[0].number, 20);
     assert.deepEqual(launches.map((launch) => launch.metadata.github_number), [20]);
     assert.deepEqual(repoUpdates[0].patch.spawnedItemKeys, ['pr:19', 'pr:20']);
+  });
+
+  it('reviews a new head of an already reviewed PR once', async () => {
+    const launches = [];
+    const spawn = (spawnedItemKeys) => spawnGithubAgentsForPollResult({
+      updatedRepo: { ...BASE_REPO, id: 'octo/demo', lastSeenPrNumber: 19, spawnedItemKeys },
+      newPullRequests: [{ ...githubItem(19, 'Fixed'), headSha: 'bbb222' }],
+      newIssues: [],
+    }, {
+      config: { enabled: true, repoPaths: {}, workDir: '/tmp/github-agents', maxSpawnsPerPoll: 5 },
+      resolveScratchWorkDir: async ({ kind, number }) => `/tmp/${kind}-${number}`,
+      sessionLauncher: async (launch) => { launches.push(launch); return { sessionId: `sess_${launches.length}` }; },
+      repoStore: { updateRepo: async (id, patch) => ({ id, ...patch }) },
+    });
+    const first = await spawn(['pr:19']);
+    assert.deepEqual(first.updatedRepo.spawnedItemKeys, ['pr:19', 'pr:19@bbb222']);
+    await spawn(first.updatedRepo.spawnedItemKeys);
+    assert.deepEqual(launches.map((launch) => launch.metadata.github_number), [19]);
   });
 
   it('does not spawn when a live existing session is already in the item worktree', async () => {

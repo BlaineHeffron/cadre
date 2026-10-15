@@ -51,7 +51,7 @@ function normalizeSpawnedItemKeys(value) {
   const keys = [];
   for (const entry of value) {
     const key = normalizeText(entry);
-    if (!/^(pr|issue):\d+$/.test(key) || seen.has(key)) continue;
+    if (!/^(pr|issue):\d+(@[0-9a-f]+)?$/.test(key) || seen.has(key)) continue;
     seen.add(key);
     keys.push(key);
   }
@@ -62,7 +62,7 @@ function githubItemSpawnKey(kind, item = {}) {
   const normalizedKind = normalizeText(kind).toLowerCase();
   const number = Number(item.number || 0);
   if ((normalizedKind !== 'pr' && normalizedKind !== 'issue') || !Number.isInteger(number) || number <= 0) return '';
-  return `${normalizedKind}:${number}`;
+  return `${normalizedKind}:${number}${item.headSha ? `@${item.headSha}` : ''}`;
 }
 
 function withSpawnedItemKey(repo = {}, key = '') {
@@ -598,13 +598,14 @@ export class GithubAgentPoller {
         updatedRepo: safeRepoRecord(repo),
       };
     }
-    if (!suppressSpawn && repo.enabled) await this.pollWatches(repo);
+    const moved = !suppressSpawn && repo.enabled ? await this.pollWatches(repo) : [];
     const result = await pollGithubRepo(repo, {
       fetchImpl: this.fetchImpl,
       env: this.config.env || process.env,
       now: this.now,
       timeoutMs: this.timeoutMs,
     });
+    if (moved.length && !result.error && !result.skipped) result.newPullRequests = [...(result.newPullRequests || []), ...moved];
     const deletedSessions = [];
     if (!suppressSpawn && !result.error && !result.skipped && typeof this.deleteSession === 'function') {
       const sessions = this.listExistingSessions
@@ -666,7 +667,9 @@ export class GithubAgentPoller {
     return payload;
   }
 
+  // Returns watched open PRs whose head moved since the last poll, for a fresh review of the new head.
   async pollWatches(repo) {
+    const moved = [];
     for (const watch of (await this.repoStore.getRepo(repo.id))?.watches || []) {
       try {
         const notify = (line) => {
@@ -694,12 +697,14 @@ export class GithubAgentPoller {
           await this.repoStore.updateWatch(repo.id, watch.number);
         } else {
           if (pr.mergeable_state === 'dirty' && watch.mergeableState !== 'dirty') await notify('has merge conflict');
-          await this.repoStore.updateWatch(repo.id, watch.number, { mergeableState: pr.mergeable_state });
+          if (repo.prEnabled && watch.headSha && pr.head?.sha && pr.head.sha !== watch.headSha) moved.push({ ...normalizeGithubItem(pr), headSha: pr.head.sha });
+          await this.repoStore.updateWatch(repo.id, watch.number, { mergeableState: pr.mergeable_state, headSha: pr.head?.sha });
         }
       } catch (error) {
         this.log?.warn?.({ repoId: repo.id, number: watch.number, code: sanitizedError(error) }, 'PR watch poll failed');
       }
     }
+    return moved;
   }
 
   pollOnce(options = {}) {
@@ -1294,6 +1299,7 @@ export function buildGithubAgentPrompt({
         ? 'autoReviewEnabled=true: you ARE authorized to post a GitHub pull-request review. Use REQUEST_CHANGES only when BLOCKING > 0; APPROVE only when BLOCKING = 0 and the change is clearly safe; otherwise COMMENT.'
         : 'autoReviewEnabled=false: use COMMENT only, regardless of findings. Never REQUEST_CHANGES or APPROVE.',
       'Add inline comments only for concrete line issues, as part of that single review.',
+      'If the worktree has `.cadre/review.md`, read it first and follow it (which tests to run, resource checks, review rules). If the PR already has reviews, check their [B] items against this head.',
     );
   } else {
     lines.push('Post exactly one issue triage comment with suspected files, likely cause and proposed fix. No code pushed.');

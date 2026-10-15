@@ -78,6 +78,19 @@ test('authenticated operator can delete an agent watch linked to a room it does 
   assert.deepEqual(await s.store.listWatches(), []);
 });
 
+test('a watched PR whose head moves is returned once for a fresh review, only when PR review is on', async (t) => {
+  const s = await setup(t);
+  await s.watch();
+  const repo = async (prEnabled) => s.store.upsertRepo({ owner: 'octo', repo: 'demo', authRef: 'TEST_GITHUB_TOKEN', enabled: true, prEnabled, issueEnabled: false });
+  assert.deepEqual(await s.poller.pollWatches(await repo(true)), []);
+  s.setPr({ head: { sha: 'fff999' }, number: 1, title: 'Fix' });
+  const moved = await s.poller.pollWatches(await repo(true));
+  assert.deepEqual(moved.map((item) => [item.number, item.headSha]), [[1, 'fff999']]);
+  assert.deepEqual(await s.poller.pollWatches(await repo(true)), []);
+  s.setPr({ head: { sha: 'eee888' } });
+  assert.deepEqual(await s.poller.pollWatches(await repo(false)), []);
+});
+
 test('reviews and conflicts notify once, re-arm, ignore comments, and follow room transfer', async (t) => {
   const s = await setup(t);
   await s.watch();
