@@ -154,14 +154,24 @@ process.stdout.write(JSON.stringify({ ok: true, session_id: args[args.indexOf('-
   await assert.rejects(mcp.handleToolCall('cloud_attach', { id: 'cse_b', thread_id: mine.id }, as(peer)), /Forbidden/);
   assert.deepEqual(h.app.agentBusLifecycle.cloudSessions.get('cse_b').owner, owner);
 
-  // With a title, attach makes a new room the caller owns but is not in. Someone else's session is refused before any room is made.
+  // With a title, attach makes a room of just the caller and the cloud. Someone else's session is refused before any room is made.
   f.routes['GET /v1/code/sessions/cse_c'] = () => [200, { response_shape: cloudSession('cse_c', { title: 'Fixer', external_metadata: {} }) }];
-  f.routes['GET /v1/code/sessions/cse_c/events'] = eventsRoute([]);
+  const eventsC = [];
+  f.routes['GET /v1/code/sessions/cse_c/events'] = eventsRoute(eventsC);
   await assert.rejects(mcp.handleToolCall('cloud_attach', { id: 'cse_c' }, as(peer)));
   const made = await mcp.handleToolCall('cloud_attach', { id: 'cse_c', title: 'Fix room' }, as(peer));
   const room = h.store.getThread(made.thread_id).thread;
   assert.deepEqual([room.title, room.createdBy], ['Fix room', peer]);
-  assert.deepEqual(room.participants.map((p) => `${p.kind}:${p.sessionId}`), ['cloud:cse_c']);
+  assert.deepEqual(room.participants.map((p) => `${p.kind}:${p.sessionId}`), ['codex:codex-1', 'cloud:cse_c']);
+  // Its turn's reply reaches the caller through the room.
+  eventsC.push(
+    { sequence_num: '1', event_type: 'assistant', payload: { message: { content: [{ type: 'text', text: 'Fixed it' }] } } },
+    { sequence_num: '2', event_type: 'result', payload: { result: 'Fixed it' } },
+  );
+  await h.app.agentBusLifecycle.cloudSessions.step();
+  const fixed = h.store.getThread(room.id).messages.find((m) => m.from.kind === 'cloud');
+  assert.equal(fixed?.body, 'Fixed it');
+  assert.deepEqual(h.store.getThread(room.id).deliveries.filter((d) => d.messageId === fixed.id).map((d) => d.target), [peer]);
   const roomCount = h.store.state.threads.length;
   await assert.rejects(mcp.handleToolCall('cloud_attach', { id: 'cse_c', title: 'Steal' }, as(owner)), /Forbidden/);
   assert.equal(h.store.state.threads.length, roomCount);

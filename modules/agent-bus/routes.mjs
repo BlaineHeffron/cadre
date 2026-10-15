@@ -485,7 +485,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
   }
   app.agentBusLifecycle.directMessage = directMessage;
   app.agentBusLifecycle.send = send;
-  app.agentBusLifecycle.createRoom = ({ title, createdBy }) => store.createThread({ title, createdBy });
+  app.agentBusLifecycle.createRoom = ({ title, owner }) => store.createThread({ title, createdBy: owner, participants: [owner] });
   app.agentBusLifecycle.addParticipant = (threadId, participant) => store.addThreadParticipant(threadId, participant);
   app.agentBusLifecycle.removeParticipant = (threadId, participant) => store.removeThreadParticipant(threadId, participant);
 

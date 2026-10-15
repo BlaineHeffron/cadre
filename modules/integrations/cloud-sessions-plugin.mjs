@@ -186,7 +186,7 @@ export async function cloudSessionsPlugin(app, {
     return null;
   }
 
-  // With `title` in place of `thread_id`, attach to a new room the caller owns but is not in.
+  // With `title` in place of `thread_id`, attach to a new room of just the caller and the cloud, so its replies reach the caller.
   app.post('/api/cloud/attach', async (req, reply) => {
     const owner = caller(req);
     const { id, title } = req.body;
@@ -197,7 +197,7 @@ export async function cloudSessionsPlugin(app, {
     const [view, tail] = await Promise.all([cloudStatus({ id }, cloudOpts), cloudOutput({ id, limit: 1 }, cloudOpts)]);
     if (title) {
       assertOwner(id, owner);
-      threadId = (await app.agentBusLifecycle.createRoom({ title, createdBy: owner })).id;
+      threadId = (await app.agentBusLifecycle.createRoom({ title, owner })).id;
     }
     await track(id, owner, view, { threadId, seq: tail.next_seq ?? 0, title: view.title });
     await app.agentBusLifecycle.addParticipant(threadId, cloudRef(id));
