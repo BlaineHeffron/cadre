@@ -1394,13 +1394,13 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'cloud_attach',
-      description: 'Add a Claude Code cloud session to a room you own or are in, or with title to a new room of just you and it, and watch it as its owner. Room messages addressed to it (a reply to it, its id or title, @clouds) are sent to it; its new assistant replies are posted to the room as cloud:<id>. Returns id, thread_id and status.',
+      description: 'Add a Claude Code cloud session to a room you own or are in, or with title to a new room you own but are not in (pair it with a reviewer there, who reports the result; a solo cloud needs no room, it DMs you), and watch it as its owner. Room messages addressed to it (a reply to it, its id or title, @clouds) are sent to it; its new assistant replies are posted to the room as cloud:<id>. Returns id, thread_id and status.',
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'string', minLength: 1, description: 'Cloud session id.' },
           thread_id: { type: 'string', minLength: 1, description: 'Room id. Pass this or title.' },
-          title: { type: 'string', minLength: 1, description: 'Title for a new room of just you and the cloud session. Pass this or thread_id.' },
+          title: { type: 'string', minLength: 1, description: 'Title for a new room you own (you are not added to it). Pass this or thread_id.' },
         },
         required: ['id'],
         additionalProperties: false,
