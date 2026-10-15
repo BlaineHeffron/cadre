@@ -249,7 +249,7 @@ test('monitor MCP exposes the cloud tools and validates their arguments', async 
   const names = mcp.listTools().map((tool) => tool.name);
   for (const name of ['cloud_status', 'cloud_output', 'cloud_send', 'cloud_launch', 'cloud_watch', 'cloud_attach', 'cloud_detach']) assert.ok(names.includes(name), name);
   await assert.rejects(mcp.handleToolCall('cloud_launch', { prompt: 'hi', repo: 'not a repo' }));
-  await assert.rejects(mcp.handleToolCall('cloud_attach', { id: 'cse_a' }));
+  await assert.rejects(mcp.handleToolCall('cloud_detach', { id: 'cse_a' }));
   await assert.rejects(mcp.handleToolCall('cloud_send', { id: 'cse_a' }));
   await assert.rejects(mcp.handleToolCall('cloud_send', { id: 'cse_a', text: 'hi', wait_s: 601 }));
   await assert.rejects(mcp.handleToolCall('cloud_output', { id: 'cse_a', limit: 0 }));
