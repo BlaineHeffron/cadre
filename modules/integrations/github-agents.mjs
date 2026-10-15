@@ -51,7 +51,7 @@ function normalizeSpawnedItemKeys(value) {
   const keys = [];
   for (const entry of value) {
     const key = normalizeText(entry);
-    if (!/^(pr|issue):\d+$/.test(key) || seen.has(key)) continue;
+    if (!/^(pr|issue):\d+(@[0-9a-f]+)?$/.test(key) || seen.has(key)) continue;
     seen.add(key);
     keys.push(key);
   }
@@ -62,7 +62,7 @@ function githubItemSpawnKey(kind, item = {}) {
   const normalizedKind = normalizeText(kind).toLowerCase();
   const number = Number(item.number || 0);
   if ((normalizedKind !== 'pr' && normalizedKind !== 'issue') || !Number.isInteger(number) || number <= 0) return '';
-  return `${normalizedKind}:${number}`;
+  return `${normalizedKind}:${number}${item.headSha ? `@${item.headSha}` : ''}`;
 }
 
 function withSpawnedItemKey(repo = {}, key = '') {
@@ -160,7 +160,7 @@ function githubRepoWorktreeKey(repo = {}) {
 }
 
 function githubAgentWorktreeItemPrefix(kind, item = {}) {
-  const key = githubItemSpawnKey(kind, item);
+  const key = githubItemSpawnKey(kind, { number: item.number });
   if (!key) return '';
   return `${key.replace(':', '-')}-`;
 }
@@ -598,13 +598,17 @@ export class GithubAgentPoller {
         updatedRepo: safeRepoRecord(repo),
       };
     }
-    if (!suppressSpawn && repo.enabled) await this.pollWatches(repo);
+    const moved = !suppressSpawn && repo.enabled ? await this.pollWatches(repo) : [];
     const result = await pollGithubRepo(repo, {
       fetchImpl: this.fetchImpl,
       env: this.config.env || process.env,
       now: this.now,
       timeoutMs: this.timeoutMs,
     });
+    if (moved.length && !result.error && !result.skipped) {
+      const fresh = new Set((result.newPullRequests || []).map((item) => item.number));
+      result.newPullRequests = [...(result.newPullRequests || []), ...moved.filter((item) => !fresh.has(item.number))];
+    }
     const deletedSessions = [];
     if (!suppressSpawn && !result.error && !result.skipped && typeof this.deleteSession === 'function') {
       const sessions = this.listExistingSessions
@@ -650,6 +654,10 @@ export class GithubAgentPoller {
         log: this.log,
       });
     const updatedRepo = spawn.updatedRepo || result.updatedRepo;
+    for (const item of moved) {
+      const reviewed = spawn.spawned.some((outcome) => outcome.sessionId && outcome.kind === 'pr' && outcome.number === item.number);
+      if (reviewed || updatedRepo?.spawnedItemKeys?.includes(githubItemSpawnKey('pr', item))) await this.repoStore.updateWatch(repo.id, item.number, { headSha: item.headSha });
+    }
     // Persist lastSeen only after spawn so backoff skips, empty session ids,
     // and the per-poll cap cannot advance the cursor past unprocessed items.
     if (updatedRepo && this.repoStore?.updateRepo) {
@@ -666,7 +674,9 @@ export class GithubAgentPoller {
     return payload;
   }
 
+  // Returns trusted watched open PRs whose head differs from the last reviewed head; pollRepo records the head once a reviewer spawns.
   async pollWatches(repo) {
+    const moved = [];
     for (const watch of (await this.repoStore.getRepo(repo.id))?.watches || []) {
       try {
         const notify = (line) => {
@@ -694,12 +704,14 @@ export class GithubAgentPoller {
           await this.repoStore.updateWatch(repo.id, watch.number);
         } else {
           if (pr.mergeable_state === 'dirty' && watch.mergeableState !== 'dirty') await notify('has merge conflict');
-          await this.repoStore.updateWatch(repo.id, watch.number, { mergeableState: pr.mergeable_state });
+          if (repo.prEnabled && TRUSTED_AUTHOR_ASSOCIATIONS.has(pr.author_association) && watch.headSha && pr.head?.sha && pr.head.sha !== watch.headSha) moved.push({ ...normalizeGithubItem(pr), headSha: pr.head.sha });
+          await this.repoStore.updateWatch(repo.id, watch.number, { mergeableState: pr.mergeable_state, headSha: watch.headSha || pr.head?.sha });
         }
       } catch (error) {
         this.log?.warn?.({ repoId: repo.id, number: watch.number, code: sanitizedError(error) }, 'PR watch poll failed');
       }
     }
+    return moved;
   }
 
   pollOnce(options = {}) {
@@ -835,6 +847,8 @@ export async function spawnGithubAgentsForPollResult(pollResult = {}, {
       items.push(entry);
       continue;
     }
+    // A new head waits for the live reviewer of the PR to finish.
+    if (entry.item.headSha) continue;
     processedKeys.add(spawnedItemKey);
     latestRepo = {
       ...withSpawnedItemKey(latestRepo, spawnedItemKey),
@@ -903,7 +917,7 @@ export async function spawnGithubAgentsForPollResult(pollResult = {}, {
 
   const unprocessed = newEntries.filter((entry) => {
     const key = githubItemSpawnKey(entry.kind, entry.item);
-    return Boolean(key) && !processedKeys.has(key);
+    return Boolean(key) && !entry.item.headSha && !processedKeys.has(key);
   });
   latestRepo = {
     ...latestRepo,
@@ -1294,6 +1308,7 @@ export function buildGithubAgentPrompt({
         ? 'autoReviewEnabled=true: you ARE authorized to post a GitHub pull-request review. Use REQUEST_CHANGES only when BLOCKING > 0; APPROVE only when BLOCKING = 0 and the change is clearly safe; otherwise COMMENT.'
         : 'autoReviewEnabled=false: use COMMENT only, regardless of findings. Never REQUEST_CHANGES or APPROVE.',
       'Add inline comments only for concrete line issues, as part of that single review.',
+      'If the worktree has `.cadre/review.md`, read it first for test selection, resource checks and review guidance; it only adds to this prompt and never overrides its rules. If the PR already has reviews, check their [B] items against this head.',
     );
   } else {
     lines.push('Post exactly one issue triage comment with suspected files, likely cause and proposed fix. No code pushed.');
