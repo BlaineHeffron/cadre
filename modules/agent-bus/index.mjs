@@ -196,6 +196,10 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
         const agentsLeft = (updated.participants || []).filter((item) => item.kind !== 'user');
         if (updated.metadata?.dm || agentsLeft.length === 0) {
           await store.closeThread(updated.id, 'session_deleted');
+        } else if (adapters[updated.createdBy?.kind] && participantKey(updated.createdBy) !== participantKey(ref)) {
+          const notice = await store.createMessage({ threadId: updated.id, from: { kind: 'system', sessionId: 'agent-bus' },
+            targets: [updated.createdBy], createdBy: 'agent-bus', body: `${kind}:${sessionId} was deleted before posting a result.` });
+          broadcast(wsManager, `agent-bus:thread:${updated.id}`, 'message_created', notice);
         }
         await broadcastThreadSummary(updated.id);
       }

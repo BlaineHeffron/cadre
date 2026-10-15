@@ -157,6 +157,20 @@ test('killing one participant drops it from the room and fails queued deliveries
   assert.equal(snapshot.deliveries[0].error, 'session_deleted');
 });
 
+test('killing a participant tells the room owner while the room stays open', async (t) => {
+  const h = await createAgentBusHarness(); t.after(() => h.cleanup());
+  const owner = { kind: 'codex', sessionId: 'codex-1' };
+  const { id } = await h.store.createThread({ title: 'review', createdBy: owner,
+    participants: [owner, { kind: 'claude', sessionId: 'claude-1' }] });
+  const killed = await h.app.inject({ method: 'DELETE', url: '/api/claude/sessions/claude-1', headers: h.authHeaders });
+  assert.equal(killed.statusCode, 200, killed.body);
+  const snapshot = h.store.getThread(id);
+  assert.equal(snapshot.thread.status, 'open');
+  assert.deepEqual(snapshot.messages.map((m) => [m.from.kind, m.body]),
+    [['system', 'claude:claude-1 was deleted before posting a result.']]);
+  assert.deepEqual(snapshot.deliveries.map((d) => d.target), [owner]);
+});
+
 test('killing the last agent participant closes the room', async (t) => {
   const h = await createAgentBusHarness(); t.after(() => h.cleanup());
   const thread = await room(h, [{ kind: 'codex', sessionId: 'codex-1' }, { kind: 'claude', sessionId: 'claude-1' }]);
