@@ -48,10 +48,11 @@ export async function cloudSessionsPlugin(app, {
   }
 
   // Track `id` for `owner`. The baseline is the session's current view, so registering never notifies.
-  // The owner of the room a session is attached to may take it over, so room_transfer hands off its clouds.
+  // The owner of the open room a session is attached to may take it over, so room_transfer hands off its clouds.
   async function track(id, owner, view, patch = {}) {
     const prior = state.sessions[id];
-    const roomOwner = prior?.threadId && same(app.agentBusLifecycle.getThread(prior.threadId)?.thread?.createdBy, owner);
+    const room = prior?.threadId && app.agentBusLifecycle.getThread(prior.threadId)?.thread;
+    const roomOwner = room?.status === 'open' && !room.metadata?.dm && same(room.createdBy, owner);
     if (prior && !same(prior.owner, owner) && !roomOwner) {
       throw Object.assign(new Error(`Cloud session ${id} is owned by ${prior.owner.kind}:${prior.owner.sessionId}`), { statusCode: 403 });
     }
