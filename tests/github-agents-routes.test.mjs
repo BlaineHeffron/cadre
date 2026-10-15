@@ -7,7 +7,6 @@ import {
   defaultSessionLauncher,
   githubAgentsPlugin,
 } from '../modules/integrations/github-agents-plugin.mjs';
-import { shouldAutoCloseSession } from '../modules/sessions/auto-close.mjs';
 
 const TEST_TOKEN = 'github-route-token';
 const tempFiles = [];
@@ -43,12 +42,8 @@ describe('GitHub agents routes', () => {
 
     assert.equal(result.id, 'session-98');
     assert.equal(creates[0].backendType, 'codex');
-    // A finished agent closes (freeing its PR for the next head's reviewer); a working one does not.
-    const close = (execution, executionSource) => shouldAutoCloseSession({
-      ...creates[0].input, now: 10 * 60 * 1000 + 1, idleSince: 1, execution, executionSource, lifecycle: 'running',
-    }).close;
-    assert.equal(close('idle', 'transcript'), true);
-    assert.equal(close('working', 'hook'), false);
+    assert.equal(creates[0].input.autoCloseMode, 'when_waiting_for_input');
+    assert.equal(creates[0].input.autoCloseAfterMs, 7200000);
     assert.deepEqual(commands, [{
       backendType: 'codex',
       sessionId: 'session-98',

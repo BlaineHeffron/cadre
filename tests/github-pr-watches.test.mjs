@@ -119,6 +119,37 @@ test('pollRepo reviews a moved trusted head once, after the live reviewer ends, 
   assert.deepEqual(launches, [1, 1, 1]);
 });
 
+test('pollRepo ends a finished reviewer for a moved head and reviews it, but waits on a working one', async (t) => {
+  const s = await setup(t);
+  await s.watch();
+  await s.store.upsertRepo({ owner: 'octo', repo: 'demo', authRef: 'TEST_GITHUB_TOKEN', enabled: true, prEnabled: true, issueEnabled: false, lastSeenPrNumber: 5 });
+  const launches = [];
+  const deleted = [];
+  let execution = 'working';
+  let sessions = [{ id: 'rev', source: 'github-agent', metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: 1 } }];
+  Object.assign(s.poller, {
+    resolveScratchWorkDir: async () => '/tmp/github-agents-scratch',
+    listExistingSessions: async () => sessions,
+    getSession: async () => ({ canonicalState: { execution } }),
+    deleteSession: async (session) => { deleted.push(session.id); sessions = []; },
+    sessionLauncher: async (input) => { launches.push(input.metadata.github_number); return { sessionId: `sess_${launches.length}` }; },
+  });
+  const list = s.poller.fetchImpl;
+  s.poller.fetchImpl = async (url) => (new URL(url).pathname.endsWith('/pulls') ? new Response(JSON.stringify([await (await list(`${url}/1`)).json()])) : list(url));
+  const poll = async () => {
+    await s.poller.pollRepo(await s.store.getRepo('octo/demo'));
+    return [(await s.store.listWatches())[0].headSha, deleted.length, launches.length];
+  };
+  s.setPr({ number: 1, title: 'Fix', author_association: 'MEMBER' });
+  await poll();
+  s.setPr({ head: { sha: 'bbb222' } });
+  assert.deepEqual(await poll(), ['abcdef123', 0, 0]);
+  execution = 'idle';
+  assert.deepEqual(await poll(), ['bbb222', 1, 1]);
+  sessions = [{ id: 'rev2', source: 'github-agent', metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: 1 } }];
+  assert.deepEqual(await poll(), ['bbb222', 1, 1]);
+});
+
 test('reviews and conflicts notify once, re-arm, ignore comments, and follow room transfer', async (t) => {
   const s = await setup(t);
   await s.watch();

@@ -102,9 +102,8 @@ export async function defaultSessionLauncher({
     runtime: selection.runtime,
     thinkingLevel,
     source: 'github-agent',
-    // Agents post once and stop; a TUI session can't exit itself, and a live pane blocks review of a new PR head.
     autoCloseMode: 'when_waiting_for_input',
-    autoCloseAfterMs: 10 * 60 * 1000,
+    autoCloseAfterMs: 2 * 60 * 60 * 1000,
     metadata,
     ...(sandbox ? { sandbox, githubToken } : {}),
   });
@@ -167,6 +166,7 @@ export async function githubAgentsPlugin(app, opts = {}) {
     listExistingSessions: opts.listExistingSessions,
     tmuxSessionExists: opts.tmuxSessionExists,
     deleteSession: opts.deleteSession || ((session) => createAgentAdapters()[session.backendType].deleteSession(app, session.id || session.sessionId)),
+    getSession: (session) => createAgentAdapters()[session.backendType].getSession(app, session.id || session.sessionId),
     getThread: (id) => app.agentBusLifecycle?.getThread?.(id),
     notifyWatch: async (target, text) => {
       const adapter = createAgentAdapters()[target?.kind];

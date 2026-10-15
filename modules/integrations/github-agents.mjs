@@ -556,6 +556,7 @@ export class GithubAgentPoller {
     listExistingSessions = null,
     tmuxSessionExists = null,
     deleteSession = null,
+    getSession = null,
     onResult = () => {},
     getThread = () => null,
     notifyWatch = async () => {},
@@ -576,6 +577,7 @@ export class GithubAgentPoller {
     this.listExistingSessions = listExistingSessions;
     this.tmuxSessionExists = tmuxSessionExists;
     this.deleteSession = deleteSession;
+    this.getSession = getSession;
     this.pollQueue = Promise.resolve();
     this.onResult = onResult;
     this.getThread = getThread;
@@ -622,6 +624,13 @@ export class GithubAgentPoller {
           const kind = metadata.github_kind;
           const number = Number(metadata.github_number);
           if (!sessionMatchesGithubItem(session, repo, kind, { number }, this.config)) continue;
+          if (kind === 'pr' && moved.some((item) => item.number === number)) {
+            // A TUI reviewer can't exit after posting; end it for the moved head unless it is mid-turn.
+            if (['working', 'thinking'].includes((await this.getSession?.(session))?.canonicalState?.execution)) continue;
+            await this.deleteSession(session);
+            deletedSessions.push({ sessionId: session.id || session.sessionId, kind, number });
+            continue;
+          }
           const openNumbers = kind === 'pr' ? result.openPullRequestNumbers : kind === 'issue' ? result.openIssueNumbers : null;
           if (!openNumbers || openNumbers.includes(number)) continue;
           const item = await fetchGithubJson(this.fetchImpl,
