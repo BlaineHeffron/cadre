@@ -600,7 +600,7 @@ export class GithubAgentPoller {
         updatedRepo: safeRepoRecord(repo),
       };
     }
-    const moved = !suppressSpawn && repo.enabled ? await this.pollWatches(repo) : [];
+    const { moved, reviewed } = !suppressSpawn && repo.enabled ? await this.pollWatches(repo) : { moved: [], reviewed: [] };
     const result = await pollGithubRepo(repo, {
       fetchImpl: this.fetchImpl,
       env: this.config.env || process.env,
@@ -624,9 +624,9 @@ export class GithubAgentPoller {
           const kind = metadata.github_kind;
           const number = Number(metadata.github_number);
           if (!sessionMatchesGithubItem(session, repo, kind, { number }, this.config)) continue;
-          if (kind === 'pr' && moved.some((item) => item.number === number)) {
-            // A TUI reviewer can't exit after posting; end it for the moved head unless it is mid-turn.
-            if (['working', 'thinking'].includes((await this.getSession?.(session))?.canonicalState?.execution)) continue;
+          if (kind === 'pr' && (reviewed.includes(number) || moved.some((item) => item.number === number))) {
+            // A TUI reviewer can't exit after posting; end it once idle after a new review or a moved head.
+            if ((await this.getSession?.(session))?.canonicalState?.execution !== 'idle') continue;
             await this.deleteSession(session);
             deletedSessions.push({ sessionId: session.id || session.sessionId, kind, number });
             continue;
@@ -683,9 +683,11 @@ export class GithubAgentPoller {
     return payload;
   }
 
-  // Returns trusted watched open PRs whose head differs from the last reviewed head; pollRepo records the head once a reviewer spawns.
+  // Returns trusted watched open PRs whose head differs from the last reviewed head (pollRepo records the head once a reviewer spawns)
+  // and the numbers of watched PRs with a new review.
   async pollWatches(repo) {
     const moved = [];
+    const reviewed = [];
     for (const watch of (await this.repoStore.getRepo(repo.id))?.watches || []) {
       try {
         const notify = (line) => {
@@ -706,6 +708,7 @@ export class GithubAgentPoller {
           const verdict = lines.find((line) => /^VERDICT\b/.test(line)) || (lines[0] || '').slice(0, 200);
           await notify(`review by ${review.user?.login || 'unknown'} (${review.state}): ${verdict}${lines.filter((line) => /^- \[B\]/.test(line)).slice(0, 5).map((line) => `\n${line}`).join('')}`);
           await this.repoStore.updateWatch(repo.id, watch.number, { lastReviewId: review.id });
+          reviewed.push(watch.number);
         }
         if (reviews.length === 100) await this.repoStore.updateWatch(repo.id, watch.number, { reviewPage: (watch.reviewPage || 1) + 1 });
         if (pr.merged || pr.state === 'closed') {
@@ -720,7 +723,7 @@ export class GithubAgentPoller {
         this.log?.warn?.({ repoId: repo.id, number: watch.number, code: sanitizedError(error) }, 'PR watch poll failed');
       }
     }
-    return moved;
+    return { moved, reviewed };
   }
 
   pollOnce(options = {}) {
