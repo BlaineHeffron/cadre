@@ -136,6 +136,23 @@ process.stdout.write(JSON.stringify({ ok: true, session_id: args[args.indexOf('-
   await h.app.agentBusLifecycle.cloudSessions.step();
   assert.equal(fromCloudBodies().length, relayedBefore);
   assert.ok(h.app.agentBusLifecycle.cloudSessions.get('cse_a'));
+
+  // After room_transfer the new room owner can take over the room's attached clouds; nobody else can.
+  await h.store.transferThread(thread.id, peer);
+  await assert.rejects(mcp.handleToolCall('cloud_watch', { id: 'cse_b' }, as({ kind: 'pi', sessionId: 'pi-1' })), /Forbidden/);
+  await mcp.handleToolCall('cloud_watch', { id: 'cse_b' }, as(peer));
+  assert.deepEqual(h.app.agentBusLifecycle.cloudSessions.get('cse_b').owner, peer);
+  await assert.rejects(mcp.handleToolCall('cloud_watch', { id: 'cse_a' }, as(peer)), /Forbidden/);
+
+  // A closed room hands over nothing, even to its claimed owner attaching the session to a room they own.
+  await h.store.transferThread(thread.id, owner);
+  await mcp.handleToolCall('cloud_watch', { id: 'cse_b' }, as(owner));
+  await h.store.closeThread(thread.id);
+  const mine = await h.store.createThread({ title: 'peer room', participants: [peer], createdBy: peer });
+  await h.store.transferThread(thread.id, peer);
+  await assert.rejects(mcp.handleToolCall('cloud_watch', { id: 'cse_b' }, as(peer)), /Forbidden/);
+  await assert.rejects(mcp.handleToolCall('cloud_attach', { id: 'cse_b', thread_id: mine.id }, as(peer)), /Forbidden/);
+  assert.deepEqual(h.app.agentBusLifecycle.cloudSessions.get('cse_b').owner, owner);
 });
 
 const participantIs = (a, b) => a.kind === b.kind && a.sessionId === b.sessionId;

@@ -39,6 +39,8 @@ export async function cloudSessionsPlugin(app, {
   const state = { sessions: {}, ...(await store.load().catch(() => null)) };
   const save = () => store.save(state);
 
+  const same = (ref, owner) => ref?.kind === owner.kind && ref?.sessionId === owner.sessionId;
+
   function caller(req) {
     const p = req.duenoAuth?.principal;
     if (p?.type !== 'agent' || !p.kind || !p.sessionId) throw Object.assign(new Error('Authenticated agent identity required'), { statusCode: 403 });
@@ -46,9 +48,12 @@ export async function cloudSessionsPlugin(app, {
   }
 
   // Track `id` for `owner`. The baseline is the session's current view, so registering never notifies.
+  // The owner of the open room a session is attached to may take it over, so room_transfer hands off its clouds.
   async function track(id, owner, view, patch = {}) {
     const prior = state.sessions[id];
-    if (prior && (prior.owner.kind !== owner.kind || prior.owner.sessionId !== owner.sessionId)) {
+    const room = prior?.threadId && app.agentBusLifecycle.getThread(prior.threadId)?.thread;
+    const roomOwner = room?.status === 'open' && !room.metadata?.dm && same(room.createdBy, owner);
+    if (prior && !same(prior.owner, owner) && !roomOwner) {
       throw Object.assign(new Error(`Cloud session ${id} is owned by ${prior.owner.kind}:${prior.owner.sessionId}`), { statusCode: 403 });
     }
     state.sessions[id] = { prs: [], ...prior, owner, state: view.state, needs_action: view.needs_action || '', ...(view.pr ? { prs: [view.pr.number] } : {}), ...patch };
@@ -172,8 +177,7 @@ export async function cloudSessionsPlugin(app, {
     const thread = app.agentBusLifecycle.getThread(threadId)?.thread;
     if (!thread || thread.status !== 'open') return [404, 'Open room not found'];
     if (thread.metadata?.dm) return [400, 'Cloud sessions attach to rooms, not DMs'];
-    const same = (ref) => ref?.kind === owner.kind && ref?.sessionId === owner.sessionId;
-    if (!same(thread.createdBy) && !thread.participants?.some(same)) return [403, 'Room owner or participant required'];
+    if (!same(thread.createdBy, owner) && !thread.participants?.some((ref) => same(ref, owner))) return [403, 'Room owner or participant required'];
     return null;
   }
 
