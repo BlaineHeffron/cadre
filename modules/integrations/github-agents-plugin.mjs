@@ -102,8 +102,9 @@ export async function defaultSessionLauncher({
     runtime: selection.runtime,
     thinkingLevel,
     source: 'github-agent',
+    // Agents post once and stop; a TUI session can't exit itself, and a live pane blocks review of a new PR head.
     autoCloseMode: 'when_waiting_for_input',
-    autoCloseAfterMs: 2 * 60 * 60 * 1000,
+    autoCloseAfterMs: 10 * 60 * 1000,
     metadata,
     ...(sandbox ? { sandbox, githubToken } : {}),
   });
