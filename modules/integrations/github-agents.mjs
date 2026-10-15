@@ -655,7 +655,8 @@ export class GithubAgentPoller {
       });
     const updatedRepo = spawn.updatedRepo || result.updatedRepo;
     for (const item of moved) {
-      if (updatedRepo?.spawnedItemKeys?.includes(githubItemSpawnKey('pr', item))) await this.repoStore.updateWatch(repo.id, item.number, { headSha: item.headSha });
+      const reviewed = spawn.spawned.some((outcome) => outcome.sessionId && outcome.kind === 'pr' && outcome.number === item.number);
+      if (reviewed || updatedRepo?.spawnedItemKeys?.includes(githubItemSpawnKey('pr', item))) await this.repoStore.updateWatch(repo.id, item.number, { headSha: item.headSha });
     }
     // Persist lastSeen only after spawn so backoff skips, empty session ids,
     // and the per-poll cap cannot advance the cursor past unprocessed items.
