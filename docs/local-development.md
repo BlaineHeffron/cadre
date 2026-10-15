@@ -35,3 +35,4 @@ To smoke the structured runtime or real agent launches:
 - End commits with a `Co-Authored-By` trailer naming your model.
 - Write the PR body per `config/skills/pr.md` and end it with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
 - Address blocking findings from automatic Grok PR review if it posts; wait at most about 20 minutes.
+- Land a reviewed PR with `bash scripts/land-pr.sh <pr> <sha> [worktree-path]`; it refuses unless the head and the optional clean worktree are at `<sha>` and every check is SUCCESS (SKIPPED or NEUTRAL also refuse), and cleans up only after the merge reaches `origin/main`.
