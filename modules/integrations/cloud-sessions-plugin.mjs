@@ -49,13 +49,18 @@ export async function cloudSessionsPlugin(app, {
 
   // Track `id` for `owner`. The baseline is the session's current view, so registering never notifies.
   // The owner of the open room a session is attached to may take it over, so room_transfer hands off its clouds.
-  async function track(id, owner, view, patch = {}) {
+  function assertOwner(id, owner) {
     const prior = state.sessions[id];
     const room = prior?.threadId && app.agentBusLifecycle.getThread(prior.threadId)?.thread;
     const roomOwner = room?.status === 'open' && !room.metadata?.dm && same(room.createdBy, owner);
     if (prior && !same(prior.owner, owner) && !roomOwner) {
       throw Object.assign(new Error(`Cloud session ${id} is owned by ${prior.owner.kind}:${prior.owner.sessionId}`), { statusCode: 403 });
     }
+  }
+
+  async function track(id, owner, view, patch = {}) {
+    assertOwner(id, owner);
+    const prior = state.sessions[id];
     state.sessions[id] = { prs: [], ...prior, owner, state: view.state, needs_action: view.needs_action || '', ...(view.pr ? { prs: [view.pr.number] } : {}), ...patch };
     await save();
     return state.sessions[id];
@@ -181,12 +186,19 @@ export async function cloudSessionsPlugin(app, {
     return null;
   }
 
+  // With `title` in place of `thread_id`, attach to a new room the caller owns but is not in.
   app.post('/api/cloud/attach', async (req, reply) => {
     const owner = caller(req);
-    const { id, thread_id: threadId } = req.body;
-    const denied = roomDenied(owner, threadId);
+    const { id, title } = req.body;
+    let threadId = req.body.thread_id;
+    if (!threadId === !title) return reply.code(400).send({ error: 'Pass thread_id or title' });
+    const denied = threadId && roomDenied(owner, threadId);
     if (denied) return reply.code(denied[0]).send({ error: denied[1] });
     const [view, tail] = await Promise.all([cloudStatus({ id }, cloudOpts), cloudOutput({ id, limit: 1 }, cloudOpts)]);
+    if (title) {
+      assertOwner(id, owner);
+      threadId = (await app.agentBusLifecycle.createRoom({ title, createdBy: owner })).id;
+    }
     await track(id, owner, view, { threadId, seq: tail.next_seq ?? 0, title: view.title });
     await app.agentBusLifecycle.addParticipant(threadId, cloudRef(id));
     return { id, thread_id: threadId, status: 'attached' };
