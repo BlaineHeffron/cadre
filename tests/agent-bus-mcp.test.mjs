@@ -254,7 +254,8 @@ test('room list pins the caller and returns only the compact participant-scoped 
   const calls = [];
   const server = buildAgentBusMcpServer({ requestImpl: async (path) => {
     calls.push(path);
-    return { threads: [{ id: 'thr_1', title: 'Work', status: 'open', participants: [{ kind: 'codex', sessionId: 'c1' }],
+    return { threads: [{ id: 'thr_1', title: 'Work', status: 'open', createdBy: { kind: 'claude', sessionId: 'coord' },
+      participants: [{ kind: 'codex', sessionId: 'c1' }, { kind: 'pi', sessionId: 'p1' }, { kind: 'user', sessionId: 'dashboard' }],
       metadata: {} }, { id: 'thr_dm', title: 'DM', status: 'closed', participants: [{ kind: 'codex', sessionId: 'c1' }],
       metadata: { dm: true }, projectKey: 'hidden' }] };
   } });
@@ -263,8 +264,8 @@ test('room list pins the caller and returns only the compact participant-scoped 
   const result = await server.callTool('room_list', {}, context);
   assert.equal(calls[0], '/api/agent-bus/threads/by-participant?kind=codex&sessionId=c1&status=all');
   assert.deepEqual(result.structuredContent.rooms, [
-    { id: 'thr_1', title: 'Work', kind: 'room', status: 'open' },
-    { id: 'thr_dm', title: 'DM', kind: 'dm', status: 'closed' },
+    { id: 'thr_1', title: 'Work', kind: 'room', status: 'open', participants: 2, owner: { kind: 'claude', sessionId: 'coord' } },
+    { id: 'thr_dm', title: 'DM', kind: 'dm', status: 'closed', participants: 1, owner: null },
   ]);
 });
 
