@@ -300,6 +300,18 @@ describe('Monitor MCP server', () => {
     });
   });
 
+  it('keeps compact aliases when fields select from the full session', async () => {
+    const server = buildMonitorMcpServer({
+      async requestImpl() {
+        return { sessions: [{ id: 'claude_1', name: 'worker', state: { status: 'running' }, workDir: '/tmp/w' }] };
+      },
+    });
+
+    const result = await server.handleToolCall('monitor_list_claude_sessions', { fields: ['displayName', 'status', 'workDir'] });
+
+    assert.deepEqual(result.sessions, [{ displayName: 'worker', status: 'running', workDir: '/tmp/w' }]);
+  });
+
   it('lists Pi sessions through the Pi backend route', async () => {
     const requests = [];
     const server = buildMonitorMcpServer({
