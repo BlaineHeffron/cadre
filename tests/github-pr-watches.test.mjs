@@ -119,6 +119,51 @@ test('pollRepo reviews a moved trusted head once, after the live reviewer ends, 
   assert.deepEqual(launches, [1, 1, 1]);
 });
 
+test('pollRepo ends an idle reviewer after a new review or a moved head, and only a moved head spawns', async (t) => {
+  const s = await setup(t);
+  await s.watch();
+  await s.store.upsertRepo({ owner: 'octo', repo: 'demo', authRef: 'TEST_GITHUB_TOKEN', enabled: true, prEnabled: true, issueEnabled: false, lastSeenPrNumber: 5 });
+  const launches = [];
+  const deleted = [];
+  let execution = 'unknown';
+  const reviewer = { id: 'rev', source: 'github-agent', metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: 1 } };
+  let sessions = [reviewer];
+  Object.assign(s.poller, {
+    resolveScratchWorkDir: async () => '/tmp/github-agents-scratch',
+    listExistingSessions: async () => sessions,
+    getSession: async () => ({ canonicalState: { execution } }),
+    deleteSession: async (session) => { deleted.push(session.id); sessions = []; },
+    sessionLauncher: async (input) => { launches.push(input.metadata.github_number); return { sessionId: `sess_${launches.length}` }; },
+  });
+  const list = s.poller.fetchImpl;
+  s.poller.fetchImpl = async (url) => (new URL(url).pathname.endsWith('/pulls') ? new Response(JSON.stringify([await (await list(`${url}/1`)).json()])) : list(url));
+  const poll = async () => {
+    await s.poller.pollRepo(await s.store.getRepo('octo/demo'));
+    return [(await s.store.listWatches())[0].headSha, deleted.length, launches.length];
+  };
+  const review = (id) => s.setReviews([{ id, user: { login: 'bot' }, state: 'COMMENTED', body: 'VERDICT: OK' }]);
+  s.setPr({ number: 1, title: 'Fix', author_association: 'MEMBER' });
+  await poll();
+  review(1);
+  assert.deepEqual(await poll(), ['abcdef123', 0, 0]);
+  execution = 'working';
+  review(2);
+  assert.deepEqual(await poll(), ['abcdef123', 0, 0]);
+  execution = 'idle';
+  review(3);
+  assert.deepEqual(await poll(), ['abcdef123', 1, 0]);
+  sessions = [reviewer];
+  s.setPr({ head: { sha: 'bbb222' } });
+  execution = 'working';
+  assert.deepEqual(await poll(), ['abcdef123', 1, 0]);
+  s.poller.getSession = null;
+  assert.deepEqual(await poll(), ['abcdef123', 1, 0]);
+  s.poller.getSession = async () => ({ canonicalState: { execution: 'idle' } });
+  assert.deepEqual(await poll(), ['bbb222', 2, 1]);
+  sessions = [{ ...reviewer, id: 'rev2' }];
+  assert.deepEqual(await poll(), ['bbb222', 2, 1]);
+});
+
 test('reviews and conflicts notify once, re-arm, ignore comments, and follow room transfer', async (t) => {
   const s = await setup(t);
   await s.watch();

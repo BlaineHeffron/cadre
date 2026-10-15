@@ -166,6 +166,7 @@ export async function githubAgentsPlugin(app, opts = {}) {
     listExistingSessions: opts.listExistingSessions,
     tmuxSessionExists: opts.tmuxSessionExists,
     deleteSession: opts.deleteSession || ((session) => createAgentAdapters()[session.backendType].deleteSession(app, session.id || session.sessionId)),
+    getSession: (session) => createAgentAdapters()[session.backendType].getSession(app, session.id || session.sessionId),
     getThread: (id) => app.agentBusLifecycle?.getThread?.(id),
     notifyWatch: async (target, text) => {
       const adapter = createAgentAdapters()[target?.kind];
