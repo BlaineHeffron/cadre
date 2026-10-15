@@ -13,7 +13,7 @@ Never call the real GitHub API from tests. Run browsers headless.
 
 Follow the verification ladder in `AGENTS.md`. Run `npm run check:node` when checking runtime prerequisites.
 
-`npm test` runs `scripts/run-tests.mjs`, which drops inherited `CADRE_*`/`DM_*`/`DUENO_*` and per-user config vars, uses a temp `HOME`, and forces `CADRE_AGENT_CGROUP_ISOLATION=0`, so host config, agent session env, and isolation do not leak into tests.
+`npm test` runs `scripts/run-tests.mjs`, which passes tests only an allowlist of OS/node vars (`PATH`, `TMPDIR`, locale, `TERM`, `SHELL`, `USER`, `TZ`, `NODE_*`, `CI`) plus a temp `HOME` and `CADRE_AGENT_CGROUP_ISOLATION=0`; a test that needs any other var sets it itself.
 
 ## Smoke server
 
