@@ -146,6 +146,8 @@ function canAttemptSend(snapshot, capability, transaction = {}) {
   // Codex and Claude room messages steer or queue into the running turn, even when hook/transcript say working.
   if (activeQueue && transaction.source === 'agent_bus') return true;
   if (isDeterministicallyBusy(snapshot)) return false;
+  // Clear wipes the conversation: refuse it while any source (pane included) reports work.
+  if (capability === 'clear' && snapshot.execution !== 'idle') return false;
   if (activeQueue) return true;
   // lifecycle can stay 'running' after process evidence expires. Send only
   // while a fresh process observation still grants canQueueMessage.
