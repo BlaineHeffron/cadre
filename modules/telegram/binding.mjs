@@ -671,8 +671,8 @@ export function buildBindingStore({ stateDir = DEFAULT_STATE_DIR, now = () => Da
         tmux_session: text(session.tmuxSession || session.tmux_session || entry.tmux_session),
         name: text(session.name || session.displayName || entry.name),
         created: Number(session.created || entry.created || 0),
-        bus_thread_id: text(session.busThreadId || session.bus_thread_id || entry.bus_thread_id),
-        bus_thread_title: text(session.busThreadTitle || session.bus_thread_title || entry.bus_thread_title),
+        bus_thread_id: text(session.busThreadId || session.bus_thread_id),
+        bus_thread_title: text(session.busThreadTitle || session.bus_thread_title),
         orphaned_at_ms: 0,
       };
       const changed = Object.entries(metadata).some(([field, value]) => entry[field] !== value);

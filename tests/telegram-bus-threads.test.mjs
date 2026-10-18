@@ -32,7 +32,6 @@ describe('telegram bus thread index', () => {
       id: 'thr_direct',
       title: 'Direct State',
       updatedAt: 100,
-      status: 'open',
     });
     assert.equal(index.get('codex:84325d24').id, 'thr_direct');
   });
@@ -109,6 +108,20 @@ describe('telegram bus thread index', () => {
     });
 
     assert.equal(index.get('codex:84325d24').id, 'thr_a');
+  });
+
+  it('never selects a closed room, even when it is the only room', () => {
+    const index = buildBusThreadIndex({
+      threads: [{
+        id: 'thr_closed',
+        title: 'Closed',
+        status: 'closed',
+        updatedAt: 500,
+        participants: [{ kind: 'codex', sessionId: '84325d24' }],
+      }],
+    });
+
+    assert.equal(index.get('codex:84325d24'), undefined);
   });
 
   it('keeps the last good index on read failure and clears on a successful empty read', () => {

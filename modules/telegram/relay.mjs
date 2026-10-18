@@ -512,7 +512,7 @@ export class TelegramRelayLoop {
         this.orphanSessionsSeen += 1;
         try {
           await this.processSession(orphanSession, {
-            busThread: busThreadFromSession(orphanSession),
+            busThread: busIndex.get(sessionParticipantKey(orphanSession)),
             liveTenantCount: 1,
             orphaned: true,
           });
