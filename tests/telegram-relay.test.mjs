@@ -1940,6 +1940,53 @@ Telegram Q&A beta final: choose an option
     });
   });
 
+  it('routes to the session topic once its only room is closed, including orphan drain', async () => {
+    await withTempDir(async (stateDir) => {
+      const deliveries = [];
+      const transcriptPath = join(stateDir, 'codex.jsonl');
+      const agentBusStatePath = join(stateDir, 'agent-bus-state.json');
+      const writeRoom = (status) => writeFile(agentBusStatePath, JSON.stringify({
+        threads: [{
+          id: 'thr_room',
+          title: 'Room',
+          status,
+          updatedAt: 2000,
+          participants: [{ kind: 'codex', sessionId: 'session-123456' }],
+        }],
+      }));
+      await writeRoom('open');
+      const sessions = [session({ state: canonicalState('working') })];
+      const bindingStore = buildBindingStore({ stateDir, now: () => 1000 });
+      const loop = buildLoop({
+        stateDir,
+        sessions,
+        bindingStore,
+        transcriptPaths: { 'codex:/tmp/project': transcriptPath },
+        transcriptDeltas: {
+          [transcriptPath]: (offset) => ({ text: `output ${offset}`, nextOffset: offset + 10, path: transcriptPath }),
+        },
+        deliveries,
+        agentBusStatePaths: [agentBusStatePath],
+      });
+
+      await loop.step();
+      await writeRoom('closed');
+      await loop.step();
+      const bindings = await readJson(join(stateDir, 'bindings.json'));
+      assert.equal(bindings['session-123456'].bus_thread_id, '');
+      // A binding written before the fix still names the closed room.
+      await bindingStore.observe('session-123456', { busThreadId: 'thr_room', busThreadTitle: 'Room' });
+      sessions.splice(0);
+      await loop.step();
+
+      assert.deepEqual(deliveries.map((delivery) => delivery.key), [
+        'thread:thr_room',
+        'session:session-123456',
+        'session:session-123456',
+      ]);
+    });
+  });
+
   it('isolates per-session errors and continues delivering other sessions', async () => {
     await withTempDir(async (stateDir) => {
       const deliveries = [];

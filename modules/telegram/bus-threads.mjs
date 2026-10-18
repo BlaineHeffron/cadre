@@ -23,9 +23,6 @@ function threadUpdatedAt(thread = {}) {
 
 function preferThread(candidate, previous) {
   if (!previous) return true;
-  const candidateStatusRank = candidate.status === 'open' ? 1 : 0;
-  const previousStatusRank = previous.status === 'open' ? 1 : 0;
-  if (candidateStatusRank !== previousStatusRank) return candidateStatusRank > previousStatusRank;
   if (candidate.updatedAt !== previous.updatedAt) return candidate.updatedAt > previous.updatedAt;
   return candidate.id < previous.id;
 }
@@ -34,12 +31,12 @@ export function buildBusThreadIndex(agentBusState = {}) {
   const byParticipant = new Map();
   for (const entry of Array.isArray(agentBusState?.threads) ? agentBusState.threads : []) {
     const thread = threadRecord(entry);
-    if (!thread?.id || isDmBusThread(thread)) continue;
+    // A closed room never routes, so its sessions fall back to their own topics.
+    if (!thread?.id || thread.status !== 'open' || isDmBusThread(thread)) continue;
     const candidate = {
       id: String(thread.id),
       title: String(thread.title || '').trim(),
       updatedAt: threadUpdatedAt(thread),
-      status: String(thread.status || ''),
     };
     for (const participant of Array.isArray(thread.participants) ? thread.participants : []) {
       if (!participant?.sessionId) continue;
