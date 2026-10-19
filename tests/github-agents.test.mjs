@@ -1433,24 +1433,31 @@ describe('GitHub agents poller', () => {
     for (const dir of ['pr-1-100', 'pr-2-200', 'pr-3-300', 'pr-4-400', 'pr-6-600', 'pr-9-900']) await utimes(join(reposDir, dir), old, old);
     await utimes(otherRepo, old, old);
     const logs = [];
-    const registry = (name) => join(root, `${name}_sessions.json`);
+    // Default registry paths: <CADRE_STATE_DIR>/<backend>_sessions.json, with a legacy ./.<backend>_sessions.json twin.
+    const registry = (name) => join(root, 'state', `${name}_sessions.json`);
+    await mkdir(join(root, 'state'));
     await writeFile(registry('codex'), JSON.stringify([{ id: 'other', workDir: join(root, 'scratch') }]));
     await writeFile(registry('claude'), '[{"id": "s2", "workDir"');
+    await writeFile(join(root, '.claude_sessions.json'), '[]');
+    const previous = { cwd: process.cwd(), stateDir: process.env.CADRE_STATE_DIR };
+    process.chdir(root);
+    process.env.CADRE_STATE_DIR = join(root, 'state');
     const paths = [clean, owned, dirty, unpushed, fresh, join(reposDir, 'pr-6-600'), otherRepo, join(reposDir, 'pr-8-800'), join(reposDir, 'pr-9-900'), linked];
     await withRepoStore(async (store) => {
       await store.upsertRepo({ ...BASE_REPO, lastSeenPrNumber: 20, lastSeenIssueNumber: 20 });
       const poller = new GithubAgentPoller({
         repoStore: store, fetchImpl: mockGithubFetch([]), log: { info: (fields) => logs.push(fields), warn: () => {} },
-        config: {
-          enabled: true, workDir: base, repoPaths: { 'octo/demo': repo }, env: { GITHUB_TOKEN_REF: 'test-token' },
-          codexSessionsFile: registry('codex'), claudeSessionsFile: registry('claude'), piSessionsFile: registry('pi'),
-        },
+        config: { enabled: true, workDir: base, repoPaths: { 'octo/demo': repo }, env: { GITHUB_TOKEN_REF: 'test-token' } },
       });
-      // The registry owning pr-2 is unreadable, so nothing is removed.
+      // The current registry owning pr-2 is unreadable; its stale legacy twin must not stand in, so nothing is removed.
       await poller.pollOnce();
       assert.ok(paths.every((p) => existsSync(p)));
       await writeFile(registry('claude'), JSON.stringify([{ id: 's2', workDir: owned }]));
       await poller.pollOnce();
+    }).finally(() => {
+      process.chdir(previous.cwd);
+      if (previous.stateDir === undefined) delete process.env.CADRE_STATE_DIR;
+      else process.env.CADRE_STATE_DIR = previous.stateDir;
     });
     assert.deepEqual(paths.map((p) => existsSync(p)), [false, true, true, true, true, false, true, true, false, true]);
     assert.equal(existsSync(join(reposDir, 'pr-1-100')), false);

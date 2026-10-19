@@ -193,19 +193,17 @@ function sessionMatchesGithubItem(session = {}, repo = {}, kind = '', item = {},
   return firstSegment.startsWith(githubAgentWorktreeItemPrefix(normalizedKind, item));
 }
 
-// Returns null when a registry exists but cannot be read; a missing file reads as empty.
+// Missing files read as empty and fall through to the legacy file; any other failure returns null.
 async function readSessionRegistry(filePath, legacyFilePath) {
-  let failed = false;
-  for (const path of legacyFilePath ? [filePath, legacyFilePath] : [filePath]) {
+  for (const path of [filePath, legacyFilePath].filter(Boolean)) {
     try {
       const parsed = JSON.parse(await readFile(path, 'utf8'));
-      if (Array.isArray(parsed)) return parsed;
+      return Array.isArray(parsed) ? parsed : null;
     } catch (error) {
-      if (error.code === 'ENOENT') continue;
+      if (error.code !== 'ENOENT') return null;
     }
-    failed = true;
   }
-  return failed ? null : [];
+  return [];
 }
 
 async function tmuxSessionExists(sessionName = '') {
@@ -810,7 +808,7 @@ export class GithubAgentPoller {
     const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
     const sessions = entries.length ? (this.listExistingSessions ? await this.listExistingSessions() : await listRegisteredGithubSessions(this.config)) : [];
     // Without every registry, an owned worktree would look orphaned.
-    if (!sessions.length || sessions.readFailed) return;
+    if (sessions.readFailed) return;
     const owned = new Set(sessions.map((session) => relative(root, resolve(normalizeText(session.workDir || session.metadata?.github_worktree_path) || '/')).split(/[\\/]/)[0]));
     for (const entry of entries) {
       const number = Number(/^pr-(\d+)-\d+$/.exec(entry.name)?.[1]);
