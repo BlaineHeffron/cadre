@@ -565,6 +565,11 @@ describe('Claude stream-json sessions', () => {
     }
     assert.deepEqual(clients.slice(2).map((client) => [client.startSpec.permissionMode, client.startSpec.approvalPolicy]),
       [['danger-full-access', 'never'], ['read-only', 'untrusted']]);
+    const profiled = await app.inject({ method: 'POST', url: '/api/codex/sessions', payload: { workDir, structured: true, promptProfile: 'research' } });
+    assert.equal(profiled.statusCode, 200, profiled.body);
+    const { args, developerInstructions } = clients.at(-1).startSpec;
+    assert.match(developerInstructions, /research agent/);
+    assert.equal(args.join(' ').includes('research agent'), false);
   });
 
   it('gives an operator-created Claude coordinator the unattended mode spawn_session grants, unless a mode is given', async () => {

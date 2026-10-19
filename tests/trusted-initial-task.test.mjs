@@ -9,12 +9,12 @@ import { pathToFileURL } from 'node:url';
 
 const run = promisify(execFile);
 
-test('collab creates launch trusted prompts through real provider builders without startup injection', async (t) => {
+test('collab launches keep prompt and profile text out of every agent argv', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'cadre-trusted-launch-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const bin = join(root, 'bin');
   await mkdir(bin);
-  const recorder = `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.TEST_ARGV, JSON.stringify(process.argv.slice(2)));\n`;
+  const recorder = `#!${process.execPath}\nconst fs = require('node:fs');\nfs.writeFileSync(process.env.TEST_ARGV, JSON.stringify({ args: process.argv.slice(2), stdin: fs.readFileSync(0, 'utf8') }));\n`;
   for (const kind of ['codex', 'claude', 'pi']) {
     await writeFile(join(bin, kind), recorder);
     await chmod(join(bin, kind), 0o755);
@@ -45,14 +45,16 @@ test('collab creates launch trusted prompts through real provider builders witho
         if (h.store.getThread(rooms[0].id).deliveries.some((delivery) => delivery.status === 'queued')) throw new Error('Startup was queued for paste');
         // Keep MCP offline; bootstrap's capability forwarding is covered by its route tests.
         providers[kind] = createAgentSessionsProvider(kind);
-        await providers[kind].createSession({ ...body, mcpProfile: 'default', mcpServers: undefined });
+        const created = await providers[kind].createSession({ ...body, mcpProfile: 'default', mcpServers: undefined, promptProfile: 'research' });
         const command = await readFile(process.env.TEST_COMMAND, 'utf8');
-        await promisify(execFile)('bash', ['-c', command]);
-        const args = JSON.parse(await readFile(process.env.TEST_ARGV, 'utf8'));
-        const file = command.match(/\\$\\(< '([^']+)'\\)/)[1];
-        launches[kind] = { args, prompt: await readFile(file, 'utf8'), mode: (await stat(file)).mode & 511 };
+        await promisify(execFile)('bash', ['-c', 'exec < /dev/null; ' + command]);
+        const { args, stdin } = JSON.parse(await readFile(process.env.TEST_ARGV, 'utf8'));
+        const fileArg = args.find((arg) => arg.startsWith('@'));
+        const file = command.match(/ < '([^']+)'/)?.[1] || fileArg?.slice(1) || '';
+        launches[kind] = { args, stdin, fileArg, file, body: body.initialPrompt, initialPromptError: created.initialPromptError,
+          ...(file ? { prompt: await readFile(file, 'utf8'), mode: (await stat(file)).mode & 511 } : {}) };
         const resume = renderAgentSessionLaunch({ resume: true, backendType: kind,
-          sessionBinary: kind, buildOptions: { cliSessionId: 'cli-id', initialPromptFile: file } });
+          sessionBinary: kind, buildOptions: { cliSessionId: 'cli-id', initialPromptFile: file || '/state/prompt.txt' } });
         launches[kind].resume = resume.paneCommand;
       };
     }
@@ -69,14 +71,11 @@ test('collab creates launch trusted prompts through real provider builders witho
       await assert.rejects(providers[kind].createSession({ ...options, sessionId: 12345678 }), /Invalid/);
       const existingId = h.createdSessions[kind][0].sessionId;
       await assert.rejects(providers[kind].createSession({ ...options, sessionId: existingId }), /duplicate/);
-      if (kind === 'pi') await assert.rejects(providers[kind].createSession({ ...options, initialPrompt: '-bad' }), /dash/);
     }
     await writeFile(${JSON.stringify(join(bin, 'tmux'))}, '#!/bin/sh\\nexit 9\\n');
-    await assert.rejects(providers.codex.createSession({ workDir: ${JSON.stringify(root)},
+    await assert.rejects(providers.claude.createSession({ workDir: ${JSON.stringify(root)},
       sessionId: 'feedcafe', initialPrompt: 'Must clean up', mcpProfile: 'default' }), /Failed to create session/);
-    const failedFile = await readFile(process.env.TEST_COMMAND, 'utf8');
-    const initialDir = failedFile.match(/\\$\\(< '([^']+)'\\)/)[1].replace(/[^/]+$/, '');
-    await assert.rejects(readFile(initialDir + 'codex-feedcafe.txt'), /ENOENT/);
+    await assert.rejects(readFile(launches.claude.file.replace(/[^/]+$/, 'claude-feedcafe.txt')), /ENOENT/);
     console.log(JSON.stringify({ status: response.statusCode, body: response.json(), launches, injected: h.injected }));
     await h.cleanup();
   `;
@@ -92,19 +91,32 @@ test('collab creates launch trusted prompts through real provider builders witho
   const result = JSON.parse(stdout.trim());
   assert.equal(result.status, 200, JSON.stringify(result.body));
   assert.equal(result.body.bootstrapOk, true);
+  const { resolvePromptProfile } = await import('../modules/integrations/prompt-profile-catalog.mjs');
+  const sentences = (text) => text.split(/[.\n]/).map((line) => line.trim()).filter((line) => line.length >= 12);
+  const profileSentences = sentences(resolvePromptProfile({ promptProfile: 'research' }).body);
+  assert.ok(profileSentences.length > 3);
   for (const kind of ['codex', 'claude', 'pi']) {
     const launch = result.launches[kind];
     const message = result.body.messages[['codex', 'claude', 'pi'].indexOf(kind)];
     assert.equal(message.type, 'startup_prompt');
-    assert.equal(launch.prompt, message.body);
-    assert.ok(launch.prompt.includes(task.trim()));
-    assert.match(launch.prompt, new RegExp(result.body.thread.id));
-    assert.equal(launch.mode, 0o600);
+    assert.equal(launch.body, message.body);
+    assert.ok(launch.body.includes(task.trim()));
+    assert.match(launch.body, new RegExp(result.body.thread.id));
+    assert.ok(launch.body.includes('never find or kill processes by matching their full command line'));
     assert.equal(result.injected[kind].length, 0);
-    assert.doesNotMatch(launch.resume, /initial_prompts|Begin working now/);
+    assert.doesNotMatch(launch.resume, /initial_prompts|Begin working now|prompt\.txt/);
+    // Codex has no file option that appends developer instructions, so only its profile stays in argv.
+    const forbidden = [...sentences(launch.body), ...(kind === 'codex' ? [] : profileSentences)];
+    for (const arg of launch.args) assert.equal(forbidden.find((sentence) => arg.includes(sentence)), undefined, kind + ' argv: ' + arg.slice(0, 80));
   }
-  assert.equal(result.launches.codex.args.at(-1), result.launches.codex.prompt);
-  assert.equal(result.launches.claude.args.at(-1), result.launches.claude.prompt);
-  assert.equal(result.launches.pi.args.at(-1), result.launches.pi.prompt);
+  // Claude reads the prompt from stdin and Pi from an @file; both files are private.
+  assert.equal(result.launches.claude.stdin, result.launches.claude.body);
+  assert.equal(result.launches.claude.prompt, result.launches.claude.body);
+  assert.equal(result.launches.pi.args.at(-1), result.launches.pi.fileArg);
+  assert.equal(result.launches.pi.prompt, result.launches.pi.body);
+  for (const kind of ['claude', 'pi']) assert.equal(result.launches[kind].mode, 0o600);
+  // Codex types its prompt into the pane through the command gate, which this provider never registered.
+  assert.equal(result.launches.codex.prompt, undefined);
+  assert.match(result.launches.codex.initialPromptError, /command gate is not ready/);
   assert.ok(result.body.deliveries.every((delivery) => delivery.resolution.channel === 'launch' && delivery.attempts === 0));
 });

@@ -58,11 +58,11 @@ describe('Pi sessions', () => {
     assert.equal(typeof mod.piSessionsPlugin, 'function');
   });
 
-  it('appends selected prompt profiles to the Pi launch argv', async () => {
+  it('appends selected prompt profiles to Pi from a file, not argv text', async () => {
     const result = await runPiScenario({ action: 'create', promptProfile: 'research' });
     assert.equal(result.response.statusCode, 200, JSON.stringify(result));
-    assert.match(result.tmuxArgs, /--append-system-prompt/);
-    assert.match(result.tmuxArgs, /research agent/);
+    assert.match(result.tmuxArgs, /'--append-system-prompt' '[^']*prompt_profiles\/pi-[a-f0-9]+\.txt'/);
+    assert.doesNotMatch(result.tmuxArgs, /research agent/);
   });
 
   it('launches Pi without a systemd scope when started with no user bus (an env -i start)', async () => {

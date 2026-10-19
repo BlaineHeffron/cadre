@@ -21,10 +21,12 @@ export function buildPromptLaunchArgs({ runtime = '', promptLaunch = null } = {}
     return promptLaunch.filePath ? [flag, promptLaunch.filePath] : [];
   }
   if (normalized === 'pi') {
+    // Pi reads either flag's value as a file when the path exists.
     const flag = placement === 'replace' ? '--system-prompt' : '--append-system-prompt';
-    return [flag, body];
+    return promptLaunch.filePath ? [flag, promptLaunch.filePath] : [];
   }
   if (normalized === 'codex') {
+    // Codex has no file option that appends (model_instructions_file replaces the base prompt).
     return ['-c', `developer_instructions=${JSON.stringify(body)}`];
   }
   return [];

@@ -65,6 +65,46 @@ it('startup-input reports the launch log when a real tmux agent exits', async (t
   assert.match(result.body.error, /route-launch-error/);
 });
 
+it('types the initial prompt into a new Codex pane instead of its argv', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'cadre-codex-startup-'));
+  const socket = join(dir, 'socket'), out = join(dir, 'typed.txt');
+  t.after(async () => { await exec('tmux', ['-S', socket, 'kill-server']); await rm(dir, { recursive: true, force: true }); });
+  await mkdir(join(dir, 'bin'));
+  await mkdir(join(dir, 'work'));
+  const binary = (await exec('which', ['tmux'])).stdout.trim();
+  await writeFile(join(dir, 'bin/tmux'), `#!/bin/sh\nexec '${binary}' -S '${socket}' "$@"\n`);
+  // A Codex stand-in: records argv, shows an idle composer, then a working footer once a line arrives.
+  await writeFile(join(dir, 'bin/codex'), `#!/bin/bash\necho "$*" > '${out}.argv'\nprintf '\\n› '\nIFS= read -r line\nprintf '%s' "$line" > '${out}'\nprintf '\\n• Working (0s • esc to interrupt)\\n'\nsleep 30\n`);
+  await chmod(join(dir, 'bin/tmux'), 0o755);
+  await chmod(join(dir, 'bin/codex'), 0o755);
+  const fastifyUrl = pathToFileURL(resolve('node_modules/fastify/fastify.js')).href;
+  const pluginUrl = pathToFileURL(resolve('modules/sessions/codex-sessions.mjs')).href;
+  const script = `
+    import Fastify from ${JSON.stringify(fastifyUrl)};
+    const { codexSessionsPlugin } = await import(${JSON.stringify(pluginUrl)});
+    const app = Fastify();
+    await app.register(codexSessionsPlugin, { appServerEnabled: false,
+      wsManager: { broadcast() {}, onChannel() {}, channels: new Map() } });
+    await app.ready();
+    const response = await app.inject({ method: 'POST', url: '/api/codex/sessions',
+      payload: { workDir: ${JSON.stringify(join(dir, 'work'))}, initialPrompt: 'Start the codex task now', mcpProfile: 'default' } });
+    console.log(JSON.stringify({ statusCode: response.statusCode, body: response.json() }));
+    await app.close();
+  `;
+  const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', script], {
+    cwd: dir, timeout: 30000,
+    env: { ...coverageEnv, NODE_TEST_CONTEXT: '1', HOME: dir, PATH: `${dir}/bin:/usr/bin:/bin`,
+      CADRE_DISABLE_SIDE_EFFECTS: '1', CADRE_GITHUB_AGENT_POLLER_ENABLED: '0', CADRE_GITHUB_AGENTS_ENABLED: '0',
+      CADRE_SCHEDULED_AGENT_PUMP_ENABLED: '0', TELEGRAM_BRIDGE: '0', CADRE_AGENT_CGROUP_ISOLATION: '0',
+      APP_STATE_STORAGE: 'file', CODEX_SESSIONS_STORAGE: 'file', LOG_LEVEL: 'error', DATABASE_URL: '' },
+  });
+  const result = JSON.parse(stdout.trim());
+  assert.equal(result.statusCode, 200, JSON.stringify(result.body));
+  assert.equal(result.body.initialPromptInjected, true, JSON.stringify(result.body));
+  assert.equal(await readFile(out, 'utf8'), 'Start the codex task now');
+  assert.doesNotMatch(await readFile(`${out}.argv`, 'utf8'), /codex task/);
+});
+
 async function runClearScenario({ paneContent, deadlineMs = 5000 }) {
   const tempDir = await mkdtemp(join(tmpdir(), 'dueno-codex-clear-'));
   tempDirs.push(tempDir);

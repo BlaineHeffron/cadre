@@ -76,7 +76,8 @@ test('onboarding without a room channel omits collab workflow and tools', () => 
 test('collab onboarding includes the safe-wait rule on one line', () => {
   const prompt = renderCollabOnboarding({ self: { kind: 'codex', sessionId: 'implementer' } });
   assert.ok(prompt.split('\n').includes('Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges.'));
-  assert.ok(prompt.split('\n').includes('Wait on background jobs by exact PID (`wait <pid>`, `kill -0 <pid>`) or your harness\'s background-task tool; wait on a long command with one call and a long timeout, not repeated sleeps; never poll `pgrep -f`/`pkill -f` with a pattern that also appears in your own command line.'));
+  assert.ok(prompt.split('\n').includes('Wait on background jobs by exact PID (`wait <pid>`, `kill -0 <pid>`) or your harness\'s background-task tool; wait on a long command with one call and a long timeout, not repeated sleeps; never find or kill processes by matching their full command line with `pgrep`/`pkill`, since that can hit other agents.'));
+  assert.doesNotMatch(prompt, /p(grep|kill) -f/);
   assert.ok(prompt.includes('To wait on a teammate, end your turn; Cadre delivers room messages when you are idle.'));
   assert.ok(prompt.includes('Use the `dueno` MCP server'));
 });

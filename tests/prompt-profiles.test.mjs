@@ -32,7 +32,7 @@ describe('prompt profile catalog', () => {
     const tools = new Set(buildMonitorMcpServer({ requestImpl: async () => ({}) }).listTools().map((tool) => tool.name));
 
     assert.equal(resolved.placement, 'append');
-    assert.deepEqual(buildPromptLaunchArgs({ runtime: 'pi', promptLaunch: resolved }), ['--append-system-prompt', resolved.body]);
+    assert.deepEqual(buildPromptLaunchArgs({ runtime: 'pi', promptLaunch: { ...resolved, filePath: '/state/p.txt' } }), ['--append-system-prompt', '/state/p.txt']);
     assert.ok(named.includes('monitor_add_human_queue_item'));
     assert.ok(named.includes('monitor_dismiss_human_queue_item'));
     assert.deepEqual(named.filter((name) => !tools.has(name)), []);
@@ -110,8 +110,8 @@ describe('prompt profile launch args', () => {
     assert.deepEqual(buildPromptLaunchArgs({ runtime: 'pi', promptLaunch: { body: '', placement: 'append' } }), []);
     assert.deepEqual(buildPromptLaunchArgs({
       runtime: 'pi',
-      promptLaunch: { body: 'Be terse.', placement: 'append' },
-    }), ['--append-system-prompt', 'Be terse.']);
+      promptLaunch: { body: 'Be terse.', placement: 'append', filePath: '/tmp/style.txt' },
+    }), ['--append-system-prompt', '/tmp/style.txt']);
     assert.deepEqual(buildPromptLaunchArgs({
       runtime: 'claude',
       promptLaunch: { body: 'Be terse.', placement: 'replace', filePath: '/tmp/style.txt' },
