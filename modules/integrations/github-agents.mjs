@@ -574,6 +574,7 @@ export class GithubAgentPoller {
     this.removeWorktree = removeWorktree;
     this.resolveScratchWorkDir = resolveScratchWorkDir;
     this.spawnBackoff = spawnBackoff instanceof Map ? spawnBackoff : new Map();
+    this.reviewedPrs = new Set();
     this.reapWorktrees = reapWorktreesImpl;
     this.listExistingSessions = listExistingSessions;
     this.tmuxSessionExists = tmuxSessionExists;
@@ -601,7 +602,7 @@ export class GithubAgentPoller {
         updatedRepo: safeRepoRecord(repo),
       };
     }
-    const { moved, reviewed } = !suppressSpawn && repo.enabled ? await this.pollWatches(repo) : { moved: [], reviewed: [] };
+    const { moved, reviewed, unreviewed } = !suppressSpawn && repo.enabled ? await this.pollWatches(repo) : { moved: [], reviewed: [], unreviewed: [] };
     const result = await pollGithubRepo(repo, {
       fetchImpl: this.fetchImpl,
       env: this.config.env || process.env,
@@ -613,18 +614,22 @@ export class GithubAgentPoller {
       result.newPullRequests = [...(result.newPullRequests || []), ...moved.filter((item) => !fresh.has(item.number))];
     }
     if (!suppressSpawn && !result.error && !result.skipped) {
+      // A reviewer that died without reviewing leaves pr:N recorded; retry it while it has no live session and no review.
       const fresh = new Set(result.newPullRequests.map((item) => item.number));
+      let fetches = normalizeMaxSpawns(this.config.maxSpawnsPerPoll);
+      result.retryPullRequests = [];
       for (const item of result.openPullRequests) {
-        // A reviewer that died without reviewing leaves its key recorded; drop the key so the PR spawns again.
-        const key = githubItemSpawnKey('pr', item);
-        if (fresh.has(item.number) || !result.updatedRepo.spawnedItemKeys.includes(key)) continue;
+        if (fresh.has(item.number) || this.reviewedPrs.has(`${repo.id}#${item.number}`) || !result.updatedRepo.spawnedItemKeys.includes(githubItemSpawnKey('pr', item))) continue;
         if (await findExistingGithubItemSession(repo, 'pr', item, { config: this.config, listExistingSessions: this.listExistingSessions, tmuxSessionExists: this.tmuxSessionExists })) continue;
-        const reviews = await fetchGithubList(this.fetchImpl, `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${item.number}/reviews?per_page=1`, {
-          token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs,
-        }).catch(() => null);
-        if (!reviews || reviews.length) continue;
-        result.updatedRepo.spawnedItemKeys = result.updatedRepo.spawnedItemKeys.filter((entry) => entry !== key);
-        result.newPullRequests.push(item);
+        if (!unreviewed.includes(item.number)) {
+          if (fetches-- <= 0) break;
+          const reviews = await fetchGithubList(this.fetchImpl, `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${item.number}/reviews?per_page=1`, {
+            token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs,
+          }).catch(() => null);
+          if (reviews?.length) this.reviewedPrs.add(`${repo.id}#${item.number}`);
+          if (!reviews || reviews.length) continue;
+        }
+        result.retryPullRequests.push(item);
       }
     }
     const deletedSessions = [];
@@ -704,6 +709,7 @@ export class GithubAgentPoller {
   async pollWatches(repo) {
     const moved = [];
     const reviewed = [];
+    const unreviewed = [];
     for (const watch of (await this.repoStore.getRepo(repo.id))?.watches || []) {
       try {
         const notify = (line) => {
@@ -726,6 +732,8 @@ export class GithubAgentPoller {
           await this.repoStore.updateWatch(repo.id, watch.number, { lastReviewId: review.id });
           reviewed.push(watch.number);
         }
+        if (reviews.length || watch.lastReviewId) this.reviewedPrs.add(`${repo.id}#${watch.number}`);
+        else unreviewed.push(watch.number);
         if (reviews.length === 100) await this.repoStore.updateWatch(repo.id, watch.number, { reviewPage: (watch.reviewPage || 1) + 1 });
         if (pr.merged || pr.state === 'closed') {
           await notify(pr.merged ? `merged (${String(pr.merge_commit_sha || pr.head?.sha || '').slice(0, 7)})` : 'closed without merge');
@@ -739,7 +747,7 @@ export class GithubAgentPoller {
         this.log?.warn?.({ repoId: repo.id, number: watch.number, code: sanitizedError(error) }, 'PR watch poll failed');
       }
     }
-    return { moved, reviewed };
+    return { moved, reviewed, unreviewed };
   }
 
   pollOnce(options = {}) {
@@ -853,11 +861,12 @@ export async function spawnGithubAgentsForPollResult(pollResult = {}, {
   const newEntries = [
     ...(Array.isArray(pollResult.newPullRequests) ? pollResult.newPullRequests.map((item) => ({ kind: 'pr', item })) : []),
     ...(Array.isArray(pollResult.newIssues) ? pollResult.newIssues.map((item) => ({ kind: 'issue', item })) : []),
+    ...(Array.isArray(pollResult.retryPullRequests) ? pollResult.retryPullRequests.map((item) => ({ kind: 'pr', item, retry: true })) : []),
   ];
   const candidateKeys = new Set();
   const candidates = newEntries.filter((entry) => {
     const key = githubItemSpawnKey(entry.kind, entry.item);
-    if (!key || processedKeys.has(key) || candidateKeys.has(key)) return false;
+    if (!key || (processedKeys.has(key) && !entry.retry) || candidateKeys.has(key)) return false;
     candidateKeys.add(key);
     return !shouldSkipGithubSpawnBackoff(spawnBackoff, repo.id, entry.kind, entry.item, nowMs);
   });

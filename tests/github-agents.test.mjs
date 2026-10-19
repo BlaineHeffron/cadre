@@ -1398,25 +1398,45 @@ describe('GitHub agents poller', () => {
   });
 
   it('respawns a recorded PR only when its reviewer died without reviewing, with backoff', async () => {
-    const run = async ({ sessions = [], reviews = [], fail = false, polls = 1 }) => withRepoStore(async (store) => {
-      await store.upsertRepo({ ...BASE_REPO, issueEnabled: false, lastSeenPrNumber: 8, spawnedItemKeys: ['pr:8'] });
+    const liveSession = (number) => ({ id: `pr-${number}`, source: 'github-agent', tmuxSession: `pr-${number}`, metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: number } });
+    const run = async ({ sessions = [], reviews = [], fail = () => false, numbers = [8], polls = [0], maxSpawnsPerPoll = 3 }) => withRepoStore(async (store) => {
+      await store.upsertRepo({ ...BASE_REPO, issueEnabled: false, lastSeenPrNumber: 20, spawnedItemKeys: numbers.map((n) => `pr:${n}`) });
       const launches = [];
-      const pulls = mockGithubFetch([], { pulls: [githubItem(8, 'PR 8')] });
+      const reviewFetches = [];
+      let nowMs = 0;
+      const pulls = mockGithubFetch([], { pulls: numbers.map((n) => githubItem(n, `PR ${n}`)) });
       const poller = new GithubAgentPoller({
-        repoStore: store, config: { enabled: true, env: { GITHUB_TOKEN_REF: 'test-token' } },
+        repoStore: store, config: { enabled: true, maxSpawnsPerPoll, env: { GITHUB_TOKEN_REF: 'test-token' } }, now: () => nowMs,
         listExistingSessions: async () => sessions, tmuxSessionExists: async () => true,
-        fetchImpl: async (url, opts) => (String(url).endsWith('/pulls/8/reviews?per_page=1') ? response(200, reviews) : pulls(url, opts)),
+        fetchImpl: async (url, opts) => {
+          const reviewed = String(url).match(/\/pulls\/(\d+)\/reviews/);
+          if (reviewed) reviewFetches.push(Number(reviewed[1]));
+          return reviewed ? response(200, reviews) : pulls(url, opts);
+        },
         resolveScratchWorkDir: async () => '/tmp/unused-github-retry',
-        sessionLauncher: async () => { launches.push(1); return { sessionId: fail ? '' : 'sess_pr_8' }; },
+        sessionLauncher: async (input) => {
+          const number = input.metadata.github_number;
+          launches.push(number);
+          if (fail(number) === 'throw') throw new Error('launcher failed');
+          if (fail(number)) return { sessionId: '' };
+          sessions.push(liveSession(number));
+          return { sessionId: `sess_pr_${number}` };
+        },
       });
-      for (let i = 0; i < polls; i += 1) await poller.pollOnce();
-      return { launches: launches.length, keys: (await store.getRepo('octo/demo')).spawnedItemKeys };
+      for (const at of polls) { nowMs = at; await poller.pollOnce(); }
+      return { launches, reviewFetches, keys: (await store.getRepo('octo/demo')).spawnedItemKeys };
     });
-    const live = [{ id: 'pr-8', source: 'github-agent', tmuxSession: 'pr-8', metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: 8 } }];
-    assert.deepEqual(await run({}), { launches: 1, keys: ['pr:8'] });
-    assert.deepEqual(await run({ sessions: live }), { launches: 0, keys: ['pr:8'] });
-    assert.deepEqual(await run({ reviews: [{ id: 1 }] }), { launches: 0, keys: ['pr:8'] });
-    assert.deepEqual(await run({ fail: true, polls: 3 }), { launches: 1, keys: [] });
+    assert.deepEqual(await run({ polls: [0, 1] }), { launches: [8], reviewFetches: [8], keys: ['pr:8'] });
+    assert.deepEqual(await run({ sessions: [liveSession(8)] }), { launches: [], reviewFetches: [], keys: ['pr:8'] });
+    // A known review is remembered, so later polls do not refetch it.
+    assert.deepEqual(await run({ reviews: [{ id: 1 }], polls: [0, 1, 2] }), { launches: [], reviewFetches: [8], keys: ['pr:8'] });
+    // New review fetches per poll are capped by maxSpawnsPerPoll.
+    assert.deepEqual((await run({ reviews: [{ id: 1 }], numbers: [8, 9], polls: [0, 1, 2], maxSpawnsPerPoll: 1 })).reviewFetches, [8, 9]);
+    assert.deepEqual(await run({ fail: () => true, polls: [0, 1, 2] }), { launches: [8], reviewFetches: [8, 8, 8], keys: ['pr:8'] });
+    // A throw after a sibling spawn keeps the failed PR recorded and eligible once backoff ends.
+    const thrown = await run({ numbers: [8, 9], fail: (n) => n === 9 && 'throw', polls: [0, 1_000, 61_000] });
+    assert.deepEqual(thrown.launches, [8, 9, 9]);
+    assert.deepEqual(thrown.keys, ['pr:8', 'pr:9']);
   });
 
   it('preserves a successful sibling ledger when a later spawn throws', async () => {
