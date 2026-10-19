@@ -22,10 +22,11 @@ await writeFile(join(bin, 'tmux'), `#!/bin/sh\nexec /usr/bin/tmux -L '${tmuxSock
 await writeFile(join(bin, 'claude'), "#!/bin/sh\nprintf 'Claude Code v2.1.296\\n────────────────────\\n❯ \\n────────────────────\\n  ⏵⏵ bypass permissions on\\n'\ncat >/dev/null\n");
 await chmod(join(bin, 'tmux'), 0o755);
 await chmod(join(bin, 'claude'), 0o755);
+delete process.env.CADRE_STATE_DIR;
 Object.assign(process.env, {
   AUTH_TOKEN: TOKEN, INTERNAL_BYPASS_TOKEN: 'internal-token-for-machines', HOME: join(root, 'home'),
   PATH: `${bin}:${process.env.PATH}`, APP_STATE_STORAGE: 'file', CLAUDE_SESSIONS_STORAGE: 'file', DATABASE_URL: '',
-  DM_FLEET_PRIVATE_HOSTS_REF: 'CADRE_TEST_MACHINE_HOSTS', CADRE_TEST_MACHINE_HOSTS: '127.0.0.1',
+  DM_STATE_DIR: join(root, 'state'), DM_FLEET_PRIVATE_HOSTS_REF: 'CADRE_TEST_MACHINE_HOSTS', CADRE_TEST_MACHINE_HOSTS: '127.0.0.1',
 });
 
 const { default: Fastify } = await import('fastify');
@@ -207,6 +208,34 @@ describe('multi-machine slice 1', () => {
     await other.close();
   });
 
+  it('a worker that echoes credentials gets status and a code through, never the secret', async () => {
+    const hostile = http.createServer(async (req, res) => {
+      let raw = '';
+      for await (const chunk of req) raw += chunk;
+      const echo = `${req.headers.authorization} ${JSON.parse(raw || '{}').busCredential || ''}`;
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/api/machine/descriptor') return res.end(JSON.stringify({ machineId: 'hostile-id', protocol: MACHINE_PROTOCOL }));
+      if (req.method === 'POST' && req.url === '/api/claude/sessions') return res.end(JSON.stringify({ sessionName: echo, initialPromptError: echo }));
+      if (req.method === 'GET') return res.end(JSON.stringify({ content: echo }));
+      res.statusCode = 400;
+      return res.end(JSON.stringify({ error: echo, code: echo }));
+    }).listen(0, '127.0.0.1');
+    await once(hostile, 'listening');
+    const credential = 'hostile-row-credential-secret';
+    hubStore.update((state) => { state.machines.hostile = { id: 'hostile', url: `http://127.0.0.1:${hostile.address().port}`, envId: 'hostile-id', credential }; });
+    const created = await hub.app.inject({ method: 'POST', url: '/api/claude/sessions', headers: hub.authHeaders, payload: { machine: 'hostile', workDir: '/srv/repo' } });
+    const { id } = created.json();
+    const input = await hub.app.inject({ method: 'POST', url: `/api/claude/sessions/${id}/input`, headers: hub.authHeaders, payload: { text: 'hi' } });
+    const detail = await hub.app.inject({ url: `/api/claude/sessions/${id}`, headers: hub.authHeaders });
+    hostile.close();
+    hubStore.update((state) => { delete state.machines.hostile; delete state.sessions[`claude:${id}`]; });
+    assert.equal(created.statusCode, 200);
+    assert.deepEqual([input.statusCode, input.json()], [400, { error: 'machine returned HTTP 400', code: null }]);
+    for (const body of [created.body, input.body, detail.body]) {
+      assert.ok(!body.includes(credential) && !body.includes('dueno_mcp_v1.'), body);
+    }
+  });
+
   it('the child talks to hub rooms; a room message to it stays queued while the worker is down or mismatched, then injects once', async () => {
     const thread = (await hub.app.inject({ method: 'POST', url: '/api/agent-bus/threads', headers: hub.authHeaders,
       payload: { title: 'cross-machine', participants: [{ kind: 'claude', sessionId: 'claude-1' }, { kind: 'claude', sessionId: remoteId }] } })).json().thread;
@@ -235,8 +264,10 @@ describe('multi-machine slice 1', () => {
   it('revokes on the next call on both sides; forget while the worker is down completes on reconnect', async () => {
     const workerCredential = hubStore.read().machines.w1.credential;
     await worker.close();
-    assert.equal((await hub.app.inject({ method: 'DELETE', url: `/api/claude/sessions/${remoteId}`, headers: hub.authHeaders })).statusCode, 503);
-    assert.equal((await busStore.authenticate(childToken)).ok, false, 'delete revokes the token while the worker sleeps');
+    const deleted = await hub.app.inject({ method: 'DELETE', url: `/api/claude/sessions/${remoteId}`, headers: hub.authHeaders });
+    assert.deepEqual([deleted.statusCode, deleted.json().ok], [200, true], 'delete proceeds while the worker sleeps');
+    assert.equal((await busStore.authenticate(childToken)).ok, false, 'and revokes the token');
+    assert.equal(hubStore.read().sessions[`claude:${remoteId}`], undefined);
     assert.match((await cli(hubDir, ['machine', 'forget', 'w1'])).out, /Pending on unreachable workers: w1/);
     const spawn = await hub.app.inject({ method: 'POST', url: '/api/claude/sessions', headers: hub.authHeaders, payload: { machine: 'w1', workDir: root } });
     assert.equal(spawn.json().code, 'machine_unknown');

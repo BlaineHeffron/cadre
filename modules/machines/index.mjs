@@ -186,9 +186,13 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
   const parse = (text) => { try { return JSON.parse(text) || {}; } catch { return {}; } };
   // A worker's error body never reaches the hub's caller: only its status and code (§4.2.6).
   const failure = (reply, { status, text }) => {
-    const code = typeof parse(text).code === 'string' ? parse(text).code : null;
+    const { code: raw } = parse(text);
+    const code = typeof raw === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(raw) ? raw : null;
     return reply.code(status).send({ error: code || `machine returned HTTP ${status}`, code });
   };
+  // A success body never carries a credential the hub holds for this call back to the caller.
+  const scrub = (text, secrets) => secrets.filter(Boolean).reduce((out, secret) => out.split(secret).join('[redacted]'), text);
+  const passThrough = (reply, status, text, secrets) => reply.code(status).type('application/json').send(scrub(text, secrets));
   const forgetSession = (kind, sessionId) => cleanupAgentBusCredentialLaunch({ backendType: kind, sessionId, credentialStore, reason: 'session_deleted' });
   const dropSession = async (kind, sessionId) => {
     store.update((state) => { delete state.sessions?.[`${kind}:${sessionId}`]; });
@@ -229,7 +233,8 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     if (!result) return unreachable(reply, { code: 'machine_unreachable' });
     if (!ok) return failure(reply, result);
     const { sessionName, mcpCapabilities, initialPromptInjected, initialPromptError, initialPromptDelivery } = parse(result.text);
-    return reply.send({ id: sessionId, sessionName, mcpCapabilities, initialPromptInjected, initialPromptError, initialPromptDelivery, machine });
+    return passThrough(reply, 200, JSON.stringify({ id: sessionId, sessionName, mcpCapabilities, initialPromptInjected,
+      initialPromptError, initialPromptDelivery, machine }), [issued?.token, row.credential]);
   }
 
   // Runs for app.inject too, so bus deliveries to a remote id never reach a local handler.
@@ -245,14 +250,19 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     // Delete revokes the token at once, even while the worker sleeps.
     if (deleting) await forgetSession(kind, req.params.id);
     const peer = row ? await checkPeer(row.url, row.envId, { protocol }) : { code: 'machine_unreachable' };
+    const result = peer.code ? null : await send(row, req.method, req.url, req.body).catch(() => null);
+    // Delete still proceeds while the worker is away: the token is revoked and the row dropped; tmux keeps running there.
+    if (!result && deleting) {
+      await dropSession(kind, req.params.id);
+      return reply.send({ ok: true, status: 'already_gone', kind, sessionId: req.params.id, residual: [], reason: peer.code || 'machine_unreachable' });
+    }
     if (peer.code) return unreachable(reply, peer);
-    const result = await send(row, req.method, req.url, req.body).catch(() => null);
     if (!result) return unreachable(reply, { code: 'machine_unreachable' });
     // The worker answers an unknown id with 404 or an ended payload coded session_not_found.
     const gone = suffix === '' && (result.status === 404 || parse(result.text).code === 'session_not_found' || (deleting && result.status < 300));
     if (gone) await dropSession(kind, req.params.id);
     if (result.status >= 300) return failure(reply, result);
-    return reply.code(result.status).type('application/json').send(result.text);
+    return passThrough(reply, result.status, result.text, [row.credential]);
   });
 
   app.addHook('onSend', async (req, reply, payload) => {
