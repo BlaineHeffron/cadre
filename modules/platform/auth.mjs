@@ -232,7 +232,7 @@ export function permissionAuthorityForRequest(request, {
   const audit = {
     actor: principal ? `${principal.kind}:${principal.sessionId}` : 'unauthenticated',
     principalType: principal?.type || 'unknown',
-    policy: operatorApproved ? 'authenticated_operator' : (policy || 'none'),
+    policy: operatorApproved ? (principal.type === 'hub-peer' ? 'hub_relayed_operator' : 'authenticated_operator') : (policy || 'none'),
     tool: String(tool || ''),
     scope: String(scope || ''),
     risk: String(risk || ''),
