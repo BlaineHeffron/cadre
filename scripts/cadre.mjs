@@ -1,8 +1,12 @@
 #!/usr/bin/env node
-// Machine pairing CLI. Run from the instance's checkout so it reads that instance's .env and state dir.
-import { config } from '../config.mjs';
-import { runtimeStatePath } from '../modules/ops/runtime-state.mjs';
-import { addMachine, forgetMachine, machineState } from '../modules/machines/index.mjs';
+// Machine pairing CLI. Like the service (WorkingDirectory=), it runs in its own checkout, so config reads that
+// checkout's .env (values already set in the shell win) and the state dir is that instance's.
+import { fileURLToPath } from 'node:url';
+
+process.chdir(fileURLToPath(new URL('..', import.meta.url)));
+const { config } = await import('../config.mjs');
+const { runtimeStatePath } = await import('../modules/ops/runtime-state.mjs');
+const { addMachine, forgetMachine, machineState } = await import('../modules/machines/index.mjs');
 
 const store = machineState(runtimeStatePath('machines'));
 const [command, sub, ...rest] = process.argv.slice(2);

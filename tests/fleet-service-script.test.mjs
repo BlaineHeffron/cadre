@@ -30,9 +30,6 @@ describe('install-fleet-service script', () => {
     assert.match(script, /^ReadWritePaths=\$HOME\/\.dueno-fleet .*\$LIVE_DIR\/\.dueno.*\$DEV_DIR\/\.dueno/m);
     assert.match(script, /^ReadWritePaths=\$HOME\/\.dueno-fleet \$LIVE_DIR\/\.dueno \$DEV_DIR\/\.dueno$/m);
     assert.match(script, /^ReadOnlyPaths=\/var\/log\/auth\.log$/m);
-    assert.match(script, /^ProtectKernelTunables=true$/m);
-    assert.match(script, /^ProtectKernelModules=true$/m);
-    assert.match(script, /^ProtectControlGroups=true$/m);
     assert.match(script, /^RestrictSUIDSGID=true$/m);
     assert.doesNotMatch(script, /ExecStartPre=.*sync-main\.sh/);
     assert.match(script, /^ExecStartPre=\$NODE_BIN scripts\/check-node-runtime\.mjs$/m);
@@ -41,7 +38,7 @@ describe('install-fleet-service script', () => {
 });
 
 describe('host path defaults', () => {
-  it('derive the dev clone from the live worktree and refuse to run outside git', async () => {
+  it('create the live copy beside a dev clone on main, drop kernel hardening on WSL only, and refuse to run outside git', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dueno-host-defaults-'));
     const dev = join(root, 'dev');
     const live = `${dev}-live`;
@@ -74,16 +71,29 @@ describe('host path defaults', () => {
       await git('-C', dev, 'commit', '-qm', 'init');
       await git('clone', '-q', '--bare', dev, join(root, 'origin.git'));
       await git('-C', dev, 'remote', 'add', 'origin', join(root, 'origin.git'));
-      await git('-C', dev, 'worktree', 'add', '-q', '--detach', live);
       await writeFile(join(dev, '.env'), 'X=1\n');
+      const units = join(root, 'config', 'systemd', 'user');
+      const kernelHardening = /^ProtectKernelTunables=true\nProtectKernelModules=true\nProtectControlGroups=true$/m;
+      const osrelease = async (text) => { await writeFile(join(root, 'osrelease'), text); return { ...env, CADRE_OSRELEASE_PATH: join(root, 'osrelease') }; };
 
-      await execFileAsync('bash', [join(live, 'scripts', 'sync-main.sh')], { env, cwd: live });
+      // The dev clone stays on main while the installer creates the live copy (WSL kernel).
+      await execFileAsync('bash', [join(dev, 'scripts', 'install-fleet-service.sh')], { env: await osrelease('6.6.87.2-microsoft-standard-WSL2\n'), cwd: dev });
+      assert.equal((await execFileAsync('git', ['-C', dev, 'branch', '--show-current'], { env })).stdout.trim(), 'main');
       assert.equal(await readlink(join(live, '.env')), join(dev, '.env'));
+      for (const name of ['dueno-fleet.service', 'dueno-fleet-backup.service']) {
+        const unit = await readFile(join(units, name), 'utf8');
+        assert.doesNotMatch(unit, /ProtectKernel|ProtectControlGroups/, name);
+        assert.match(unit, /^NoNewPrivileges=true\nProtectSystem=strict$/m, name);
+        assert.match(unit, /^RestrictSUIDSGID=true$/m, name);
+      }
 
-      await execFileAsync('bash', [join(live, 'scripts', 'install-fleet-service.sh')], { env, cwd: live });
-      const unit = await readFile(join(root, 'config', 'systemd', 'user', 'dueno-fleet.service'), 'utf8');
+      // From the live copy on a regular kernel: same dev clone, full hardening.
+      await execFileAsync('bash', [join(live, 'scripts', 'install-fleet-service.sh')], { env: await osrelease('6.8.0-45-generic\n'), cwd: live });
+      const unit = await readFile(join(units, 'dueno-fleet.service'), 'utf8');
       assert.match(unit, new RegExp(`^WorkingDirectory=${live}$`, 'm'));
       assert.match(unit, new RegExp(`^Environment=CADRE_FLEET_STATE_SRC=${dev}$`, 'm'));
+      assert.match(unit, kernelHardening);
+      assert.match(await readFile(join(units, 'dueno-fleet-backup.service'), 'utf8'), kernelHardening);
 
       // Outside git it must stop before touching systemd (no agent slice written).
       const loose = join(root, 'loose');

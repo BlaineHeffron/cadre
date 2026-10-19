@@ -10,6 +10,7 @@
 #   CADRE_FLEET_DEV_DIR   dev clone whose state is symlinked in (default: main worktree of this repo)
 #   CADRE_FLEET_PORT      http port (default: 4310)
 #   CADRE_FLEET_MCP_PORT  agent-bus MCP http port (default: 8765)
+#   CADRE_OSRELEASE_PATH  kernel release file checked for WSL (default: /proc/sys/kernel/osrelease)
 
 set -euo pipefail
 
@@ -31,9 +32,10 @@ bash "$DEV_DIR/scripts/install-agent-slice.sh"
 
 # ── Ensure the live worktree exists and tracks origin/<branch> ────────────────
 if [[ ! -e "$LIVE_DIR" ]]; then
-  echo "Creating live worktree at $LIVE_DIR (branch $BRANCH)"
+  echo "Creating live worktree at $LIVE_DIR (detached at origin/$BRANCH)"
   git -C "$DEV_DIR" fetch origin --quiet
-  git -C "$DEV_DIR" worktree add "$LIVE_DIR" "$BRANCH"
+  # Detached, so the dev clone can stay on $BRANCH; sync-main.sh pins it to origin/$BRANCH either way.
+  git -C "$DEV_DIR" worktree add --detach "$LIVE_DIR" "origin/$BRANCH"
 fi
 
 mkdir -p "$HOME/.dueno-fleet" "$DEV_DIR/.dueno" "$DEV_DIR/.agent_bus" "$DEV_DIR/agent_launch_logs"
@@ -46,6 +48,10 @@ fi
 CADRE_FLEET_LIVE_DIR="$LIVE_DIR" CADRE_FLEET_STATE_SRC="$DEV_DIR" CADRE_FLEET_BRANCH="$BRANCH" \
 DUENO_FLEET_LIVE_DIR="$LIVE_DIR" DUENO_FLEET_STATE_SRC="$DEV_DIR" DUENO_FLEET_BRANCH="$BRANCH" \
   bash "$LIVE_DIR/scripts/sync-main.sh"
+
+# WSL2's user systemd cannot drop the capabilities these need: the unit fails with status=218/CAPABILITIES.
+KERNEL_HARDENING=$'ProtectKernelTunables=true\nProtectKernelModules=true\nProtectControlGroups=true'
+if grep -qi microsoft "${CADRE_OSRELEASE_PATH:-/proc/sys/kernel/osrelease}" 2>/dev/null; then KERNEL_HARDENING=''; fi
 
 mkdir -p "$SYSTEMD_USER_DIR"
 UNIT="$SYSTEMD_USER_DIR/dueno-fleet.service"
@@ -85,9 +91,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=$HOME/.dueno-fleet $LIVE_DIR/.dueno $LIVE_DIR/.agent_bus $LIVE_DIR/agent_launch_logs $DEV_DIR/.dueno $DEV_DIR/.agent_bus $DEV_DIR/agent_launch_logs
 ReadOnlyPaths=/var/log/auth.log
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
+$KERNEL_HARDENING
 RestrictSUIDSGID=true
 MemoryDenyWriteExecute=false
 StandardOutput=journal
@@ -113,9 +117,7 @@ ExecStart=$NPM_BIN run backup:state
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=$HOME/.dueno-fleet $LIVE_DIR/.dueno $DEV_DIR/.dueno
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
+$KERNEL_HARDENING
 RestrictSUIDSGID=true
 StandardOutput=journal
 StandardError=journal
