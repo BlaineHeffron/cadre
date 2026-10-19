@@ -170,7 +170,8 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
     }
   }
 
-  createAgentBusObserver({ app, store, wsManager, deliveryInFlight, sweepStaleRooms,
+  // A worker's bus is empty: its observer would reap live collab worktrees as orphans.
+  if (config.role !== 'worker') createAgentBusObserver({ app, store, wsManager, deliveryInFlight, sweepStaleRooms,
     sessionDeliveryAuditStore,
     hookEventsRetentionDays: config.hookEventsRetentionDays,
     observerIntervalMs: config.agentBus.pollMs,

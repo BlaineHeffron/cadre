@@ -1592,7 +1592,7 @@ describe('Codex Sessions module', () => {
   it('passes route-supplied metadata into persisted session creation', async () => {
     const source = await readFile(resolve('modules/sessions/index.mjs'), 'utf8');
     assert.match(source, /const \{ workDir, args, model, provider, runtime, thinkingLevel, displayName, initialPrompt, metadata, mcpProfile, mcpServers, codexPlugins, promptProfile, skills, sandbox \} = body/);
-    assert.match(source, /displayName,\n\s+metadata: trustedMetadata,\n\s+coordinatorPolicy: scheduledCoordinatorLaunch \? requestCoordinatorPolicy : null,\n\s+loopRegistrationPolicy,\n\s+mcpProfile,\n\s+mcpServers,\n\s+codexPlugins,\n\s+promptProfile,\n\s+skills/);
+    assert.match(source, /displayName,\n\s+metadata: trustedMetadata,\n\s+coordinatorPolicy: trust\.coordinatorPolicy,\n\s+loopRegistrationPolicy: trust\.loopRegistrationPolicy,\n.*\n\s+mcpProfile,\n\s+mcpServers,\n\s+codexPlugins,\n\s+promptProfile,\n\s+skills/);
     assert.match(source, /resumeSession\(id, \{\n\s+loopRegistrationPolicy: operatorResumeLoopRegistrationPolicy\(/);
     assert.match(source, /operatorResumeLoopRegistrationPolicy/);
     assert.doesNotMatch(source, /loopRegistrationPolicy: operatorLoopRegistrationPolicy\(req\.duenoAuth\?\.principal\)/);

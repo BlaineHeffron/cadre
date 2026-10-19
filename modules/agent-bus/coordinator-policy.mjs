@@ -260,6 +260,25 @@ export function spawnerMetadata(principal, metadata = {}) {
     ? { kind: String(principal.kind), sessionId: String(principal.sessionId) } : undefined };
 }
 
+// Spawn authority comes only from the caller's credential; the hub runs this for local and remote spawns.
+export function deriveSpawnTrust(auth, metadata = {}) {
+  const requestPolicy = normalizeCredentialCoordinatorPolicy(auth?.coordinatorPolicy);
+  const principal = auth?.principal || null;
+  const scheduled = principal?.type === 'service' && principal?.kind === 'scheduled-agent-pump' && requestPolicy;
+  const loopRegistrationPolicy = operatorLoopRegistrationPolicy(principal);
+  return {
+    coordinatorPolicy: scheduled ? requestPolicy : null,
+    loopRegistrationPolicy,
+    metadata: {
+      ...stripReservedCoordinatorMetadata(metadata),
+      ...(scheduled ? coordinatorSessionMetadata(requestPolicy)
+        : (principal?.type === 'agent' ? coordinatorOwnerMetadata(requestPolicy) : {})),
+      ...loopRegistrationSessionMetadata(loopRegistrationPolicy),
+      ...spawnerMetadata(principal, metadata),
+    },
+  };
+}
+
 export function storedCoordinatorPolicy(metadata = {}) {
   const stored = metadata?.[COORDINATOR_SESSION_METADATA_KEY];
   if (stored?.issuedBy !== 'scheduled-agent-pump') return null;

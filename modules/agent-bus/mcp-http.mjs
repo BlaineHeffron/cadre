@@ -117,6 +117,8 @@ export function startAgentBusMcpHttpServer({
   businessOsMcpProxy = null,
   mcpServerProxy = null,
   credentialStore = getAgentBusCredentialStore(),
+  // The tailnet listener: a valid token is required whatever the global auth mode.
+  requireCredential = false,
 } = {}) {
   const mcpServer = serverFactory || createDefaultAgentBusMcpServer(metaUrl);
 
@@ -168,7 +170,7 @@ export function startAgentBusMcpHttpServer({
     };
     try {
       await credentialStore.init();
-      const mode = credentialStore.mode;
+      const mode = requireCredential ? 'enforce' : credentialStore.mode;
       const token = bearerTokenFromHeader(request.headers.authorization);
       if (mode !== 'off' && token) {
         const result = await credentialStore.authenticate(token);

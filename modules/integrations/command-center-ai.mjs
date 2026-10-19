@@ -344,6 +344,7 @@ function broadcastWorkQueue(wsManager, type, item) {
 }
 
 export async function addHumanQueueItem(input = {}, { wsManager, persist = true, principal, sessionInteraction } = {}) {
+  if (config.role === 'worker') throw Object.assign(new Error('Workers file queue items on the hub'), { statusCode: 403 });
   await ensureHumanWorkQueueLoaded();
   if (sessionInteraction) {
     const existing = humanWorkQueue.find((item) => item.status === 'open' && item.sessionKind === input.sessionKind && item.sessionId === input.sessionId

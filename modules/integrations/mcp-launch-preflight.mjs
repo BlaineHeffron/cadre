@@ -400,6 +400,7 @@ export async function prepareMcpCapabilityLaunch({
   rotation = false,
   fetchImpl = fetch,
   requireLiveDuenoHandshake = handshakeRequiredOutsideTests(),
+  duenoUrl = '',
   claudeConfigPath = '',
   duenoCredentialEnvVar = '',
   stdioEnv = process.env,
@@ -432,7 +433,8 @@ export async function prepareMcpCapabilityLaunch({
     });
     for (const id of serverIds) {
       if (id === 'dueno') {
-        const configuredUrl = buildAgentBusMcpUrl(sourceConfig);
+        // A worker session dials its paired hub's MCP origin, never a caller-supplied URL.
+        const configuredUrl = duenoUrl || buildAgentBusMcpUrl(sourceConfig);
         const url = duenoCredentialEnvVar ? assertLoopbackUrl(configuredUrl) : configuredUrl;
         const authorization = busCredential?.token ? `Bearer ${busCredential.token}` : '';
         if (backendType === 'codex') codexArgs.push(...codexHttpServerArgs(id, url, {

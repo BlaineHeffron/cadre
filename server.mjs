@@ -4,6 +4,7 @@ import fastifyWebsocket from '@fastify/websocket';
 import fastifyRateLimit from '@fastify/rate-limit';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { assertDistinctAuthSecrets, config, loadTlsOptions } from './config.mjs';
 import { authPlugin, buildInternalBypassHeaders, evaluateInternalBypass, InternalQuietLogController, trustProxyHop, verifyBrowserSessionRequest, verifyToken } from './modules/platform/auth.mjs';
 import { summarizeReadiness } from './modules/ops/health-controls.mjs';
@@ -37,6 +38,9 @@ import { researchWorkbenchPlugin } from './modules/integrations/research-workben
 import { buildSessionDeliveryAuditStore, sessionDeliveryAuditPlugin } from './modules/sessions/delivery-audit.mjs';
 import { buildMonitorMcpServer } from './modules/platform/monitor-mcp.mjs';
 import { startAgentBusMcpHttpServer } from './modules/agent-bus/mcp-http.mjs';
+import { getAgentBusCredentialStore } from './modules/agent-bus/mcp-auth.mjs';
+import { runtimeStatePath } from './modules/ops/runtime-state.mjs';
+import { assertWorkerHost, LOG_REDACT, machinesPlugin, machineState } from './modules/machines/index.mjs';
 import {
   buildInProcessAgentBusMcpServer,
   buildInProcessFastifyRequest,
@@ -80,6 +84,19 @@ try {
   process.exit(1);
 }
 
+const isWorker = config.role === 'worker';
+if (isWorker) {
+  try {
+    assertWorkerHost(config.host);
+    const telegramConfig = (() => { try { return readFileSync(join(homedir(), '.claude/telegram/config.env'), 'utf8'); } catch { return ''; } })();
+    if (/^TELEGRAM_BOT_TOKEN=\S/m.test(telegramConfig)) throw new Error('a worker must not hold a Telegram bot token; only the hub runs the bot');
+  } catch (err) {
+    console.error(`Server bootstrap failed in worker mode: ${err.message}`);
+    process.exit(1);
+  }
+}
+const machines = machineState(runtimeStatePath('machines'));
+
 const sideEffectLoopsSuppressed = shouldSuppressSideEffectLoops({ port: config.port });
 if (sideEffectLoopsSuppressed) {
   config.githubAgents.enabled = false;
@@ -88,7 +105,7 @@ if (sideEffectLoopsSuppressed) {
 }
 
 const app = Fastify({
-  logger: { level: config.logLevel, hooks: { logMethod: opsLogMethod } },
+  logger: { level: config.logLevel, hooks: { logMethod: opsLogMethod }, redact: LOG_REDACT },
   logController: new InternalQuietLogController(),
   bodyLimit: 12 * 1024 * 1024,
   // agentBusPlugin loads a large state file at startup and can exceed Fastify's 10s default.
@@ -109,7 +126,7 @@ await app.register(fastifyRateLimit, {
     if (verifyBrowserSessionRequest(request)) return true;
     const authHeader = request.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
-    return verifyToken(authHeader.slice(7));
+    return verifyToken(authHeader.slice(7)) || Boolean(isWorker && machines.verifyPeer(authHeader.slice(7)));
   },
 });
 
@@ -117,7 +134,8 @@ await app.register(fastifyRateLimit, {
 await app.register(fastifyWebsocket);
 
 // Auth
-await app.register(authPlugin);
+await app.register(authPlugin, isWorker ? { workerMachines: machines } : {});
+await app.register(machinesPlugin, { role: config.role, store: machines, credentialStore: getAgentBusCredentialStore() });
 await app.register(agentProviderPreferencesPlugin);
 
 // WebSocket manager (must be after websocket plugin)
@@ -536,6 +554,7 @@ let telegramBridgeRestartTimer = null;
 let telegramBridgeEnabled = shouldEnableTelegramBridge({ sideEffectLoopsSuppressed });
 const agentBusMcpHttpEnabled = shouldStartAgentBusMcpHttp({ sideEffectLoopsSuppressed });
 let agentBusMcpHttpServer = null;
+let tailnetMcpHttpServer = null;
 let telegramRelayLoop = null;
 
 async function getAgentBusMcpHealth() {
@@ -727,10 +746,11 @@ async function shutdown() {
   clearTelegramBridgeRestartTimer();
   stopTelegramBridge();
   telegramRelayLoop?.stop();
-  if (agentBusMcpHttpServer) {
-    await new Promise((resolveClose) => agentBusMcpHttpServer.close(resolveClose));
-    agentBusMcpHttpServer = null;
+  for (const server of [agentBusMcpHttpServer, tailnetMcpHttpServer].filter(Boolean)) {
+    await new Promise((resolveClose) => server.close(resolveClose));
   }
+  agentBusMcpHttpServer = null;
+  tailnetMcpHttpServer = null;
   await app.close();
   process.exit(0);
 }
@@ -753,6 +773,18 @@ try {
       businessOsMcpProxy: createBusinessOsMcpProxy({ log: app.log }),
       mcpServerProxy: createRemoteMcpProxy({ log: app.log }),
     });
+    // Paired workers' sessions reach this through `tailscale serve`; it serves only /mcp and always needs a token.
+    if (config.machines.tailnetMcpPort) {
+      tailnetMcpHttpServer = startAgentBusMcpHttpServer({
+        metaUrl: import.meta.url,
+        host: '127.0.0.1',
+        port: config.machines.tailnetMcpPort,
+        path: config.agentBusMcpHttp.path,
+        log: app.log,
+        serverFactory: createInProcessAgentBusMcpServer(),
+        requireCredential: true,
+      });
+    }
   } else {
     app.log.warn('Agent Bus MCP HTTP listener disabled by side-effect suppression');
   }

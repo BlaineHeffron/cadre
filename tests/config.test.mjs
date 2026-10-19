@@ -214,14 +214,14 @@ describe('config.promptProfiles file loading', () => {
 });
 
 describe('config.agentBusMcpHttp', () => {
-  it('inherits the main HOST when AGENT_BUS_MCP_HTTP_HOST is unset', async () => {
+  it('keeps the MCP listener on loopback when HOST is a tailnet address', async () => {
     const { config } = await importConfigWithEnv({
       HOST: '100.64.0.10',
       AGENT_BUS_MCP_HTTP_HOST: undefined,
     });
 
     assert.equal(config.host, '100.64.0.10');
-    assert.equal(config.agentBusMcpHttp.host, '100.64.0.10');
+    assert.equal(config.agentBusMcpHttp.host, '127.0.0.1');
   });
 
   it('keeps an explicit AGENT_BUS_MCP_HTTP_HOST override', async () => {

@@ -272,8 +272,9 @@ export function buildAgentInterface({
     let sessionWorkDir = requestedWorkDir;
     let worktree = null;
     if (flagEnabled(input.isolatedWorktree)) {
-      if (!requestedWorkDir) {
-        const error = new Error('workDir is required when isolatedWorktree is enabled');
+      if (!requestedWorkDir || input.machine) {
+        const error = new Error(input.machine ? 'isolatedWorktree is not supported on another machine yet'
+          : 'workDir is required when isolatedWorktree is enabled');
         error.statusCode = 400;
         throw error;
       }
@@ -291,6 +292,7 @@ export function buildAgentInterface({
       ...(input._serverAuthContext ? { authContext: input._serverAuthContext } : {}),
       body: compactBody({
         workDir: sessionWorkDir,
+        machine: input.machine,
         displayName: input.displayName,
         model: selection.model,
         provider: selection.backendProvider,

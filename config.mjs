@@ -145,8 +145,17 @@ export const config = {
     closedThreadRetentionDays: Number(env('AGENT_BUS_CLOSED_THREAD_RETENTION_DAYS', '30')),
   },
 
+  // hub (default) or worker; see docs/multi-machine-design.md.
+  role: env('CADRE_ROLE', 'hub') === 'worker' ? 'worker' : 'hub',
+  machines: {
+    // Loopback port for the tailnet MCP listener that `tailscale serve` fronts; 0 disables it.
+    tailnetMcpPort: Number(env('CADRE_TAILNET_MCP_PORT', '0')),
+    // The https origin + /mcp that paired workers' sessions dial (the Serve URL).
+    hubMcpUrl: env('CADRE_HUB_MCP_URL', ''),
+  },
+
   agentBusMcpHttp: {
-    host: env('AGENT_BUS_MCP_HTTP_HOST', env('HOST', '127.0.0.1')),
+    host: env('AGENT_BUS_MCP_HTTP_HOST', '127.0.0.1'),
     port: Number(env('AGENT_BUS_MCP_HTTP_PORT', '8765')),
     path: env('AGENT_BUS_MCP_HTTP_PATH', '/mcp'),
   },

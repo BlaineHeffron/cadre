@@ -7,6 +7,7 @@ Environment variables use the `CADRE_` prefix. The legacy `DM_` and `DUENO_` nam
 - [Local development](local-development.md)
 - [Production controls runbook](production-controls-runbook.md)
 - [Production SLOs](production-slos.md)
+- [Worker machines runbook](machines-runbook.md)
 - [Agent bus design](agent_bus_design.md)
 - [Agentic architecture](agentic-architecture.md)
 - [Canonical session state tracker plan](session-state-tracker-plan.md)

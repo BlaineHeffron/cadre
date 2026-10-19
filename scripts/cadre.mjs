@@ -1,0 +1,31 @@
+#!/usr/bin/env node
+// Machine pairing CLI. Run from the instance's checkout so it reads that instance's .env and state dir.
+import { config } from '../config.mjs';
+import { runtimeStatePath } from '../modules/ops/runtime-state.mjs';
+import { addMachine, forgetMachine, machineState } from '../modules/machines/index.mjs';
+
+const store = machineState(runtimeStatePath('machines'));
+const [command, sub, ...rest] = process.argv.slice(2);
+try {
+  if (command === 'pair') {
+    if (config.role !== 'worker') throw new Error('Run `cadre pair` on a worker (CADRE_ROLE=worker).');
+    console.log(`http://${config.host}:${config.port}/#${store.machineId()}.${store.issueCode()}`);
+    console.error('One-time link, valid for 5 minutes. Treat it like a password.');
+  } else if (command === 'unpair') {
+    store.unpair();
+    console.log('Unpaired: this worker no longer accepts its hub.');
+  } else if (command === 'machine' && sub === 'add' && rest.length === 2) {
+    const { id, label, warning } = await addMachine(store, rest[0], rest[1], { hubMcpUrl: config.machines.hubMcpUrl });
+    console.log(`Paired ${id} (${label}).`);
+    if (warning) console.warn(`warning: ${warning}`);
+  } else if (command === 'machine' && sub === 'forget' && rest.length === 1) {
+    const pending = await forgetMachine(store, rest[0]);
+    console.log(pending.length ? `Revoked on the hub. Pending on unreachable workers: ${pending.join(', ')}; re-run forget when they are back.` : 'Revoked on both sides.');
+  } else {
+    console.error('usage: cadre pair | cadre unpair | cadre machine add <name> <link> | cadre machine forget <name>');
+    process.exit(2);
+  }
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
