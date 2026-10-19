@@ -193,19 +193,19 @@ function sessionMatchesGithubItem(session = {}, repo = {}, kind = '', item = {},
   return firstSegment.startsWith(githubAgentWorktreeItemPrefix(normalizedKind, item));
 }
 
+// Returns null when a registry exists but cannot be read; a missing file reads as empty.
 async function readSessionRegistry(filePath, legacyFilePath) {
-  try {
-    const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    if (!legacyFilePath) return [];
+  let failed = false;
+  for (const path of legacyFilePath ? [filePath, legacyFilePath] : [filePath]) {
+    try {
+      const parsed = JSON.parse(await readFile(path, 'utf8'));
+      if (Array.isArray(parsed)) return parsed;
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+    }
+    failed = true;
   }
-  try {
-    const parsed = JSON.parse(await readFile(legacyFilePath, 'utf8'));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  return failed ? null : [];
 }
 
 async function tmuxSessionExists(sessionName = '') {
@@ -234,7 +234,8 @@ async function listRegisteredGithubSessions(config = {}) {
       source.explicitFile || runtimeStatePath(source.fileName),
       source.explicitFile ? undefined : legacyRootStatePath(source.fileName),
     );
-    for (const entry of entries) sessions.push({ ...entry, backendType: source.backendType });
+    if (!entries) sessions.readFailed = true;
+    for (const entry of entries || []) sessions.push({ ...entry, backendType: source.backendType });
   }
   return sessions;
 }
@@ -808,8 +809,8 @@ export class GithubAgentPoller {
     const root = resolve(expandHomePath(this.config.workDir || '~/.dueno-fleet/github-agents'), 'worktrees', githubRepoWorktreeKey(repo));
     const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
     const sessions = entries.length ? (this.listExistingSessions ? await this.listExistingSessions() : await listRegisteredGithubSessions(this.config)) : [];
-    // An unreadable registry reads as empty; never treat that as every worktree being orphaned.
-    if (!sessions.length) return;
+    // Without every registry, an owned worktree would look orphaned.
+    if (!sessions.length || sessions.readFailed) return;
     const owned = new Set(sessions.map((session) => relative(root, resolve(normalizeText(session.workDir || session.metadata?.github_worktree_path) || '/')).split(/[\\/]/)[0]));
     for (const entry of entries) {
       const number = Number(/^pr-(\d+)-\d+$/.exec(entry.name)?.[1]);
@@ -817,7 +818,9 @@ export class GithubAgentPoller {
       if (!number || !entry.isDirectory() || owned.has(entry.name)) continue;
       try {
         if (this.now() - (await stat(path)).mtimeMs < ORPHAN_WORKTREE_GRACE_MS) continue;
-        const checkout = (await readdir(path)).map((name) => resolve(path, name)).find((child) => existsSync(resolve(child, '.git')));
+        // A symlinked child could point at a worktree outside this directory; only real directories count.
+        const child = (await readdir(path, { withFileTypes: true })).find((item) => item.isDirectory() && existsSync(resolve(path, item.name, '.git')));
+        const checkout = child && resolve(path, child.name);
         if (checkout && !(await this.removeWorktree({
           repoPath: configuredRepoPath(this.config.repoPaths, repo.id), worktreePath: checkout, branch: `dueno-fleet/${entry.name}`, keepUnpushed: true, pullRequest: number,
         }))?.removed) continue;

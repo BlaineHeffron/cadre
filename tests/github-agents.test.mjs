@@ -1410,9 +1410,9 @@ describe('GitHub agents poller', () => {
     await git(repo, 'add', '.');
     await git(repo, 'commit', '-m', 'init');
     await git(repo, 'remote', 'add', 'origin', join(root, 'remote'));
-    await git(repo, 'push', 'origin', 'main', ...[1, 2, 3, 4, 5].map((n) => `HEAD:refs/pull/${n}/head`));
+    await git(repo, 'push', 'origin', 'main', ...[1, 2, 3, 4, 5, 9].map((n) => `HEAD:refs/pull/${n}/head`));
     const base = join(root, 'agents');
-    const tree = async (n) => (await createGithubPullRequestWorktree({ repoPath: repo, baseDir: base, repoId: 'octo/demo', prNumber: n, itemId: `${n}00` })).worktreePath;
+    const tree = async (n, baseDir = base) => (await createGithubPullRequestWorktree({ repoPath: repo, baseDir, repoId: 'octo/demo', prNumber: n, itemId: `${n}00` })).worktreePath;
     const [clean, owned, dirty, unpushed, fresh] = [await tree(1), await tree(2), await tree(3), await tree(4), await tree(5)];
     await mkdir(join(clean, 'target'));
     await writeFile(join(clean, 'target', 'build-output'), 'x');
@@ -1425,26 +1425,40 @@ describe('GitHub agents poller', () => {
     await mkdir(otherRepo, { recursive: true });
     await mkdir(join(root, 'outside'));
     await symlink(join(root, 'outside'), join(reposDir, 'pr-8-800'));
+    // A clean worktree outside the root, reachable only through a symlinked child of a pr-* dir.
+    const linked = await tree(9, join(root, 'elsewhere'));
+    await mkdir(join(reposDir, 'pr-9-900'));
+    await symlink(linked, join(reposDir, 'pr-9-900', 'repo'));
     const old = new Date(Date.now() - 20 * 60_000);
-    for (const dir of ['pr-1-100', 'pr-2-200', 'pr-3-300', 'pr-4-400', 'pr-6-600']) await utimes(join(reposDir, dir), old, old);
+    for (const dir of ['pr-1-100', 'pr-2-200', 'pr-3-300', 'pr-4-400', 'pr-6-600', 'pr-9-900']) await utimes(join(reposDir, dir), old, old);
     await utimes(otherRepo, old, old);
     const logs = [];
+    const registry = (name) => join(root, `${name}_sessions.json`);
+    await writeFile(registry('codex'), JSON.stringify([{ id: 'other', workDir: join(root, 'scratch') }]));
+    await writeFile(registry('claude'), '[{"id": "s2", "workDir"');
+    const paths = [clean, owned, dirty, unpushed, fresh, join(reposDir, 'pr-6-600'), otherRepo, join(reposDir, 'pr-8-800'), join(reposDir, 'pr-9-900'), linked];
     await withRepoStore(async (store) => {
       await store.upsertRepo({ ...BASE_REPO, lastSeenPrNumber: 20, lastSeenIssueNumber: 20 });
       const poller = new GithubAgentPoller({
-        repoStore: store, config: { enabled: true, workDir: base, repoPaths: { 'octo/demo': repo }, env: { GITHUB_TOKEN_REF: 'test-token' } },
-        fetchImpl: mockGithubFetch([]), listExistingSessions: async () => [{ id: 's2', workDir: owned }],
-        log: { info: (fields) => logs.push(fields), warn: () => {} },
+        repoStore: store, fetchImpl: mockGithubFetch([]), log: { info: (fields) => logs.push(fields), warn: () => {} },
+        config: {
+          enabled: true, workDir: base, repoPaths: { 'octo/demo': repo }, env: { GITHUB_TOKEN_REF: 'test-token' },
+          codexSessionsFile: registry('codex'), claudeSessionsFile: registry('claude'), piSessionsFile: registry('pi'),
+        },
       });
+      // The registry owning pr-2 is unreadable, so nothing is removed.
+      await poller.pollOnce();
+      assert.ok(paths.every((p) => existsSync(p)));
+      await writeFile(registry('claude'), JSON.stringify([{ id: 's2', workDir: owned }]));
       await poller.pollOnce();
     });
-    assert.deepEqual([clean, owned, dirty, unpushed, fresh, join(reposDir, 'pr-6-600'), otherRepo, join(reposDir, 'pr-8-800')].map((p) => existsSync(p)),
-      [false, true, true, true, true, false, true, true]);
+    assert.deepEqual(paths.map((p) => existsSync(p)), [false, true, true, true, true, false, true, true, false, true]);
     assert.equal(existsSync(join(reposDir, 'pr-1-100')), false);
     assert.deepEqual(logs.map((fields) => [fields.path, fields.reason]), [
-      [join(reposDir, 'pr-1-100'), 'no_session_clean_worktree'], [join(reposDir, 'pr-6-600'), 'no_session_no_checkout']]);
+      [join(reposDir, 'pr-1-100'), 'no_session_clean_worktree'], [join(reposDir, 'pr-6-600'), 'no_session_no_checkout'],
+      [join(reposDir, 'pr-9-900'), 'no_session_no_checkout']]);
     const branches = (await git(repo, 'branch', '--list', 'dueno-fleet/*')).stdout;
-    assert.ok(!branches.includes('pr-1-100') && branches.includes('pr-2-200'));
+    assert.ok(!branches.includes('pr-1-100') && branches.includes('pr-2-200') && branches.includes('pr-9-900'));
     await rm(root, { recursive: true, force: true });
   });
 
