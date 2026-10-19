@@ -856,10 +856,25 @@ nono's Landlock can work.
   - **Exactly once.** Every mirrored line carries the worker cursor it was read up to, and the next
     fetch starts from the last line's cursor. Cursor and data are one append, so a hub restart, a
     worker restart or a reconnect resumes after the last event seen, and the mirror never holds an
-    event twice; the observer's existing keys then make its own replay a no-op.
+    event twice; the observer's existing keys then make its own replay a no-op. A batch with no
+    prompt or stop writes no line, so its cursor goes on the index entry (`hookCursor`); skipping
+    those bytes loses nothing, and the fetch starts from the larger of the two.
+  - **Hub clock.** The observer compares a child's hook times with hub times (the spawn's
+    `created`, rooms, messages, `skipIfSentBetween`). The worker returns its `now`, and the hub
+    moves each mirrored `loggedAt` by the offset measured over that request, so a worker clock
+    behind the hub (after a sleep, or by under a second with NTP) cannot release a held turn. The
+    remaining error is half the round trip.
+  - **Mirror location.** `buildHookSessionPaths` walks up to the nearest `.git`; an empty `.git`
+    marker in `<machine state>/hooks` keeps the mirror there, not in an enclosing checkout's
+    `.agent_bus/hooks`.
   - **`spawnedBy` stays on the hub.** The worker receives metadata without it and the result note
     already appended to the initial prompt, so no worker-side session looks like a returnResults
     child to any observer.
-  - **Accepted gaps.** Turn ordering compares the worker's hook times with the hub's clock, so the
-    machines need synchronized clocks (NTP). The follow-up hold from the delivery audit does not
-    apply to remote children, because their input audit is written on the worker.
+  - **Accepted gaps.**
+    - The follow-up hold from the delivery audit does not apply to remote children, because their
+      input audit is written on the worker. A spawner's turn can be returned while a follow-up to a
+      remote child has not started.
+    - A batch is one append (one `write`) stamped with its end cursor, so only a torn write (power
+      loss, a full disk) that keeps some lines can skip the rest.
+    - The tests drive the supervisor with fake timers but wait on the observer's real interval,
+      which is not injectable.

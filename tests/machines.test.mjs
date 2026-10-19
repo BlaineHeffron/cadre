@@ -5,7 +5,7 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { once } from 'node:events';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -496,7 +496,36 @@ describe('multi-machine slice 3', () => {
     const mirror = await readHookEventsSince({ workDir: join(hubDir, 'machines', 'hooks'), provider: 'claude', sessionId: child });
     assert.deepEqual(mirror.events.filter((event) => event.eventName === 'Stop').map((event) => event.lastAssistantMessage),
       ['first answer', 'still in the background', 'waiting on my worker', 'final answer', 'done while away', 'and one more'], 'each event mirrored once, in order');
-    assert.ok((await stat((await buildHookSessionPaths({ workDir, provider: 'claude', sessionId: child })).eventsPath)).size > 0);
+    const before = hubStore.read().sessions[`claude:${child}`].hookCursor || 0;
+    await record(child, 'PreToolUse', { tool_name: 'Read' });
+    await hubTimers.fire();
+    assert.ok(hubStore.read().sessions[`claude:${child}`].hookCursor > Math.max(before, mirror.events.at(-1).machineCursor), 'a batch with no prompt or stop still advances the cursor');
+    assert.equal((await readHookEventsSince({ workDir: join(hubDir, 'machines', 'hooks'), provider: 'claude', sessionId: child })).events.length, mirror.events.length);
+  });
+
+  it('holds a turn while its remote worker is busy even with the worker clock 10 min behind the hub', async () => {
+    skew = -10 * 60_000;
+    await restartWorker();
+    await poll(async () => (await hub.app.inject({ url: '/api/claude/sessions', headers: hub.authHeaders })).json().sessions.find((row) => row.id === child)?.machine.status === 'live', 'a reconnect');
+    // A hook line stamped by the worker's own (skewed) clock.
+    const behind = async (id, eventName, lastAssistantMessage = '') => {
+      const { hooksDir, eventsPath } = await buildHookSessionPaths({ workDir, provider: 'claude', sessionId: id });
+      await mkdir(hooksDir, { recursive: true });
+      await appendFile(eventsPath, `${JSON.stringify({ loggedAt: new Date(Date.now() + skew).toISOString(), eventName, lastAssistantMessage, payload: {} })}\n`);
+    };
+    const worker3 = await spawn(await tokenOf(child));
+    await behind(worker3, 'UserPromptSubmit');
+    await behind(child, 'UserPromptSubmit');
+    await behind(child, 'Stop', 'too early');
+    await behind(worker3, 'UserPromptSubmit');
+    await behind(worker3, 'Stop', 'late worker done');
+    await poll(() => results(worker3).length === 1, 'the worker result');
+    await behind(child, 'UserPromptSubmit');
+    await behind(child, 'Stop', 'after the worker');
+    await poll(() => results(child).length === 5, 'the result after the worker');
+    skew = 0;
+    assert.deepEqual(results(child).slice(4), ['after the worker'], 'the turn that ended while the worker was busy is held');
+    assert.deepEqual(results(worker3), ['late worker done']);
   });
 
   it('only the hub\'s worker credential reads hook events', async () => {
