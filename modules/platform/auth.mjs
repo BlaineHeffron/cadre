@@ -364,6 +364,11 @@ function authPluginImpl(app, opts = {}, done) {
     const bearer = request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : '';
     const hub = bearer && opts.workerMachines?.verifyPeer(bearer);
     if (hub) {
+      // worker:operate reaches only session create/control and the forget route on this worker.
+      const routed = request.routeOptions?.url || '';
+      if (!/^\/api\/(?!agents\/)[a-z]+\/sessions(?:\/|$)/.test(routed) && routed !== '/api/pairing/forget') {
+        return reply.code(403).send({ error: 'Machine credential is limited to session routes' });
+      }
       request.duenoAuth = { authenticated: true, principal: { type: 'hub-peer', kind: 'hub', sessionId: hub.envId }, mcpUrl: hub.mcpUrl };
       return;
     }

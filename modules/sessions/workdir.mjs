@@ -13,10 +13,10 @@ export function expandHomePath(value = '') {
   return text;
 }
 
-export async function normalizeSessionWorkDir(workDir = '') {
+export async function normalizeSessionWorkDir(workDir = '', { onWorker = false } = {}) {
   const requested = String(workDir || '').trim() || readEnv('DUENO_DEFAULT_AGENT_WORKDIR') || DEFAULT_SESSION_WORKDIR;
-  // A WSL2 worker takes POSIX paths on its own ext4 disk, not Windows or /mnt/<drive> paths.
-  if (/^(?:[a-z]:[\\/]|\\\\wsl(?:\$|\.localhost)\\|\/mnt\/[a-z](?:\/|$))/i.test(requested)) {
+  // Windows paths are never valid; a WSL2 worker also refuses /mnt/<drive> in favour of its own ext4 disk.
+  if (/^(?:[a-z]:[\\/]|\\\\wsl(?:\$|\.localhost)\\)/i.test(requested) || (onWorker && /^\/mnt\/[a-z](?:\/|$)/i.test(requested))) {
     throw Object.assign(new Error(`Windows paths are not supported; use a path on the Linux disk: ${requested}`), {
       statusCode: 400, code: 'workdir_windows_path_unsupported',
     });

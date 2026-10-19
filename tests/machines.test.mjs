@@ -37,6 +37,7 @@ const { buildMonitorMcpServer } = await import('../modules/platform/monitor-mcp.
 const { authPlugin, buildInternalBypassHeaders } = await import('../modules/platform/auth.mjs');
 const { shouldSuppressSideEffectLoops } = await import('../modules/platform/side-effect-loops.mjs');
 const { agentInterfacePlugin } = await import('../modules/agent/interface.mjs');
+const { agentProviderPreferencesPlugin } = await import('../modules/agent/provider-preferences.mjs');
 const { claudeSessionsPlugin } = await import('../modules/sessions/claude-sessions.mjs');
 const { LOG_REDACT, MACHINE_PROTOCOL, machinesPlugin, machineState } = await import('../modules/machines/index.mjs');
 const { mcpClientConfigPath, prepareAgentBusCredentialLaunch } = await import('../modules/integrations/mcp-launch-preflight.mjs');
@@ -57,6 +58,7 @@ async function startWorker({ protocol = MACHINE_PROTOCOL, store = workerStore, s
   const app = Fastify({ logger: logger() });
   await app.register(authPlugin, { workerMachines: store });
   await app.register(machinesPlugin, { role: 'worker', store, protocol });
+  await app.register(agentProviderPreferencesPlugin);
   if (sessions) await app.register(claudeSessionsPlugin, { wsManager: { broadcast() {}, onChannel() {} } });
   await app.listen({ host: '127.0.0.1', port });
   return app;
@@ -170,8 +172,13 @@ describe('multi-machine slice 1', () => {
     const returning = await tool(agentToken, 'spawn_session', { provider: 'claude', machine: 'w1', workDir, returnResults: true });
     assert.match(returning.text, /returnResults is not supported/);
     for (const windowsPath of ['C:\\Users\\me\\repo', '\\\\wsl$\\Ubuntu\\home', '/mnt/c/Users/me']) {
-      assert.match((await tool(agentToken, 'spawn_session', { provider: 'claude', machine: 'w1', workDir: windowsPath })).text, /Windows paths are not supported/);
+      assert.match((await tool(agentToken, 'spawn_session', { provider: 'claude', machine: 'w1', workDir: windowsPath })).text, /workdir_windows_path_unsupported/);
     }
+    const missing = await hub.app.inject({ method: 'POST', url: '/api/claude/sessions', headers: hub.authHeaders, payload: { machine: 'w1', workDir: join(root, 'no-such-dir') } });
+    assert.deepEqual([missing.statusCode, missing.json()], [400, { error: 'machine returned HTTP 400', code: null }], 'worker error bodies stay on the worker');
+    hubStore.update((state) => { state.sessions['claude:deadbeef'] = { machine: 'w1', kind: 'claude', sessionId: 'deadbeef', status: 'live' }; });
+    assert.equal((await hub.app.inject({ url: '/api/claude/sessions/deadbeef', headers: hub.authHeaders })).json().code, 'session_not_found');
+    assert.equal(hubStore.read().sessions['claude:deadbeef'], undefined, 'a session the worker no longer has leaves the index');
   });
 
   it('a create carrying the worker credential stamps no coordinator or operator loop metadata', async () => {
@@ -195,6 +202,8 @@ describe('multi-machine slice 1', () => {
     const other = await startWorker({ store: machineState(join(root, 'other-worker')), sessions: false, port: 0 });
     const otherUrl = `http://127.0.0.1:${other.server.address().port}`;
     assert.equal((await call(`${otherUrl}/api/pairing/forget`, { method: 'POST', token: workerCredential })).status, 401, 'one machine credential fails on another');
+    assert.equal((await call(`${workerUrl}/api/agent-provider-preferences`, { token: workerCredential })).status, 403, 'worker:operate is limited to session routes');
+    assert.equal((await call(`${workerUrl}/api/agent-provider-preferences`, { token: TOKEN })).status, 200, 'the worker UI token still reads');
     await other.close();
   });
 
@@ -226,6 +235,8 @@ describe('multi-machine slice 1', () => {
   it('revokes on the next call on both sides; forget while the worker is down completes on reconnect', async () => {
     const workerCredential = hubStore.read().machines.w1.credential;
     await worker.close();
+    assert.equal((await hub.app.inject({ method: 'DELETE', url: `/api/claude/sessions/${remoteId}`, headers: hub.authHeaders })).statusCode, 503);
+    assert.equal((await busStore.authenticate(childToken)).ok, false, 'delete revokes the token while the worker sleeps');
     assert.match((await cli(hubDir, ['machine', 'forget', 'w1'])).out, /Pending on unreachable workers: w1/);
     const spawn = await hub.app.inject({ method: 'POST', url: '/api/claude/sessions', headers: hub.authHeaders, payload: { machine: 'w1', workDir: root } });
     assert.equal(spawn.json().code, 'machine_unknown');
@@ -234,6 +245,9 @@ describe('multi-machine slice 1', () => {
     assert.match((await cli(hubDir, ['machine', 'forget', 'w1'])).out, /Revoked on both sides/);
     assert.equal((await call(`${workerUrl}/api/claude/sessions/${remoteId}`, { token: workerCredential })).status, 403);
     assert.equal(workerStore.read().hub, undefined);
+    const unusedLink = await pair();
+    await cli(workerDir, ['unpair']);
+    assert.equal((await addMachine('w3', unusedLink)).ok, false, 'unpair revokes outstanding codes');
   });
 
   it('a worker forces loops off and refuses to bind an address that is not its Tailscale IP', async () => {

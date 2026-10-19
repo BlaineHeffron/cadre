@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, platform } from 'node:os';
 import { join } from 'node:path';
 import { privateAllowedHosts } from '../fleet/registry.mjs';
@@ -19,17 +19,25 @@ const sha = (value) => createHash('sha256').update(String(value)).digest('hex');
 const fail = (message, code, statusCode = 400) => Object.assign(new Error(message), { code, statusCode });
 
 // One 0600 file per instance. Every read goes to disk, so a CLI revoke or a consumed code is
-// seen by the server on its next call. Sync IO keeps each read-modify-write atomic in-process.
+// seen by the server on its next call. A lock file serializes read-modify-write between the CLI and the server.
 export function machineState(dir) {
   const file = join(dir, 'machines.json');
+  const lock = `${file}.lock`;
   const read = () => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return {}; } };
   const update = (fn) => {
-    const state = read();
-    const result = fn(state);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    writeFileSync(`${file}.tmp`, JSON.stringify(state), { mode: 0o600 });
-    renameSync(`${file}.tmp`, file);
-    return result;
+    for (;;) {
+      try { closeSync(openSync(lock, 'wx', 0o600)); break; } catch (error) { if (error.code !== 'EEXIST') throw error; }
+      try { if (Date.now() - statSync(lock).mtimeMs > 5000) rmSync(lock, { force: true }); } catch {}
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+    try {
+      const state = read();
+      const result = fn(state);
+      writeFileSync(`${file}.tmp`, JSON.stringify(state), { mode: 0o600 });
+      renameSync(`${file}.tmp`, file);
+      return result;
+    } finally { rmSync(lock, { force: true }); }
   };
   const machineId = () => {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -61,7 +69,7 @@ export function machineState(dir) {
       const record = state.credentials?.[sha(token)];
       return record?.scope === 'worker:operate' ? { envId: record.peer, mcpUrl: state.hub?.mcpUrl || '' } : null;
     },
-    unpair() { update((state) => { state.credentials = {}; delete state.hub; }); },
+    unpair() { update((state) => { state.credentials = {}; state.codes = {}; delete state.hub; }); },
   };
 }
 
@@ -133,7 +141,7 @@ export async function forgetMachine(store, name = '') {
   });
   for (const row of Object.values(store.read().pendingForget || {})) {
     if ((await checkPeer(row.url, row.envId)).code) continue;
-    const res = await fetch(`${row.url}/api/pairing/forget`, { method: 'POST', headers: { authorization: `Bearer ${row.credential}` } }).catch(() => null);
+    const res = await fetch(`${row.url}/api/pairing/forget`, { method: 'POST', headers: { authorization: `Bearer ${row.credential}` }, signal: AbortSignal.timeout(10_000) }).catch(() => null);
     if (res && (res.ok || res.status === 401)) store.update((state) => { delete state.pendingForget[row.id]; });
   }
   return Object.keys(store.read().pendingForget || {});
@@ -175,6 +183,17 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
   }
 
   const unreachable = (reply, peer) => reply.code(503).send({ error: peer.detail || peer.code, code: peer.code, transient: true });
+  const parse = (text) => { try { return JSON.parse(text) || {}; } catch { return {}; } };
+  // A worker's error body never reaches the hub's caller: only its status and code (§4.2.6).
+  const failure = (reply, { status, text }) => {
+    const code = typeof parse(text).code === 'string' ? parse(text).code : null;
+    return reply.code(status).send({ error: code || `machine returned HTTP ${status}`, code });
+  };
+  const forgetSession = (kind, sessionId) => cleanupAgentBusCredentialLaunch({ backendType: kind, sessionId, credentialStore, reason: 'session_deleted' });
+  const dropSession = async (kind, sessionId) => {
+    store.update((state) => { delete state.sessions?.[`${kind}:${sessionId}`]; });
+    await forgetSession(kind, sessionId);
+  };
 
   async function send(row, method, url, body) {
     const res = await fetch(`${row.url}${url}`, {
@@ -208,7 +227,9 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     store.update((state) => { if (ok) state.sessions[key].status = 'live'; else delete state.sessions[key]; });
     if (!ok) await cleanupAgentBusCredentialLaunch({ backendType: kind, sessionId, credentialStore, reason: 'launch_failed' });
     if (!result) return unreachable(reply, { code: 'machine_unreachable' });
-    return reply.code(result.status).type('application/json').send(ok ? { ...JSON.parse(result.text), machine } : result.text);
+    if (!ok) return failure(reply, result);
+    const { sessionName, mcpCapabilities, initialPromptInjected, initialPromptError, initialPromptDelivery } = parse(result.text);
+    return reply.send({ id: sessionId, sessionName, mcpCapabilities, initialPromptInjected, initialPromptError, initialPromptDelivery, machine });
   }
 
   // Runs for app.inject too, so bus deliveries to a remote id never reach a local handler.
@@ -220,14 +241,17 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     const entry = state.sessions?.[`${kind}:${req.params.id}`];
     if (!entry) return;
     const row = state.machines?.[entry.machine];
+    const deleting = req.method === 'DELETE' && suffix === '';
+    // Delete revokes the token at once, even while the worker sleeps.
+    if (deleting) await forgetSession(kind, req.params.id);
     const peer = row ? await checkPeer(row.url, row.envId, { protocol }) : { code: 'machine_unreachable' };
     if (peer.code) return unreachable(reply, peer);
     const result = await send(row, req.method, req.url, req.body).catch(() => null);
     if (!result) return unreachable(reply, { code: 'machine_unreachable' });
-    if (req.method === 'DELETE' && suffix === '' && result.status < 300) {
-      store.update((state) => { delete state.sessions[`${kind}:${req.params.id}`]; });
-      await cleanupAgentBusCredentialLaunch({ backendType: kind, sessionId: req.params.id, credentialStore, reason: 'session_deleted' });
-    }
+    // The worker answers an unknown id with 404 or an ended payload coded session_not_found.
+    const gone = suffix === '' && (result.status === 404 || parse(result.text).code === 'session_not_found' || (deleting && result.status < 300));
+    if (gone) await dropSession(kind, req.params.id);
+    if (result.status >= 300) return failure(reply, result);
     return reply.code(result.status).type('application/json').send(result.text);
   });
 

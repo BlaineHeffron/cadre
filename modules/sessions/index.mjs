@@ -1094,7 +1094,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     piBin: sessionBinary,
   });
   if (!sessionBinary) sessionBinary = await findCompatibleBinary();
-  const normalizedWorkDir = await normalizeSessionWorkDir(workDir);
+  const normalizedWorkDir = await normalizeSessionWorkDir(workDir, { onWorker: busCredential !== null });
   const resolvedMcp = resolveMcpCapabilities({
     request: canonicalMcpRequest({ mcpProfile, mcpServers }),
     provider: capabilityProvider(config.id, sessionRuntime),
