@@ -680,7 +680,7 @@ export class GithubAgentPoller {
         spawnBackoff: this.spawnBackoff,
         listExistingSessions: this.listExistingSessions,
         tmuxSessionExists: this.tmuxSessionExists,
-        tokenLogin: result.newPullRequests?.length ? await Promise.resolve().then(() => fetchGithubJson(this.fetchImpl, 'https://api.github.com/user', {
+        tokenLogin: result.newPullRequests?.length || result.retryPullRequests?.length ? await Promise.resolve().then(() => fetchGithubJson(this.fetchImpl, 'https://api.github.com/user', {
           token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs,
         })).then((user) => normalizeText(user?.login), () => '') : '',
         now: this.now,

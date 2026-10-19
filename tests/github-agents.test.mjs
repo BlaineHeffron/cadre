@@ -1405,6 +1405,7 @@ describe('GitHub agents poller', () => {
   });
 
   it('respawns a recorded PR only when its reviewer died without reviewing, with backoff', async () => {
+    const prompts = [];
     const liveSession = (number) => ({ id: `pr-${number}`, source: 'github-agent', tmuxSession: `pr-${number}`, metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: number } });
     const run = async ({ sessions = [], reviews = [], fail = () => false, numbers = [8], polls = [0], maxSpawnsPerPoll = 3 }) => withRepoStore(async (store) => {
       await store.upsertRepo({ ...BASE_REPO, issueEnabled: false, lastSeenPrNumber: 20, spawnedItemKeys: numbers.map((n) => `pr:${n}`) });
@@ -1418,12 +1419,14 @@ describe('GitHub agents poller', () => {
         fetchImpl: async (url, opts) => {
           const reviewed = String(url).match(/\/pulls\/(\d+)\/reviews/);
           if (reviewed) reviewFetches.push(Number(reviewed[1]));
+          if (String(url).endsWith('/user')) return response(200, { login: 'fleet-bot' });
           return reviewed ? response(200, reviews) : pulls(url, opts);
         },
         resolveScratchWorkDir: async () => '/tmp/unused-github-retry',
         sessionLauncher: async (input) => {
           const number = input.metadata.github_number;
           launches.push(number);
+          prompts.push(input.prompt);
           if (fail(number) === 'throw') throw new Error('launcher failed');
           if (fail(number)) return { sessionId: '' };
           sessions.push(liveSession(number));
@@ -1434,6 +1437,8 @@ describe('GitHub agents poller', () => {
       return { launches, reviewFetches, keys: (await store.getRepo('octo/demo')).spawnedItemKeys };
     });
     assert.deepEqual(await run({ polls: [0, 1] }), { launches: [8], reviewFetches: [8], keys: ['pr:8'] });
+    // A retry-only poll still resolves the token login, so a different author keeps APPROVE/REQUEST_CHANGES.
+    assert.match(prompts[0], /APPROVE only when BLOCKING = 0/);
     assert.deepEqual(await run({ sessions: [liveSession(8)] }), { launches: [], reviewFetches: [], keys: ['pr:8'] });
     // A known review is remembered, so later polls do not refetch it.
     assert.deepEqual(await run({ reviews: [{ id: 1 }], polls: [0, 1, 2] }), { launches: [], reviewFetches: [8], keys: ['pr:8'] });
