@@ -137,7 +137,7 @@ await app.register(fastifyWebsocket);
 // Auth
 await app.register(authPlugin, isWorker ? { workerMachines: machines } : {});
 // The machine supervisors are the hub's one machine loop, gated by the side-effect switch like every other loop.
-await app.register(machinesPlugin, { role: config.role, store: machines, credentialStore: getAgentBusCredentialStore(),
+await app.register(machinesPlugin, { role: config.role, store: machines, credentialStore: getAgentBusCredentialStore(), hubMcpUrl: config.machines.hubMcpUrl,
   supervise: !sideEffectLoopsSuppressed, routeCommands: routeRemoteSessionCommands, wsManager: { broadcast: (...args) => wsManager.broadcast(...args) } });
 await app.register(agentProviderPreferencesPlugin);
 

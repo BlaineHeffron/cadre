@@ -34,6 +34,7 @@ import { EmptyState, ErrorState, LoadingState } from '../components/page-state.m
 import { AgentSessionDetailPage } from './agent-session-detail.mjs';
 import { settleWithConcurrency } from '../app/async-pool.mjs';
 import { sessionTitle } from '../app/agent-bus-ui.mjs';
+import { MachineChip, RunOnSelect } from '../components/machines.mjs';
 
 const PROVIDER_OPTIONS = [
   { id: 'all', label: 'All providers' },
@@ -185,6 +186,7 @@ function AgentRailRow({ session, active, selected, onSelect, onToggleSelected, o
         <span class="agent-rail-row-topline">
           <span class="agent-rail-row-title">${title}</span>
           ${status === 'done' ? html`<span class="badge badge-info">Done</span>` : null}
+          <${MachineChip} machine=${session.machine} />
         </span>
         <span class="agent-rail-row-meta">
           <span>${providerLabel(session._provider)}</span>
@@ -320,6 +322,7 @@ function makeStartFreshSession(loading, loadError) {
         displayName: session.displayName || '',
         model: session.model || '',
         thinkingLevel: session.thinkingLevel || DEFAULT_THINKING_LEVEL,
+        machine: session.machine?.id,
       });
       addToast(`Started fresh session ${data.sessionName || data.id}`, 'success');
       await loadAgentSessions(loading, loadError);
@@ -381,6 +384,8 @@ export function AgentsPage() {
   const newPrompt = useMemo(() => signal(''), []);
   const newSkillInsert = useMemo(() => ({ current: null }), []);
   const newIsolatedWorktree = useMemo(() => signal(false), []);
+  const machines = useMemo(() => signal([]), []);
+  const newMachine = useMemo(() => signal(''), []);
   const creatingSession = useMemo(() => signal(false), []);
 
   const killClaudeSession = useMemo(() => makeKillSession(loading, loadError, 'claude'), []);
@@ -450,6 +455,8 @@ export function AgentsPage() {
     newAdvancedOpen.value = false;
     newPrompt.value = '';
     newIsolatedWorktree.value = false;
+    newMachine.value = '';
+    api.get('/machines').then((data) => { machines.value = data.machines || []; }, () => {});
     if (!modelCatalogLoading.value && modelCatalogState.value.providers.length === 0) {
       loadModelCatalog(modelCatalogState, modelCatalogLoading);
     }
@@ -467,6 +474,7 @@ export function AgentsPage() {
       model: newModel.value.trim(),
       thinkingLevel: newThinkingLevel.value.trim() || DEFAULT_THINKING_LEVEL,
       isolatedWorktree: newIsolatedWorktree.value,
+      ...(newMachine.value ? { machine: newMachine.value } : {}),
     };
     body.mcpProfile = newMcpSelection.value.mcpProfile;
     body.mcpServers = newMcpSelection.value.mcpServers;
@@ -850,6 +858,7 @@ export function AgentsPage() {
                 onInput=${e => {
                   const provider = normalizeProvider(e.target.value);
                   newProvider.value = provider;
+                  newMachine.value = '';
                   newModel.value = defaultModelForProvider(provider, modelCatalogState.value);
                   newThinkingLevel.value = defaultThinkingLevelFor(provider, newModel.value);
                 }}>
@@ -858,6 +867,7 @@ export function AgentsPage() {
                 `)}
               </select>
             </label>
+            <${RunOnSelect} machines=${machines.value} provider=${normalizeProvider(newProvider.value)} value=${newMachine.value} onChange=${(id) => { newMachine.value = id; }} />
             <label class="new-agent-field">
               <span>Model</span>
               <select

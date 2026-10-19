@@ -368,16 +368,17 @@ function authPluginImpl(app, opts = {}, done) {
     const bearer = request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : '';
     const hub = bearer && opts.workerMachines?.verifyPeer(bearer);
     if (hub) {
-      // worker:operate reaches only session create/control, the event and hook-event streams, collab worktrees and the forget route on this worker.
+      // worker:operate reaches only session create/control, the provider list, the event and hook-event streams, collab worktrees and the forget route on this worker.
       const routed = request.routeOptions?.url || '';
-      if (!/^\/api\/(?!agents\/)[a-z]+\/sessions(?:\/|$)/.test(routed) && !['/api/pairing/forget', '/api/machine/events', '/api/machine/hook-events', '/api/machine/worktree'].includes(routed)) {
+      if (!/^\/api\/(?!agents\/)[a-z]+\/sessions(?:\/|$)/.test(routed) && !['/api/pairing/forget', '/api/agents/providers', '/api/machine/events', '/api/machine/hook-events', '/api/machine/worktree'].includes(routed)) {
         return reply.code(403).send({ error: 'Machine credential is limited to session routes' });
       }
       request.duenoAuth = { authenticated: true, principal: { type: 'hub-peer', kind: 'hub', sessionId: hub.envId }, mcpUrl: hub.mcpUrl,
         hubOperator: request.headers[HUB_OPERATOR_HEADER] === '1' };
       return;
     }
-    if (opts.workerMachines && !['GET', 'HEAD'].includes(request.method)) {
+    // The one write the worker's own operator makes: issuing a pairing link.
+    if (opts.workerMachines && !['GET', 'HEAD'].includes(request.method) && request.routeOptions?.url !== '/api/pairing/code') {
       return reply.code(401).send({ error: 'Worker credential required' });
     }
 

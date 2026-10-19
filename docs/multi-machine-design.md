@@ -958,3 +958,24 @@ nono's Landlock can work.
   - **Forget** drops that machine's pending entries in the hub's 30 s sweep.
   - **Accepted gap.** A create that the worker completes but whose answer the hub never receives (a
     timeout) is not recorded, so its worktree and branch stay on the worker until removed by hand.
+- **Slice 6 as built (implementer):**
+  - **`GET /api/machines`** on the hub returns `{role, canAdd, machines}`. Each machine is `{id, status, since?, label, url,
+    os, protocol, providers}`: status and `since` come from the supervisor; OS and protocol from the descriptor check, and
+    providers from the worker's `/api/agents/providers`, both read on each call while the machine answers and stored on
+    its row, so an away machine still lists what it last reported. `url` is the worker origin, for "Open on"; no
+    credential, `envId` or cursor is returned. `providers` holds only the worker's enabled providers that remote spawn
+    supports (Claude, `backendType: 'claude'`), so the UI offers a machine exactly when the selected provider is listed;
+    slice 7 widens that filter. A worker answers `{role: 'worker', machines: []}`.
+  - **Scope.** `worker:operate` gains `GET /api/agents/providers`. The worker's own operator (its `AUTH_TOKEN` or browser
+    session, principal `ui`) gains one write, `POST /api/pairing/code`, which returns the link `cadre pair` prints
+    (`pairLink`, shared with the CLI; the origin is the worker's bound address). Its UI is otherwise still read-only.
+  - **Add machine.** `POST /api/machines {name, link}` runs `addMachine` and requires the `ui` principal, so an agent's
+    in-process call is refused. `canAdd` is `CADRE_HUB_MCP_URL` being set, which `addMachine` needs anyway.
+  - **OS.** The descriptor reports `linux-wsl2` when the Linux kernel release names Microsoft.
+  - **Detail.** The proxied detail route adds `machine: {id, status, since?, url}`, live or from the cached row. The
+    detail page shows the captured content it already loads, an "Open on <machine>" link to `<url>/<kind>/<id>`, and
+    hides "Copy Attach" and "Open In Terminator" (a local tmux command) for remote sessions. "Start Fresh" keeps the
+    machine.
+  - **UI.** A Machines card in Settings (worker: "Pair with hub"; hub: the machine list and the add form) renders only
+    on a worker or on a hub with `canAdd` or a registered machine, so a plain hub's pages are unchanged. The "Run on"
+    select, the chip and the `unreachable`/`blocked` badge render only with machines or a `machine` field.

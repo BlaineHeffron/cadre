@@ -6,14 +6,14 @@ import { fileURLToPath } from 'node:url';
 process.chdir(fileURLToPath(new URL('..', import.meta.url)));
 const { config } = await import('../config.mjs');
 const { runtimeStatePath } = await import('../modules/ops/runtime-state.mjs');
-const { addMachine, forgetMachine, machineState } = await import('../modules/machines/index.mjs');
+const { addMachine, forgetMachine, machineState, pairLink } = await import('../modules/machines/index.mjs');
 
 const store = machineState(runtimeStatePath('machines'));
 const [command, sub, ...rest] = process.argv.slice(2);
 try {
   if (command === 'pair') {
     if (config.role !== 'worker') throw new Error('Run `cadre pair` on a worker (CADRE_ROLE=worker).');
-    console.log(`http://${config.host}:${config.port}/#${store.machineId()}.${store.issueCode()}`);
+    console.log(pairLink(store, `http://${config.host}:${config.port}`));
     console.error('One-time link, valid for 5 minutes. Treat it like a password.');
   } else if (command === 'unpair') {
     store.unpair();
