@@ -137,6 +137,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       thinkingLevel: String(participant.thinking_level || participant.thinkingLevel || defaults.thinkingLevel || '').trim(),
       displayName: String(participant.display_name || participant.displayName || defaults.displayName || '').trim(),
       workDir: String(participant.work_dir || participant.workDir || defaults.workDir || '').trim(),
+      ...(participant.machine ? { machine: String(participant.machine) } : {}),
       ...(participant.mcpProfile !== undefined
         ? { mcpProfile: participant.mcpProfile }
         : (defaults.mcpProfile !== undefined ? { mcpProfile: defaults.mcpProfile } : {})),
@@ -1137,6 +1138,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
                 display_name: { type: 'string', description: 'Optional display name for a newly created participant.' },
                 initial_task: { type: 'string', description: 'Optional participant-specific task.' },
                 work_dir: { type: 'string', description: 'Optional working directory override for this participant.' },
+                machine: { type: 'string', description: 'Optional paired machine for a new participant (Claude only); its work_dir and the worktree repo are paths there.' },
                 ...MCP_SELECTION_SCHEMA_PROPERTIES,
                 codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
               },

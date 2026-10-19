@@ -340,8 +340,9 @@ request without a valid paired credential is rejected.
    - Resume: the hub mints the rotation token and forwards it. Delete: the hub revokes it.
    - A compromised worker holds only its own sessions' tokens and the hub credential. It cannot mint
      for anything.
-   - The hub ignores `busCredential` and a caller-supplied `sessionId` in its own request bodies.
-     Only worker mode honors them, and only with the worker credential.
+   - The hub ignores `busCredential` in its own request bodies. It takes a caller-supplied `sessionId`
+     (the collab roster's, slice 5) only when no local or remote session has it. Only worker mode
+     honors `busCredential`, and only with the worker credential.
    - **Worker mode never derives spawn trust from `req.duenoAuth`.** Even though the worker
      credential is not the operator principal, running `index.mjs:2588-2600` as it does today could
      stamp operator loop-registration delegation and coordinator metadata on remote sessions.
@@ -515,7 +516,7 @@ Hub-side row status is `live`, `unreachable` (last-known state plus `since`), or
 | Deliveries while away | The proxy short-circuits 503 `transient`, so deliveries stay `queued` with `backoff`, `holdReason: machine_offline` and no age limit (`delivery.mjs:125-133`). On wake, the worker's hello resets the backoff, the supervisor reconnects and replays from its cursor, and the observer injects each held delivery once. |
 | Lost response causing a double inject | If the hub's POST reached the worker but the laptop slept before replying, the retry runs the existing pane dedupe, which skips a pane that already shows `id=<msgId>` (`delivery.mjs:100-108`). That check goes through the proxied detail route. **Residual risk, accepted:** `sessionHasBusMessage` sees only the captured pane, so if the marker has scrolled off, this case injects twice. It is the same limit as for local sessions today. |
 | Bus token after wake | Still valid, because tokens have no TTL (`mcp-auth.mjs`). Rotation happens only on resume, minted by the hub. |
-| tmux and worktrees after wake | Both are untouched by a suspend. No reaper runs while away: the worker sweep is off (§4.5). Collab cleanup for a room that ended during sleep is recorded `pending` on the hub's index entry and retried on reconnect, keeping the existing dirty and unpushed guards. |
+| tmux and worktrees after wake | Both are untouched by a suspend. No reaper runs while away: the worker sweep is off (§4.5). Collab cleanup for a room that ended during sleep is recorded `pending` on the hub (`worktreeCleanup` in the machine state) and retried on reconnect: the room's sessions there end first, then the existing dirty and unpushed guards run. |
 | Laptop reboots instead of sleeping | The tmux server is gone. The worker's journal restores rows as ended or resumable. Once reachable, the hub sees `session_not_found` and follows the normal ended path. Resume runs through the hub, using the transcript on the laptop's disk. |
 | Tailnet IP or MagicDNS change | A node's 100.x address stays the same through roaming. It changes only if the node is re-registered. The hub never follows a name. The URL host must pass `DM_FLEET_PRIVATE_HOSTS_REF`, and the descriptor at that address must report the recorded `envId` (§4.2.2). Otherwise the machine is `blocked`, with a reason naming the expected and observed ID, and no credential is sent. A re-registered node keeps its `machineId` (it lives in the state dir), so the check still passes. The operator updates `urlRef` or the allowlist when the IP really moved. |
 | Spawn while offline | Fails closed with `machine_unreachable`. There are no queued spawns. |
@@ -928,3 +929,27 @@ nono's Landlock can work.
     time, while the same answer passed when the read came just before it. Slice 4's queue test waits
     up to 60 s for `running` and answers whichever item is open; the hub closing and refiling the
     item across that window is the intended behavior.
+- **Slice 5 as built (implementer):**
+  - **Participants.** `spawn_collab_session` takes `participants[].machine`; bootstrap passes it to the
+    same create route `spawn_session` uses, so the hub's create proxy launches the participant on its
+    worker. The roster id minted at `routes.mjs:232` goes in the body, and the hub accepts it only if
+    neither a local session nor the remote index has it (`session_id_invalid` otherwise).
+  - **One worktree per machine.** The room's `worktree` spec is made on the hub when a participant is
+    local and once on each machine that hosts a participant, through one worker route,
+    `POST /api/machine/worktree` (`{create}` or `{cleanup, spawnFailed}`), around
+    `createManagedWorktree` and `cleanupManagedWorktree`. `repo` is therefore a path on every machine
+    in the room, and each machine has its own checkout of the room's branch; participants on
+    different machines meet through the remote. The hub keeps each remote worktree and that machine's
+    roster ids in `thread.metadata.machineWorktrees`.
+  - **Guards.** The worker's live sessions are the live-session guard. Room overlap is not checked on
+    the worker: its bus has no rooms, and a managed path is unique per room. The dirty, unpushed and
+    marker guards are unchanged. A worker error reaches the hub caller as its HTTP status only.
+  - **Pending.** If the worker cannot answer at room end (or at a failed bootstrap's rollback), the hub
+    records `{machine, cleanup, sessionIds}` under `worktreeCleanup` in its machine state. After each
+    successful poll the supervisor first deletes those sessions on the worker (the hub's delete while
+    away left them running there), then sends the cleanup. Any 200 settles the entry, whether the
+    worktree was removed or kept. If the hub stops between the answer and the update, the retry finds no worktree and changes nothing.
+  - **Scope.** `worker:operate` gains exactly this route, which also requires the `hub-peer`
+    principal. No protocol bump: an older worker refuses the route (403), a create fails closed, and a
+    cleanup stays pending until the worker is updated.
+  - **Accepted gap.** Entries for a machine that is forgotten stay in `worktreeCleanup` unused.
