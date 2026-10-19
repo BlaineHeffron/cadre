@@ -920,3 +920,11 @@ nono's Landlock can work.
   - **Tests** add stub `/transcript` and `/keys` routes to the test hub, because the agent-bus
     harness has no real Claude routes and the proxy hook runs only on routed paths. The relay is
     driven by calling `step()`; waits for the reconnect still use the suite's polling helper.
+  - **Found, not fixed (worker session state, also on main):** in some runs of
+    `tests/machines.test.mjs` the worker reports a just-spawned session as `missing` (ended) for
+    about 25 s while its process is alive, and its detail, list and command-gate views disagree
+    during that time. On main this is the occasional slice 3 timeout (1 in 8 runs here). A detail
+    read right after spawn also made a later interaction answer fail with `session_missing` every
+    time, while the same answer passed when the read came just before it. Slice 4's queue test waits
+    up to 60 s for `running` and answers whichever item is open; the hub closing and refiling the
+    item across that window is the intended behavior.

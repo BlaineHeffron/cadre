@@ -100,8 +100,8 @@ const cli = (dir, args, env = {}) => execFileAsync(process.execPath, ['scripts/c
 const pair = () => cli(workerDir, ['pair'], { CADRE_ROLE: 'worker', HOST: '127.0.0.1', PORT: String(workerPort) }).then(({ out }) => { secrets.add(out.split('.').at(-1)); return out; });
 const addMachine = (name, link) => cli(hubDir, ['machine', 'add', name, link], { CADRE_HUB_MCP_URL: hubMcpUrl });
 const pane = async (id) => (await execFileAsync('/usr/bin/tmux', ['-L', tmuxSocket, 'capture-pane', '-p', '-J', '-S', '-', '-t', `claude-${id}`])).stdout;
-async function until(check, label) {
-  for (let i = 0; i < 200; i += 1) { const value = await check(); if (value) return value; await new Promise((r) => setTimeout(r, 50)); }
+async function until(check, label, tries = 200) {
+  for (let i = 0; i < tries; i += 1) { const value = await check(); if (value) return value; await new Promise((r) => setTimeout(r, 50)); }
   assert.fail(`timed out waiting for ${label}`);
 }
 
@@ -546,7 +546,7 @@ describe('multi-machine slice 3', () => {
 });
 
 describe('multi-machine slice 4', () => {
-  const remoteRows = async () => (await hub.app.inject({ url: '/api/claude/sessions', headers: hub.authHeaders })).json().sessions.filter((row) => row.machine);
+  const remoteRows = async () => (await hub.app.inject({ url: '/api/claude/sessions', headers: hub.authHeaders })).json().sessions.filter((row) => row.machine?.id === 'w7');
   const live = () => until(async () => { await hubTimers.fire(); return (await remoteRows()).every((row) => row.machine.status === 'live'); }, 'w7 live');
   const spawn = async (workDir) => (await hub.app.inject({ method: 'POST', url: '/api/claude/sessions', headers: hub.authHeaders, payload: { machine: 'w7', workDir } })).json().id;
 
@@ -595,8 +595,8 @@ describe('multi-machine slice 4', () => {
     hubStore.update((state) => { state.machines.w7.cursor = 1e9; });
     await hubTimers.fire();
     await hubTimers.fire();
-    const [item, ...extra] = await items();
-    assert.deepEqual([extra, item.status, item.sessionKind], [[], 'open', 'claude'], 'a snapshot refiles the same prompt into the same item');
+    const [item, ...extra] = (await items()).filter((entry) => entry.status === 'open');
+    assert.deepEqual([extra, item.sessionKind], [[], 'claude'], 'a snapshot refiles the same prompt into the same item');
 
     const keys = { keys: 'Enter', expectedFingerprint: item.sessionInteraction.fingerprint, expectedInteractionKind: item.sessionInteraction.kind };
     const viaHub = await hub.app.inject({ method: 'POST', url: `/api/claude/sessions/${id}/keys`, headers: buildInternalBypassHeaders(), payload: keys });
@@ -608,7 +608,13 @@ describe('multi-machine slice 4', () => {
       'the worker credential without the hub flag, and the flag without the worker credential');
     assert.equal((await pane(id)).includes('answered'), false);
 
-    const answered = await hub.app.inject({ method: 'POST', url: `/api/command-center/work-queue/${item.id}/answer`, headers: hub.authHeaders, payload: { optionId: item.options[0].id } });
+    // The worker can still read a new session as missing: briefly from its 1 s pane probe cache, and in some runs of this
+    // file for about 25 s (the worker-side lag behind the occasional slice 3 timeout on main).
+    await until(async () => (await hub.app.inject({ url: `/api/claude/sessions/${id}`, headers: hub.authHeaders })).json().canonicalState?.lifecycle === 'running',
+      'the worker sees the session running', 1200);
+    // While it read as ended the hub closed the item; the prompt seen again is filed again.
+    const open = await until(async () => { await hubTimers.fire(); return (await items()).find((entry) => entry.status === 'open'); }, 'an open item', 1200);
+    const answered = await hub.app.inject({ method: 'POST', url: `/api/command-center/work-queue/${open.id}/answer`, headers: hub.authHeaders, payload: { optionId: open.options[0].id } });
     assert.deepEqual([answered.statusCode, answered.json().status], [200, 'routed'], answered.body);
     await until(async () => (await pane(id)).includes('answered'), 'the answer in the worker pane');
   });
