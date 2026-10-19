@@ -21,6 +21,7 @@ const fail = (message, code, statusCode = 400) => Object.assign(new Error(messag
 const BACKOFF_MIN_MS = 1000;
 const BACKOFF_MAX_MS = 5 * 60_000;
 const POLL_MS = 5000;
+const SWEEP_MS = 30_000;
 const EVENT_LOG_SIZE = 1000;
 const BLOCKING = new Set(['machine_blocked', 'machine_protocol_mismatch']);
 const realTimers = { set: (fn, ms) => setTimeout(fn, ms).unref(), clear: (timer) => clearTimeout(timer) };
@@ -208,6 +209,8 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
         }
         log.items = log.items.slice(-EVENT_LOG_SIZE);
         const gap = after > log.sequence || (log.items.length > 0 && after < log.items[0].sequence - 1);
+        // Without a fresh list a snapshot could miss live rows, so a gap waits for the next read.
+        if (gap && !current) return { sequence: after, events: [] };
         return { sequence: log.sequence, events: gap ? [] : log.items.filter((event) => event.sequence > after), ...(gap ? { snapshot: log.rows } : {}) };
       });
     });
@@ -278,10 +281,14 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     supervisors.delete(name);
     for (const entry of Object.values(store.read().sessions || {})) if (entry.machine === name) await dropSession(entry.kind, entry.sessionId);
   }
-  async function apply(name, { sequence = 0, events = [], snapshot = {} }) {
+  async function apply(name, { sequence = 0, events = [], snapshot }) {
     const removed = [];
     store.update((state) => {
-      for (const [key, row] of Object.entries(snapshot)) if (state.sessions?.[key]?.machine === name) state.sessions[key].state = row;
+      // A snapshot lists every session the worker still has; a live entry it omits is gone.
+      for (const entry of snapshot ? Object.values(state.sessions || {}) : []) {
+        if (entry.machine !== name || entry.status !== 'live') continue;
+        if (snapshot[`${entry.kind}:${entry.sessionId}`]) entry.state = snapshot[`${entry.kind}:${entry.sessionId}`]; else removed.push(entry);
+      }
       // Unknown event types are skipped and still advance the cursor.
       for (const event of events) {
         const entry = event.type === 'session' && state.sessions?.[event.key];
@@ -321,13 +328,21 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     else if (supervise && s.phase === 'available') void connect(name);
     return peer;
   }
+  // `cadre machine forget` only removes the row: the hub revokes that machine's session tokens within SWEEP_MS,
+  // whatever phase its supervisor is in.
+  let sweepTimer;
+  async function sweep() {
+    const state = store.read();
+    const names = new Set([...supervisors.keys(), ...Object.values(state.sessions || {}).map((entry) => entry.machine)]);
+    for (const name of names) if (!state.machines?.[name]) await retire(name);
+    sweepTimer = timers.set(sweep, SWEEP_MS);
+  }
   if (supervise) {
     app.addHook('onReady', async () => {
-      const state = store.read();
-      const names = new Set([...Object.keys(state.machines || {}), ...Object.values(state.sessions || {}).map((entry) => entry.machine)]);
-      for (const name of names) void connect(name);
+      await sweep();
+      for (const name of Object.keys(store.read().machines || {})) void connect(name);
     });
-    app.addHook('onClose', async () => { for (const s of supervisors.values()) timers.clear(s.timer); });
+    app.addHook('onClose', async () => { timers.clear(sweepTimer); for (const s of supervisors.values()) timers.clear(s.timer); });
   }
   app.decorate('machineRoutes', async (req, res, url) => {
     const answer = (status, body) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); return true; };

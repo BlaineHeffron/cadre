@@ -117,8 +117,8 @@ Run the CLI from each instance's live checkout so it reads that instance's `.env
 
 - On the hub: `node scripts/cadre.mjs machine forget <name>`. The hub side is revoked at once. If the
   worker is unreachable, its side stays pending; run `forget` again when it is back. The running hub
-  then drops that machine's sessions from its lists and revokes their tokens (on its next poll, or
-  the next time one of them is used); the tmux sessions keep running on the worker until you end
+  then drops that machine's sessions from its lists and revokes their tokens within 30 s, even if
+  the machine is blocked or away; the tmux sessions keep running on the worker until you end
   them there.
 - On the worker: `node scripts/cadre.mjs unpair` drops its hub at once.
 

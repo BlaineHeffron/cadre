@@ -311,7 +311,9 @@ describe('multi-machine slice 2', () => {
   const listed = async (id) => (await hub.app.inject({ url: '/api/claude/sessions', headers: hub.authHeaders })).json().sessions.find((row) => row.id === id);
   const status = async () => (await listed(a))?.machine.status;
   const events = async (after) => (await call(`${workerUrl}/api/machine/events?afterSequence=${after}`, { token: hubStore.read().machines.w5.credential })).json;
-  const pending = () => [...hubTimers.pending].map((timer) => timer.ms);
+  // The 30 s forget sweep always has a timer pending; these assertions are about the supervisor's.
+  const pending = () => [...hubTimers.pending].map((timer) => timer.ms).filter((ms) => ms !== 30_000);
+  const fireHub = async () => (await hubTimers.fire()).filter((ms) => ms !== 30_000);
   const authenticates = async (token) => (await busStore.authenticate(token)).ok;
 
   it('a spawn starts the supervisor; events fill the rows and replay from any cursor; in-process commands reach the remote pane', async () => {
@@ -320,13 +322,20 @@ describe('multi-machine slice 2', () => {
     b = (await create('b')).json().id;
     [tokenA, tokenB] = [await tokenOf(a), await tokenOf(b)];
     secrets.add(tokenA).add(tokenB);
-    await until(async () => { await hubTimers.fire(); return (await listed(a))?.state && (await listed(b))?.state && await status() === 'live'; }, 'rows filled from events');
+    await until(async () => { await fireHub(); return (await listed(a))?.state && (await listed(b))?.state && await status() === 'live'; }, 'rows filled from events');
     assert.deepEqual((await listed(a)).machine, { id: 'w5', status: 'live' });
     assert.deepEqual(pending(), [5000]);
     const all = await events(0);
     assert.ok(all.events.every((event, index) => event.sequence === index + 1), 'a contiguous, persisted sequence');
     assert.deepEqual((await events(0)).events.slice(0, all.events.length), all.events, 'a cursor replays the same events');
     assert.deepEqual((await events(hubStore.read().machines.w5.cursor)).events, [], 'the hub cursor has seen every event');
+    hubStore.update((state) => {
+      state.machines.w5.cursor = 1e9;
+      state.sessions['claude:0badc0de'] = { machine: 'w5', kind: 'claude', sessionId: '0badc0de', status: 'live' };
+    });
+    await fireHub();
+    assert.equal(hubStore.read().sessions['claude:0badc0de'], undefined, 'a snapshot drops a session the worker no longer has');
+    assert.ok(hubStore.read().sessions[`claude:${a}`] && hubStore.read().machines.w5.cursor < 1e9);
     await enqueueAgentSessionCommand('claude', b, { text: 'from the command queue', enter: true, source: 'test' });
     await until(async () => (await pane(b)).includes('from the command queue'), 'an in-process command in the remote pane');
   });
@@ -334,7 +343,7 @@ describe('multi-machine slice 2', () => {
   it('while the worker is away: rows show unreachable with since and the last state, spawn fails closed, deliveries hold, backoff grows to 5 min', async () => {
     const before = (await listed(a)).state;
     await worker.close();
-    assert.deepEqual(await hubTimers.fire(), [5000]);
+    assert.deepEqual(await fireHub(), [5000]);
     const row = await listed(a);
     assert.deepEqual([row.machine.status, row.state], ['unreachable', before]);
     assert.ok(row.machine.since <= Date.now());
@@ -347,7 +356,7 @@ describe('multi-machine slice 2', () => {
     delivery = () => hub.store.getDeliveryForMessage(posted.json().message.id);
     await until(() => delivery()?.holdReason === 'machine_offline', 'a machine_offline hold');
     const delays = [];
-    for (let i = 0; i < 10; i += 1) delays.push(...await hubTimers.fire());
+    for (let i = 0; i < 10; i += 1) delays.push(...await fireHub());
     assert.deepEqual(delays, [750, 1500, 3000, 6000, 12000, 24000, 48000, 96000, 192000, 225000], 'equal jitter at the midpoint, capped at 5 min');
     assert.equal(delivery().status, 'queued');
   });
@@ -376,7 +385,7 @@ describe('multi-machine slice 2', () => {
     const moved = http.createServer((req, res) => { seen.push([req.url, req.headers.authorization]); res.end(JSON.stringify({ machineId: 'another-machine', protocol: MACHINE_PROTOCOL })); }).listen(0, '127.0.0.1');
     await once(moved, 'listening');
     hubStore.update((state) => { state.machines.w5.url = `http://127.0.0.1:${moved.address().port}`; });
-    await hubTimers.fire();
+    await fireHub();
     moved.close();
     assert.deepEqual([await status(), pending(), seen], ['blocked', [], [['/api/machine/descriptor', undefined]]]);
     hubStore.update((state) => { state.machines.w5.url = workerUrl; });
@@ -388,20 +397,20 @@ describe('multi-machine slice 2', () => {
 
   it('a hub without network waits without backing off; a late tick after a sleep says hello; the cursor replays what was missed', async () => {
     await worker.close();
-    await hubTimers.fire();
+    await fireHub();
     online = false;
     worker = await startWorker();
     await until(() => pending()[0] === 1000, 'offline on the boot hello');
     const cursor = hubStore.read().machines.w5.cursor;
     const removed = await call(`${workerUrl}/api/claude/sessions/${b}`, { method: 'DELETE', token: hubStore.read().machines.w5.credential });
     assert.equal(removed.status, 200, removed.text);
-    assert.deepEqual([await hubTimers.fire(), pending(), await status()], [[1000], [1000], 'unreachable'], 'offline does not grow the backoff');
+    assert.deepEqual([await fireHub(), pending(), await status()], [[1000], [1000], 'unreachable'], 'offline does not grow the backoff');
     online = true;
     skew = 10 * 60_000;
     await workerTimers.fire();
     skew = 0;
     await until(async () => await status() === 'live', 'reconnected by the wake hello');
-    await until(async () => { await hubTimers.fire(); return !hubStore.read().sessions[`claude:${b}`]; }, 'the removal replayed');
+    await until(async () => { await fireHub(); return !hubStore.read().sessions[`claude:${b}`]; }, 'the removal replayed');
     const missed = (await events(cursor)).events;
     assert.ok(missed.every((event, index) => event.sequence === cursor + index + 1), 'no gap after the cursor');
     assert.deepEqual(missed.filter((event) => event.key === `claude:${b}`).map((event) => event.row), [null], 'the removal, once');
@@ -423,12 +432,18 @@ describe('multi-machine slice 2', () => {
     tokenA = rotated;
   });
 
-  it('forget drops the machine sessions and revokes their tokens on the hub', async () => {
-    assert.match((await cli(hubDir, ['machine', 'forget', 'w5'])).out, /Revoked on both sides/);
+  it('forget of a blocked machine revokes its session tokens on the next sweep, with no session request', async () => {
+    await restartWorker({ protocol: MACHINE_PROTOCOL + 1 });
+    await until(async () => await status() === 'blocked', 'blocked on protocol');
+    assert.match((await cli(hubDir, ['machine', 'forget', 'w5'])).out, /Pending on unreachable workers: w5/);
+    assert.equal(await authenticates(tokenA), true, 'nothing on the hub has run yet');
+    assert.deepEqual([...hubTimers.pending].map((timer) => timer.ms), [30_000], 'blocked: only the sweep is pending');
     await hubTimers.fire();
     assert.equal(hubStore.read().sessions[`claude:${a}`], undefined);
     assert.equal(await authenticates(tokenA), false);
     assert.equal(await listed(a), undefined);
+    await restartWorker();
+    assert.match((await cli(hubDir, ['machine', 'forget', 'w5'])).out, /Revoked on both sides/);
   });
 });
 

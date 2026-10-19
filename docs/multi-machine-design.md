@@ -808,8 +808,11 @@ nono's Landlock can work.
     `{sequence, events}`; the hub polls it every 5 s and `connected` means the last poll succeeded.
     The worker makes `session` events by diffing its session list (status only) on each read, with a
     persisted sequence and a 1000-event log. A cursor the log no longer covers gets a `snapshot` of
-    every row in the same response, so there is no separate snapshot call. Hook events join the
-    stream in slice 3.
+    every row in the same response, so there is no separate snapshot call; the hub drops a live
+    session the snapshot omits. **Deferred, explicitly:** a reconnect replays each session's net
+    status change and its removal, not the intermediate transitions, because events are made at read
+    time. Slice 3 must append hook events to the worker's log when they are recorded (not by diffing),
+    so the hub can replay them in order.
   - **Hello.** The hub's tailnet listener also serves `GET /machine/descriptor` and
     `POST /machine/hello`. The worker checks only the hub's machine id before its hello: the hub
     checks the protocol, so a mismatched worker shows `blocked` instead of staying silent. Wake is a
@@ -824,9 +827,12 @@ nono's Landlock can work.
     startup-input and resume answer 503 `transient`. `MACHINE_PROTOCOL` is 2.
   - **Resume.** The hub checks that the worker reports the session ended before it rotates the
     token, so resuming a running session never revokes its live token. An ended session that the
-    worker can resume stays in the remote index; only an unknown one is dropped.
+    worker can resume stays in the remote index; only an unknown one is dropped. Accepted gap: the
+    rotation revokes the old token before the worker call, so if that call fails, the ended session
+    has no usable token until the next resume mints one.
   - **Forget.** The CLI cannot revoke session tokens: the hub process owns the bus credential state.
-    The running hub drops a forgotten machine's sessions and revokes their tokens on its next poll,
-    or on the next request for one of them.
+    A hub sweep every 30 s, independent of the supervisor's phase (blocked machines have no timer),
+    drops a forgotten machine's sessions and revokes their tokens; a request for one of them does it
+    at once.
   - **Found for slice 4:** a permission answer through the hub reaches the worker as `hub-peer`,
     which `permissionAuthorityForRequest` rejects (`permission_authority_required`).
