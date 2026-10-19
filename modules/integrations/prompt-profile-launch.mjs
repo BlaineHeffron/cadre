@@ -1,5 +1,6 @@
-import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { chmod, lstat, mkdir, rm, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { resolvePromptProfile } from './prompt-profile-catalog.mjs';
 
@@ -7,7 +8,11 @@ function text(value) {
   return String(value || '').trim();
 }
 
-export function promptProfilePath(backendType, sessionId) {
+// Codex takes a profile only as `-p <name>`, loaded from $CODEX_HOME/<name>.config.toml.
+export function promptProfilePath(backendType, sessionId, { codexHome = '' } = {}) {
+  if (text(backendType) === 'codex') {
+    return join(codexHome || process.env.CODEX_HOME || join(homedir(), '.codex'), `cadre-${text(sessionId)}.config.toml`);
+  }
   return runtimeStatePath(`prompt_profiles/${text(backendType)}-${text(sessionId)}.txt`);
 }
 
@@ -26,8 +31,7 @@ export function buildPromptLaunchArgs({ runtime = '', promptLaunch = null } = {}
     return promptLaunch.filePath ? [flag, promptLaunch.filePath] : [];
   }
   if (normalized === 'codex') {
-    // Codex has no file option that appends (model_instructions_file replaces the base prompt).
-    return ['-c', `developer_instructions=${JSON.stringify(body)}`];
+    return promptLaunch.filePath ? ['-p', basename(promptLaunch.filePath, '.config.toml')] : [];
   }
   return [];
 }
@@ -36,6 +40,7 @@ export async function preparePromptProfileLaunch({
   promptProfile,
   backendType,
   sessionId,
+  codexHome = '',
   now = new Date(),
 } = {}) {
   const resolved = resolvePromptProfile({ promptProfile, now });
@@ -45,9 +50,14 @@ export async function preparePromptProfileLaunch({
       prepared: { body: '', placement: resolved.placement, filePath: '' },
     };
   }
-  const filePath = promptProfilePath(backendType, sessionId);
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${resolved.body}\n`, { mode: 0o600 });
+  const filePath = promptProfilePath(backendType, sessionId, { codexHome });
+  // A sandboxed agent can write its CODEX_HOME, so never follow a link it planted there.
+  await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
+  if (codexHome && !(await lstat(dirname(filePath))).isDirectory()) throw new Error(`Prompt profile directory is not a plain directory: ${dirname(filePath)}`);
+  await rm(filePath, { force: true });
+  // JSON string escapes are valid TOML basic-string escapes, except DEL, which TOML requires escaped.
+  const content = text(backendType) === 'codex' ? `developer_instructions = ${JSON.stringify(resolved.body).replace(/\x7f/g, '\\u007f')}` : resolved.body;
+  await writeFile(filePath, `${content}\n`, { mode: 0o600, flag: 'wx' });
   await chmod(filePath, 0o600).catch(() => {});
   return {
     resolved,

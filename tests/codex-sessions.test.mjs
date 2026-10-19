@@ -1695,12 +1695,15 @@ describe('Codex Sessions module', () => {
     assert.match(tmuxArgs, /^new-session/m);
   });
 
-  it('passes selected prompt profiles as Codex developer instructions', async () => {
+  it('passes selected prompt profiles as a Codex config profile file, not argv text', async () => {
     const workDir = await mkdtemp(join(tmpdir(), 'dueno-codex-style-'));
     tempDirs.push(workDir);
     const tmuxArgs = await runCreateCommandScenario({ workDir, promptProfile: 'research' });
-    assert.match(tmuxArgs, /developer_instructions=/);
-    assert.match(tmuxArgs, /research agent/);
+    const name = tmuxArgs.match(/'-p' '(cadre-[a-f0-9]+)'/)[1];
+    assert.doesNotMatch(tmuxArgs, /developer_instructions|research agent/);
+    // The scenario's HOME is the last temp dir; Codex loads $CODEX_HOME/<name>.config.toml.
+    const profile = await readFile(join(tempDirs.at(-1), '.codex', `${name}.config.toml`), 'utf8');
+    assert.match(profile, /^developer_instructions = ".*research agent/);
   });
 
   it('builds Codex launch args from the shared agent runtime harness layer', async () => {

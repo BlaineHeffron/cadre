@@ -1145,6 +1145,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
       promptProfile,
       backendType: config.id,
       sessionId: id,
+      codexHome: sandboxMode === 'nono' ? join(nonoStatePaths(config.id, id).stateDir, config.id) : '',
     });
     if (initialPromptFile) {
       await mkdir(resolve(initialPromptFile, '..'), { recursive: true });
@@ -1250,12 +1251,14 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
       if (!_enqueueSessionCommand) throw new Error('codex session command gate is not ready');
       await waitForStartupPane(exec, sessionName, launchLogPath);
       // The pane opens on a login shell; the gate would read that wrapper as a dead agent.
-      for (let tries = 0; tries < 40; tries += 1) {
+      for (let tries = 0; ; tries += 1) {
         const [evidence] = await observeProcessLiveness({ sessionName, now: Date.now(), execFn: exec, expectedCli: 'codex', paneProbe: createTmuxPaneProbe(exec) });
         if (evidence?.value?.lifecycle === 'running') break;
+        if (tries >= 40) throw new Error(`Codex did not start in ${sessionName}`);
         await sleep(250);
       }
-      await _enqueueSessionCommand(id, { source: 'codex_startup_input', operation: 'startup', text: launchPrompt, enter: true, resolveOnAwaiting: true });
+      const delivered = await _enqueueSessionCommand(id, { source: 'codex_initial_prompt', operation: 'startup', text: launchPrompt, enter: true });
+      if (delivered?.submissionConfirmed === false) throw new Error('Codex did not confirm the initial prompt was submitted');
     } catch (error) {
       initialPromptError = error.message;
     }
@@ -1406,6 +1409,7 @@ async function resumeSession(id, { loopRegistrationPolicy = null, busCredential 
       promptProfile: refreshed.promptProfile?.profileId,
       backendType: config.id,
       sessionId: id,
+      codexHome: sandboxMode === 'nono' ? join(nonoStatePaths(config.id, id).stateDir, config.id) : '',
     });
     launchLogPath = await prepareLaunchLog(sessionName);
     const headroom = await prepareHeadroomLaunch(sessionRuntime.provider);

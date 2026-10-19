@@ -105,8 +105,7 @@ test('collab launches keep prompt and profile text out of every agent argv', asy
     assert.ok(launch.body.includes('never find or kill processes by matching their full command line'));
     assert.equal(result.injected[kind].length, 0);
     assert.doesNotMatch(launch.resume, /initial_prompts|Begin working now|prompt\.txt/);
-    // Codex has no file option that appends developer instructions, so only its profile stays in argv.
-    const forbidden = [...sentences(launch.body), ...(kind === 'codex' ? [] : profileSentences)];
+    const forbidden = [...sentences(launch.body), ...profileSentences];
     for (const arg of launch.args) assert.equal(forbidden.find((sentence) => arg.includes(sentence)), undefined, kind + ' argv: ' + arg.slice(0, 80));
   }
   // Claude reads the prompt from stdin and Pi from an @file; both files are private.

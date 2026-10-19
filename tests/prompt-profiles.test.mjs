@@ -118,8 +118,8 @@ describe('prompt profile launch args', () => {
     }), ['--system-prompt-file', '/tmp/style.txt']);
     assert.deepEqual(buildPromptLaunchArgs({
       runtime: 'codex',
-      promptLaunch: { body: 'Be terse.', placement: 'append' },
-    }), ['-c', 'developer_instructions="Be terse."']);
+      promptLaunch: { body: 'Be terse.', placement: 'append', filePath: '/home/u/.codex/cadre-abcd1234.config.toml' },
+    }), ['-p', 'cadre-abcd1234']);
   });
 
   it('writes a session file for selected profiles and cleans it up', async () => {
