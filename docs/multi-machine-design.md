@@ -432,12 +432,13 @@ Not chosen: trusting `Tailscale-User-Login` behind Serve (Serve only fronts the 
   4. On success the entry becomes `live`. On failure the hub drops the entry and revokes the token.
   - **What stays on the hub after create returns:** `parentThreadId` attach and the solo-thread
     bookkeeping. They are never moved to the worker's empty bus.
-  - **`returnResults` for a remote child is rejected with 400 until slice 3.** The observer `stat`s
-    the hook log on the hub's disk (`observer.mjs:65-82`), so it would silently return nothing.
+  - **`returnResults` for a remote child** (slice 3): `spawnedBy` stays in the hub's index entry, and
+    the worker gets the metadata without it plus the result note in its initial prompt. The hub
+    mirrors the child's hook events into a local hook log that the observer reads (§7, slice 3).
 - **In-process callers.** `enqueueAgentSessionCommand` (`index.mjs:3572`) sends remote ids to the
   HTTP input route.
 - **Hook registry.** `registerHookSessionRegistry` (`hook-events.mjs:14`) also registers the remote
-  index, so returnResults can see remote children (slice 3).
+  index's returnResults children, with the hub-side mirror as their hook log (slice 3).
 
 ### 4.5 Worker mode (`CADRE_ROLE=worker`)
 
@@ -700,7 +701,9 @@ Sizes count added lines, including tests. S is under 150, M is 150-350, L is 350
    - Tests replay every §4.7 row with a worker that is stopped and restarted: cursor replay with no
      loss or duplicates, hello resetting a long backoff, and blocked states that do not retry.
 3. **returnResults across machines (S, about 100 lines).** The observer reads remote children's hook
-   events from the slice 2 stream (`observer.mjs:65-82`). There is no separate polling route.
+   events through a hub-side mirror of each child's hook log, filled on the supervisor's 5 s poll
+   (`observer.mjs:65-82` unchanged). As built, this is one worker route next to the slice 2 stream
+   (§7).
 4. **Telegram and Command Queue for remote sessions (M).**
    - Remote topics are verified (they come from slice 2's list merge).
    - The transcript-delta worker route, with the relay cursor kept on the hub.
@@ -836,3 +839,27 @@ nono's Landlock can work.
     at once.
   - **Found for slice 4:** a permission answer through the hub reaches the worker as `hub-peer`,
     which `permissionAuthorityForRequest` rejects (`permission_authority_required`).
+- **Slice 3 as built (implementer):**
+  - **Hook events come from the session's own hook log, not the slice 2 event log.** The hook
+    recorder already appends each event to the session's JSONL log when it is recorded
+    (`hook-events.mjs:289`), so the worker serves `GET /api/machine/hook-events?sessionId=&cursor=`,
+    which runs `readHookEventsSince` from the hub's cursor and returns only `UserPromptSubmit` and
+    `Stop` (time, name, last message, `background_tasks`). Copying them into the 1000-entry machine
+    log would add a second writer, from the hook process, and a cursor gap there would lose results.
+    `worker:operate` reaches this one route in addition to slice 2's; the route also requires the
+    `hub-peer` principal, so the worker's UI token is refused.
+  - **The hub mirrors, the observer is unchanged.** On each successful poll the supervisor fetches
+    every live remote child with `spawnedBy` and appends the events to a hub hook log
+    (`buildHookSessionPaths` under the machine state dir). The remote index registers those children
+    in the hook registry with that log, so held turns (background work, outstanding returnResults
+    workers, including remote ones) and the idempotency keys work as for a local child.
+  - **Exactly once.** Every mirrored line carries the worker cursor it was read up to, and the next
+    fetch starts from the last line's cursor. Cursor and data are one append, so a hub restart, a
+    worker restart or a reconnect resumes after the last event seen, and the mirror never holds an
+    event twice; the observer's existing keys then make its own replay a no-op.
+  - **`spawnedBy` stays on the hub.** The worker receives metadata without it and the result note
+    already appended to the initial prompt, so no worker-side session looks like a returnResults
+    child to any observer.
+  - **Accepted gaps.** Turn ordering compares the worker's hook times with the hub's clock, so the
+    machines need synchronized clocks (NTP). The follow-up hold from the delivery audit does not
+    apply to remote children, because their input audit is written on the worker.
