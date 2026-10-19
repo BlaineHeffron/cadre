@@ -76,7 +76,9 @@ test('onboarding without a room channel omits collab workflow and tools', () => 
 test('collab onboarding includes the safe-wait rule on one line', () => {
   const prompt = renderCollabOnboarding({ self: { kind: 'codex', sessionId: 'implementer' } });
   assert.ok(prompt.split('\n').includes('Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges.'));
-  assert.ok(prompt.split('\n').includes('Wait on background jobs by exact PID (`wait <pid>`, `kill -0 <pid>`) or your harness\'s background-task tool; never poll `pgrep -f`/`pkill -f` with a pattern that also appears in your own command line.'));
+  assert.ok(prompt.split('\n').includes('Wait on background jobs by exact PID (`wait <pid>`, `kill -0 <pid>`) or your harness\'s background-task tool; wait on a long command with one call and a long timeout, not repeated sleeps; never poll `pgrep -f`/`pkill -f` with a pattern that also appears in your own command line.'));
+  assert.ok(prompt.includes('To wait on a teammate, end your turn; Cadre delivers room messages when you are idle.'));
+  assert.ok(prompt.includes('Use the `dueno` MCP server'));
 });
 
 test('bootstrap injects simplified room prompts without loop startup metadata', async (t) => {
@@ -111,7 +113,7 @@ test('bootstrap injects simplified room prompts without loop startup metadata', 
   assert.match(h.injected.codex[0], /Begin working now/);
   assert.doesNotMatch(h.injected.codex[0], /\back\b|manager.loop|wait for/i);
   for (const prompt of [h.injected.codex[0], h.injected.claude[0]]) {
-    assert.match(prompt, /For your own bounded reading, searching, and checks, use built-in subagents when available: Haiku 5\.5 \(claude-haiku-5-5\) on Claude, GPT-6 Luna \(gpt-6-luna\) on Codex/);
+    assert.match(prompt, /For your own bounded reading, searching, and checks, use built-in subagents when available: Haiku \(model: "haiku"\) on Claude, GPT-6 Luna \(gpt-6-luna\) on Codex/);
     assert.match(prompt, /if you are assigned implementer or reviewer, the implementer writes code and tests; the reviewer blocks on correctness or unnecessary code\. Iterate until the reviewer approves/);
     assert.match(prompt, /Coordinator findings go through the reviewer/);
     assert.match(prompt, /implementer acts only on forwarded findings/);

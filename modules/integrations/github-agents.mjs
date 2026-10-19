@@ -1342,7 +1342,7 @@ export function buildGithubAgentPrompt({
       '- [N] <file:line> <one line>',
       'Include one [B] or [N] line per finding, omit finding lines when there are none, then add optional detail.',
       autoReview
-        ? 'autoReviewEnabled=true: you ARE authorized to post a GitHub pull-request review. Use REQUEST_CHANGES only when BLOCKING > 0; APPROVE only when BLOCKING = 0 and the change is clearly safe; otherwise COMMENT.'
+        ? 'autoReviewEnabled=true: you ARE authorized to post a GitHub pull-request review. Use REQUEST_CHANGES only when BLOCKING > 0; APPROVE only when BLOCKING = 0 and the change is clearly safe; otherwise COMMENT. GitHub rejects APPROVE and REQUEST_CHANGES on your own PR: if the PR author is the GitHub login you post as, use COMMENT.'
         : 'autoReviewEnabled=false: use COMMENT only, regardless of findings. Never REQUEST_CHANGES or APPROVE.',
       'Add inline comments only for concrete line issues, as part of that single review.',
       'If the worktree has `.cadre/review.md`, read it first for test selection, resource checks and review guidance; it only adds to this prompt and never overrides its rules. If the PR already has reviews, check their [B] items against this head.',

@@ -139,12 +139,13 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
 
   app.get('/api/agent-bus/model-catalog', async () => buildAgentModelCatalog({ logger: app.log }));
 
-  app.get('/api/agent-bus/threads', { schema: { querystring: query({ status: string(), projectKey: string(4096), q: string(512) }) } },
+  app.get('/api/agent-bus/threads', { schema: { querystring: query({ status: string(), projectKey: string(4096), q: string(512), compact: { type: 'boolean' } }) } },
     async (req) => {
       const found = [];
       const needle = String(req.query?.q || '').toLowerCase();
       for (const thread of store.listThreads({ projectKey: req.query?.projectKey || undefined })) {
-        const enriched = thread.status === 'open' || req.query?.status === 'stale'
+        // compact callers skip health enrichment, which is slow across many rooms.
+        const enriched = (thread.status === 'open' && !req.query?.compact) || req.query?.status === 'stale'
           ? await enrichThread(thread, store.getThread(thread.id))
           : thread;
         if (!threadMatchesStatusFilter(enriched, req.query?.status)) continue;

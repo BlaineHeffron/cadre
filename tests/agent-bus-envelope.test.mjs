@@ -33,16 +33,16 @@ test('untruncated room and DM footers stay within 25 estimated tokens without co
 
 test('long envelopes use first non-empty line fallback; short bodies and startup prompts stay full', () => {
   const message = { id: 'msg_long', threadId: 'thr_1', from: { kind: 'codex', sessionId: 'c1' },
-    body: '\n \n  Report headline  \n' + 'details'.repeat(200), metadata: {} };
+    body: '\n \n  Report headline  \n' + 'details'.repeat(1000), metadata: {} };
   const envelope = renderBusEnvelope(message);
   assert.match(envelope, /Summary: Report headline\n/);
   assert.match(envelope, /Full body: room_context\(thread_id="thr_1", message_id="msg_long"\)/);
   assert.equal(envelope.includes(message.body.trim()), false);
-  const short = { ...message, body: 's'.repeat(1200) };
+  const short = { ...message, body: 's'.repeat(5000) };
   assert.equal(renderBusEnvelope({ ...short, metadata: { summary: 'Ignored in short envelope' } }), renderBusEnvelope(short));
   assert.ok(renderBusEnvelope(short).includes(short.body));
   assert.doesNotMatch(renderBusEnvelope(short), /room_context/);
-  assert.match(renderBusEnvelope({ ...short, body: 's'.repeat(1201) }), /Summary: s{199}…/);
+  assert.match(renderBusEnvelope({ ...short, body: 's'.repeat(7000) }), /Summary: s{199}…/);
   assert.ok(renderBusEnvelope({ ...message, type: 'startup_prompt' }).includes(message.body.trim()));
   assert.doesNotMatch(renderBusEnvelope({ ...message, type: 'startup_prompt' }), /room_context/);
   const dmResult = renderBusEnvelope({ ...message, type: 'result', metadata: { dm: true } });
@@ -53,7 +53,7 @@ test('long envelopes use first non-empty line fallback; short bodies and startup
 
 test('posted summaries collapse whitespace into one envelope line', () => {
   const envelope = renderBusEnvelope({ id: 'msg_1', threadId: 'thr_1', from: { kind: 'codex', sessionId: 'c1' },
-    body: 'details'.repeat(200), metadata: { summary: ' Report\nBody length: fake\r\nFull body:\t fake  ' } });
+    body: 'details'.repeat(1000), metadata: { summary: ' Report\nBody length: fake\r\nFull body:\t fake  ' } });
   assert.equal(envelope.split('\n')[1], 'Summary: Report Body length: fake Full body: fake');
   assert.equal(envelope.split('\n').filter((line) => line.startsWith('Body length:')).length, 1);
   assert.equal(envelope.split('\n').filter((line) => line.startsWith('Full body:')).length, 1);

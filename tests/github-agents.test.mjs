@@ -617,6 +617,7 @@ describe('GitHub agents poller', () => {
     assert.match(launches[0].prompt, /pull request/);
     assert.match(launches[0].prompt, /Fix bug/);
     assert.match(launches[0].prompt, /autoReviewEnabled=true: you ARE authorized to post a GitHub pull-request review/);
+    assert.match(launches[0].prompt, /if the PR author is the GitHub login you post as, use COMMENT/);
     assert.doesNotMatch(launches[0].prompt, /Do not post comments, reviews, commits, pushes, GitHub mutations/);
     assert.doesNotMatch(launches[0].prompt, /auto-post/i);
     assert.deepEqual(repoUpdates, [{

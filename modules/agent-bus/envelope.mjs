@@ -40,7 +40,7 @@ export function renderBusEnvelope(message, parent = null, { inlineCap = 0 } = {}
   const reply = 'Reply: room_send(thread_id=<room>, body="...", reply_to=<id>)';
   const body = String(message.body || '');
   // A returned spawn result arrives whole, like a subagent's answer.
-  const summarize = body.length > 1200 && message.type !== 'startup_prompt' && !(dm && message.type === 'result');
+  const summarize = body.length > 6000 && message.type !== 'startup_prompt' && !(dm && message.type === 'result');
   let content = summarize
     ? `Summary: ${messageSummary(message)}\nBody length: ${body.length} characters\nFull body: room_context(thread_id="${message.threadId}", message_id="${message.id}")`
     : body.trim();

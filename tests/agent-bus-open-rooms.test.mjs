@@ -153,7 +153,7 @@ test('a DM participant may archive while both participant sessions are alive', a
 test('poster summaries persist through MCP room and DM calls and compact contexts', async (t) => {
   const { h, thread, call, requestImpl } = await setup(t);
   const summary = 'ready · PR #42 · Summary delivery works';
-  const body = 'Full report\n' + 'details '.repeat(200);
+  const body = 'Full report\n' + 'details '.repeat(800);
   const sent = await call('room_send', { thread_id: thread.id, body, summary, type: 'result' });
   const stored = h.store.getMessage(sent.structuredContent.message_id);
   assert.equal(stored.metadata.summary, summary);
@@ -198,7 +198,7 @@ test('poster summaries persist through MCP room and DM calls and compact context
     await assert.rejects(requestImpl(path, { method: 'POST', body: { ...args, body: 'Rejected', summary: 'x'.repeat(201) } }), (err) => err.statusCode === 400 && /summary/.test(err.payload?.message));
   }
   for (const summary of ['', '   ']) {
-    const sent = await call('room_send', { thread_id: thread.id, body: 'Fallback headline\n' + 'd'.repeat(1200), summary });
+    const sent = await call('room_send', { thread_id: thread.id, body: 'Fallback headline\n' + 'd'.repeat(6000), summary });
     const message = h.store.getMessage(sent.structuredContent.message_id);
     assert.match(renderBusEnvelope(message), /Summary: Fallback headline/);
     assert.equal(JSON.parse((await call('room_context', { thread_id: thread.id, message_id: message.id, summary_only: true })).content[0].text).messages[0].summary, 'Fallback headline');

@@ -35,7 +35,7 @@ const CACHEABLE_METHODS = new Set([
 ]);
 const EMPTY_LIST = Object.freeze([]);
 const DEFAULT_CONTEXT_MESSAGE_LIMIT = 8;
-const DEFAULT_CONTEXT_BODY_CHARS = 3000;
+const DEFAULT_CONTEXT_BODY_CHARS = 12000;
 const MCP_ID_MAX = 240;
 const MCP_BODY_MAX = 200000;
 const AGENT_PERMISSION_AUTHORITY_TOOLS = new Set([
@@ -481,7 +481,7 @@ export function buildAgentBusMcpServer({
       inputSchema: { type: 'object', properties: {
         thread_id: { type: 'string' }, limit: { type: 'integer', minimum: 0, maximum: 500 },
         since: { type: 'string' }, after: { type: 'string' }, message_id: { type: 'string' },
-        body_offset: { type: 'integer', minimum: 0 }, body_limit: { type: 'integer', minimum: 0, maximum: DEFAULT_CONTEXT_BODY_CHARS },
+        body_offset: { type: 'integer', minimum: 0 }, body_limit: { type: 'integer', minimum: 0 },
         metadata: { type: 'boolean' }, bodies: { type: 'boolean' }, deliveries: { type: 'boolean' }, summary_only: { type: 'boolean' },
       }, required: ['thread_id'], additionalProperties: false },
     },
@@ -520,7 +520,7 @@ export function buildAgentBusMcpServer({
       name: 'agent_dm',
       description: 'Send a direct message to any agent, creating the deterministic pair room when needed. Returns message_id, delivery_count and failed_targets on failure.',
       inputSchema: { type: 'object', properties: {
-        kind: { type: 'string' }, session_id: { type: 'string' }, body: { type: 'string' }, summary: { type: 'string', maxLength: 200 },
+        kind: { type: 'string', enum: ['claude', 'codex', 'pi'], description: "target session's provider" }, session_id: { type: 'string' }, body: { type: 'string' }, summary: { type: 'string', maxLength: 200 },
       }, required: ['kind', 'session_id', 'body'], additionalProperties: false },
     },
     {
@@ -606,11 +606,12 @@ export function buildAgentBusMcpServer({
       case 'room_list': {
         if (!authenticatedContext(authContext)) throw authorizationError('Room listing requires an authenticated agent credential', 'principal_missing');
         const actor = principalAgentRef(authContext);
-        const payload = await request(args.scope === 'all' ? '/api/agent-bus/threads?status=open'
+        const payload = await request(args.scope === 'all' ? '/api/agent-bus/threads?status=open&compact=true'
           : `/api/agent-bus/threads/by-participant?kind=${encodeURIComponent(actor.kind)}&sessionId=${encodeURIComponent(actor.sessionId)}&status=all`);
         const rooms = (payload?.threads || []).filter((thread) => args.scope !== 'all' || !thread.metadata?.dm).map((thread) => ({ id: thread.id, title: thread.title,
           kind: thread.metadata?.dm ? 'dm' : 'room', status: thread.status,
-          participants: (thread.participants || []).filter((item) => item.kind !== 'user').length, owner: thread.createdBy || null }));
+          participants: (thread.participants || []).filter((item) => item.kind !== 'user').length, owner: thread.createdBy || null,
+          updatedAt: thread.updatedAt ?? null }));
         const { items, ...page } = paginate(rooms, args);
         const result = { rooms: items, ...page };
         return textResult(JSON.stringify(result), result);
