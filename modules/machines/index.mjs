@@ -111,7 +111,8 @@ export function validateMachineUrl(raw, { mcp = false, env = process.env } = {})
   const scheme = mcp ? url.protocol === 'https:' || (loopback && url.protocol === 'http:') : url.protocol === 'http:';
   const allowed = privateAllowedHosts(env, readEnv('DM_FLEET_PRIVATE_HOSTS_REF', env));
   if (!scheme || url.username || url.password || url.search || url.hash || url.pathname !== (mcp ? '/mcp' : '/')
-    || !(allowed.has(url.hostname.toLowerCase()) || allowed.has(url.origin))) {
+    // An IPv6 hostname comes bracketed; the allowlist holds `tailscale ip` output, which is not.
+    || !(allowed.has(url.hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1')) || allowed.has(url.origin))) {
     throw fail(`Machine URL ${url.origin} is not an allowed ${mcp ? 'https MCP' : 'http'} URL`, 'machine_url_invalid');
   }
   return mcp ? url.href : url.origin;

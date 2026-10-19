@@ -50,7 +50,7 @@ const { buildHookSessionPaths, readHookEventsSince, recordHookPayload } = await 
 const { commandCenterAIPlugin } = await import('../modules/integrations/command-center-ai.mjs');
 const { buildSentStore, TelegramRelayLoop } = await import('../modules/telegram/relay.mjs');
 const { buildBindingStore, claudeTranscriptPath } = await import('../modules/telegram/binding.mjs');
-const { relayBinding } = await import('../modules/machines/index.mjs');
+const { pairLink, parsePairLink, relayBinding, validateMachineUrl } = await import('../modules/machines/index.mjs');
 
 function fakeTimers() {
   const pending = new Set();
@@ -794,6 +794,13 @@ describe('multi-machine slice 6', () => {
     assert.deepEqual((await machines(other, headers)).machines.map(({ id, status, providers }) => ({ id, status, providers })), [{ id: 'w9', status: 'live', providers: ['claude'] }]);
     secrets.add(machineState(join(root, 'hub-two')).read().machines.w9.credential);
     await other.close();
+  });
+
+  it('a pairing link for a Tailscale IPv6 host is a URL the hub allowlist accepts', () => {
+    const env = { DM_FLEET_PRIVATE_HOSTS_REF: 'IPV6_HOSTS', IPV6_HOSTS: 'fd7a:115c::1' };
+    const { url } = parsePairLink(pairLink({ machineId: () => 'id', issueCode: () => 'CODE' }, 'fd7a:115c::1', 4320));
+    assert.equal(validateMachineUrl(url, { env }), 'http://[fd7a:115c::1]:4320');
+    assert.throws(() => validateMachineUrl('http://[fd7a:115c::2]:4320', { env }), /not an allowed/);
   });
 });
 
