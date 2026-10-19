@@ -1,4 +1,5 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { exec } from '../../lib/exec.mjs';
 import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
@@ -12,6 +13,7 @@ const DEFAULT_MAX_SPAWNS_PER_POLL = 5;
 const MAX_SPAWNED_ITEM_KEYS = 500;
 const SPAWN_BACKOFF_BASE_MS = 60_000;
 const SPAWN_BACKOFF_MAX_MS = 30 * 60_000;
+const ORPHAN_WORKTREE_GRACE_MS = 10 * 60_000;
 const USER_AGENT = 'dueno-fleet';
 // Public repos accept issues and PRs from anyone; only these authors spawn agents.
 const TRUSTED_AUTHOR_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
@@ -667,6 +669,7 @@ export class GithubAgentPoller {
         }
       }
     }
+    if (!suppressSpawn) await this.removeOrphanWorktrees(repo);
     const spawn = suppressSpawn
       ? { spawned: [], capped: false, updatedRepo: result.updatedRepo }
       : await spawnGithubAgentsForPollResult(result, {
@@ -798,6 +801,32 @@ export class GithubAgentPoller {
       }
     }
     return results;
+  }
+
+  // A reviewer that dies, loses its registry entry or is replaced leaves its worktree; remove the clean ones.
+  async removeOrphanWorktrees(repo) {
+    const root = resolve(expandHomePath(this.config.workDir || '~/.dueno-fleet/github-agents'), 'worktrees', githubRepoWorktreeKey(repo));
+    const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+    const sessions = entries.length ? (this.listExistingSessions ? await this.listExistingSessions() : await listRegisteredGithubSessions(this.config)) : [];
+    // An unreadable registry reads as empty; never treat that as every worktree being orphaned.
+    if (!sessions.length) return;
+    const owned = new Set(sessions.map((session) => relative(root, resolve(normalizeText(session.workDir || session.metadata?.github_worktree_path) || '/')).split(/[\\/]/)[0]));
+    for (const entry of entries) {
+      const number = Number(/^pr-(\d+)-\d+$/.exec(entry.name)?.[1]);
+      const path = resolve(root, entry.name);
+      if (!number || !entry.isDirectory() || owned.has(entry.name)) continue;
+      try {
+        if (this.now() - (await stat(path)).mtimeMs < ORPHAN_WORKTREE_GRACE_MS) continue;
+        const checkout = (await readdir(path)).map((name) => resolve(path, name)).find((child) => existsSync(resolve(child, '.git')));
+        if (checkout && !(await this.removeWorktree({
+          repoPath: configuredRepoPath(this.config.repoPaths, repo.id), worktreePath: checkout, branch: `dueno-fleet/${entry.name}`, keepUnpushed: true, pullRequest: number,
+        }))?.removed) continue;
+        await rm(path, { recursive: true, force: true });
+        this.log?.info?.({ repoId: repo.id, path, reason: checkout ? 'no_session_clean_worktree' : 'no_session_no_checkout' }, 'Removed orphan GitHub agent worktree');
+      } catch (error) {
+        this.log?.warn?.({ repoId: repo.id, path, code: sanitizedError(error) }, 'Failed to remove orphan GitHub agent worktree');
+      }
+    }
   }
 
   async runReaper() {

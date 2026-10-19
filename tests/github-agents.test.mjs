@@ -1,7 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -15,6 +16,7 @@ import {
   spawnGithubAgentsForPollResult,
   validateGithubAuthRef,
 } from '../modules/integrations/github-agents.mjs';
+import { createGithubPullRequestWorktree } from '../modules/fleet/git-worktree.mjs';
 import { assertValidCodexModel } from '../modules/sessions/codex-models.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -1395,6 +1397,55 @@ describe('GitHub agents poller', () => {
     assert.equal(launches.length, 2);
     assert.equal((await store.getRepo('octo/demo')).lastSeenPrNumber, 8);
     assert.deepEqual((await store.getRepo('octo/demo')).spawnedItemKeys, ['pr:8']);
+  });
+
+  it('removes clean reviewer worktrees and log-only dirs left without a session, keeping owned, fresh, dirty and outside ones', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'github-orphans-'));
+    const git = (cwd, ...args) => execFileAsync('git', ['-c', 'user.email=t@example.invalid', '-c', 'user.name=T', ...args], { cwd });
+    const repo = join(root, 'repo');
+    await mkdir(repo);
+    await git(root, 'init', '--bare', '-b', 'main', 'remote');
+    await git(repo, 'init', '-b', 'main');
+    await writeFile(join(repo, '.gitignore'), 'target/\n');
+    await git(repo, 'add', '.');
+    await git(repo, 'commit', '-m', 'init');
+    await git(repo, 'remote', 'add', 'origin', join(root, 'remote'));
+    await git(repo, 'push', 'origin', 'main', ...[1, 2, 3, 4, 5].map((n) => `HEAD:refs/pull/${n}/head`));
+    const base = join(root, 'agents');
+    const tree = async (n) => (await createGithubPullRequestWorktree({ repoPath: repo, baseDir: base, repoId: 'octo/demo', prNumber: n, itemId: `${n}00` })).worktreePath;
+    const [clean, owned, dirty, unpushed, fresh] = [await tree(1), await tree(2), await tree(3), await tree(4), await tree(5)];
+    await mkdir(join(clean, 'target'));
+    await writeFile(join(clean, 'target', 'build-output'), 'x');
+    await writeFile(join(dirty, '.gitignore'), 'changed\n');
+    await git(unpushed, 'commit', '--allow-empty', '-m', 'local');
+    const reposDir = join(base, 'worktrees', 'octo-demo');
+    await mkdir(join(reposDir, 'pr-6-600'));
+    await writeFile(join(reposDir, 'pr-6-600', 'session.log'), 'log');
+    const otherRepo = join(base, 'worktrees', 'octo-other', 'pr-7-700');
+    await mkdir(otherRepo, { recursive: true });
+    await mkdir(join(root, 'outside'));
+    await symlink(join(root, 'outside'), join(reposDir, 'pr-8-800'));
+    const old = new Date(Date.now() - 20 * 60_000);
+    for (const dir of ['pr-1-100', 'pr-2-200', 'pr-3-300', 'pr-4-400', 'pr-6-600']) await utimes(join(reposDir, dir), old, old);
+    await utimes(otherRepo, old, old);
+    const logs = [];
+    await withRepoStore(async (store) => {
+      await store.upsertRepo({ ...BASE_REPO, lastSeenPrNumber: 20, lastSeenIssueNumber: 20 });
+      const poller = new GithubAgentPoller({
+        repoStore: store, config: { enabled: true, workDir: base, repoPaths: { 'octo/demo': repo }, env: { GITHUB_TOKEN_REF: 'test-token' } },
+        fetchImpl: mockGithubFetch([]), listExistingSessions: async () => [{ id: 's2', workDir: owned }],
+        log: { info: (fields) => logs.push(fields), warn: () => {} },
+      });
+      await poller.pollOnce();
+    });
+    assert.deepEqual([clean, owned, dirty, unpushed, fresh, join(reposDir, 'pr-6-600'), otherRepo, join(reposDir, 'pr-8-800')].map((p) => existsSync(p)),
+      [false, true, true, true, true, false, true, true]);
+    assert.equal(existsSync(join(reposDir, 'pr-1-100')), false);
+    assert.deepEqual(logs.map((fields) => [fields.path, fields.reason]), [
+      [join(reposDir, 'pr-1-100'), 'no_session_clean_worktree'], [join(reposDir, 'pr-6-600'), 'no_session_no_checkout']]);
+    const branches = (await git(repo, 'branch', '--list', 'dueno-fleet/*')).stdout;
+    assert.ok(!branches.includes('pr-1-100') && branches.includes('pr-2-200'));
+    await rm(root, { recursive: true, force: true });
   });
 
   it('respawns a recorded PR only when its reviewer died without reviewing, with backoff', async () => {
