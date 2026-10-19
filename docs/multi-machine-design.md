@@ -80,8 +80,9 @@ commit `15903f1` (`t3code-REVIEW.md`).
   revocation is immediate. Copy. **Adapt:** t3code stores the code in plaintext, and Cadre hashes it.
 - **Scoped, narrow-only credentials.** Cadre's per-session bus tokens already have this property.
   t3code has about 17 scopes; Cadre uses two coarse ones, `worker:operate` and `bus:agent`.
-- **Protocol version in the descriptor.** A mismatch is HTTP 426 and blocks as `unsupported`. Copy,
-  and require an exact commit match too: every Cadre machine deploys from `origin/main`.
+- **Protocol version in the descriptor.** A mismatch is HTTP 426 and blocks as `unsupported`. Copy.
+  The Cadre commit is in the descriptor too, but a commit mismatch only warns (operator decision,
+  2026-10-18).
 - **Disconnects don't kill agents.** The client runs one supervisor per environment.
   - Phases: `available | offline | connecting | backoff | connected | blocked`. Errors are transient
     (retry) or blocked (stop until the user acts).
@@ -279,8 +280,8 @@ request without a valid paired credential is rejected.
    - Pairing records the peer's ID as `envId`.
    - **Before spending a pairing code, and before sending any credential on a saved route** (a hub
      request to a worker, a worker's hello to the hub), the client fetches the peer's descriptor and
-     requires `machineId == envId` (at pairing, the link's id) and the protocol and commit rule
-     (§4.10). A mismatch, or no answer, sets `blocked` or `offline`, and nothing is sent. A wrong link
+     requires `machineId == envId` (at pairing, the link's id) and the protocol rule (§4.10; a
+     commit mismatch only warns). A mismatch, or no answer, sets `blocked` or `offline`, and nothing is sent. A wrong link
      therefore does not burn the code. The check runs per credential send and per new connection,
      never from a status cache.
    - The ID is not a secret. It catches a stale or reassigned route, not an active impersonator (§4.2.7).
@@ -469,7 +470,8 @@ It also:
   - **Backoff:** equal-jitter exponential from 1 s up to 5 min. A worker `hello` (boot, wake, network
     change) resets it and probes at once, as does an explicit "retry now". An OS "network offline"
     report pauses the supervisor but does not tear down a live connection.
-  - **Connect:** the descriptor check (protocol and commit; a mismatch is 426 and fails closed), then
+  - **Connect:** the descriptor check (a protocol mismatch is 426 and fails closed; a commit mismatch
+    only warns), then
     a snapshot of session rows, then `GET /api/machine/events?afterSequence=<cursor>`. Events are
     session-state and hook events with a worker-wide persisted, monotonic `sequence`.
     - The hub stores the cursor per machine and resumes from it, so a reconnect replays what it
@@ -602,17 +604,18 @@ Native win32 is **not** a Cadre host:
   that machine. For WSL that means inside the distro.
   - There is no remote self-update. Deploys stay explicit operator actions, per AGENTS.md.
 - **Protocol and commit.** The descriptor carries `MACHINE_PROTOCOL` (an integer, bumped when the
-  hub-to-worker contract breaks) and the Cadre commit. Both must equal the hub's, because every
-  machine deploys from `origin/main`. A mismatch is HTTP 426 on connect and sets `blocked`.
-  - On a mismatch the hub still allows list, get and delete.
+  hub-to-worker contract breaks) and the Cadre commit. Only the protocol must equal the hub's; a
+  protocol mismatch is HTTP 426 on connect and sets `blocked`. A commit mismatch only warns (the
+  pairing CLI prints it and the hub logs it on create), per the operator's decision of 2026-10-18.
+  - On a protocol mismatch the hub still allows list, get and delete.
   - Create fails closed with "update <machine> (protocol X, hub Y)".
   - Input, clear, startup-input and resume get 503 `machine_protocol_mismatch` with
     `transient:true` (§4.4), so
     queued deliveries wait for the upgrade instead of failing.
   - The machine shows as `blocked`.
 - **Upgrade order.**
-  - Commit equality means a hub deploy leaves each worker `blocked` until it runs
-    `server.sh restart`. Deploy them back to back, workers first.
+  - A hub deploy that keeps the protocol leaves workers working, with a commit warning until each
+    runs `server.sh restart`. Deploy them back to back, workers first.
   - Breaking changes: stop the remote sessions, then upgrade everything.
   - A laptop that was away during an upgrade comes back `blocked` until it is updated. Nothing is
     lost, and its sessions are still listed.
@@ -685,7 +688,7 @@ Sizes count added lines, including tests. S is under 150, M is 150-350, L is 350
      - Pairing codes, credentials and `busCredential` never appear in captured log output.
 2. **Supervisor, event stream and lifecycle (L, about 450 lines).**
    - The per-machine supervisor: phases, transient/blocked errors, equal-jitter backoff (1 s to 5 min),
-     the 426 protocol and commit check.
+     the 426 protocol check (a commit mismatch only warns).
    - The worker's `GET /api/machine/events?afterSequence=` stream with a persisted sequence, the hub's
      cursor and replay, and the worker `hello` route that resets the backoff.
    - `unreachable`, `blocked` and `since` on rows; the list merge from snapshot plus events.
@@ -734,13 +737,11 @@ Telegram and one queue. Slice 5 extends it to cross-machine collabs.
    a per-machine path?
 6. **Hub-wide `enforce` rollout.** This design doesn't need it, because the tailnet listener always
    requires credentials. Do you want it scheduled anyway?
-7. **Exact commit match.** The review wants protocol and commit to match, which blocks every worker
-   after each hub deploy until it restarts. Keep that, or block on protocol only and show a commit
-   mismatch as a warning?
-8. **Tailnet Serve.** Is HTTPS (MagicDNS and certificates) enabled on the tailnet, and may the hub
+7. **Tailnet Serve.** Is HTTPS (MagicDNS and certificates) enabled on the tailnet, and may the hub
    expose `:8766` through `tailscale serve`?
 
-Answered: Tailscale inside WSL2 on incadence is approved, and there are no ACLs (§7). Still to check at
+Answered: Tailscale inside WSL2 on incadence is approved, and there are no ACLs (§7). A commit
+mismatch only warns and only a protocol mismatch blocks (operator, 2026-10-18). Still to check at
 demo time: incadence's Windows build and WSL kernel, which decide whether mirrored networking and
 nono's Landlock can work.
 
@@ -799,3 +800,5 @@ nono's Landlock can work.
   - Pairing tightened: 12-character codes, 5-minute TTL, hashed, atomic, descriptor checked before
     the code is spent, two scopes, stored-state revocation (§4.2.3, §4.2.5).
   - Slice 1 shrinks from about 600 to about 550 lines; slice 2 grows to L; slice 3 shrinks to S.
+- **2026-10-18 operator, slice 1 approval:** block on protocol only. A commit mismatch shows a
+  warning (former open question 7), so a hub deploy does not block workers until they restart.
