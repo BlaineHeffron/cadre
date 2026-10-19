@@ -21,6 +21,7 @@ import {
   setBrowserNotificationsEnabled,
 } from '../app/notification-prefs.mjs';
 import { encodeQr, qrSvgPath } from '../lib/qrcodegen.mjs';
+import { MachinesCard } from '../components/machines.mjs';
 
 function makeSaveToken(inputToken) {
   return async function saveToken() {
@@ -306,6 +307,8 @@ export function SettingsPage({ section }) {
           Collaboration available: ${agentProviders.value.collabEnabled ? 'yes' : 'no'}
         </div>
       </div>
+
+      ${isAuthenticated.value ? html`<${MachinesCard} />` : null}
 
       <div class="card">
         <div class="card-header">

@@ -25,6 +25,7 @@ import { Terminal, stripAnsi } from '../components/terminal.mjs';
 import { AgentControlBar } from '../components/agent-control-bar.mjs';
 import { TerminalKeys } from '../components/terminal-keys.mjs';
 import { RenderedTranscript } from '../components/rendered-transcript.mjs';
+import { MachineChip } from '../components/machines.mjs';
 
 function isActiveThread(thread) {
   if (!thread) return false;
@@ -236,6 +237,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         externalOwner: data.externalOwner || null,
         canResume: data.canResume === true,
         resumeBlockedReason: data.resumeBlockedReason || '',
+        machine: data.machine || null,
       };
     } catch (e) {
       if (!shouldApply()) return;
@@ -445,6 +447,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
       displayName: freshSession?.displayName || sessionInfo.value.displayName || '',
       model: freshSession?.model || sessionInfo.value.model || '',
       thinkingLevel: freshSession?.thinkingLevel || sessionInfo.value.thinkingLevel || '',
+      machine: sessionInfo.value.machine?.id,
     };
     try {
       const data = await api.post('/agents/sessions', body);
@@ -598,6 +601,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
   const headerParts = [displayName, threadTitle].filter(Boolean);
   const headerTitle = headerParts.length ? headerParts.join(' / ') : fallbackTitle;
   const { previous, next } = findSessionNeighbors(siblingSessions.value, descriptor.kind, id);
+  const { machine } = sessionInfo.value;
   const startLoop = () => route(`/loop-sessions?kind=${encodeURIComponent(descriptor.kind)}&session_id=${encodeURIComponent(id)}`);
 
   return h('div', { class: `claude-session-page${embedded ? ' agent-session-page-embedded' : ''}` },
@@ -625,13 +629,18 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
           ? h('button', { class: 'ctrl-btn ctrl-default', onClick: startLoop, style: 'padding:4px 8px; font-size:12px' }, 'Start loop')
           : null,
         isRustManagedReadOnly ? h('span', { class: 'badge badge-low' }, 'rust-managed / read-only') : null,
+        h(MachineChip, { machine: sessionInfo.value.machine }),
       ),
       h('div', { class: 'session-header-actions' },
         h('button', { class: 'ctrl-btn ctrl-default', onClick: copySessionId, style: 'padding:4px 8px; font-size:12px' }, 'Copy ID'),
-        (sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process')
+        // A remote session's pane lives on its worker; its own UI (and AUTH_TOKEN) attaches there.
+        machine?.url
+          ? h('a', { class: 'ctrl-btn ctrl-default', href: `${machine.url}/${descriptor.kind}/${id}`, target: '_blank', rel: 'noopener noreferrer', style: 'padding:4px 8px; font-size:12px' }, `Open on ${machine.id}`)
+          : null,
+        (!machine && sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process')
           ? h('button', { class: 'ctrl-btn ctrl-default mobile-hidden', onClick: copyAttachCommand, style: 'padding:4px 8px; font-size:12px' }, 'Copy Attach')
           : null,
-        (sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process' && !isRustManagedReadOnly && tmuxCapabilities.value.canOpenTerminal)
+        (!machine && sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process' && !isRustManagedReadOnly && tmuxCapabilities.value.canOpenTerminal)
           ? h('button', { class: 'ctrl-btn ctrl-default mobile-hidden', onClick: openInTerminal, style: 'padding:4px 8px; font-size:12px' }, 'Open In Terminator')
           : null,
         sessionState.value.status === 'ended' && !isRustManagedReadOnly

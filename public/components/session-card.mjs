@@ -5,6 +5,7 @@ import { copyText, linkedThreadsForSession, sessionTitle, shortThreadId } from '
 import { providerDescriptor } from '../app/providers.mjs';
 import { isActiveThread } from '../pages/agent-collab/format.mjs';
 import { addToast, agentThreads, seenSessionStoreForKind, hasSeenPromptNotification, sessionDisplayStatus } from '../app/state.mjs';
+import { MachineChip } from './machines.mjs';
 
 const STATE_CONFIG = {
   starting: { label: 'Starting', cls: 'badge-info', pulse: false, idle: false },
@@ -119,6 +120,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
       ` : null}
       <div style="display:flex; gap:8px; font-size:12px; color:var(--text-muted); align-items:center">
         ${stateInfo.label === 'Done' ? html`<span class="badge badge-info">Done</span>` : null}
+        <${MachineChip} machine=${session.machine} />
         ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono); font-size:11px" title=${session.workDir}>${session.workDir}</span>` : null}
       </div>
       <div style="display:flex; gap:8px; font-size:11px; color:var(--text-muted); margin-top:2px">

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { appendFile, mkdir, stat } from 'node:fs/promises';
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { hostname, networkInterfaces, platform } from 'node:os';
+import { hostname, networkInterfaces, platform, release } from 'node:os';
 import { join } from 'node:path';
 import { privateAllowedHosts } from '../fleet/registry.mjs';
 import { readEnv } from '../platform/cadre-env.mjs';
@@ -97,8 +97,12 @@ export function machineState(dir) {
 }
 
 export function descriptor(store, { label = readEnv('CADRE_MACHINE_LABEL') || hostname(), protocol = MACHINE_PROTOCOL } = {}) {
-  return { machineId: store.machineId(), label, os: platform(), commit: COMMIT, protocol };
+  const os = platform() === 'linux' && /microsoft/i.test(release()) ? 'linux-wsl2' : platform();
+  return { machineId: store.machineId(), label, os, commit: COMMIT, protocol };
 }
+
+// The one-time link `cadre pair` prints and the worker UI's pair button shows (a Tailscale IPv6 host is bracketed).
+export const pairLink = (store, host, port) => `http://${String(host).includes(':') ? `[${host}]` : host}:${port}/#${store.machineId()}.${store.issueCode()}`;
 
 // Every host must be listed in DM_FLEET_PRIVATE_HOSTS_REF: worker links are plain HTTP.
 export function validateMachineUrl(raw, { mcp = false, env = process.env } = {}) {
@@ -107,7 +111,8 @@ export function validateMachineUrl(raw, { mcp = false, env = process.env } = {})
   const scheme = mcp ? url.protocol === 'https:' || (loopback && url.protocol === 'http:') : url.protocol === 'http:';
   const allowed = privateAllowedHosts(env, readEnv('DM_FLEET_PRIVATE_HOSTS_REF', env));
   if (!scheme || url.username || url.password || url.search || url.hash || url.pathname !== (mcp ? '/mcp' : '/')
-    || !(allowed.has(url.hostname.toLowerCase()) || allowed.has(url.origin))) {
+    // An IPv6 hostname comes bracketed; the allowlist holds `tailscale ip` output, which is not.
+    || !(allowed.has(url.hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1')) || allowed.has(url.origin))) {
     throw fail(`Machine URL ${url.origin} is not an allowed ${mcp ? 'https MCP' : 'http'} URL`, 'machine_url_invalid');
   }
   return mcp ? url.href : url.origin;
@@ -124,7 +129,7 @@ export async function checkPeer(url, envId, { protocol = MACHINE_PROTOCOL } = {}
   if (!peer) return { code: 'machine_unreachable' };
   if (peer.machineId !== envId) return { code: 'machine_blocked', detail: `expected machine ${envId}, found ${peer.machineId}` };
   if (peer.protocol !== protocol) return { code: 'machine_protocol_mismatch', detail: `update machine (protocol ${peer.protocol}, hub ${protocol})` };
-  return { code: null, commitWarning: peer.commit !== COMMIT ? `machine runs commit ${peer.commit || 'unknown'}, hub ${COMMIT || 'unknown'}` : '' };
+  return { code: null, os: peer.os, protocol: peer.protocol, commitWarning: peer.commit !== COMMIT ? `machine runs commit ${peer.commit || 'unknown'}, hub ${COMMIT || 'unknown'}` : '' };
 }
 
 export function parsePairLink(link) {
@@ -191,10 +196,18 @@ export const relayBinding = (request) => async (session, options = {}) => {
 
 const SESSION_ROUTE = /^\/api\/([a-z]+)\/sessions(?:\/:id(.*))?$/;
 
-export async function machinesPlugin(app, { role = 'hub', store, credentialStore, protocol = MACHINE_PROTOCOL, now = () => Date.now(),
+export async function machinesPlugin(app, { role = 'hub', store, credentialStore, protocol = MACHINE_PROTOCOL, now = () => Date.now(), hubMcpUrl = '',
   supervise = false, timers = realTimers, random = Math.random, online = () => addresses() !== '', routeCommands = null, wakeCheckMs = 30_000, wsManager, worktreeBaseDir = managedWorktreeBase }) {
   app.get('/api/machine/descriptor', async () => descriptor(store, { protocol }));
+  const operatorOnly = (req) => { if (req.duenoAuth?.principal?.type !== 'ui') throw fail('Operator required', 'forbidden', 403); };
   if (role === 'worker') {
+    app.get('/api/machines', async () => ({ role, machines: [] }));
+    app.post('/api/pairing/code', async (req, reply) => {
+      operatorOnly(req);
+      const { address, port } = app.server.address();
+      reply.header('Cache-Control', 'no-store');
+      return { link: pairLink(store, address, port) };
+    });
     // Hello on boot, after a sleep (a late tick) and on a network change, so the hub stops backing off.
     async function hello() {
       const hub = store.read().hub;
@@ -445,6 +458,29 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     });
     app.addHook('onClose', async () => { timers.clear(sweepTimer); for (const s of supervisors.values()) timers.clear(s.timer); });
   }
+  // Status from the supervisor; OS, protocol and providers as the machine last reported them, so an away machine still lists.
+  async function machineInfo(name, row) {
+    const peer = await reach(name, row);
+    if (!peer.code) {
+      const listed = await send(row, 'GET', '/api/agents/providers').catch(() => null);
+      // Remote spawn runs Claude only for now, so only the worker's enabled Claude providers are offered.
+      const providers = listed?.status === 200 ? (parse(listed.text).providers || [])
+        .filter((entry) => entry.enabled !== false && entry.backendType === 'claude').map((entry) => entry.id) : row.providers;
+      const report = { os: peer.os, protocol: peer.protocol, providers };
+      if (JSON.stringify(report) !== JSON.stringify({ os: row.os, protocol: row.protocol, providers: row.providers })) {
+        Object.assign(row, report);
+        store.update((state) => { if (state.machines?.[name]) Object.assign(state.machines[name], report); });
+      }
+    }
+    return { ...machineStatus(name), label: row.label || name, url: row.url, os: row.os || '', protocol: row.protocol ?? null, providers: row.providers || [] };
+  }
+  app.get('/api/machines', async () => ({ role, canAdd: Boolean(hubMcpUrl),
+    machines: await Promise.all(Object.entries(store.read().machines || {}).map(([name, row]) => machineInfo(name, row))) }));
+  app.post('/api/machines', async (req) => {
+    operatorOnly(req);
+    const { name, link } = req.body || {};
+    return addMachine(store, name, link, { hubMcpUrl }).catch((error) => { throw error.statusCode ? error : fail(error.message, 'machine_pairing_failed'); });
+  });
   app.decorate('machineRoutes', async (req, res, url) => {
     const answer = (status, body) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); return true; };
     if (req.method === 'GET' && url.pathname === '/machine/descriptor') return answer(200, descriptor(store, { protocol }));
@@ -556,11 +592,13 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     // Delete revokes the token at once, even while the worker sleeps.
     if (deleting) await forgetSession(kind, req.params.id);
     const peer = await reach(entry.machine, row);
+    const detail = req.method === 'GET' && suffix === '';
+    const ref = { url: row?.url || '' };
     // Detail answers from the cached row while the machine is away, so deliveries hold as machine_offline.
-    if (peer.code && req.method === 'GET' && suffix === '') {
+    if (peer.code && detail) {
       return reply.send({ id: entry.sessionId, displayName: entry.displayName, workDir: entry.workDir,
         state: { status: entry.state?.status || 'unknown', reason: peer.code },
-        machine: { id: entry.machine, status: BLOCKING.has(peer.code) ? 'blocked' : 'unreachable', since: sup(entry.machine).since } });
+        machine: { id: entry.machine, status: BLOCKING.has(peer.code) ? 'blocked' : 'unreachable', since: sup(entry.machine).since, ...ref } });
     }
     let body = req.body;
     let rotated = '';
@@ -588,7 +626,10 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     const gone = suffix === '' && (result.status === 404 || (ended.code === 'session_not_found' && !ended.canResume) || (deleting && result.status < 300));
     if (gone) await dropSession(kind, req.params.id);
     if (result.status >= 300) return failure(reply, result);
-    return passThrough(reply, result.status, result.text, [row.credential, rotated]);
+    // The UI's remote terminal view links to the worker's own UI. The worker just answered, so it is live: a reconnect
+    // in progress must not read as away, or deliveries would hold (delivery.mjs).
+    const text = detail ? JSON.stringify({ ...parse(result.text), machine: { id: entry.machine, status: 'live', ...ref } }) : result.text;
+    return passThrough(reply, result.status, text, [row.credential, rotated]);
   });
 
   app.addHook('onSend', async (req, reply, payload) => {

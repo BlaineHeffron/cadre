@@ -50,7 +50,7 @@ const { buildHookSessionPaths, readHookEventsSince, recordHookPayload } = await 
 const { commandCenterAIPlugin } = await import('../modules/integrations/command-center-ai.mjs');
 const { buildSentStore, TelegramRelayLoop } = await import('../modules/telegram/relay.mjs');
 const { buildBindingStore, claudeTranscriptPath } = await import('../modules/telegram/binding.mjs');
-const { relayBinding } = await import('../modules/machines/index.mjs');
+const { pairLink, parsePairLink, relayBinding, validateMachineUrl } = await import('../modules/machines/index.mjs');
 
 function fakeTimers() {
   const pending = new Set();
@@ -80,6 +80,7 @@ async function startWorker({ protocol = MACHINE_PROTOCOL, store = workerStore, s
   await app.register(authPlugin, { workerMachines: store });
   await app.register(machinesPlugin, { role: 'worker', store, protocol, timers: workerTimers, now: () => Date.now() + skew, worktreeBaseDir: workerWorktrees });
   await app.register(agentProviderPreferencesPlugin);
+  await app.register(agentInterfacePlugin);
   if (sessions) await app.register(claudeSessionsPlugin, { wsManager: { broadcast() {}, onChannel() {} } });
   await app.listen({ host: '127.0.0.1', port });
   return app;
@@ -746,6 +747,60 @@ describe('multi-machine slice 5', () => {
     assert.equal((await call(url, { method: 'POST', token: TOKEN, body })).status, 401, 'the worker UI token is read-only');
     const answered = await call(url, { method: 'POST', token: hubStore.read().machines.w8.credential, body });
     assert.deepEqual([answered.status, answered.json.removed], [200, false], 'the hub\'s worker credential reaches it, and the guards still hold');
+  });
+});
+
+describe('multi-machine slice 6', () => {
+  const machines = async (app = hub.app, headers = hub.authHeaders) => { const res = await app.inject({ url: '/api/machines', headers }); responses.push(res.body); return res.json(); };
+  const w8 = async () => (await machines()).machines.find((machine) => machine.id === 'w8');
+
+  it('lists a live machine with its OS, protocol and providers, and an offline one with since and its last report, no secrets', async () => {
+    const { os } = (await call(`${workerUrl}/api/machine/descriptor`)).json;
+    const live = { id: 'w8', status: 'live', label: hubStore.read().machines.w8.label, url: workerUrl, os, protocol: MACHINE_PROTOCOL, providers: ['claude'] };
+    assert.deepEqual(await w8(), live, 'only the worker\'s Claude providers: remote spawn runs Claude only');
+    const { id } = (await hub.app.inject({ method: 'POST', url: '/api/claude/sessions', headers: hub.authHeaders, payload: { machine: 'w8', workDir: root } })).json();
+    secrets.add(JSON.parse(await readFile(mcpClientConfigPath('claude', id), 'utf8')).mcpServers.dueno.headers.Authorization.slice('Bearer '.length));
+    const detail = async () => (await hub.app.inject({ url: `/api/claude/sessions/${id}`, headers: hub.authHeaders })).json().machine;
+    assert.deepEqual(await detail(), { id: 'w8', status: 'live', url: workerUrl }, 'the remote terminal view links to the worker UI');
+    await worker.close();
+    await hubTimers.fire();
+    assert.deepEqual(await detail(), { id: 'w8', status: 'unreachable', since: (await w8()).since, url: workerUrl });
+    const away = await w8();
+    assert.ok(away.since <= Date.now());
+    assert.deepEqual(away, { ...live, status: 'unreachable', since: away.since }, 'the last report while away');
+    worker = await startWorker();
+    await until(async () => { await hubTimers.fire(); return (await w8()).status === 'live'; }, 'live again on reconnect');
+  });
+
+  it('the worker\'s operator issues a pairing link and the hub operator redeems it; nobody else can', async () => {
+    const issue = (token) => fetch(`${workerUrl}/api/pairing/code`, { method: 'POST', headers: token ? { authorization: `Bearer ${token}` } : {} });
+    assert.equal((await issue()).status, 401);
+    assert.equal((await issue(hubStore.read().machines.w8.credential)).status, 403, 'the hub\'s worker credential cannot issue codes');
+    const { link } = await (await issue(TOKEN)).json();
+    secrets.add(link.split('.').at(-1));
+    const refused = await hub.app.inject({ method: 'POST', url: '/api/machines', headers: buildInternalBypassHeaders(), payload: { name: 'w9', link } });
+    assert.equal(refused.statusCode, 403, 'an agent cannot pair a machine');
+    // A second hub, so this pairing does not take the worker from the first.
+    const other = Fastify({ logger: logger() });
+    await other.register(authPlugin);
+    await other.register(machinesPlugin, { role: 'hub', store: machineState(join(root, 'hub-two')), credentialStore: busStore, hubMcpUrl });
+    const headers = { authorization: `Bearer ${TOKEN}` };
+    assert.deepEqual(await machines(other, headers), { role: 'hub', canAdd: true, machines: [] });
+    const add = (name) => other.inject({ method: 'POST', url: '/api/machines', headers, payload: { name, link } });
+    const added = await add('w9');
+    responses.push(added.body);
+    assert.deepEqual([added.statusCode, added.json().id], [200, 'w9'], added.body);
+    assert.deepEqual((await add('w10')).json().code, 'machine_pairing_failed', 'a used link is refused');
+    assert.deepEqual((await machines(other, headers)).machines.map(({ id, status, providers }) => ({ id, status, providers })), [{ id: 'w9', status: 'live', providers: ['claude'] }]);
+    secrets.add(machineState(join(root, 'hub-two')).read().machines.w9.credential);
+    await other.close();
+  });
+
+  it('a pairing link for a Tailscale IPv6 host is a URL the hub allowlist accepts', () => {
+    const env = { DM_FLEET_PRIVATE_HOSTS_REF: 'IPV6_HOSTS', IPV6_HOSTS: 'fd7a:115c::1' };
+    const { url } = parsePairLink(pairLink({ machineId: () => 'id', issueCode: () => 'CODE' }, 'fd7a:115c::1', 4320));
+    assert.equal(validateMachineUrl(url, { env }), 'http://[fd7a:115c::1]:4320');
+    assert.throws(() => validateMachineUrl('http://[fd7a:115c::2]:4320', { env }), /not an allowed/);
   });
 });
 
