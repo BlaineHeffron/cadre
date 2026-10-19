@@ -972,7 +972,9 @@ nono's Landlock can work.
   - **Add machine.** `POST /api/machines {name, link}` runs `addMachine` and requires the `ui` principal, so an agent's
     in-process call is refused. `canAdd` is `CADRE_HUB_MCP_URL` being set, which `addMachine` needs anyway.
   - **OS.** The descriptor reports `linux-wsl2` when the Linux kernel release names Microsoft.
-  - **Detail.** The proxied detail route adds `machine: {id, status, since?, url}`, live or from the cached row. The
+  - **Detail.** The proxied detail route adds `machine: {id, status, since?, url}`. A worker answer is always `live`:
+    the delivery hold reads any other status as `machine_offline`, so the supervisor's `connecting` phase must not leak
+    into a successful answer (an earlier draft did, and held deliveries until the next poll). The
     detail page shows the captured content it already loads, an "Open on <machine>" link to `<url>/<kind>/<id>`, and
     hides "Copy Attach" and "Open In Terminator" (a local tmux command) for remote sessions. "Start Fresh" keeps the
     machine.

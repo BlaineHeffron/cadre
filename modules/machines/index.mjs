@@ -622,8 +622,9 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     const gone = suffix === '' && (result.status === 404 || (ended.code === 'session_not_found' && !ended.canResume) || (deleting && result.status < 300));
     if (gone) await dropSession(kind, req.params.id);
     if (result.status >= 300) return failure(reply, result);
-    // The UI's remote terminal view links to the worker's own UI.
-    const text = detail ? JSON.stringify({ ...parse(result.text), machine: { ...machineStatus(entry.machine), ...ref } }) : result.text;
+    // The UI's remote terminal view links to the worker's own UI. The worker just answered, so it is live: a reconnect
+    // in progress must not read as away, or deliveries would hold (delivery.mjs).
+    const text = detail ? JSON.stringify({ ...parse(result.text), machine: { id: entry.machine, status: 'live', ...ref } }) : result.text;
     return passThrough(reply, result.status, text, [row.credential, rotated]);
   });
 
