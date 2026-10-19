@@ -115,6 +115,7 @@ test('pollRepo reviews a moved trusted head once, after the live reviewer ends, 
   assert.deepEqual(launches, [1, 1]);
   s.setPr({ head: { sha: 'ddd444' }, author_association: 'MEMBER' });
   assert.equal((await poll(0)).head, 'ddd444');
+  s.setReviews([{ id: 1, state: 'COMMENTED' }]);
   await poll();
   assert.deepEqual(launches, [1, 1, 1]);
 });
