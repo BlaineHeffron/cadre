@@ -119,6 +119,8 @@ export function startAgentBusMcpHttpServer({
   credentialStore = getAgentBusCredentialStore(),
   // The tailnet listener: a valid token is required whatever the global auth mode.
   requireCredential = false,
+  // The tailnet listener also answers the worker descriptor check and hello (modules/machines).
+  machineRoutes = null,
 } = {}) {
   const mcpServer = serverFactory || createDefaultAgentBusMcpServer(metaUrl);
 
@@ -135,6 +137,8 @@ export function startAgentBusMcpHttpServer({
     if (mcpServerProxy && await mcpServerProxy.handle(request, reply, { requestUrl, protocolVersion })) {
       return;
     }
+
+    if (machineRoutes && await machineRoutes(request, reply, requestUrl)) return;
 
     if (requestUrl.pathname !== path) {
       sendJson(reply, 404, { error: 'Not Found' }, protocolVersion);

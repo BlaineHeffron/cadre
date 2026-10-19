@@ -476,6 +476,8 @@ export async function createAgentBusHarness({
       });
     });
 
+    app.post(`/api/${kind}/sessions/:id/resume`, async (req, reply) => reply.code(404).send({ error: 'Session not found', code: 'session_not_found' }));
+
     app.post(`/api/${kind}/sessions/:id/enter`, async (req, reply) => {
       if (!sessionCatalog[kind].has(req.params.id)) {
         return reply.code(404).send({ error: 'Session not found' });

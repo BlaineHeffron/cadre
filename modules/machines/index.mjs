@@ -1,15 +1,16 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { hostname, platform } from 'node:os';
+import { hostname, networkInterfaces, platform } from 'node:os';
 import { join } from 'node:path';
 import { privateAllowedHosts } from '../fleet/registry.mjs';
 import { readEnv } from '../platform/cadre-env.mjs';
-import { deriveSpawnTrust } from '../agent-bus/coordinator-policy.mjs';
+import { deriveSpawnTrust, operatorResumeLoopRegistrationPolicy, storedCoordinatorPolicy } from '../agent-bus/coordinator-policy.mjs';
+import { buildInternalBypassHeaders } from '../platform/auth.mjs';
 import { cleanupAgentBusCredentialLaunch, prepareAgentBusCredentialLaunch } from '../integrations/mcp-launch-preflight.mjs';
 
 // Bump when the hub-to-worker contract breaks. A commit mismatch only warns.
-export const MACHINE_PROTOCOL = 1;
+export const MACHINE_PROTOCOL = 2;
 export const LOG_REDACT = ['req.headers.authorization', 'busCredential', '*.busCredential', 'pairCode', '*.pairCode',
   'hubCredential', '*.hubCredential', 'workerCredential', '*.workerCredential'];
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -17,6 +18,13 @@ const CODE_TTL_MS = 5 * 60_000;
 const COMMIT = (() => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } })();
 const sha = (value) => createHash('sha256').update(String(value)).digest('hex');
 const fail = (message, code, statusCode = 400) => Object.assign(new Error(message), { code, statusCode });
+const BACKOFF_MIN_MS = 1000;
+const BACKOFF_MAX_MS = 5 * 60_000;
+const POLL_MS = 5000;
+const EVENT_LOG_SIZE = 1000;
+const BLOCKING = new Set(['machine_blocked', 'machine_protocol_mismatch']);
+const realTimers = { set: (fn, ms) => setTimeout(fn, ms).unref(), clear: (timer) => clearTimeout(timer) };
+const addresses = () => Object.values(networkInterfaces()).flat().filter((nic) => !nic.internal).map((nic) => nic.address).sort().join();
 
 // One 0600 file per instance. Every read goes to disk, so a CLI revoke or a consumed code is
 // seen by the server on its next call. A lock file serializes read-modify-write between the CLI and the server.
@@ -69,6 +77,8 @@ export function machineState(dir) {
       const record = state.credentials?.[sha(token)];
       return record?.scope === 'worker:operate' ? { envId: record.peer, mcpUrl: state.hub?.mcpUrl || '' } : null;
     },
+    // The hub accepts a hello only with the bus:agent credential it issued to that worker.
+    helloPeer(token) { const record = read().credentials?.[sha(token)]; return record?.scope === 'bus:agent' ? record.peer : null; },
     unpair() { update((state) => { state.credentials = {}; state.codes = {}; delete state.hub; }); },
   };
 }
@@ -156,9 +166,51 @@ export function assertWorkerHost(host) {
 
 const SESSION_ROUTE = /^\/api\/([a-z]+)\/sessions(?:\/:id(.*))?$/;
 
-export async function machinesPlugin(app, { role = 'hub', store, credentialStore, protocol = MACHINE_PROTOCOL, now = () => Date.now() }) {
+export async function machinesPlugin(app, { role = 'hub', store, credentialStore, protocol = MACHINE_PROTOCOL, now = () => Date.now(),
+  supervise = false, timers = realTimers, random = Math.random, online = () => addresses() !== '', routeCommands = null, wakeCheckMs = 30_000 }) {
   app.get('/api/machine/descriptor', async () => descriptor(store, { protocol }));
   if (role === 'worker') {
+    // Hello on boot, after a sleep (a late tick) and on a network change, so the hub stops backing off.
+    async function hello() {
+      const hub = store.read().hub;
+      if (!hub?.credential) return;
+      const origin = new URL(hub.mcpUrl).origin;
+      try {
+        const peer = await (await fetch(`${origin}/machine/descriptor`, { signal: AbortSignal.timeout(5000) })).json();
+        // Only the hub's identity is checked: on a protocol mismatch the hello lets the hub show this machine as blocked.
+        if (peer.machineId !== hub.envId) return;
+        await fetch(`${origin}/machine/hello`, { method: 'POST', headers: { authorization: `Bearer ${hub.credential}` }, signal: AbortSignal.timeout(5000) });
+      } catch {}
+    }
+    let timer; let last = now(); let nets = addresses();
+    const watch = () => { timer = timers.set(async () => {
+      const [at, current] = [now(), addresses()];
+      if (at - last > 2 * wakeCheckMs || current !== nets) await hello();
+      [last, nets] = [at, current];
+      watch();
+    }, wakeCheckMs); };
+    app.addHook('onListen', async () => { void hello(); watch(); });
+    app.addHook('onClose', async () => timers.clear(timer));
+    // Session-state events with a persisted, monotonic sequence, made by diffing the session list on each read.
+    // A cursor the log no longer covers gets a snapshot of every row instead.
+    app.get('/api/machine/events', async (req) => {
+      if (req.duenoAuth?.principal?.type !== 'hub-peer') throw fail('Hub credential required', 'forbidden', 403);
+      const after = Number(req.query.afterSequence) || 0;
+      const list = await app.inject({ url: '/api/claude/sessions', headers: { authorization: req.headers.authorization } });
+      const rows = list.statusCode === 200 && !list.json().stale ? list.json().sessions : null;
+      return store.update((state) => {
+        const log = state.events ||= { sequence: 0, rows: {}, items: [] };
+        const current = rows && Object.fromEntries(rows.map((row) => [`claude:${row.id}`, { status: row.state?.status || 'unknown' }]));
+        for (const key of current ? new Set([...Object.keys(log.rows), ...Object.keys(current)]) : []) {
+          if (JSON.stringify(current[key] || null) === JSON.stringify(log.rows[key] || null)) continue;
+          log.items.push({ sequence: ++log.sequence, type: 'session', key, row: current[key] || null });
+          if (current[key]) log.rows[key] = current[key]; else delete log.rows[key];
+        }
+        log.items = log.items.slice(-EVENT_LOG_SIZE);
+        const gap = after > log.sequence || (log.items.length > 0 && after < log.items[0].sequence - 1);
+        return { sequence: log.sequence, events: gap ? [] : log.items.filter((event) => event.sequence > after), ...(gap ? { snapshot: log.rows } : {}) };
+      });
+    });
     app.post('/api/pairing/redeem', async (req, reply) => {
       const { pairCode, hubEnvId, hubCredential, hubMcpUrl } = req.body || {};
       let mcpUrl;
@@ -182,7 +234,7 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     return;
   }
 
-  const unreachable = (reply, peer) => reply.code(503).send({ error: peer.detail || peer.code, code: peer.code, transient: true });
+  const unreachable = (reply, peer, status = 503) => reply.code(status).send({ error: peer.detail || peer.code, code: peer.code, transient: true });
   const parse = (text) => { try { return JSON.parse(text) || {}; } catch { return {}; } };
   // A worker's error body never reaches the hub's caller: only its status and code (§4.2.6).
   const failure = (reply, { status, text }) => {
@@ -199,6 +251,103 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     await forgetSession(kind, sessionId);
   };
 
+  // One supervisor per machine (§4.6): it moves between available, offline, connecting, backoff, connected and
+  // blocked. Transient failures back off with equal jitter from 1 s to 5 min; blocked ones wait for a hello.
+  const supervisors = new Map();
+  const sup = (name) => supervisors.get(name) || supervisors.set(name, { phase: 'available', since: now(), attempt: 0, peer: null }).get(name);
+  const down = (s) => supervise && ['offline', 'backoff', 'blocked'].includes(s.phase);
+  const enter = (s, phase, peer = null) => { if (s.phase !== phase) Object.assign(s, { phase, since: now() }); s.peer = peer; };
+  const schedule = (name, ms) => { const s = sup(name); timers.clear(s.timer); s.timer = timers.set(() => connect(name), ms); };
+  const machineStatus = (name) => {
+    const s = sup(name);
+    const status = { blocked: 'blocked', backoff: 'unreachable', offline: 'unreachable' }[supervise ? s.phase : ''] || 'live';
+    return status === 'live' ? { id: name, status } : { id: name, status, since: s.since };
+  };
+  function failed(name, peer) {
+    const s = sup(name);
+    if (!supervise) return;
+    if (BLOCKING.has(peer.code)) return void (timers.clear(s.timer), enter(s, 'blocked', peer));
+    enter(s, 'backoff', peer);
+    const cap = Math.min(BACKOFF_MAX_MS, BACKOFF_MIN_MS * 2 ** s.attempt++);
+    schedule(name, cap / 2 + random() * cap / 2);
+  }
+  // A forgotten machine takes its sessions with it: index entries dropped, their bus tokens revoked.
+  async function retire(name) {
+    timers.clear(supervisors.get(name)?.timer);
+    supervisors.delete(name);
+    for (const entry of Object.values(store.read().sessions || {})) if (entry.machine === name) await dropSession(entry.kind, entry.sessionId);
+  }
+  async function apply(name, { sequence = 0, events = [], snapshot = {} }) {
+    const removed = [];
+    store.update((state) => {
+      for (const [key, row] of Object.entries(snapshot)) if (state.sessions?.[key]?.machine === name) state.sessions[key].state = row;
+      // Unknown event types are skipped and still advance the cursor.
+      for (const event of events) {
+        const entry = event.type === 'session' && state.sessions?.[event.key];
+        if (entry?.machine !== name) continue;
+        if (event.row) entry.state = event.row; else removed.push(entry);
+      }
+      if (state.machines?.[name]) state.machines[name].cursor = sequence;
+    });
+    for (const entry of removed) await dropSession(entry.kind, entry.sessionId);
+  }
+  async function attempt(name) {
+    const s = sup(name);
+    const row = store.read().machines?.[name];
+    if (!row) return retire(name);
+    if (!online()) return void (s.phase !== 'connected' && enter(s, 'offline'), schedule(name, BACKOFF_MIN_MS));
+    if (s.phase !== 'connected') enter(s, 'connecting');
+    let peer = await checkPeer(row.url, row.envId, { protocol });
+    if (!peer.code) {
+      const result = await send(row, 'GET', `/api/machine/events?afterSequence=${Number(row.cursor) || 0}`).catch(() => null);
+      if (result?.status === 200) {
+        await apply(name, parse(result.text));
+        enter(s, 'connected');
+        s.attempt = 0;
+        return schedule(name, POLL_MS);
+      }
+      peer = { code: result && result.status < 500 ? 'machine_blocked' : 'machine_unreachable', detail: result ? `machine returned HTTP ${result.status}` : '' };
+    }
+    failed(name, peer);
+  }
+  const connect = (name) => { const s = sup(name); return s.busy ||= attempt(name).finally(() => { s.busy = null; }); };
+  // Every credential send still checks the descriptor first; a machine known to be down is answered without a call.
+  async function reach(name, row) {
+    const s = sup(name);
+    if (down(s)) return s.peer || { code: 'machine_unreachable' };
+    const peer = row ? await checkPeer(row.url, row.envId, { protocol }) : { code: 'machine_unreachable' };
+    if (peer.code) failed(name, peer);
+    else if (supervise && s.phase === 'available') void connect(name);
+    return peer;
+  }
+  if (supervise) {
+    app.addHook('onReady', async () => {
+      const state = store.read();
+      const names = new Set([...Object.keys(state.machines || {}), ...Object.values(state.sessions || {}).map((entry) => entry.machine)]);
+      for (const name of names) void connect(name);
+    });
+    app.addHook('onClose', async () => { for (const s of supervisors.values()) timers.clear(s.timer); });
+  }
+  app.decorate('machineRoutes', async (req, res, url) => {
+    const answer = (status, body) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); return true; };
+    if (req.method === 'GET' && url.pathname === '/machine/descriptor') return answer(200, descriptor(store, { protocol }));
+    if (req.method !== 'POST' || url.pathname !== '/machine/hello') return false;
+    const bearer = String(req.headers.authorization || '').replace(/^Bearer /, '');
+    const envId = bearer && store.helloPeer(bearer);
+    const row = envId && Object.values(store.read().machines || {}).find((machine) => machine.envId === envId);
+    if (!row) return answer(401, { error: 'Machine credential required' });
+    // A hello resets the backoff and probes at once, blocked or not.
+    if (supervise) { sup(row.id).attempt = 0; void connect(row.id); }
+    return answer(200, { ok: true });
+  });
+  routeCommands?.((kind, sessionId, input) => (store.read().sessions?.[`${kind}:${sessionId}`]
+    ? app.inject({ method: 'POST', url: `/api/${kind}/sessions/${sessionId}/input`, headers: buildInternalBypassHeaders(),
+      payload: { text: input.text, enter: input.enter, source: input.source } }).then((res) => {
+      if (res.statusCode >= 300) throw Object.assign(new Error(res.json().error || `input failed with HTTP ${res.statusCode}`), { payload: res.json() });
+      return res.json();
+    })
+    : null));
+
   async function send(row, method, url, body) {
     const res = await fetch(`${row.url}${url}`, {
       method, signal: AbortSignal.timeout(30_000),
@@ -214,15 +363,16 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     if (!row) return reply.code(400).send({ error: `Unknown machine: ${machine}`, code: 'machine_unknown' });
     if (kind !== 'claude') return reply.code(400).send({ error: `machine ${machine} runs only claude sessions`, code: 'machine_kind_unsupported' });
     if (body.metadata?.returnToSpawner) return reply.code(400).send({ error: 'returnResults is not supported on another machine yet', code: 'machine_return_results_unsupported' });
-    const peer = await checkPeer(row.url, row.envId, { protocol });
-    if (peer.code) return unreachable(reply, peer);
+    // Never queued: a machine that is down, or on another protocol (426), fails the spawn now.
+    const peer = await reach(machine, row);
+    if (peer.code) return unreachable(reply, peer, peer.code === 'machine_protocol_mismatch' ? 426 : 503);
     if (peer.commitWarning) req.log.warn({ machine }, peer.commitWarning);
     const trust = deriveSpawnTrust(req.duenoAuth, body.metadata);
     const sessionId = randomBytes(4).toString('hex');
     const key = `${kind}:${sessionId}`;
     const issued = await prepareAgentBusCredentialLaunch({ backendType: kind, sessionId, credentialStore,
       coordinatorPolicy: trust.coordinatorPolicy, loopRegistrationPolicy: trust.loopRegistrationPolicy });
-    const entry = { machine, kind, sessionId, workDir: String(body.workDir || ''), displayName: String(body.displayName || ''), created: now(), status: 'pending' };
+    const entry = { machine, kind, sessionId, workDir: String(body.workDir || ''), displayName: String(body.displayName || ''), created: now(), status: 'pending', metadata: trust.metadata };
     store.update((state) => { (state.sessions ||= {})[key] = entry; });
     const result = await send(row, 'POST', `/api/${kind}/sessions`, {
       ...body, mcpProfile: 'dueno', metadata: trust.metadata, sessionId, busCredential: issued?.token || '',
@@ -246,11 +396,29 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     const entry = state.sessions?.[`${kind}:${req.params.id}`];
     if (!entry) return;
     const row = state.machines?.[entry.machine];
+    if (!row) await retire(entry.machine);
     const deleting = req.method === 'DELETE' && suffix === '';
     // Delete revokes the token at once, even while the worker sleeps.
     if (deleting) await forgetSession(kind, req.params.id);
-    const peer = row ? await checkPeer(row.url, row.envId, { protocol }) : { code: 'machine_unreachable' };
-    const result = peer.code ? null : await send(row, req.method, req.url, req.body).catch(() => null);
+    const peer = await reach(entry.machine, row);
+    // Detail answers from the cached row while the machine is away, so deliveries hold as machine_offline.
+    if (peer.code && req.method === 'GET' && suffix === '') {
+      return reply.send({ id: entry.sessionId, displayName: entry.displayName, workDir: entry.workDir,
+        state: { status: entry.state?.status || 'unknown', reason: peer.code },
+        machine: { id: entry.machine, status: BLOCKING.has(peer.code) ? 'blocked' : 'unreachable', since: sup(entry.machine).since } });
+    }
+    let body = req.body;
+    let rotated = '';
+    // Resume rotates the session token on the hub; it is refused before rotating if the session still runs.
+    if (!peer.code && req.method === 'POST' && suffix === '/resume') {
+      const current = await send(row, 'GET', `/api/${kind}/sessions/${req.params.id}`).catch(() => null);
+      if (!current || !parse(current.text).sessionEnded) return reply.code(409).send({ error: 'Session is running or unreachable', code: 'session_already_running' });
+      rotated = (await prepareAgentBusCredentialLaunch({ backendType: kind, sessionId: req.params.id, credentialStore, rotation: true,
+        coordinatorPolicy: storedCoordinatorPolicy(entry.metadata),
+        loopRegistrationPolicy: operatorResumeLoopRegistrationPolicy(req.duenoAuth?.principal, entry.metadata) }))?.token || '';
+      body = { busCredential: rotated };
+    }
+    const result = peer.code ? null : await send(row, req.method, req.url, body).catch(() => null);
     // Delete still proceeds while the worker is away: the token is revoked and the row dropped; tmux keeps running there.
     if (!result && deleting) {
       await dropSession(kind, req.params.id);
@@ -258,11 +426,12 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     }
     if (peer.code) return unreachable(reply, peer);
     if (!result) return unreachable(reply, { code: 'machine_unreachable' });
-    // The worker answers an unknown id with 404 or an ended payload coded session_not_found.
-    const gone = suffix === '' && (result.status === 404 || parse(result.text).code === 'session_not_found' || (deleting && result.status < 300));
+    // The worker answers an unknown id with 404 or an ended payload coded session_not_found; a resumable one stays.
+    const ended = parse(result.text);
+    const gone = suffix === '' && (result.status === 404 || (ended.code === 'session_not_found' && !ended.canResume) || (deleting && result.status < 300));
     if (gone) await dropSession(kind, req.params.id);
     if (result.status >= 300) return failure(reply, result);
-    return passThrough(reply, result.status, result.text, [row.credential]);
+    return passThrough(reply, result.status, result.text, [row.credential, rotated]);
   });
 
   app.addHook('onSend', async (req, reply, payload) => {
@@ -271,8 +440,8 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     const rows = Object.values(store.read().sessions || {}).filter((entry) => entry.kind === kind && entry.status === 'live');
     if (!rows.length) return payload;
     const body = JSON.parse(payload);
-    body.sessions = [...(body.sessions || []), ...rows.map(({ sessionId, machine, workDir, displayName, created }) => ({
-      id: sessionId, displayName, workDir, created, machine: { id: machine, status: 'live' },
+    body.sessions = [...(body.sessions || []), ...rows.map(({ sessionId, machine, workDir, displayName, created, state }) => ({
+      id: sessionId, displayName, workDir, created, ...(state ? { state } : {}), machine: machineStatus(machine),
     }))];
     return JSON.stringify(body);
   });

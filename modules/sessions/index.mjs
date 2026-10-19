@@ -507,7 +507,13 @@ export function createAgentSessionsProvider(providerId) {
   const pollingGeneration = new Map();
   let agentBusCredentialStore = null;
 
-  function credentialStoreOptions() {
+  function credentialStoreOptions(busCredential = null) {
+    // On a worker the hub minted the bus token; this store only hands it back, so nothing is minted here.
+    if (busCredential !== null) return { credentialStore: {
+      issue: async () => (busCredential ? { token: busCredential, credential: null } : null),
+      revoke: async () => false,
+      authenticate: async () => ({ ok: false }),
+    } };
     return agentBusCredentialStore ? { credentialStore: agentBusCredentialStore } : {};
   }
 
@@ -1068,12 +1074,7 @@ async function launchTmuxSession({ sessionName, workDir = '', sessionBinary = ''
 }
 
 async function createSession({ sessionId, initialPrompt = '', workDir, args, model = '', provider = config.id, runtime = '', thinkingLevel = '', source = 'external', displayName = '', autoCloseMode = 'never', autoCloseAfterMs = 0, metadata = {}, coordinatorPolicy = null, loopRegistrationPolicy = null, mcpProfile, mcpServers, mcpCredentialProfile = 'agent', codexPlugins, promptProfile, skills, sandbox, githubToken = '', busCredential = null, duenoUrl = '' } = {}) {
-  // On a worker the hub minted the bus token; this store only hands it back, so nothing is minted here.
-  const storeOptions = busCredential === null ? credentialStoreOptions() : { credentialStore: {
-    issue: async () => (busCredential ? { token: busCredential, credential: null } : null),
-    revoke: async () => false,
-    authenticate: async () => ({ ok: false }),
-  } };
+  const storeOptions = credentialStoreOptions(busCredential);
   const sessionRuntime = config.normalizeRuntime(provider, runtime);
   const sandboxMode = resolveSandbox(sandbox);
   const researchSafeRuntime = config.id === 'codex' && hasResearchWorkbenchLaunchProfile(metadata);
@@ -1270,7 +1271,7 @@ async function refreshSessionCliMetadata(id, meta = {}, targetSessions = session
   return true;
 }
 
-async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
+async function resumeSession(id, { loopRegistrationPolicy = null, busCredential = null, duenoUrl = '' } = {}) {
   const meta = sessions.get(id);
   if (!meta) {
     const err = new Error(`Session not found: ${id}`);
@@ -1330,7 +1331,7 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
 
   const sandboxMode = resolveSandbox(refreshed.sandbox, { resume: true });
   const sessionBinary = await findCompatibleBinary();
-  const normalizedWorkDir = await normalizeSessionWorkDir(refreshed.workDir || process.cwd());
+  const normalizedWorkDir = await normalizeSessionWorkDir(refreshed.workDir || process.cwd(), { onWorker: busCredential !== null });
   const sessionRuntime = config.normalizeRuntime(refreshed.provider || config.defaultProvider, refreshed.runtime || config.defaultRuntime);
   const storedMcp = refreshed.mcpCapabilities && typeof refreshed.mcpCapabilities === 'object'
     ? refreshed.mcpCapabilities
@@ -1359,7 +1360,7 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
     sessionId: id,
     credentialProfile: refreshed.mcpCredentialProfile || 'agent',
     reason: 'resume_rotation',
-    ...credentialStoreOptions(),
+    ...credentialStoreOptions(busCredential),
   });
   await cleanupPromptProfileLaunch({ backendType: config.id, sessionId: id });
   await rm(initialPromptPath(id), { force: true }).catch(() => {});
@@ -1373,7 +1374,8 @@ async function resumeSession(id, { loopRegistrationPolicy = null } = {}) {
     loopRegistrationPolicy,
     credentialProfile: refreshed.mcpCredentialProfile || 'agent',
     rotation: true,
-    ...credentialStoreOptions(),
+    duenoUrl,
+    ...credentialStoreOptions(busCredential),
   });
   let promptPreparation = null;
   let launchLogPath = '';
@@ -2675,16 +2677,12 @@ async function sessionsPlugin(app, {
 
   app.post(`/api/${config.id}/sessions/:id/resume`, async (req, reply) => {
     const { id } = req.params;
-    if (req.duenoAuth?.principal?.type === 'hub-peer') {
-      return reply.code(409).send({ error: 'Resume on another machine needs a hub-minted token (not yet supported)', code: 'resume_unsupported' });
-    }
+    // A worker resumes with the rotation token its hub minted and derives no authority itself.
+    const hubPeer = req.duenoAuth?.principal?.type === 'hub-peer';
     try {
-      const result = await resumeSession(id, {
-        loopRegistrationPolicy: operatorResumeLoopRegistrationPolicy(
-          req.duenoAuth?.principal,
-          sessions.get(id)?.metadata,
-        ),
-      });
+      const result = await resumeSession(id, hubPeer
+        ? { busCredential: String(req.body?.busCredential || ''), duenoUrl: req.duenoAuth.mcpUrl || '' }
+        : { loopRegistrationPolicy: operatorResumeLoopRegistrationPolicy(req.duenoAuth?.principal, sessions.get(id)?.metadata) });
       broadcastSessionList(wsManager);
       return result;
     } catch (err) {
@@ -3567,8 +3565,12 @@ export function getAgentSessionsProvider(providerId) {
   return providerRegistry.get(id);
 }
 
+// The hub sends commands for a session on another machine through its HTTP input route.
+let remoteSessionCommand = () => null;
+export function routeRemoteSessionCommands(route) { remoteSessionCommand = route; }
+
 export function enqueueAgentSessionCommand(providerId, sessionId, input) {
-  return getAgentSessionsProvider(providerId).enqueueCommand(sessionId, input);
+  return remoteSessionCommand(providerId, sessionId, input) || getAgentSessionsProvider(providerId).enqueueCommand(sessionId, input);
 }
 
 export async function createAgentSession(providerId, opts = {}) {

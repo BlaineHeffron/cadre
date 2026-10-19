@@ -16,6 +16,7 @@ import { threatPlugin } from './modules/platform/threat.mjs';
 import { filesPlugin } from './modules/platform/files.mjs';
 import { skillsPlugin } from './modules/integrations/skills.mjs';
 import { claudeSessionsPlugin } from './modules/sessions/claude-sessions.mjs';
+import { routeRemoteSessionCommands } from './modules/sessions/index.mjs';
 import { codexSessionsPlugin } from './modules/sessions/codex-sessions.mjs';
 import { createCodexAppServerSessionProvider } from './modules/sessions/codex-app-server-sessions.mjs';
 import { getPiProviderHealth, piSessionsPlugin } from './modules/sessions/pi-sessions.mjs';
@@ -135,7 +136,9 @@ await app.register(fastifyWebsocket);
 
 // Auth
 await app.register(authPlugin, isWorker ? { workerMachines: machines } : {});
-await app.register(machinesPlugin, { role: config.role, store: machines, credentialStore: getAgentBusCredentialStore() });
+// The machine supervisors are the hub's one machine loop, gated by the side-effect switch like every other loop.
+await app.register(machinesPlugin, { role: config.role, store: machines, credentialStore: getAgentBusCredentialStore(),
+  supervise: !sideEffectLoopsSuppressed, routeCommands: routeRemoteSessionCommands });
 await app.register(agentProviderPreferencesPlugin);
 
 // WebSocket manager (must be after websocket plugin)
@@ -783,6 +786,7 @@ try {
         log: app.log,
         serverFactory: createInProcessAgentBusMcpServer(),
         requireCredential: true,
+        machineRoutes: app.machineRoutes,
       });
     }
   } else {

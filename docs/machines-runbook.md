@@ -6,16 +6,26 @@ Queue and every loop stay on the hub. Design: [multi-machine-design.md](multi-ma
 Placeholders: `<hub>.<tailnet>.ts.net` is the hub's MagicDNS name, `<worker-ip>` the worker's
 Tailscale IPv4 address (`tailscale ip -4` on the worker), `<name>` the name you give the worker.
 
-## What works today (slice 1)
+## What works today (slices 1-2)
 
 - `spawn_session({provider: 'claude', machine: '<name>', workDir: '/home/<user>/projects/<repo>'})`.
   Claude in tmux only. `workDir` is a path on the worker.
 - The child gets only the `dueno` MCP and calls the hub directly over HTTPS with a token the hub
   minted. It can `room_send`, `agent_dm` and read rooms; room messages to it are delivered.
-- A message to a worker that is down or on another protocol stays queued and is injected once the
-  worker is back. A DM sent while the worker is unreachable fails at send time; use a room message.
-- Not yet: a remote session's live state in lists, the UI, resume, `returnResults` (rejected with
-  400), Telegram output, other runtimes. Spawning on an unreachable worker fails; it is never queued.
+- The hub runs one supervisor per worker (only where side-effect loops run, so on 4310). It polls
+  the worker's event stream every 5 s, and backs off from 1 s to 5 min while the worker is away.
+  Session rows show `machine.status` `live`, `unreachable` or `blocked`, with `since`, and keep the
+  last-known state.
+- A message to a worker that is away or on another protocol stays queued with
+  `holdReason: machine_offline` and is injected once the worker is back. A DM sent while the worker
+  is unreachable fails at send time; use a room message.
+- The worker says hello to the hub on boot, after a sleep and when its addresses change; the hub
+  then reconnects at once, without waiting out its backoff. A worker on another protocol shows
+  `blocked` and is not retried until it restarts on the hub's protocol.
+- Resume and delete go through the hub (resume rotates the session's token; delete revokes it).
+  Command Queue and supervisor messages reach remote sessions.
+- Not yet: `returnResults` (rejected with 400), Telegram output, the UI, other runtimes. Spawning on
+  an unreachable worker fails (503, or 426 on a protocol mismatch); it is never queued.
 
 ## Hub setup (once)
 
@@ -106,10 +116,15 @@ Run the CLI from each instance's live checkout so it reads that instance's `.env
 ## Forget a worker
 
 - On the hub: `node scripts/cadre.mjs machine forget <name>`. The hub side is revoked at once. If the
-  worker is unreachable, its side stays pending; run `forget` again when it is back.
+  worker is unreachable, its side stays pending; run `forget` again when it is back. The running hub
+  then drops that machine's sessions from its lists and revokes their tokens (on its next poll, or
+  the next time one of them is used); the tmux sessions keep running on the worker until you end
+  them there.
 - On the worker: `node scripts/cadre.mjs unpair` drops its hub at once.
 
 ## Upgrades
 
 Each machine deploys itself with `bash scripts/server.sh restart` (inside the distro for WSL). A
-worker on another protocol keeps its queued messages but rejects spawns until it is updated.
+worker on another protocol keeps its queued messages but rejects spawns until it is updated; its
+restart says hello and unblocks it. Slice 2 is protocol 2, so a slice 1 worker shows `blocked` until
+it is redeployed.
