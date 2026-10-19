@@ -60,7 +60,7 @@ test('a refused Cadre connection reports a restart instead of a bare ECONNREFUSE
 });
 
 test('room context defaults to truncated bodies and omits deliveries', async () => {
-  const longBody = 'x'.repeat(3800);
+  const longBody = 'x'.repeat(12800);
   const server = buildAgentBusMcpServer({ requestImpl: async (path) => {
     assert.match(path, /deliveryLimit=0/);
     return {
@@ -76,9 +76,11 @@ test('room context defaults to truncated bodies and omits deliveries', async () 
   const payload = JSON.parse(result.content.find((item) => item.type === 'text').text);
   assert.equal(result.structuredContent, undefined);
   assert.equal(payload.messages[0].truncated, true);
-  assert.equal(payload.messages[0].body.length, 3000);
-  assert.equal(payload.messages[0].bodyLength, 3800);
-  assert.equal(payload.messages[0].nextOffset, 3000);
+  assert.equal(payload.messages[0].body.length, 12000);
+  assert.equal(payload.messages[0].bodyLength, 12800);
+  assert.equal(payload.messages[0].nextOffset, 12000);
+  const large = await server.callTool('room_context', { thread_id: 'thr_1', body_limit: 50000 }, context);
+  assert.equal(JSON.parse(large.content[0].text).messages[0].body.length, 12000);
   assert.equal(payload.deliveries, undefined);
   assert.equal(payload.messageCount, 1);
   assert.deepEqual(payload.thread, { id: 'thr_1', title: 'Work', status: 'open' });
@@ -169,7 +171,7 @@ test('room context exposes queued age and detailed hold reason when deliveries a
 });
 
 test('room context pages a truncated body with message_id and body_offset', async () => {
-  const longBody = 'x'.repeat(3800);
+  const longBody = 'x'.repeat(12800);
   const paths = [];
   const server = buildAgentBusMcpServer({ requestImpl: async (path) => {
     paths.push(path);
@@ -187,7 +189,7 @@ test('room context pages a truncated body with message_id and body_offset', asyn
   assert.equal(message.body, 'x'.repeat(800));
   assert.equal(message.truncated, false);
   assert.equal(first.body + message.body, longBody);
-  assert.equal(message.bodyLength, 3800);
+  assert.equal(message.bodyLength, 12800);
   assert.equal(message.nextOffset, undefined);
   assert.ok(paths.some((path) => /messageLimit=500/.test(path)));
 });
@@ -256,7 +258,7 @@ test('room list pins the caller and returns only the compact participant-scoped 
     calls.push(path);
     return { threads: [{ id: 'thr_1', title: 'Work', status: 'open', createdBy: { kind: 'claude', sessionId: 'coord' },
       participants: [{ kind: 'codex', sessionId: 'c1' }, { kind: 'pi', sessionId: 'p1' }, { kind: 'user', sessionId: 'dashboard' }],
-      metadata: {} }, { id: 'thr_dm', title: 'DM', status: 'closed', participants: [{ kind: 'codex', sessionId: 'c1' }],
+      metadata: {}, updatedAt: 5 }, { id: 'thr_dm', title: 'DM', status: 'closed', participants: [{ kind: 'codex', sessionId: 'c1' }],
       metadata: { dm: true }, projectKey: 'hidden' }] };
   } });
   await assert.rejects(server.callTool('room_list', { kind: 'claude', session_id: 'spoof' }, context), /room_list: unknown argument/);
@@ -264,9 +266,13 @@ test('room list pins the caller and returns only the compact participant-scoped 
   const result = await server.callTool('room_list', {}, context);
   assert.equal(calls[0], '/api/agent-bus/threads/by-participant?kind=codex&sessionId=c1&status=all');
   assert.deepEqual(result.structuredContent.rooms, [
-    { id: 'thr_1', title: 'Work', kind: 'room', status: 'open', participants: 2, owner: { kind: 'claude', sessionId: 'coord' } },
-    { id: 'thr_dm', title: 'DM', kind: 'dm', status: 'closed', participants: 1, owner: null },
+    { id: 'thr_1', title: 'Work', kind: 'room', status: 'open', participants: 2, owner: { kind: 'claude', sessionId: 'coord' }, updatedAt: 5 },
+    { id: 'thr_dm', title: 'DM', kind: 'dm', status: 'closed', participants: 1, owner: null, updatedAt: null },
   ]);
+  await server.callTool('room_list', { scope: 'all' }, context);
+  assert.equal(calls[1], '/api/agent-bus/threads?status=open&compact=true');
+  await assert.rejects(server.callTool('agent_dm', { kind: 'gpt', session_id: 'c2', body: 'hi' }, context), /kind/);
+  await assert.doesNotReject(server.callTool('agent_dm', { kind: 'codex-app-server', session_id: 'c2', body: 'hi' }, context));
 });
 
 test('room creator can read, address, and close without being a participant', async () => {

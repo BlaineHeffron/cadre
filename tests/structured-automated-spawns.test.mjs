@@ -442,7 +442,7 @@ describe('structured automated spawns', () => {
         const stored = JSON.parse(readFileSync(join(root, 'state', 'claude_sessions.json'), 'utf8')).find((entry) => entry.id === id);
         const prompt = readFileSync(join(root, 'state', 'initial_prompts', `claude-${id}.txt`), 'utf8');
         if (args.returnResults) {
-          assert.match(prompt, /For your own bounded reading, searching, and checks, use built-in subagents when available: Haiku 5\.5 \(claude-haiku-5-5\) on Claude, GPT-6 Luna \(gpt-6-luna\) on Codex/);
+          assert.match(prompt, /For your own bounded reading, searching, and checks, use built-in subagents when available: Haiku \(model: "haiku"\) on Claude, GPT-6 Luna \(gpt-6-luna\) on Codex/);
           assert.match(prompt, /Reply only if this is new work\. Do not reply to delayed copies or courtesy acks\./);
         }
         outcomes.push([stored.metadata.spawnedBy, prompt.includes('final message of each turn')]);

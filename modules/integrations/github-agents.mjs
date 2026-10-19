@@ -680,6 +680,9 @@ export class GithubAgentPoller {
         spawnBackoff: this.spawnBackoff,
         listExistingSessions: this.listExistingSessions,
         tmuxSessionExists: this.tmuxSessionExists,
+        tokenLogin: result.newPullRequests?.length || result.retryPullRequests?.length ? await Promise.resolve().then(() => fetchGithubJson(this.fetchImpl, 'https://api.github.com/user', {
+          token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs,
+        })).then((user) => normalizeText(user?.login), () => '') : '',
         now: this.now,
         log: this.log,
       });
@@ -843,6 +846,7 @@ export async function spawnGithubAgentsForPollResult(pollResult = {}, {
   spawnBackoff = null,
   listExistingSessions = null,
   tmuxSessionExists = null,
+  tokenLogin = '',
   now = () => Date.now(),
   log = null,
 } = {}) {
@@ -922,6 +926,7 @@ export async function spawnGithubAgentsForPollResult(pollResult = {}, {
         createIssueWorktree,
         removeWorktree,
         resolveScratchWorkDir,
+        tokenLogin,
         now,
         log,
       });
@@ -974,6 +979,7 @@ export async function spawnGithubAgentForItem({
   createIssueWorktree = createGithubIssueWorktree,
   removeWorktree = removeAgentSessionWorktree,
   resolveScratchWorkDir = defaultScratchWorkDir,
+  tokenLogin = '',
   now = () => Date.now(),
   log = null,
 } = {}) {
@@ -1031,7 +1037,7 @@ export async function spawnGithubAgentForItem({
     };
   }
 
-  const prompt = buildGithubAgentPrompt({ repo, kind, item, repoContext, workDir });
+  const prompt = buildGithubAgentPrompt({ repo, kind, item, repoContext, workDir, tokenLogin });
   const metadata = {
     github_repo: repoId,
     github_kind: kind,
@@ -1307,9 +1313,13 @@ export function buildGithubAgentPrompt({
   item = {},
   repoContext = {},
   workDir = '',
+  tokenLogin = '',
 } = {}) {
   const label = kind === 'pr' ? 'pull request' : 'issue';
-  const autoReview = (repo?.autoReviewEnabled ?? GITHUB_AGENT_DEFAULTS.autoReviewEnabled) === true;
+  // GitHub rejects APPROVE/REQUEST_CHANGES from the PR author, so self-authored or unknown-login PRs get COMMENT only.
+  const login = normalizeText(tokenLogin).toLowerCase();
+  const autoReview = (repo?.autoReviewEnabled ?? GITHUB_AGENT_DEFAULTS.autoReviewEnabled) === true
+    && Boolean(login) && normalizeText(item.user).toLowerCase() !== login;
   const lines = [
     'GitHub fleet agent task.',
     '',

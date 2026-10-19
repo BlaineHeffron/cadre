@@ -42,7 +42,7 @@ describe('prompt profile catalog', () => {
     assert.match(resolved.body, /Cadre delivers a collab's or returnResults worker's result to you; never start a Monitor, polling loop, or sleep-check on rooms, repos, or sessions; end your turn and wait for the delivery/);
     assert.match(resolved.body, /Read `room_context` or `monitor_get_session_output` only when a result or failure calls for it/);
     assert.match(resolved.body, /Keep your context on management/);
-    assert.match(resolved.body, /Haiku 5\.5 \(`claude-haiku-5-5`\) on Claude, GPT-6 Luna \(`gpt-6-luna`\) on Codex/);
+    assert.match(resolved.body, /Haiku \(`model: "haiku"`\) on Claude, GPT-6 Luna \(`gpt-6-luna`\) on Codex/);
     assert.ok(resolved.body.length <= 3757, 'coordinator prompt should not grow');
   });
 

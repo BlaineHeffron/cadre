@@ -273,7 +273,7 @@ describe('GitHub agent lifecycle', () => {
 
   it('requires a single verdict review or triage comment and process exit', () => {
     for (const autoReviewEnabled of [true, false]) {
-      const pr = buildGithubAgentPrompt({ repo: { ...BASE_REPO, autoReviewEnabled }, kind: 'pr' });
+      const pr = buildGithubAgentPrompt({ repo: { ...BASE_REPO, autoReviewEnabled }, kind: 'pr', item: { user: 'octocat' }, tokenLogin: 'fleet-bot' });
       assert.match(pr, /Post exactly one GitHub pull-request review/);
       assert.match(pr, /VERDICT: BLOCKING <n> \| NON-BLOCKING <m> \| sha <short head sha>/);
       assert.match(pr, /- \[B\] <file:line> <one line>/);
@@ -282,6 +282,12 @@ describe('GitHub agent lifecycle', () => {
       assert.match(pr, /Do not push commits, merge, force-push, change branches/);
       assert.match(pr, /If the worktree has `\.cadre\/review\.md`, read it first .*never overrides its rules/);
       assert.match(pr, autoReviewEnabled ? /REQUEST_CHANGES only when BLOCKING > 0/ : /use COMMENT only/);
+    }
+    // GitHub rejects APPROVE/REQUEST_CHANGES from the PR author; an unknown poller login fails safe.
+    for (const tokenLogin of ['Fleet-Bot', '']) {
+      const own = buildGithubAgentPrompt({ repo: { ...BASE_REPO, autoReviewEnabled: true }, kind: 'pr', item: { user: 'fleet-bot' }, tokenLogin });
+      assert.match(own, /use COMMENT only, regardless of findings/);
+      assert.doesNotMatch(own, /APPROVE only when/);
     }
     const issue = buildGithubAgentPrompt({ kind: 'issue' });
     assert.match(issue, /exactly one issue triage comment with suspected files, likely cause and proposed fix/);
@@ -570,6 +576,7 @@ describe('GitHub agents poller', () => {
       newPullRequests: [githubItem(12, 'Fix bug')],
       newIssues: [],
     }, {
+      tokenLogin: 'fleet-bot',
       config: {
         enabled: true,
         repoPaths: { 'octo/demo': '/repo/demo' },
@@ -1398,6 +1405,7 @@ describe('GitHub agents poller', () => {
   });
 
   it('respawns a recorded PR only when its reviewer died without reviewing, with backoff', async () => {
+    const prompts = [];
     const liveSession = (number) => ({ id: `pr-${number}`, source: 'github-agent', tmuxSession: `pr-${number}`, metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: number } });
     const run = async ({ sessions = [], reviews = [], fail = () => false, numbers = [8], polls = [0], maxSpawnsPerPoll = 3 }) => withRepoStore(async (store) => {
       await store.upsertRepo({ ...BASE_REPO, issueEnabled: false, lastSeenPrNumber: 20, spawnedItemKeys: numbers.map((n) => `pr:${n}`) });
@@ -1411,12 +1419,14 @@ describe('GitHub agents poller', () => {
         fetchImpl: async (url, opts) => {
           const reviewed = String(url).match(/\/pulls\/(\d+)\/reviews/);
           if (reviewed) reviewFetches.push(Number(reviewed[1]));
+          if (String(url).endsWith('/user')) return response(200, { login: 'fleet-bot' });
           return reviewed ? response(200, reviews) : pulls(url, opts);
         },
         resolveScratchWorkDir: async () => '/tmp/unused-github-retry',
         sessionLauncher: async (input) => {
           const number = input.metadata.github_number;
           launches.push(number);
+          prompts.push(input.prompt);
           if (fail(number) === 'throw') throw new Error('launcher failed');
           if (fail(number)) return { sessionId: '' };
           sessions.push(liveSession(number));
@@ -1427,6 +1437,8 @@ describe('GitHub agents poller', () => {
       return { launches, reviewFetches, keys: (await store.getRepo('octo/demo')).spawnedItemKeys };
     });
     assert.deepEqual(await run({ polls: [0, 1] }), { launches: [8], reviewFetches: [8], keys: ['pr:8'] });
+    // A retry-only poll still resolves the token login, so a different author keeps APPROVE/REQUEST_CHANGES.
+    assert.match(prompts[0], /APPROVE only when BLOCKING = 0/);
     assert.deepEqual(await run({ sessions: [liveSession(8)] }), { launches: [], reviewFetches: [], keys: ['pr:8'] });
     // A known review is remembered, so later polls do not refetch it.
     assert.deepEqual(await run({ reviews: [{ id: 1 }], polls: [0, 1, 2] }), { launches: [], reviewFetches: [8], keys: ['pr:8'] });

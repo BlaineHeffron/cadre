@@ -401,6 +401,7 @@ function mockGithubFetch(calls, { pulls = [], issues = [] } = {}) {
     calls.push({ url, headers: opts.headers });
     if (String(url).includes('/pulls?')) return response(200, pulls);
     if (String(url).includes('/issues?')) return response(200, issues);
+    if (String(url).endsWith('/user')) return response(200, { login: 'fleet-bot' });
     return response(404, { message: 'not found' });
   };
 }

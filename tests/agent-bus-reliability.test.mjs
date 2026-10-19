@@ -98,6 +98,9 @@ test('legacy closed queue resumes only after explicit reopen; held age degrades 
   assert.equal(health.metadata.deliveryHealth.queued, 1);
   assert.equal(health.metadata.deliveryHealth.held, 1);
   assert.equal(health.metadata.deliveryHealth.overdue, true);
+  const list = async (query) => (await request(`threads?${query}`, {}, 'GET')).json().threads.find((item) => item.id === thread.id);
+  assert.equal((await list('status=open&compact=true')).health, 'ok');
+  assert.equal((await list('status=stale&compact=true')).health, 'stale');
   assert.ok(health.metadata.deliveryHealth.oldestQueuedAgeMs >= 3600000);
   // Persist the pre-fix legacy state rather than invoking today's terminalizing close.
   h.store.state.threads.find((item) => item.id === thread.id).status = 'closed';
