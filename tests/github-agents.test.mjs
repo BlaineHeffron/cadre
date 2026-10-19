@@ -273,7 +273,7 @@ describe('GitHub agent lifecycle', () => {
 
   it('requires a single verdict review or triage comment and process exit', () => {
     for (const autoReviewEnabled of [true, false]) {
-      const pr = buildGithubAgentPrompt({ repo: { ...BASE_REPO, autoReviewEnabled }, kind: 'pr' });
+      const pr = buildGithubAgentPrompt({ repo: { ...BASE_REPO, autoReviewEnabled }, kind: 'pr', item: { user: 'octocat' }, tokenLogin: 'fleet-bot' });
       assert.match(pr, /Post exactly one GitHub pull-request review/);
       assert.match(pr, /VERDICT: BLOCKING <n> \| NON-BLOCKING <m> \| sha <short head sha>/);
       assert.match(pr, /- \[B\] <file:line> <one line>/);
@@ -282,6 +282,12 @@ describe('GitHub agent lifecycle', () => {
       assert.match(pr, /Do not push commits, merge, force-push, change branches/);
       assert.match(pr, /If the worktree has `\.cadre\/review\.md`, read it first .*never overrides its rules/);
       assert.match(pr, autoReviewEnabled ? /REQUEST_CHANGES only when BLOCKING > 0/ : /use COMMENT only/);
+    }
+    // GitHub rejects APPROVE/REQUEST_CHANGES from the PR author; an unknown poller login fails safe.
+    for (const tokenLogin of ['Fleet-Bot', '']) {
+      const own = buildGithubAgentPrompt({ repo: { ...BASE_REPO, autoReviewEnabled: true }, kind: 'pr', item: { user: 'fleet-bot' }, tokenLogin });
+      assert.match(own, /use COMMENT only, regardless of findings/);
+      assert.doesNotMatch(own, /APPROVE only when/);
     }
     const issue = buildGithubAgentPrompt({ kind: 'issue' });
     assert.match(issue, /exactly one issue triage comment with suspected files, likely cause and proposed fix/);
@@ -570,6 +576,7 @@ describe('GitHub agents poller', () => {
       newPullRequests: [githubItem(12, 'Fix bug')],
       newIssues: [],
     }, {
+      tokenLogin: 'fleet-bot',
       config: {
         enabled: true,
         repoPaths: { 'octo/demo': '/repo/demo' },
@@ -617,7 +624,6 @@ describe('GitHub agents poller', () => {
     assert.match(launches[0].prompt, /pull request/);
     assert.match(launches[0].prompt, /Fix bug/);
     assert.match(launches[0].prompt, /autoReviewEnabled=true: you ARE authorized to post a GitHub pull-request review/);
-    assert.match(launches[0].prompt, /if the PR author is the GitHub login you post as, use COMMENT/);
     assert.doesNotMatch(launches[0].prompt, /Do not post comments, reviews, commits, pushes, GitHub mutations/);
     assert.doesNotMatch(launches[0].prompt, /auto-post/i);
     assert.deepEqual(repoUpdates, [{

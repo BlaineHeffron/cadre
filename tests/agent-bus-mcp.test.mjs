@@ -272,6 +272,7 @@ test('room list pins the caller and returns only the compact participant-scoped 
   await server.callTool('room_list', { scope: 'all' }, context);
   assert.equal(calls[1], '/api/agent-bus/threads?status=open&compact=true');
   await assert.rejects(server.callTool('agent_dm', { kind: 'gpt', session_id: 'c2', body: 'hi' }, context), /kind/);
+  await assert.doesNotReject(server.callTool('agent_dm', { kind: 'codex-app-server', session_id: 'c2', body: 'hi' }, context));
 });
 
 test('room creator can read, address, and close without being a participant', async () => {
