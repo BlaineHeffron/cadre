@@ -1397,6 +1397,28 @@ describe('GitHub agents poller', () => {
     assert.deepEqual((await store.getRepo('octo/demo')).spawnedItemKeys, ['pr:8']);
   });
 
+  it('respawns a recorded PR only when its reviewer died without reviewing, with backoff', async () => {
+    const run = async ({ sessions = [], reviews = [], fail = false, polls = 1 }) => withRepoStore(async (store) => {
+      await store.upsertRepo({ ...BASE_REPO, issueEnabled: false, lastSeenPrNumber: 8, spawnedItemKeys: ['pr:8'] });
+      const launches = [];
+      const pulls = mockGithubFetch([], { pulls: [githubItem(8, 'PR 8')] });
+      const poller = new GithubAgentPoller({
+        repoStore: store, config: { enabled: true, env: { GITHUB_TOKEN_REF: 'test-token' } },
+        listExistingSessions: async () => sessions, tmuxSessionExists: async () => true,
+        fetchImpl: async (url, opts) => (String(url).endsWith('/pulls/8/reviews?per_page=1') ? response(200, reviews) : pulls(url, opts)),
+        resolveScratchWorkDir: async () => '/tmp/unused-github-retry',
+        sessionLauncher: async () => { launches.push(1); return { sessionId: fail ? '' : 'sess_pr_8' }; },
+      });
+      for (let i = 0; i < polls; i += 1) await poller.pollOnce();
+      return { launches: launches.length, keys: (await store.getRepo('octo/demo')).spawnedItemKeys };
+    });
+    const live = [{ id: 'pr-8', source: 'github-agent', tmuxSession: 'pr-8', metadata: { github_repo: 'octo/demo', github_kind: 'pr', github_number: 8 } }];
+    assert.deepEqual(await run({}), { launches: 1, keys: ['pr:8'] });
+    assert.deepEqual(await run({ sessions: live }), { launches: 0, keys: ['pr:8'] });
+    assert.deepEqual(await run({ reviews: [{ id: 1 }] }), { launches: 0, keys: ['pr:8'] });
+    assert.deepEqual(await run({ fail: true, polls: 3 }), { launches: 1, keys: [] });
+  });
+
   it('preserves a successful sibling ledger when a later spawn throws', async () => {
     let saved = null;
     const store = buildGithubAgentRepoStore({

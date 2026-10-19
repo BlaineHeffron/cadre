@@ -519,6 +519,7 @@ export async function pollGithubRepo(repoInput = {}, {
       baselineIssue,
       newPullRequests,
       newIssues,
+      openPullRequests: openPulls,
       openPullRequestNumbers: repo.prEnabled ? pulls.map((item) => Number(item.number)) : null,
       openIssueNumbers: repo.issueEnabled ? issues.filter((item) => !item.pull_request).map((item) => Number(item.number)) : null,
       updatedRepo: safeRepoRecord(updatedRepo),
@@ -610,6 +611,21 @@ export class GithubAgentPoller {
     if (moved.length && !result.error && !result.skipped) {
       const fresh = new Set((result.newPullRequests || []).map((item) => item.number));
       result.newPullRequests = [...(result.newPullRequests || []), ...moved.filter((item) => !fresh.has(item.number))];
+    }
+    if (!suppressSpawn && !result.error && !result.skipped) {
+      const fresh = new Set(result.newPullRequests.map((item) => item.number));
+      for (const item of result.openPullRequests) {
+        // A reviewer that died without reviewing leaves its key recorded; drop the key so the PR spawns again.
+        const key = githubItemSpawnKey('pr', item);
+        if (fresh.has(item.number) || !result.updatedRepo.spawnedItemKeys.includes(key)) continue;
+        if (await findExistingGithubItemSession(repo, 'pr', item, { config: this.config, listExistingSessions: this.listExistingSessions, tmuxSessionExists: this.tmuxSessionExists })) continue;
+        const reviews = await fetchGithubList(this.fetchImpl, `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${item.number}/reviews?per_page=1`, {
+          token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs,
+        }).catch(() => null);
+        if (!reviews || reviews.length) continue;
+        result.updatedRepo.spawnedItemKeys = result.updatedRepo.spawnedItemKeys.filter((entry) => entry !== key);
+        result.newPullRequests.push(item);
+      }
     }
     const deletedSessions = [];
     if (!suppressSpawn && !result.error && !result.skipped && typeof this.deleteSession === 'function') {
