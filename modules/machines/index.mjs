@@ -101,8 +101,8 @@ export function descriptor(store, { label = readEnv('CADRE_MACHINE_LABEL') || ho
   return { machineId: store.machineId(), label, os, commit: COMMIT, protocol };
 }
 
-// The one-time link `cadre pair` prints and the worker UI's pair button shows.
-export const pairLink = (store, origin) => `${origin}/#${store.machineId()}.${store.issueCode()}`;
+// The one-time link `cadre pair` prints and the worker UI's pair button shows (a Tailscale IPv6 host is bracketed).
+export const pairLink = (store, host, port) => `http://${String(host).includes(':') ? `[${host}]` : host}:${port}/#${store.machineId()}.${store.issueCode()}`;
 
 // Every host must be listed in DM_FLEET_PRIVATE_HOSTS_REF: worker links are plain HTTP.
 export function validateMachineUrl(raw, { mcp = false, env = process.env } = {}) {
@@ -205,7 +205,7 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
       operatorOnly(req);
       const { address, port } = app.server.address();
       reply.header('Cache-Control', 'no-store');
-      return { link: pairLink(store, `http://${address}:${port}`) };
+      return { link: pairLink(store, address, port) };
     });
     // Hello on boot, after a sleep (a late tick) and on a network change, so the hub stops backing off.
     async function hello() {
@@ -465,8 +465,11 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
       // Remote spawn runs Claude only for now, so only the worker's enabled Claude providers are offered.
       const providers = listed?.status === 200 ? (parse(listed.text).providers || [])
         .filter((entry) => entry.enabled !== false && entry.backendType === 'claude').map((entry) => entry.id) : row.providers;
-      Object.assign(row, { os: peer.os, protocol: peer.protocol, providers });
-      store.update((state) => { if (state.machines?.[name]) Object.assign(state.machines[name], { os: row.os, protocol: row.protocol, providers }); });
+      const report = { os: peer.os, protocol: peer.protocol, providers };
+      if (JSON.stringify(report) !== JSON.stringify({ os: row.os, protocol: row.protocol, providers: row.providers })) {
+        Object.assign(row, report);
+        store.update((state) => { if (state.machines?.[name]) Object.assign(state.machines[name], report); });
+      }
     }
     return { ...machineStatus(name), label: row.label || name, url: row.url, os: row.os || '', protocol: row.protocol ?? null, providers: row.providers || [] };
   }

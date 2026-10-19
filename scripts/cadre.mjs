@@ -13,7 +13,7 @@ const [command, sub, ...rest] = process.argv.slice(2);
 try {
   if (command === 'pair') {
     if (config.role !== 'worker') throw new Error('Run `cadre pair` on a worker (CADRE_ROLE=worker).');
-    console.log(pairLink(store, `http://${config.host}:${config.port}`));
+    console.log(pairLink(store, config.host, config.port));
     console.error('One-time link, valid for 5 minutes. Treat it like a password.');
   } else if (command === 'unpair') {
     store.unpair();
