@@ -223,7 +223,7 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
       const detail = /^[a-f0-9]{8,32}$/.test(sessionId) && await app.inject({ url: `/api/claude/sessions/${sessionId}?lines=50`, headers: { authorization: req.headers.authorization } });
       if (detail?.statusCode !== 200 || !detail.json().workDir) return { cursor: Number(cursor) || 0, events: [] };
       const read = await readHookEventsSince({ workDir: detail.json().workDir, provider: 'claude', sessionId, cursor });
-      return { now: now(), cursor: read.cursor, events: read.events.filter((event) => ['UserPromptSubmit', 'Stop'].includes(event.eventName))
+      return { cursor: read.cursor, events: read.events.filter((event) => ['UserPromptSubmit', 'Stop'].includes(event.eventName))
         .map(({ loggedAt, eventName, lastAssistantMessage, payload }) => ({ loggedAt, eventName, lastAssistantMessage, payload: { background_tasks: payload?.background_tasks } })) };
     });
     app.post('/api/pairing/redeem', async (req, reply) => {
@@ -322,22 +322,31 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
   const unregisterHooks = registerHookSessionRegistry('claude', () => returning().map((entry) => [entry.sessionId,
     { workDir: hookFile(entry).workDir, metadata: entry.metadata, created: entry.created, lifecycle: entry.state?.status }]));
   app.addHook('onClose', async () => unregisterHooks());
+  const hookCursors = new Map();
+  let lastStamp = 0;
   async function mirrorHooks(name, row) {
+    const fetched = [];
     for (const entry of returning().filter((item) => item.machine === name)) {
-      // A batch with no prompt or stop writes no line; its cursor is kept on the index entry, since skipping it loses nothing.
-      const cursor = Math.max((await readHookEventsSince(hookFile(entry))).events.at(-1)?.machineCursor || 0, entry.hookCursor || 0);
-      const sent = now();
+      const key = `${entry.kind}:${entry.sessionId}`;
+      // Read once per hub process: the mirror's last line, or the cursor of a batch with no prompt or stop (which wrote no line).
+      if (!hookCursors.has(key)) hookCursors.set(key, Math.max((await readHookEventsSince(hookFile(entry))).events.at(-1)?.machineCursor || 0, entry.hookCursor || 0));
+      const cursor = hookCursors.get(key);
       const result = await send(row, 'GET', `/api/machine/hook-events?sessionId=${entry.sessionId}&cursor=${cursor}`).catch(() => null);
-      const { events = [], cursor: next, now: workerNow } = result?.status === 200 ? parse(result.text) : {};
-      if (!Number.isFinite(workerNow) || !(next > cursor)) continue;
-      if (!events.length) { store.update((state) => { const item = state.sessions?.[`${entry.kind}:${entry.sessionId}`]; if (item) item.hookCursor = next; }); continue; }
-      // The observer compares these times with hub times (spawns, rooms, messages), so they move onto the hub clock,
-      // using the worker's clock offset measured over this request.
-      const offset = (sent + now()) / 2 - workerNow;
+      const { events = [], cursor: next } = result?.status === 200 ? parse(result.text) : {};
+      if (!(next > cursor)) continue;
+      if (events.length) { fetched.push({ entry, key, events, next }); continue; }
+      store.update((state) => { if (state.sessions?.[key]) state.sessions[key].hookCursor = next; });
+      hookCursors.set(key, next);
+    }
+    // The observer compares these times with hub times (spawns, rooms, messages), and the worker clock can step between a hook
+    // and this read. So each event gets the hub's receive time, strictly increasing in the worker's order across sessions.
+    const order = fetched.flatMap(({ events }) => { let at = 0; return events.map((event) => ({ event, at: at = Math.max(at, Date.parse(event.loggedAt) || 0) })); });
+    for (const { event } of order.sort((a, b) => a.at - b.at)) event.loggedAt = new Date(lastStamp = Math.max(now(), lastStamp + 1)).toISOString();
+    for (const { entry, key, events, next } of fetched) {
       const { hooksDir, eventsPath } = await buildHookSessionPaths(hookFile(entry));
       await mkdir(hooksDir, { recursive: true });
-      await appendFile(eventsPath, events.map((event) => `${JSON.stringify({ ...event,
-        loggedAt: new Date(Date.parse(event.loggedAt) + offset).toISOString(), machineCursor: next })}\n`).join(''));
+      await appendFile(eventsPath, events.map((event) => `${JSON.stringify({ ...event, machineCursor: next })}\n`).join(''));
+      hookCursors.set(key, next);
     }
   }
   async function attempt(name) {

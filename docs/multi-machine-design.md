@@ -858,12 +858,15 @@ nono's Landlock can work.
     worker restart or a reconnect resumes after the last event seen, and the mirror never holds an
     event twice; the observer's existing keys then make its own replay a no-op. A batch with no
     prompt or stop writes no line, so its cursor goes on the index entry (`hookCursor`); skipping
-    those bytes loses nothing, and the fetch starts from the larger of the two.
+    those bytes loses nothing. The hub reads the mirror (and `hookCursor`) once per session per process
+    and keeps the cursor in memory after that.
   - **Hub clock.** The observer compares a child's hook times with hub times (the spawn's
-    `created`, rooms, messages, `skipIfSentBetween`). The worker returns its `now`, and the hub
-    moves each mirrored `loggedAt` by the offset measured over that request, so a worker clock
-    behind the hub (after a sleep, or by under a second with NTP) cannot release a held turn. The
-    remaining error is half the round trip.
+    `created`, rooms, messages, `skipIfSentBetween`). Each mirrored `loggedAt` is the hub's receive
+    time, strictly increasing and assigned in the worker's order across that poll's sessions. A
+    worker clock that is behind, or that steps between the hook and the poll (NTP after a sleep),
+    therefore never moves a Stop earlier than the hub saw it. An offset measured at poll time
+    would not survive such a step. The cost is in the safe direction: a turn can be held longer,
+    for example when a child spawns between the Stop and its copy.
   - **Mirror location.** `buildHookSessionPaths` walks up to the nearest `.git`; an empty `.git`
     marker in `<machine state>/hooks` keeps the mirror there, not in an enclosing checkout's
     `.agent_bus/hooks`.
@@ -874,6 +877,9 @@ nono's Landlock can work.
     - The follow-up hold from the delivery audit does not apply to remote children, because their
       input audit is written on the worker. A spawner's turn can be returned while a follow-up to a
       remote child has not started.
+    - Receive time also moves a prompt later, so a DM the child sends its spawner itself within
+      one poll of its prompt can fall outside `skipIfSentBetween`, and the spawner gets that answer
+      twice. A result is never returned early.
     - A batch is one append (one `write`) stamped with its end cursor, so only a torn write (power
       loss, a full disk) that keeps some lines can skip the rest.
     - The tests drive the supervisor with fake timers but wait on the observer's real interval,
