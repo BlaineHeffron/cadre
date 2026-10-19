@@ -21,7 +21,7 @@ await mkdir(bin, { recursive: true });
 await mkdir(join(root, 'home'), { recursive: true });
 await writeFile(join(bin, 'tmux'), `#!/bin/sh\nexec /usr/bin/tmux -L '${tmuxSocket}' "$@"\n`);
 // In a workDir holding prompt.txt the stand-in shows that permission prompt first and waits for an answer.
-await writeFile(join(bin, 'claude'), "#!/bin/sh\n[ -f prompt.txt ] && cat prompt.txt && read answer && printf 'answered\\n'\nprintf 'Claude Code v2.1.296\\n────────────────────\\n❯ \\n────────────────────\\n  ⏵⏵ bypass permissions on\\n'\ncat >/dev/null\n");
+await writeFile(join(bin, 'claude'), "#!/bin/sh\n[ -f prompt.txt ] && cat prompt.txt && read answer </dev/tty && printf 'answered\\n'\nprintf 'Claude Code v2.1.296\\n────────────────────\\n❯ \\n────────────────────\\n  ⏵⏵ bypass permissions on\\n'\ncat >/dev/null </dev/tty\n");
 await chmod(join(bin, 'tmux'), 0o755);
 await chmod(join(bin, 'claude'), 0o755);
 delete process.env.CADRE_STATE_DIR;
