@@ -212,6 +212,8 @@ export function buildInternalBypassHeaders({
   return headers;
 }
 
+export const HUB_OPERATOR_HEADER = 'x-cadre-hub-operator';
+
 export function permissionAuthorityForRequest(request, {
   tool = '',
   scope = 'permission.approve',
@@ -223,12 +225,14 @@ export function permissionAuthorityForRequest(request, {
   const automationApproved = principal?.type === 'service'
     && policy
     && config.permissionAuthority.preapprovedAutomationPolicies.includes(policy);
-  const operatorApproved = auth?.authenticated === true && principal?.type === 'ui';
+  // A hub relays an operator's answer to a worker with its worker credential, and flags it only after its own check.
+  const operatorApproved = auth?.authenticated === true
+    && (principal?.type === 'ui' || (principal?.type === 'hub-peer' && auth.hubOperator === true));
   const decision = operatorApproved || automationApproved ? 'allowed' : 'denied';
   const audit = {
     actor: principal ? `${principal.kind}:${principal.sessionId}` : 'unauthenticated',
     principalType: principal?.type || 'unknown',
-    policy: operatorApproved ? 'authenticated_operator' : (policy || 'none'),
+    policy: operatorApproved ? (principal.type === 'hub-peer' ? 'hub_relayed_operator' : 'authenticated_operator') : (policy || 'none'),
     tool: String(tool || ''),
     scope: String(scope || ''),
     risk: String(risk || ''),
@@ -369,7 +373,8 @@ function authPluginImpl(app, opts = {}, done) {
       if (!/^\/api\/(?!agents\/)[a-z]+\/sessions(?:\/|$)/.test(routed) && !['/api/pairing/forget', '/api/machine/events', '/api/machine/hook-events'].includes(routed)) {
         return reply.code(403).send({ error: 'Machine credential is limited to session routes' });
       }
-      request.duenoAuth = { authenticated: true, principal: { type: 'hub-peer', kind: 'hub', sessionId: hub.envId }, mcpUrl: hub.mcpUrl };
+      request.duenoAuth = { authenticated: true, principal: { type: 'hub-peer', kind: 'hub', sessionId: hub.envId }, mcpUrl: hub.mcpUrl,
+        hubOperator: request.headers[HUB_OPERATOR_HEADER] === '1' };
       return;
     }
     if (opts.workerMachines && !['GET', 'HEAD'].includes(request.method)) {

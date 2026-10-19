@@ -482,10 +482,10 @@ It also:
   - Status and the row cache update from events. `connected` means the stream is open.
 - **Telegram.**
   - Topics: the hub's bridge already lists sessions over the hub API (`server.mjs:352-377`). Merged
-    remote rows carry `id`, `tmuxSession` and `workDir` (`:362`), so remote sessions get topics in
-    the same `bindings.json` and `topics.json` on dueno-1.
+    remote rows carry `id`, `tmuxSession` and `workDir` (`:362`; `tmuxSession` added in slice 4), so
+    remote sessions get topics in the same `bindings.json` and `topics.json` on dueno-1.
   - Input: it goes through hub routes, which proxy to the worker.
-  - Output (slice 6): the relay keeps its cursor **on the hub** and pulls deltas through a worker
+  - Output (slice 4): the relay keeps its cursor **on the hub** and pulls deltas through a worker
     route, `GET /api/<kind>/sessions/:id/transcript?cursor=` (`relay.mjs:361-362` already takes
     injectable readers).
   - While the laptop sleeps, the pull returns 503, the cursor stays put, and nothing is sent. On
@@ -494,7 +494,7 @@ It also:
   - The laptop never holds a bot token, never polls Telegram and keeps no Telegram state.
 - **Command Queue.**
   - Agent-filed items (`monitor_add_human_queue_item`) already go over MCP to the hub's store.
-  - Permission, confirmation and selection prompts in remote sessions (slice 6): the supervisor sees
+  - Permission, confirmation and selection prompts in remote sessions (slice 4): the supervisor sees
     `state.interaction` in remote rows and calls the hub's `addHumanQueueItem`, through the same path
     as `push.mjs:12-25`, including the fingerprint dedupe.
   - Answers route through the hub input proxy.
@@ -709,6 +709,7 @@ Sizes count added lines, including tests. S is under 150, M is 150-350, L is 350
    - The transcript-delta worker route, with the relay cursor kept on the hub.
    - Interaction rows become hub `addHumanQueueItem` items.
    - Tests: the laptop sleeps during output, then wakes, and the topic gets each line exactly once.
+   - The §7 permission-authority bug: a hub-relayed operator answer is accepted by the worker.
    - This is moved ahead of the UI because the operator requires one Telegram and one queue.
 5. **Collabs across machines (M).**
    - `participants[].machine` in bootstrap.
@@ -884,3 +885,46 @@ nono's Landlock can work.
       loss, a full disk) that keeps some lines can skip the rest.
     - The tests drive the supervisor with fake timers but wait on the observer's real interval,
       which is not injectable.
+- **Slice 4 as built (implementer):**
+  - **Topics** needed one field: merged remote rows had no `tmuxSession`, and the bridge and relay
+    skip a row without one. The list merge now sets the worker's tmux name (`<kind>-<id>`), and
+    `listTelegramSessions` passes `machine` through so the relay can tell a remote row.
+  - **Output.** The worker's existing `GET /api/<kind>/sessions/:id/transcript` (already proxied by
+    the hub and already inside `worker:operate`'s session-route scope, so the scope is unchanged)
+    gets a cursor mode: `?cursor=<offset>&ino=<inode>` returns `{ino, text, startOffset, nextOffset,
+    pendingBytes}` from the worker's own `resolveBinding` and `readTranscriptDelta`. A cursor for
+    another inode (`/clear`, a new file) starts that file from 0. On the hub, the relay's injected
+    `resolveBinding` (`relayBinding` in `modules/machines`) handles rows with `machine`: the binding
+    path is `machine:<kind>:<id>:<ino>`, the offset is the hub's `bindings.json` offset, and the
+    binding carries the delta it pulled, which the relay uses instead of a local read (one line in
+    `relay.mjs`). While the worker is away the proxied pull answers 503, the relay records the
+    error, sends nothing and keeps the offset. The existing delivery key in `sent.json` covers a
+    crash between send and advance, as for a local session.
+  - **Command Queue.** Worker `session` events now carry the row's prompt (`kind`, `detail`,
+    `options`, `fingerprint`) when it is a permission, confirmation or selection prompt. On every
+    changed or removed remote row the hub runs `closeStaleSessionQueueItems` and the queue half of
+    `notifyPush`, extracted as `queueSessionInteraction`, so dedupe is `addHumanQueueItem`'s
+    fingerprint check. Unlike local prompts, this is not gated on Web Push being configured.
+  - **Answers and the authority bug.** The hub's proxy runs `permissionAuthorityForRequest` on its
+    own caller and, only if that passes, adds `x-cadre-hub-operator: 1` to the forwarded request. A
+    worker counts that flag only on a request that also authenticated with the worker credential
+    (`hub-peer`); any other caller's flag is ignored. A hub caller therefore gets exactly the
+    authority it would have for a local session. The in-process answer path
+    (`enqueueAgentSessionCommand` for a remote id) now forwards `keys` and the expected fingerprint to
+    `/keys`, and presents the operator bearer for an interaction answer, matching the local
+    in-process path, which has no authority check. Telegram answers keep their local behavior: the
+    bridge's internal-bypass `service` principal needs a pre-approved automation policy for a
+    blocking prompt, here as locally.
+  - **No protocol bump.** An older worker ignores the cursor (its full-text answer has no
+    `nextOffset`, so the relay sends nothing) and the flag; an older hub ignores the prompt fields.
+  - **Tests** add stub `/transcript` and `/keys` routes to the test hub, because the agent-bus
+    harness has no real Claude routes and the proxy hook runs only on routed paths. The relay is
+    driven by calling `step()`; waits for the reconnect still use the suite's polling helper.
+  - **Found, not fixed (worker session state, also on main):** in some runs of
+    `tests/machines.test.mjs` the worker reports a just-spawned session as `missing` (ended) for
+    about 25 s while its process is alive, and its detail, list and command-gate views disagree
+    during that time. On main this is the occasional slice 3 timeout (1 in 8 runs here). A detail
+    read right after spawn also made a later interaction answer fail with `session_missing` every
+    time, while the same answer passed when the read came just before it. Slice 4's queue test waits
+    up to 60 s for `running` and answers whichever item is open; the hub closing and refiling the
+    item across that window is the intended behavior.

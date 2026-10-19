@@ -609,7 +609,8 @@ export class TelegramRelayLoop {
     }
     const currentBinding = this.bindingStore.get(session.id);
     const currentOffset = Number(currentBinding?.offset || 0);
-    const delta = await this.readTranscriptDelta(binding.path, currentOffset, runtime);
+    // A remote session's binding already carries the delta its worker returned from this offset.
+    const delta = binding.delta || await this.readTranscriptDelta(binding.path, currentOffset, runtime);
     this.pendingPartialBytes += Math.max(Number(delta.pendingBytes || 0), 0);
     const startOffset = Number.isFinite(Number(delta.startOffset))
       ? Number(delta.startOffset)

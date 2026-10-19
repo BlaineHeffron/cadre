@@ -33,6 +33,7 @@ import {
   extractClaudeConversationText,
   extractCodexConversationText,
   readConversationPage,
+  readTranscriptDelta,
 } from '../telegram/transcript.mjs';
 import { resolveBinding } from '../telegram/binding.mjs';
 import { createTmuxCommandExecutor, sessionCommandGate } from '../session-state/command-gate.mjs';
@@ -3225,7 +3226,8 @@ async function sessionsPlugin(app, {
     try {
       // Reuse the relay's binding resolver so this route inherits the same
       // originator/hook/identity anchors rather than re-guessing the mapping.
-      const binding = await resolveBinding({ id, workDir, runtime, ...meta });
+      // The hub's relay cannot count this machine's sessions per workDir, so its pulls never bind by sole tenancy.
+      const binding = await resolveBinding({ id, workDir, runtime, ...meta }, req.query?.cursor === undefined ? {} : { liveTenantCount: 0 });
       if (!binding?.path) {
         return reply.code(404).send({
           error: 'No session log bound to this session',
@@ -3235,6 +3237,11 @@ async function sessionsPlugin(app, {
       }
 
       const filePath = binding.path;
+      // The hub's Telegram relay pulls a remote session's output from its own cursor; a cursor into another file starts over.
+      if (req.query?.cursor !== undefined) {
+        const { text, startOffset, nextOffset, pendingBytes } = await readTranscriptDelta(filePath, Number(req.query.ino) === binding.ino ? req.query.cursor : 0, runtime);
+        return { ino: binding.ino, text, startOffset, nextOffset, pendingBytes };
+      }
       // The rendered view pages with `limit`; unpaged callers get the whole log.
       if (req.query?.limit) {
         return { id, runtime, filePath, ...(await readConversationPage(filePath, runtime, req.query)) };
