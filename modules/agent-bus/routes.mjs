@@ -216,6 +216,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (requested.length < 2) return reply.code(400).send({ error: 'At least two participants are required' });
     const created = [];
     let worktree = null;
+    const remote = {};
     let thread = null;
     const roomId = `thr_${randomUUID().replaceAll('-', '')}`;
     try {
@@ -227,7 +228,11 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
         promptProfile: req.body.promptProfile, requireDueno: true, structured: req.body.structured === true,
         ...(req.body.sandbox !== undefined ? { sandbox: req.body.sandbox } : {}),
       }));
-      if (req.body.worktree) worktree = await createManagedWorktree({ ...req.body.worktree, roomId, baseDir: managedWorktreeBaseDir });
+      // One managed worktree per machine with a participant: the hub's own, and each remote one made on its worker.
+      if (req.body.worktree && requested.some((p) => !p.machine)) worktree = await createManagedWorktree({ ...req.body.worktree, roomId, baseDir: managedWorktreeBaseDir });
+      for (const machine of req.body.worktree ? new Set(requested.map((p) => p.machine).filter(Boolean)) : []) {
+        remote[machine] = await app.machineWorktree(machine, { create: { ...req.body.worktree, roomId } });
+      }
       const roster = plans.map((plan) => plan.mode === 'attach' ? plan.participant : {
         kind: plan.resolvedSelection.backendType, sessionId: randomBytes(4).toString('hex'),
         displayName: plan.createArgs.displayName,
@@ -235,10 +240,12 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
       const prompts = roster.map((participant, index) => renderCollabStartupPrompt({
         self: { ...participant, role: requested[index]?.role }, participants: roster,
         threadId: roomId, title: req.body.title, initialTask: req.body.initialTask,
-        participantTask: requested[index]?.initialTask, merge: worktree?.merge,
+        participantTask: requested[index]?.initialTask, merge: (worktree || Object.values(remote)[0])?.merge,
       }));
       thread = await store.createThread({ id: roomId, title: req.body.title, projectKey: req.body.projectKey,
-        participants: roster.map(participantRef), metadata: { source: 'bootstrap', ...(worktree ? { worktree } : {}) },
+        participants: roster.map(participantRef), metadata: { source: 'bootstrap', ...(worktree ? { worktree } : {}),
+          ...(Object.keys(remote).length ? { machineWorktrees: Object.fromEntries(Object.entries(remote).map(([machine, metadata]) => [machine,
+            { worktree: metadata, sessionIds: roster.filter((_, index) => requested[index].machine === machine).map((p) => p.sessionId) }])) } : {}) },
         createdBy: createdByFromRequest(req) });
       const records = [];
       for (let index = 0; index < plans.length; index += 1) {
@@ -248,7 +255,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
       }
       for (let index = 0; index < plans.length; index += 1) {
         const plan = plans[index];
-        if (worktree && plan.mode === 'create') plan.createArgs.workDir = worktree.path;
+        if (req.body.worktree && plan.mode === 'create') plan.createArgs.workDir = (remote[requested[index].machine] || worktree).path;
         if (plan.mode === 'create') {
           plan.createArgs.sessionId = roster[index].sessionId;
           plan.createArgs.initialPrompt = prompts[index];
@@ -291,8 +298,10 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
       const cleanupFailures = await discardCreatedParticipants(created);
       if (cleanupFailures?.length) err.message += `; session rollback failed: ${cleanupFailures.join('; ')}`;
       const result = worktree ? await cleanupWorktree(worktree, true) : undefined;
+      const machineWorktrees = {};
+      for (const [machine, metadata] of Object.entries(remote)) machineWorktrees[machine] = await app.machineWorktree(machine, { cleanup: metadata, spawnFailed: true });
       if (thread) await broadcastThreadSummary(thread.id);
-      return reply.code(400).send({ ...(result ? { worktree: result } : {}), error: err.message, ...(err.rollbackError ? { rollbackError: err.rollbackError, worktree: { removed: false, report: `worktree: kept (${err.rollbackError})` } } : {}), ...(err.code ? { code: err.code } : {}) });
+      return reply.code(400).send({ ...(result ? { worktree: result } : {}), ...(Object.keys(remote).length ? { machineWorktrees } : {}), error: err.message, ...(err.rollbackError ? { rollbackError: err.rollbackError, worktree: { removed: false, report: `worktree: kept (${err.rollbackError})` } } : {}), ...(err.code ? { code: err.code } : {}) });
     }
   });
 
@@ -370,7 +379,12 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     });
     await broadcastThreadSummary(thread.id);
     const worktree = thread.metadata?.worktree ? await cleanupWorktree(thread.metadata.worktree) : undefined;
-    return { ...(worktree ? { worktree } : {}), ok: results.every((item) => item.status !== 'failed'), status: 'ended', thread: normalizeThreadSummary(await enrichThread(thread)), results, skipped };
+    // A remote worktree is cleaned on its worker after its sessions there end; while the worker is away both stay pending.
+    const machineWorktrees = {};
+    for (const [machine, { worktree: metadata, sessionIds }] of Object.entries(thread.metadata?.machineWorktrees || {})) {
+      machineWorktrees[machine] = await app.machineWorktree(machine, { cleanup: metadata, sessionIds: sessionIds.filter((id) => !skipped.some((ref) => ref.sessionId === id)) });
+    }
+    return { ...(worktree ? { worktree } : {}), ...(Object.keys(machineWorktrees).length ? { machineWorktrees } : {}), ok: results.every((item) => item.status !== 'failed'), status: 'ended', thread: normalizeThreadSummary(await enrichThread(thread)), results, skipped };
     } finally { endingThreads.delete(snapshot.thread.id); }
   });
 

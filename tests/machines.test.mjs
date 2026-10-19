@@ -59,23 +59,26 @@ function fakeTimers() {
 }
 const hubTimers = fakeTimers();
 const workerTimers = fakeTimers();
-let online = true; let skew = 0;
+let online = true; let skew = 0; let refused = 0;
 
 const logs = [];
 const logger = () => ({ level: 'trace', redact: LOG_REDACT, stream: new Writable({ write(chunk, _enc, done) { logs.push(String(chunk)); done(); } }) });
 const secrets = new Set();
 const responses = [];
 const hubDir = join(root, 'hub-state');
+const workerWorktrees = join(root, 'worker-worktrees');
 const workerDir = join(root, 'worker-state');
 const hubStore = machineState(join(hubDir, 'machines'));
 const workerStore = machineState(join(workerDir, 'machines'));
 const busStore = new AgentBusCredentialStore({ stateFile: join(root, 'hub-bus.json'), mode: 'issue_only', env: { APP_STATE_STORAGE: 'file', DATABASE_URL: '' } });
 let hub; let tailnet; let hubMcpUrl; let requestImpl; let worker; let workerPort = 0; let workerUrl;
 
-async function startWorker({ protocol = MACHINE_PROTOCOL, store = workerStore, sessions = true, port = workerPort } = {}) {
+async function startWorker({ protocol = MACHINE_PROTOCOL, store = workerStore, sessions = true, port = workerPort, refuseDeletes = false } = {}) {
   const app = Fastify({ logger: logger() });
+  // A worker whose session deletes fail (a session it cannot end).
+  if (refuseDeletes) app.addHook('onRequest', async (req, reply) => { if (req.method === 'DELETE') { refused += 1; return reply.code(409).send({ code: 'session_delete_failed' }); } });
   await app.register(authPlugin, { workerMachines: store });
-  await app.register(machinesPlugin, { role: 'worker', store, protocol, timers: workerTimers, now: () => Date.now() + skew });
+  await app.register(machinesPlugin, { role: 'worker', store, protocol, timers: workerTimers, now: () => Date.now() + skew, worktreeBaseDir: workerWorktrees });
   await app.register(agentProviderPreferencesPlugin);
   if (sessions) await app.register(claudeSessionsPlugin, { wsManager: { broadcast() {}, onChannel() {} } });
   await app.listen({ host: '127.0.0.1', port });
@@ -626,6 +629,123 @@ describe('multi-machine slice 4', () => {
     assert.equal((await hub.app.inject({ url: `/api/claude/sessions/${id}/transcript?cursor=0`, headers: { authorization: `Bearer ${hubStore.read().machines.w7.credential}` } })).statusCode, 403,
       'worker:operate cannot read through the hub');
     assert.equal((await call(url, { token: hubStore.read().machines.w7.credential })).status, 200);
+  });
+});
+
+describe('multi-machine slice 5', () => {
+  let repo; let roomId; let remoteIds;
+  const git = (cwd, ...args) => execFileAsync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args]);
+  const tokenOf = async (id) => JSON.parse(await readFile(mcpClientConfigPath('claude', id), 'utf8')).mcpServers.dueno.headers.Authorization.slice('Bearer '.length);
+  const exists = (path) => stat(path).then(() => true, () => false);
+  const live = (id) => execFileAsync('/usr/bin/tmux', ['-L', tmuxSocket, 'has-session', '-t', `claude-${id}`]).then(() => true, () => false);
+  const end = (id) => hub.app.inject({ method: 'POST', url: `/api/agent-bus/threads/${id}/end`, headers: hub.authHeaders, payload: {} });
+  // Two participants on w8 sharing that machine's worktree of the room's branch.
+  const bootstrap = async (branch) => {
+    const res = await hub.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: hub.authHeaders, payload: { title: branch,
+      worktree: { repo, branch, base: 'origin/main' }, participants: [{ kind: 'claude', create: true, machine: 'w8' }, { kind: 'claude', create: true, machine: 'w8' }] } });
+    assert.equal(res.statusCode, 200, res.body);
+    for (const { sessionId } of res.json().participants) secrets.add(await tokenOf(sessionId));
+    return res.json();
+  };
+
+  it('a room with participants on the hub and on a worker launches both, and they exchange room messages', async () => {
+    assert.equal((await addMachine('w8', await pair())).ok, true);
+    const workDir = await mkdtemp(join(root, 'repo-'));
+    const agentToken = (await prepareAgentBusCredentialLaunch({ backendType: 'claude', sessionId: 'claude-1', credentialStore: busStore })).token;
+    const spawned = await tool(agentToken, 'spawn_collab_session', { title: 'across machines', participants: [{ provider: 'claude' }, { provider: 'claude', machine: 'w8', work_dir: workDir }] });
+    assert.equal(spawned.isError, false, spawned.text);
+    const thread = spawned.value.thread_id;
+    const [local, remote] = spawned.value.participants.map((participant) => participant.session_id);
+    assert.equal(hubStore.read().sessions[`claude:${remote}`]?.machine, 'w8', 'the hub-minted roster id runs on the worker');
+    assert.equal(hubStore.read().sessions[`claude:${local}`], undefined);
+    assert.ok(hub.createdSessions.claude.some((body) => body.sessionId === local), 'the hub participant launched locally');
+    const childToken = await tokenOf(remote);
+    secrets.add(childToken);
+    const sent = await tool(childToken, 'room_send', { thread_id: thread, body: 'hello from the worker' });
+    assert.equal(sent.isError, false, sent.text);
+    // The worker can read a new session as ended for a while (the slice 4 note); a delivery then fails for good.
+    await until(async () => (await hub.app.inject({ url: `/api/claude/sessions/${remote}`, headers: hub.authHeaders })).json().canonicalState?.lifecycle === 'running',
+      'the worker sees the session running', 1200);
+    const posted = await hub.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: hub.authHeaders,
+      payload: { threadId: thread, from: { kind: 'claude', sessionId: local }, body: 'hello from the hub' } });
+    assert.equal(posted.statusCode, 200, posted.body);
+    const messageId = posted.json().message.id;
+    assert.ok(hub.store.listMessages().some((message) => message.from.sessionId === remote && message.body === 'hello from the worker'));
+    await until(() => hub.store.getDeliveryForMessage(messageId)?.status === 'injected', 'the hub message delivered to the worker');
+    await until(async () => (await pane(remote)).includes(`id=${messageId}`), 'the envelope in the worker pane');
+    const taken = await hub.app.inject({ method: 'POST', url: '/api/claude/sessions', headers: hub.authHeaders, payload: { machine: 'w8', workDir, sessionId: remote } });
+    assert.deepEqual([taken.statusCode, taken.json().code], [400, 'session_id_invalid'], 'an id in use is never minted again');
+  });
+
+  it('creates the remote participants\' managed worktree on the worker and cleans it there at room end', async () => {
+    const remoteRepo = join(root, 'origin.git');
+    repo = join(root, 'collab-repo');
+    await execFileAsync('git', ['init', '-q', '--bare', '--initial-branch=main', remoteRepo]);
+    await execFileAsync('git', ['init', '-q', '--initial-branch=main', repo]);
+    await mkdir(join(repo, '.cadre'));
+    await writeFile(join(repo, '.cadre', 'worktree.json'), JSON.stringify({ cleanup: 'on-merge' }));
+    await git(repo, 'add', '.');
+    await git(repo, 'commit', '-qm', 'base');
+    await git(repo, 'remote', 'add', 'origin', remoteRepo);
+    await git(repo, 'push', '-q', 'origin', 'main');
+    const room = await bootstrap('topic-a');
+    const { worktree: metadata, sessionIds } = hub.store.getThread(room.thread.id).thread.metadata.machineWorktrees.w8;
+    assert.equal(hub.store.getThread(room.thread.id).thread.metadata.worktree, undefined, 'no hub worktree without a hub participant');
+    assert.equal(metadata.path, join(workerWorktrees, room.thread.id, metadata.path.split('/').at(-1)));
+    assert.deepEqual(sessionIds, room.participants.map((participant) => participant.sessionId));
+    assert.equal((await hub.app.inject({ url: `/api/claude/sessions/${sessionIds[0]}`, headers: hub.authHeaders })).json().workDir, metadata.path);
+    const ended = await end(room.thread.id);
+    assert.equal(ended.json().machineWorktrees.w8.removed, true, ended.body);
+    assert.equal(await exists(metadata.path), false);
+  });
+
+  it('room end with the worker stopped leaves cleanup pending, and it completes once on restart', async () => {
+    const room = await bootstrap('topic-b');
+    ({ id: roomId } = room.thread);
+    remoteIds = room.participants.map((participant) => participant.sessionId);
+    const { path } = hub.store.getThread(roomId).thread.metadata.machineWorktrees.w8.worktree;
+    await worker.close();
+    const ended = await end(roomId);
+    assert.equal(ended.json().machineWorktrees.w8.pending, true, ended.body);
+    assert.deepEqual(Object.keys(hubStore.read().worktreeCleanup), [`w8:${roomId}`]);
+    assert.equal(await exists(path), true, 'nothing is cleaned while the worker is away');
+    worker = await startWorker();
+    await until(async () => { await hubTimers.fire(); return !Object.keys(hubStore.read().worktreeCleanup).length; }, 'the pending cleanup ran');
+    assert.equal(await exists(path), false);
+    assert.deepEqual(await Promise.all(remoteIds.map(live)), [false, false], 'the room\'s sessions on the worker ended first');
+    await hubTimers.fire();
+    assert.deepEqual(hubStore.read().worktreeCleanup, {}, 'and it is not retried');
+  });
+
+  it('a fetch failure or a failed session delete on the worker leaves cleanup pending', async () => {
+    const room = await bootstrap('topic-c');
+    const { path } = hub.store.getThread(room.thread.id).thread.metadata.machineWorktrees.w8.worktree;
+    const origin = (await git(repo, 'remote', 'get-url', 'origin')).stdout.trim();
+    await git(repo, 'remote', 'set-url', 'origin', join(root, 'no-such-remote'));
+    const ended = await end(room.thread.id);
+    assert.equal(ended.json().machineWorktrees.w8.pending, true, ended.body);
+    const key = `w8:${room.thread.id}`;
+    await hubTimers.fire();
+    assert.ok(hubStore.read().worktreeCleanup[key], 'a git fetch failure is not an answer');
+    await git(repo, 'remote', 'set-url', 'origin', origin);
+    await restartWorker({ refuseDeletes: true });
+    await until(async () => { await hubTimers.fire(); return refused > 0; }, 'a retry against the refusing worker');
+    await hubTimers.fire();
+    assert.ok(hubStore.read().worktreeCleanup[key], 'a refused session delete stops the cleanup');
+    assert.equal(await exists(path), true);
+    await restartWorker();
+    await until(async () => { await hubTimers.fire(); return !hubStore.read().worktreeCleanup[key]; }, 'the cleanup once both pass');
+    assert.equal(await exists(path), false);
+  });
+
+  it('a credential with the wrong scope is rejected on the worktree route', async () => {
+    const url = `${workerUrl}/api/machine/worktree`;
+    const body = { cleanup: { roomId } };
+    assert.equal((await call(url, { method: 'POST', body })).status, 401);
+    assert.equal((await call(url, { method: 'POST', token: workerStore.read().hub.credential, body })).status, 401, 'bus:agent is not a worker credential');
+    assert.equal((await call(url, { method: 'POST', token: TOKEN, body })).status, 401, 'the worker UI token is read-only');
+    const answered = await call(url, { method: 'POST', token: hubStore.read().machines.w8.credential, body });
+    assert.deepEqual([answered.status, answered.json.removed], [200, false], 'the hub\'s worker credential reaches it, and the guards still hold');
   });
 });
 
