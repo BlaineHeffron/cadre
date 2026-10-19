@@ -91,7 +91,7 @@ async function deriveGrants(root) {
   };
 }
 
-export async function prepareNonoLaunch({ provider, sessionId, workDir, grants, mcpLaunch = {}, promptLaunch = {}, headroom = { env: {} }, githubToken = '', env = process.env }) {
+export async function prepareNonoLaunch({ provider, sessionId, workDir, grants, mcpLaunch = {}, promptLaunch = {}, headroom = { env: {} }, githubToken = '', duenoUrl = '', env = process.env }) {
   await assertNonoReady();
   const { stateDir, tokenFile } = nonoStatePaths(provider, sessionId);
   const configDir = join(stateDir, provider);
@@ -126,7 +126,8 @@ export async function prepareNonoLaunch({ provider, sessionId, workDir, grants, 
   else if (credential && !await lstat(tokenFile).then((info) => info.isFile(), () => false)) {
     throw sandboxError('Sandboxed session has no GitHub token to resume with', 'sandbox_credential_missing', 409);
   }
-  const ports = [config.agentBusMcpHttp.port, ...['ANTHROPIC_BASE_URL', 'OPENAI_BASE_URL']
+  // A worker session dials its hub's MCP origin (https, port 443 unless given) instead of the local listener.
+  const ports = [duenoUrl ? new URL(duenoUrl).port || 443 : config.agentBusMcpHttp.port, ...['ANTHROPIC_BASE_URL', 'OPENAI_BASE_URL']
     .filter((key) => headroom.env?.[key]).map((key) => new URL(headroom.env[key]).port)];
   return {
     stateDir,

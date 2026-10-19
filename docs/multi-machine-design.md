@@ -1,6 +1,6 @@
 # Multi-machine Cadre: spawn sessions on other tailnet machines
 
-Status: design only, round 6 (adds the t3code code review; findings and decisions in §7). It folds in the operator constraints (msg_e25a4a761b4588b4) and the
+Status: slices 1-7 built (macOS deferred); design round 6 (adds the t3code code review; findings and decisions in §7). It folds in the operator constraints (msg_e25a4a761b4588b4) and the
 reviewer's gates (msg_736b7418b438f35f, msg_61ca91a94cedb937).
 
 - Designer: claude:c952c90b. Reviewer: pi:a9e71f97.
@@ -582,7 +582,8 @@ Native win32 is **not** a Cadre host:
 - Windows: the WSL2 contract above. Tailscale inside WSL also covers roaming.
 - macOS: tmux sessions work (Claude, Codex, Pi). Structured and protocol runtimes are unsupported,
   because `process-supervisor.mjs` relies on `/proc`. There are no systemd scopes, and the worker
-  runs under launchd. That launchd unit is a later slice, only if the laptop is a Mac.
+  runs under launchd. **Deferred** (slice 7): the laptop is not here yet and its OS is unknown, so
+  the launchd unit waits until it turns out to be a Mac.
 
 ### 4.9 UI and MCP selector
 
@@ -723,7 +724,8 @@ Sizes count added lines, including tests. S is under 150, M is 150-350, L is 350
 7. **Other runtimes and OSes (S-M).**
    - Codex, Pi, structured Claude, `isolatedWorktree`, and nono where Landlock exists, all on the
      worker.
-   - macOS tmux-only support with a launchd unit, if the laptop turns out to be a Mac.
+   - macOS tmux-only support with a launchd unit, if the laptop turns out to be a Mac. Deferred:
+     the laptop's OS is still unknown.
    - `task_spawn` and DeepSeek stay hub-only until asked for.
 8. **Optional: live pane websocket proxy (M).**
 
@@ -981,3 +983,36 @@ nono's Landlock can work.
   - **UI.** A Machines card in Settings (worker: "Pair with hub"; hub: the machine list and the add form) renders only
     on a worker or on a hub with `canAdd` or a registered machine, so a plain hub's pages are unchanged. The "Run on"
     select, the chip and the `unreachable`/`blocked` badge render only with machines or a `machine` field.
+- **Slice 7 as built (implementer):**
+  - **Kinds.** The create and detail proxy take `claude`, `codex` and `pi`. DeepSeek, and `task_spawn` with
+    `spec.machine`, fail with `machine_kind_unsupported` naming the machine. On every create the hub reads the
+    worker's `/api/agents/providers` (enabled entries of those kinds; `GET /api/machines` lists the same ids) and
+    refuses a provider it lacks with `machine_provider_unsupported`, also naming the machine.
+  - **Structured.** `structured` now reaches the worker, which decides it as the hub would, from its own
+    `CADRE_STRUCTURED_AUTOMATED_SPAWNS` and stream-json/app-server switches. Its structured routes take the
+    hub-minted token and the paired hub MCP URL from a `hub-peer` create or resume, exactly as its tmux routes do
+    (the pre-issued store is shared, `preIssuedCredentialStore`), and strip the reserved coordinator keys. That
+    origin is the one exception to the stream-json loopback check. A worker does not auto-resume its structured
+    sessions after its own restart, because it has no token until the hub's resume mints one. A structured row
+    has no tmux pane, so the hub's list merge gives it no `tmuxSession` and Telegram makes no topic for it, as for a
+    structured session on the hub. Prompts, answers, deliveries and delete use the unchanged paths.
+  - **One list.** The worker's event stream and the collab live-session guard list every kind it serves
+    (`app.hasRoute`), so rows, Command Queue prompts and removals work for Codex and Pi.
+  - **returnResults stays Claude's.** `spawn_session` sets `returnToSpawner` only for Claude on the hub too, so the
+    hook mirror is unchanged (tmux and structured Claude share `/api/claude/sessions`). Codex and Pi children answer
+    over the bus with their hub-minted token, as local ones do.
+  - **Collab cleanup.** The worker now ends the room's sessions on its side (any kind) before it cleans a
+    worktree; the hub sends `sessionIds` in the cleanup instead of one delete per id, which needed a kind the hub may
+    no longer have once its index entry is dropped.
+  - **`isolatedWorktree`.** The hub's agent interface asks the worker for it through the same worker route,
+    `POST /api/machine/worktree {isolated}`, which runs `createAgentSessionWorktree` under the worker's own
+    `AGENT_SESSION_WORKTREE_BASE_DIR`. The session's metadata carries the worktree, so the worker's delete removes
+    it, as locally. As locally, a create that fails after the worktree is made leaves it behind.
+  - **nono.** Decided on the worker as on the hub (`CADRE_SANDBOX=nono` plus nono's version and profile checks;
+    nono itself needs Landlock). In nono's proxy mode the port grant is the hub MCP URL's port (443 by default)
+    instead of the local listener's.
+  - **Protocol 3.** An older worker would treat the `isolated` op as a cleanup and would not end a room's sessions,
+    so `MACHINE_PROTOCOL` is 3 and older workers show `blocked` until redeployed.
+  - **Tests** add real Codex and Pi tmux plugins on the test worker with stand-in binaries that show idle panes
+    from the state corpus, and structured Claude on a fake transport. They wait for the worker to read a new pane
+    as running before a DM, for the slice 4 reason.

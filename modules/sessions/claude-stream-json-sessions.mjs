@@ -12,6 +12,7 @@ import { resolveMcpCapabilities } from '../integrations/mcp-capability-resolver.
 import {
   cleanupMcpCapabilityLaunch,
   prepareMcpCapabilityLaunch,
+  preIssuedCredentialStore,
   sanitizedMcpSnapshot,
 } from '../integrations/mcp-launch-preflight.mjs';
 import { buildMcpCapabilityCatalog } from '../integrations/mcp-server-catalog.mjs';
@@ -23,7 +24,7 @@ import { permissionAuthorityForRequest } from '../platform/auth.mjs';
 import { buildAgentBusMcpUrl, seedClaudeWorkspaceTrust } from '../platform/mcp-seed.mjs';
 import { notifyPush } from '../platform/push.mjs';
 import { projectCompatibility } from '../session-state/contract.mjs';
-import { SPAWN_RESULT_NOTE, spawnerMetadata } from '../agent-bus/coordinator-policy.mjs';
+import { SPAWN_RESULT_NOTE, spawnerMetadata, stripReservedCoordinatorMetadata } from '../agent-bus/coordinator-policy.mjs';
 import { createJournalStore } from './journal-store.mjs';
 import { assertValidClaudeModel } from './claude-models.mjs';
 import { assertValidCodexModel } from './codex-models.mjs';
@@ -50,6 +51,9 @@ const TRANSCRIPT = {
 };
 const CODEX_SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
 const RESTART_NOTE = 'Cadre restarted during your last turn and cut it off. Check what it already did, then continue the task.';
+// On a worker, as on its tmux routes, the session token and MCP origin come from the hub, which minted the token.
+const fromHub = (req) => (req.duenoAuth?.principal?.type === 'hub-peer'
+  ? { busCredential: String(req.body?.busCredential || ''), duenoUrl: req.duenoAuth.mcpUrl || '' } : null);
 
 function openInteraction(session) {
   return session.interactions.find((interaction) => interaction.status === 'open') || null;
@@ -140,7 +144,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
 
   // Scoped credential, MCP config, and launch args for one attempt. A resumed attempt reuses the
   // persisted MCP selection; the provider replays the system prompt it recorded at first launch.
-  async function prepareAttempt({ id, workDir, body = {}, generation = 1, resolvedMcp, permissionMode, codexPlugins }) {
+  async function prepareAttempt({ id, workDir, body = {}, generation = 1, resolvedMcp, permissionMode, codexPlugins, hub = null }) {
     // Validate plugins before issuing a credential; tmux's default plugin removals apply here too.
     const pluginArgs = claude ? [] : buildCodexPluginConfigArgs(codexPlugins ?? undefined);
     const mcpPreparation = await prepareMcpCapabilityLaunch({
@@ -149,7 +153,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       serverAllowlist: resolvedMcp.serverIds,
       ...(claude ? { claudeConfigPath: claudeStreamJsonMcpConfigPath(sessionRoot, id, generation) } : {}),
       duenoCredentialEnvVar: CLAUDE_STREAM_JSON_MCP_TOKEN_ENV_VAR,
-      ...(credentialStore ? { credentialStore } : {}),
+      ...(hub ? { credentialStore: preIssuedCredentialStore(hub.busCredential), duenoUrl: hub.duenoUrl } : credentialStore ? { credentialStore } : {}),
     });
     if (!mcpPreparation.credentialToken) {
       const error = new Error(`${label} ${claude ? 'stream-json' : 'app-server'} requires an authenticated Cadre MCP credential`);
@@ -180,7 +184,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         args: [...headroom.args, ...pluginArgs, ...mcpPreparation.prepared.codexArgs, ...promptArgs,
         ...(headroom.modelProvider ? ['-c', `model_provider=${JSON.stringify(headroom.modelProvider)}`] : [])] };
     }
-    const discovery = await mcpDiscovery({ url: buildAgentBusMcpUrl(sourceConfig), token: mcpPreparation.credentialToken });
+    const discovery = await mcpDiscovery({ url: hub?.duenoUrl || buildAgentBusMcpUrl(sourceConfig), token: mcpPreparation.credentialToken });
     const evidence = e2eEvidence || claudeStreamJsonBusE2eEvidence({
       cliVersion: await versionReader(binary),
     });
@@ -275,7 +279,9 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       const workDir = await normalizeSessionWorkDir(req.body?.workDir);
       if (!workDir) return reply.code(400).send({ error: `workDir is required for ${label} sessions` });
       // As on tmux, the spawner comes from the credential, and the observer returns its turns from the hook log.
-      const metadata = { ...req.body?.metadata, ...spawnerMetadata(req.duenoAuth?.principal, req.body?.metadata) };
+      const hub = fromHub(req);
+      const metadata = hub ? stripReservedCoordinatorMetadata(req.body?.metadata)
+        : { ...req.body?.metadata, ...spawnerMetadata(req.duenoAuth?.principal, req.body?.metadata) };
       // Resolve launch skills before starting so an unknown skill cannot orphan a process.
       const initialPrompt = composeLaunchUserPrompt({ skillIds: req.body?.skills,
         initialPrompt: metadata.spawnedBy && req.body?.initialPrompt ? `${req.body.initialPrompt}\n\n${SPAWN_RESULT_NOTE}` : req.body?.initialPrompt });
@@ -302,7 +308,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       selectedMcpServerIds = resolvedMcp.serverIds;
       const thinkingLevel = text(req.body?.thinkingLevel);
       const codexPlugins = claude ? null : req.body?.codexPlugins;
-      const { preflight, ...launch } = await prepareAttempt({ id, workDir, body: req.body || {}, resolvedMcp, permissionMode, codexPlugins });
+      const { preflight, ...launch } = await prepareAttempt({ id, workDir, body: req.body || {}, resolvedMcp, permissionMode, codexPlugins, hub });
       let session = await service.start({
         ...launch, metadata, sessionId: id, displayName: text(req.body?.displayName), workDir, model, thinkingLevel, codexPlugins, permissionMode,
         mcpCapabilities: sanitizedMcpSnapshot(resolvedMcp, preflight),
@@ -327,7 +333,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   app.get(`/api/${kind}/sessions/:id`, async (req, reply) => {
     try { return project(requireSession(req.params.id)); } catch (error) { return errorReply(reply, error); }
   });
-  function resume(session, { waitForBus = false, prompt = null } = {}) {
+  function resume(session, { waitForBus = false, prompt = null, hub = null } = {}) {
     let generation = 0;
     const serverIds = session.mcpCapabilities?.serverIds || [];
     return service.resume(session.id, {
@@ -337,7 +343,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
         for (let tries = 1; ; tries += 1) {
           try {
             const { preflight: _preflight, ...launch } = await prepareAttempt({
-              id: current.id, workDir: current.workDir, generation, resolvedMcp: { serverIds }, permissionMode: current.permissionMode, codexPlugins: current.codexPlugins,
+              id: current.id, workDir: current.workDir, generation, resolvedMcp: { serverIds }, permissionMode: current.permissionMode, codexPlugins: current.codexPlugins, hub,
             });
             return launch;
           } catch (error) {
@@ -357,7 +363,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   // Reattach an interrupted session (e.g. after a Fleet restart) to its provider conversation.
   app.post(`/api/${kind}/sessions/:id/resume`, async (req, reply) => {
     try {
-      return project(await resume(requireSession(req.params.id)));
+      return project(await resume(requireSession(req.params.id), { hub: fromHub(req) }));
     } catch (error) {
       const session = service.get(req.params.id);
       // Offer Start Fresh only while the session is still down (not after a concurrent resume won).
@@ -471,7 +477,8 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   // Claude sessions a Cadre restart interrupted resume on their conversation. A turn the restart cut off is reported
   // to the agent first, unless its Stop already reached the hook log: that Stop is the turn's one spawn result.
   let closing = false;
-  for (const session of claude ? service.list() : []) {
+  // A worker has no token to resume with until its hub mints one, so its sessions wait for the hub's resume.
+  for (const session of claude && config.role !== 'worker' ? service.list() : []) {
     const attempt = session.attempts.at(-1);
     const cut = session.turns.at(-1);
     if (attempt?.endReason !== 'fleet_restart' || !project(session).canResume) continue;

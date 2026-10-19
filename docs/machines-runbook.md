@@ -8,8 +8,13 @@ Tailscale IPv4 address (`tailscale ip -4` on the worker), `<name>` the name you 
 
 ## What works today (slices 1-2)
 
-- `spawn_session({provider: 'claude', machine: '<name>', workDir: '/home/<user>/projects/<repo>'})`.
-  Claude in tmux only. `workDir` is a path on the worker.
+- `spawn_session({provider, machine: '<name>', workDir: '/home/<user>/projects/<repo>'})` for Claude
+  (tmux or structured), Codex and Pi. `workDir` is a path on the worker. The worker runs what its
+  own `/api/agents/providers` lists (its provider settings and logins); anything else fails with
+  `machine_provider_unsupported`. Structured runtimes and nono follow the worker's own
+  `CADRE_STRUCTURED_AUTOMATED_SPAWNS`, `CLAUDE_STREAM_JSON_ENABLED`, `CODEX_APP_SERVER_ENABLED` and
+  `CADRE_SANDBOX`, as on the hub. `isolatedWorktree` worktrees are made and removed on the worker.
+  DeepSeek and `task_spawn` stay on the hub. macOS workers are not supported yet.
 - The child gets only the `dueno` MCP and calls the hub directly over HTTPS with a token the hub
   minted. It can `room_send`, `agent_dm` and read rooms; room messages to it are delivered.
 - The hub runs one supervisor per worker (only where side-effect loops run, so on 4310). It polls
@@ -136,5 +141,5 @@ shell win.
 
 Each machine deploys itself with `bash scripts/server.sh restart` (inside the distro for WSL). A
 worker on another protocol keeps its queued messages but rejects spawns until it is updated; its
-restart says hello and unblocks it. Slice 2 is protocol 2, so a slice 1 worker shows `blocked` until
+restart says hello and unblocks it. Slice 7 is protocol 3, so an older worker shows `blocked` until
 it is redeployed.
