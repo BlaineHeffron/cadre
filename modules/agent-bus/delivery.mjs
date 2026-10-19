@@ -24,6 +24,8 @@ function canDeliverNow(kind, state) {
 }
 
 function holdReasonFor(session) {
+  // The hub answers for a session on an unreachable or blocked machine from its cached row.
+  if (session?.machine?.status && session.machine.status !== 'live') return 'machine_offline';
   const status = session?.state?.status;
   const execution = session?.state?.execution;
   if (execution === 'working' || execution === 'thinking') return 'target_busy';

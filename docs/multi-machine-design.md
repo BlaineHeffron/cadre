@@ -408,8 +408,9 @@ Not chosen: trusting `Tailscale-User-Login` behind Serve (Serve only fronts the 
     get 503 `{code:'machine_unreachable'|'machine_protocol_mismatch', transient:true}`.
     - Adapters copy `payload` onto the error (`adapters.mjs:83-87`), so
       `isTransientDeliveryError` (`delivery.mjs:4-5`) keeps the delivery `queued`.
-    - The hub sets `holdReason: machine_offline` on the held delivery through the existing `queued` +
-      `holdReason` path (field names to confirm in slice 2). No new queue.
+    - The held delivery gets `holdReason: machine_offline` through the existing `queued` +
+      `holdReason` path. No new queue. As built (slice 2), the detail route answers from the cached
+      row with `machine.status` while the machine is away, and the delivery hold reads that.
     - `resolveAgentSession` treats only 404 as ended (`participants.mjs:146-165`), so rooms stay
       intact.
     - A 4xx here would fail the delivery for good (`delivery.mjs:125-133`). A laptop that slept
@@ -802,3 +803,36 @@ nono's Landlock can work.
   - Slice 1 shrinks from about 600 to about 550 lines; slice 2 grows to L; slice 3 shrinks to S.
 - **2026-10-18 operator, slice 1 approval:** block on protocol only. A commit mismatch shows a
   warning (former open question 7), so a hub deploy does not block workers until they restart.
+- **Slice 2 as built (implementer):**
+  - **Event stream is a cursor poll.** `GET /api/machine/events?afterSequence=` returns
+    `{sequence, events}`; the hub polls it every 5 s and `connected` means the last poll succeeded.
+    The worker makes `session` events by diffing its session list (status only) on each read, with a
+    persisted sequence and a 1000-event log. A cursor the log no longer covers gets a `snapshot` of
+    every row in the same response, so there is no separate snapshot call; the hub drops a live
+    session the snapshot omits. **Deferred, explicitly:** a reconnect replays each session's net
+    status change and its removal, not the intermediate transitions, because events are made at read
+    time. Slice 3 must append hook events to the worker's log when they are recorded (not by diffing),
+    so the hub can replay them in order.
+  - **Hello.** The hub's tailnet listener also serves `GET /machine/descriptor` and
+    `POST /machine/hello`. The worker checks only the hub's machine id before its hello: the hub
+    checks the protocol, so a mismatched worker shows `blocked` instead of staying silent. Wake is a
+    30 s tick that arrives over twice late; a network change is a change in the non-internal
+    address set.
+  - **Phases.** `offline` means the hub host has no non-internal network address: the supervisor
+    rechecks every second without growing the backoff and keeps a live connection. `blocked`
+    (descriptor id mismatch, protocol mismatch, any 4xx) never retries on its own; a hello does.
+    A supervisor starts at hub boot for every stored machine, or on the first successful contact
+    with a newly added one.
+  - **Protocol mismatch** is detected from the descriptor. Create answers 426; input, clear,
+    startup-input and resume answer 503 `transient`. `MACHINE_PROTOCOL` is 2.
+  - **Resume.** The hub checks that the worker reports the session ended before it rotates the
+    token, so resuming a running session never revokes its live token. An ended session that the
+    worker can resume stays in the remote index; only an unknown one is dropped. Accepted gap: the
+    rotation revokes the old token before the worker call, so if that call fails, the ended session
+    has no usable token until the next resume mints one.
+  - **Forget.** The CLI cannot revoke session tokens: the hub process owns the bus credential state.
+    A hub sweep every 30 s, independent of the supervisor's phase (blocked machines have no timer),
+    drops a forgotten machine's sessions and revokes their tokens; a request for one of them does it
+    at once.
+  - **Found for slice 4:** a permission answer through the hub reaches the worker as `hub-peer`,
+    which `permissionAuthorityForRequest` rejects (`permission_authority_required`).

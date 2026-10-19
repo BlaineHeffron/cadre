@@ -1,5 +1,6 @@
-// Multi-machine slice 1: a hub and a worker in this process on loopback ports, real HTTP between them,
-// a real tmux server (private socket) running a stand-in claude binary on the worker side.
+// Multi-machine slices 1 and 2: a hub and a worker in this process on loopback ports, real HTTP between them,
+// a real tmux server (private socket) running a stand-in claude binary on the worker side. Supervisor and
+// wake timers are fake, so backoff runs only when a test fires it; jitter is fixed at the midpoint.
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -43,6 +44,16 @@ const { claudeSessionsPlugin } = await import('../modules/sessions/claude-sessio
 const { LOG_REDACT, MACHINE_PROTOCOL, machinesPlugin, machineState } = await import('../modules/machines/index.mjs');
 const { mcpClientConfigPath, prepareAgentBusCredentialLaunch } = await import('../modules/integrations/mcp-launch-preflight.mjs');
 const { runtimeStatePath } = await import('../modules/ops/runtime-state.mjs');
+const { enqueueAgentSessionCommand, routeRemoteSessionCommands } = await import('../modules/sessions/index.mjs');
+
+function fakeTimers() {
+  const pending = new Set();
+  return { pending, set: (fn, ms) => { const timer = { fn, ms }; pending.add(timer); return timer; }, clear: (timer) => pending.delete(timer),
+    async fire() { const due = [...pending]; pending.clear(); for (const timer of due) await timer.fn(); return due.map((timer) => timer.ms); } };
+}
+const hubTimers = fakeTimers();
+const workerTimers = fakeTimers();
+let online = true; let skew = 0;
 
 const logs = [];
 const logger = () => ({ level: 'trace', redact: LOG_REDACT, stream: new Writable({ write(chunk, _enc, done) { logs.push(String(chunk)); done(); } }) });
@@ -58,7 +69,7 @@ let hub; let tailnet; let hubMcpUrl; let worker; let workerPort = 0; let workerU
 async function startWorker({ protocol = MACHINE_PROTOCOL, store = workerStore, sessions = true, port = workerPort } = {}) {
   const app = Fastify({ logger: logger() });
   await app.register(authPlugin, { workerMachines: store });
-  await app.register(machinesPlugin, { role: 'worker', store, protocol });
+  await app.register(machinesPlugin, { role: 'worker', store, protocol, timers: workerTimers, now: () => Date.now() + skew });
   await app.register(agentProviderPreferencesPlugin);
   if (sessions) await app.register(claudeSessionsPlugin, { wsManager: { broadcast() {}, onChannel() {} } });
   await app.listen({ host: '127.0.0.1', port });
@@ -82,6 +93,7 @@ const cli = (dir, args, env = {}) => execFileAsync(process.execPath, ['scripts/c
   .then(({ stdout }) => ({ ok: true, out: stdout.trim() }), (error) => ({ ok: false, out: `${error.stdout}${error.stderr}` }));
 const pair = () => cli(workerDir, ['pair'], { CADRE_ROLE: 'worker', HOST: '127.0.0.1', PORT: String(workerPort) }).then(({ out }) => { secrets.add(out.split('.').at(-1)); return out; });
 const addMachine = (name, link) => cli(hubDir, ['machine', 'add', name, link], { CADRE_HUB_MCP_URL: hubMcpUrl });
+const pane = async (id) => (await execFileAsync('/usr/bin/tmux', ['-L', tmuxSocket, 'capture-pane', '-p', '-J', '-S', '-', '-t', `claude-${id}`])).stdout;
 async function until(check, label) {
   for (let i = 0; i < 200; i += 1) { const value = await check(); if (value) return value; await new Promise((r) => setTimeout(r, 50)); }
   assert.fail(`timed out waiting for ${label}`);
@@ -89,12 +101,13 @@ async function until(check, label) {
 
 before(async () => {
   hub = await createAgentBusHarness({ authToken: TOKEN, pollMs: 50, credentialStore: busStore, logger: logger(), beforeReady: async (app) => {
-    await app.register(machinesPlugin, { role: 'hub', store: hubStore, credentialStore: busStore });
+    await app.register(machinesPlugin, { role: 'hub', store: hubStore, credentialStore: busStore, supervise: true, timers: hubTimers,
+      random: () => 0.5, online: () => online, routeCommands: routeRemoteSessionCommands });
     await app.register(agentInterfacePlugin);
   } });
   const requestImpl = buildInProcessFastifyRequest({ app: hub.app, buildHeaders: () => buildInternalBypassHeaders() });
   const serverFactory = buildInProcessAgentBusMcpServer({ requestImpl, monitorMcp: buildMonitorMcpServer({ requestImpl }), credentialStore: busStore });
-  tailnet = startAgentBusMcpHttpServer({ host: '127.0.0.1', port: 0, credentialStore: busStore, serverFactory, requireCredential: true, log: { info() {}, error() {} } });
+  tailnet = startAgentBusMcpHttpServer({ host: '127.0.0.1', port: 0, credentialStore: busStore, serverFactory, requireCredential: true, machineRoutes: hub.app.machineRoutes, log: { info() {}, error() {} } });
   await once(tailnet, 'listening');
   hubMcpUrl = `http://127.0.0.1:${tailnet.address().port}/mcp`;
   worker = await startWorker();
@@ -249,16 +262,15 @@ describe('multi-machine slice 1', () => {
     assert.equal(posted.statusCode, 200, posted.body);
     const messageId = posted.json().message.id;
     const delivery = () => hub.store.getDeliveryForMessage(messageId);
-    await until(() => delivery()?.holdReason === 'backoff' && /machine_unreachable/.test(delivery().error), 'an unreachable hold');
+    await until(() => delivery()?.holdReason === 'machine_offline' && delivery().holdDetail === 'machine_unreachable', 'an unreachable hold');
     worker = await startWorker({ protocol: MACHINE_PROTOCOL + 1 });
-    await until(() => /protocol/.test(delivery()?.error || ''), 'a protocol-mismatch hold');
+    await until(() => delivery()?.holdDetail === 'machine_protocol_mismatch', 'a protocol-mismatch hold');
     assert.equal(delivery().status, 'queued');
     await restartWorker();
     await until(() => delivery()?.status === 'injected', 'injection');
-    const pane = async () => (await execFileAsync('/usr/bin/tmux', ['-L', tmuxSocket, 'capture-pane', '-p', '-J', '-S', '-', '-t', `claude-${remoteId}`])).stdout;
-    await until(async () => (await pane()).includes(`id=${messageId}`), 'the envelope in the worker pane');
+    await until(async () => (await pane(remoteId)).includes(`id=${messageId}`), 'the envelope in the worker pane');
     await new Promise((resolve) => setTimeout(resolve, 500));
-    assert.equal((await pane()).split(`id=${messageId}`).length - 1, 1, 'injected exactly once');
+    assert.equal((await pane(remoteId)).split(`id=${messageId}`).length - 1, 1, 'injected exactly once');
   });
 
   it('revokes on the next call on both sides; forget while the worker is down completes on reconnect', async () => {
@@ -290,12 +302,156 @@ describe('multi-machine slice 1', () => {
     assert.match(result.stderr, /requires HOST to be this node's Tailscale IP \(100\.64\.0\.7\), got 127\.0\.0\.1/);
   });
 
-  it('never returns or logs a pairing code, machine credential or bus token', () => {
-    assert.ok(logs.length > 0);
-    const logText = logs.join('');
-    for (const secret of secrets) {
-      assert.ok(!logText.includes(secret), 'secret in logs');
-      assert.ok(!responses.some((text) => text.includes(secret)), 'secret in a response');
-    }
+});
+
+describe('multi-machine slice 2', () => {
+  let a; let b; let tokenA; let tokenB; let delivery;
+  const create = (displayName) => hub.app.inject({ method: 'POST', url: '/api/claude/sessions', headers: hub.authHeaders, payload: { machine: 'w5', workDir: root, displayName } });
+  const tokenOf = async (id) => JSON.parse(await readFile(mcpClientConfigPath('claude', id), 'utf8')).mcpServers.dueno.headers.Authorization.slice('Bearer '.length);
+  const listed = async (id) => (await hub.app.inject({ url: '/api/claude/sessions', headers: hub.authHeaders })).json().sessions.find((row) => row.id === id);
+  const status = async () => (await listed(a))?.machine.status;
+  const events = async (after) => (await call(`${workerUrl}/api/machine/events?afterSequence=${after}`, { token: hubStore.read().machines.w5.credential })).json;
+  // The 30 s forget sweep always has a timer pending; these assertions are about the supervisor's.
+  const pending = () => [...hubTimers.pending].map((timer) => timer.ms).filter((ms) => ms !== 30_000);
+  const fireHub = async () => (await hubTimers.fire()).filter((ms) => ms !== 30_000);
+  const authenticates = async (token) => (await busStore.authenticate(token)).ok;
+
+  it('a spawn starts the supervisor; events fill the rows and replay from any cursor; in-process commands reach the remote pane', async () => {
+    assert.equal((await addMachine('w5', await pair())).ok, true);
+    a = (await create('a')).json().id;
+    b = (await create('b')).json().id;
+    [tokenA, tokenB] = [await tokenOf(a), await tokenOf(b)];
+    secrets.add(tokenA).add(tokenB);
+    await until(async () => { await fireHub(); return (await listed(a))?.state && (await listed(b))?.state && await status() === 'live'; }, 'rows filled from events');
+    assert.deepEqual((await listed(a)).machine, { id: 'w5', status: 'live' });
+    assert.deepEqual(pending(), [5000]);
+    const all = await events(0);
+    assert.ok(all.events.every((event, index) => event.sequence === index + 1), 'a contiguous, persisted sequence');
+    assert.deepEqual((await events(0)).events.slice(0, all.events.length), all.events, 'a cursor replays the same events');
+    assert.deepEqual((await events(hubStore.read().machines.w5.cursor)).events, [], 'the hub cursor has seen every event');
+    hubStore.update((state) => {
+      state.machines.w5.cursor = 1e9;
+      state.sessions['claude:0badc0de'] = { machine: 'w5', kind: 'claude', sessionId: '0badc0de', status: 'live' };
+    });
+    await fireHub();
+    assert.equal(hubStore.read().sessions['claude:0badc0de'], undefined, 'a snapshot drops a session the worker no longer has');
+    assert.ok(hubStore.read().sessions[`claude:${a}`] && hubStore.read().machines.w5.cursor < 1e9);
+    await enqueueAgentSessionCommand('claude', b, { text: 'from the command queue', enter: true, source: 'test' });
+    await until(async () => (await pane(b)).includes('from the command queue'), 'an in-process command in the remote pane');
   });
+
+  it('while the worker is away: rows show unreachable with since and the last state, spawn fails closed, deliveries hold, backoff grows to 5 min', async () => {
+    const before = (await listed(a)).state;
+    await worker.close();
+    assert.deepEqual(await fireHub(), [5000]);
+    const row = await listed(a);
+    assert.deepEqual([row.machine.status, row.state], ['unreachable', before]);
+    assert.ok(row.machine.since <= Date.now());
+    const spawn = await create('c');
+    assert.deepEqual([spawn.statusCode, spawn.json().code], [503, 'machine_unreachable']);
+    const thread = (await hub.app.inject({ method: 'POST', url: '/api/agent-bus/threads', headers: hub.authHeaders,
+      payload: { title: 'sleepy laptop', participants: [{ kind: 'claude', sessionId: 'claude-1' }, { kind: 'claude', sessionId: a }] } })).json().thread;
+    const posted = await hub.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: hub.authHeaders,
+      payload: { threadId: thread.id, from: { kind: 'claude', sessionId: 'claude-1' }, body: 'while you slept' } });
+    delivery = () => hub.store.getDeliveryForMessage(posted.json().message.id);
+    await until(() => delivery()?.holdReason === 'machine_offline', 'a machine_offline hold');
+    const delays = [];
+    for (let i = 0; i < 10; i += 1) delays.push(...await fireHub());
+    assert.deepEqual(delays, [750, 1500, 3000, 6000, 12000, 24000, 48000, 96000, 192000, 225000], 'equal jitter at the midpoint, capped at 5 min');
+    assert.equal(delivery().status, 'queued');
+  });
+
+  it('the boot hello resets the 5 min backoff; the held delivery injects once and session tokens survive', async () => {
+    worker = await startWorker();
+    await until(async () => await status() === 'live', 'a reconnect on hello');
+    assert.deepEqual(pending(), [5000], 'the hello replaced the 5 min backoff');
+    await until(() => delivery()?.status === 'injected', 'the held delivery injected');
+    const messageId = delivery().messageId;
+    await until(async () => (await pane(a)).includes(`id=${messageId}`), 'the envelope in the pane');
+    assert.equal((await pane(a)).split(`id=${messageId}`).length - 1, 1, 'injected exactly once');
+    assert.equal(await authenticates(tokenA), true);
+  });
+
+  it('a protocol mismatch blocks with no retry until the upgraded worker says hello; a moved address blocks before any credential', async () => {
+    await restartWorker({ protocol: MACHINE_PROTOCOL + 1 });
+    await until(async () => await status() === 'blocked', 'blocked on protocol');
+    assert.deepEqual(pending(), [], 'blocked does not retry');
+    const spawn = await create('d');
+    assert.deepEqual([spawn.statusCode, spawn.json().code], [426, 'machine_protocol_mismatch']);
+    await restartWorker();
+    await until(async () => await status() === 'live', 'unblocked by the upgraded worker');
+
+    const seen = [];
+    const moved = http.createServer((req, res) => { seen.push([req.url, req.headers.authorization]); res.end(JSON.stringify({ machineId: 'another-machine', protocol: MACHINE_PROTOCOL })); }).listen(0, '127.0.0.1');
+    await once(moved, 'listening');
+    hubStore.update((state) => { state.machines.w5.url = `http://127.0.0.1:${moved.address().port}`; });
+    await fireHub();
+    moved.close();
+    assert.deepEqual([await status(), pending(), seen], ['blocked', [], [['/api/machine/descriptor', undefined]]]);
+    hubStore.update((state) => { state.machines.w5.url = workerUrl; });
+    const hello = `${new URL(hubMcpUrl).origin}/machine/hello`;
+    assert.equal((await call(hello, { method: 'POST', token: 'not-a-credential' })).status, 401);
+    assert.equal((await call(hello, { method: 'POST', token: workerStore.read().hub.credential })).status, 200);
+    await until(async () => await status() === 'live', 'unblocked by a hello');
+  });
+
+  it('a hub without network waits without backing off; a late tick after a sleep says hello; the cursor replays what was missed', async () => {
+    await worker.close();
+    await fireHub();
+    online = false;
+    worker = await startWorker();
+    await until(() => pending()[0] === 1000, 'offline on the boot hello');
+    const cursor = hubStore.read().machines.w5.cursor;
+    const removed = await call(`${workerUrl}/api/claude/sessions/${b}`, { method: 'DELETE', token: hubStore.read().machines.w5.credential });
+    assert.equal(removed.status, 200, removed.text);
+    assert.deepEqual([await fireHub(), pending(), await status()], [[1000], [1000], 'unreachable'], 'offline does not grow the backoff');
+    online = true;
+    skew = 10 * 60_000;
+    await workerTimers.fire();
+    skew = 0;
+    await until(async () => await status() === 'live', 'reconnected by the wake hello');
+    await until(async () => { await fireHub(); return !hubStore.read().sessions[`claude:${b}`]; }, 'the removal replayed');
+    const missed = (await events(cursor)).events;
+    assert.ok(missed.every((event, index) => event.sequence === cursor + index + 1), 'no gap after the cursor');
+    assert.deepEqual(missed.filter((event) => event.key === `claude:${b}`).map((event) => event.row), [null], 'the removal, once');
+    assert.equal(await authenticates(tokenB), false, 'a session gone from the worker loses its token');
+  });
+
+  it('resume rotates the token on the hub, and refuses a running session before rotating', async () => {
+    const resume = () => hub.app.inject({ method: 'POST', url: `/api/claude/sessions/${a}/resume`, headers: hub.authHeaders });
+    const running = await resume();
+    assert.deepEqual([running.statusCode, running.json().code], [409, 'session_already_running']);
+    assert.equal(await authenticates(tokenA), true);
+    await execFileAsync('/usr/bin/tmux', ['-L', tmuxSocket, 'kill-session', '-t', `claude-${a}`]);
+    let resumed;
+    await until(async () => (resumed = await resume()).statusCode !== 409, 'the worker reports the session ended');
+    assert.equal(resumed.statusCode, 200, resumed.body);
+    const rotated = await tokenOf(a);
+    secrets.add(rotated);
+    assert.deepEqual([await authenticates(tokenA), await authenticates(rotated)], [false, true]);
+    tokenA = rotated;
+  });
+
+  it('forget of a blocked machine revokes its session tokens on the next sweep, with no session request', async () => {
+    await restartWorker({ protocol: MACHINE_PROTOCOL + 1 });
+    await until(async () => await status() === 'blocked', 'blocked on protocol');
+    assert.match((await cli(hubDir, ['machine', 'forget', 'w5'])).out, /Pending on unreachable workers: w5/);
+    assert.equal(await authenticates(tokenA), true, 'nothing on the hub has run yet');
+    assert.deepEqual([...hubTimers.pending].map((timer) => timer.ms), [30_000], 'blocked: only the sweep is pending');
+    await hubTimers.fire();
+    assert.equal(hubStore.read().sessions[`claude:${a}`], undefined);
+    assert.equal(await authenticates(tokenA), false);
+    assert.equal(await listed(a), undefined);
+    await restartWorker();
+    assert.match((await cli(hubDir, ['machine', 'forget', 'w5'])).out, /Revoked on both sides/);
+  });
+});
+
+it('never returns or logs a pairing code, machine credential or bus token', () => {
+  assert.ok(logs.length > 0);
+  const logText = logs.join('');
+  for (const secret of secrets) {
+    assert.ok(!logText.includes(secret), 'secret in logs');
+    assert.ok(!responses.some((text) => text.includes(secret)), 'secret in a response');
+  }
 });
