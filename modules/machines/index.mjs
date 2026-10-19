@@ -8,7 +8,9 @@ import { privateAllowedHosts } from '../fleet/registry.mjs';
 import { readEnv } from '../platform/cadre-env.mjs';
 import { deriveSpawnTrust, operatorResumeLoopRegistrationPolicy, SPAWN_RESULT_NOTE, storedCoordinatorPolicy } from '../agent-bus/coordinator-policy.mjs';
 import { buildHookSessionPaths, readHookEventsSince, registerHookSessionRegistry } from '../agent/hook-events.mjs';
-import { buildInternalBypassHeaders } from '../platform/auth.mjs';
+import { buildInternalBypassHeaders, HUB_OPERATOR_HEADER, permissionAuthorityForRequest } from '../platform/auth.mjs';
+import { queueSessionInteraction } from '../platform/push.mjs';
+import { resolveBinding } from '../telegram/binding.mjs';
 import { cleanupAgentBusCredentialLaunch, prepareAgentBusCredentialLaunch } from '../integrations/mcp-launch-preflight.mjs';
 
 // Bump when the hub-to-worker contract breaks. A commit mismatch only warns.
@@ -26,6 +28,10 @@ const POLL_MS = 5000;
 const SWEEP_MS = 30_000;
 const EVENT_LOG_SIZE = 1000;
 const BLOCKING = new Set(['machine_blocked', 'machine_protocol_mismatch']);
+const QUEUED = new Set(['permission', 'confirmation', 'selection']);
+// A row's status, plus a prompt the hub files in its Command Queue.
+const eventRow = ({ state }) => ({ status: state?.status || 'unknown', ...(QUEUED.has(state?.interaction?.kind) && state.interaction.fingerprint
+  ? { interaction: (({ kind, detail, options, fingerprint }) => ({ kind, detail, options, fingerprint }))(state.interaction) } : {}) });
 const realTimers = { set: (fn, ms) => setTimeout(fn, ms).unref(), clear: (timer) => clearTimeout(timer) };
 const addresses = () => Object.values(networkInterfaces()).flat().filter((nic) => !nic.internal).map((nic) => nic.address).sort().join();
 
@@ -167,10 +173,22 @@ export function assertWorkerHost(host) {
   if (!ips.includes(String(host))) throw new Error(`CADRE_ROLE=worker requires HOST to be this node's Tailscale IP (${ips.join(', ') || 'tailscale unavailable'}), got ${host}`);
 }
 
+// The Telegram relay keeps a remote session's cursor on the hub. The binding names the worker's transcript by inode, and each
+// tick pulls what follows the hub's offset through the proxied transcript route; while the worker is away the pull throws,
+// so nothing is sent and the offset stays.
+export const relayBinding = (request) => async (session, options = {}) => {
+  if (!session.machine) return resolveBinding(session, options);
+  const prefix = `machine:${session.runtime}:${session.id}:`;
+  const previous = options.previous?.transcript_path?.startsWith(prefix) ? options.previous : null;
+  const ino = Number(previous?.transcript_path.slice(prefix.length)) || 0;
+  const delta = await request(`/api/${session.runtime}/sessions/${session.id}/transcript?cursor=${Number(previous?.offset) || 0}&ino=${ino}`);
+  return { path: `${prefix}${delta.ino}`, anchor: 'machine', ino: delta.ino, startOffset: 0, reused: delta.ino === ino && Boolean(previous), delta };
+};
+
 const SESSION_ROUTE = /^\/api\/([a-z]+)\/sessions(?:\/:id(.*))?$/;
 
 export async function machinesPlugin(app, { role = 'hub', store, credentialStore, protocol = MACHINE_PROTOCOL, now = () => Date.now(),
-  supervise = false, timers = realTimers, random = Math.random, online = () => addresses() !== '', routeCommands = null, wakeCheckMs = 30_000 }) {
+  supervise = false, timers = realTimers, random = Math.random, online = () => addresses() !== '', routeCommands = null, wakeCheckMs = 30_000, wsManager }) {
   app.get('/api/machine/descriptor', async () => descriptor(store, { protocol }));
   if (role === 'worker') {
     // Hello on boot, after a sleep (a late tick) and on a network change, so the hub stops backing off.
@@ -203,7 +221,7 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
       const rows = list.statusCode === 200 && !list.json().stale ? list.json().sessions : null;
       return store.update((state) => {
         const log = state.events ||= { sequence: 0, rows: {}, items: [] };
-        const current = rows && Object.fromEntries(rows.map((row) => [`claude:${row.id}`, { status: row.state?.status || 'unknown' }]));
+        const current = rows && Object.fromEntries(rows.map((row) => [`claude:${row.id}`, eventRow(row)]));
         for (const key of current ? new Set([...Object.keys(log.rows), ...Object.keys(current)]) : []) {
           if (JSON.stringify(current[key] || null) === JSON.stringify(log.rows[key] || null)) continue;
           log.items.push({ sequence: ++log.sequence, type: 'session', key, row: current[key] || null });
@@ -293,23 +311,33 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     supervisors.delete(name);
     for (const entry of Object.values(store.read().sessions || {})) if (entry.machine === name) await dropSession(entry.kind, entry.sessionId);
   }
+  // A remote prompt takes the local path into the hub's Command Queue: one item per fingerprint, and a changed or gone prompt closes it.
+  async function fileInteraction({ kind, sessionId, displayName, state }) {
+    const { closeStaleSessionQueueItems } = await import('../integrations/command-center-ai.mjs');
+    await closeStaleSessionQueueItems(kind, sessionId, state?.interaction?.fingerprint || null, { wsManager });
+    await queueSessionInteraction({ id: kind, displayName: 'Claude' }, { sessionId, sessionName: displayName || sessionId, interaction: state?.interaction }, { wsManager });
+  }
   async function apply(name, { sequence = 0, events = [], snapshot }) {
     const removed = [];
+    const changed = [];
     store.update((state) => {
       // A snapshot lists every session the worker still has; a live entry it omits is gone.
       for (const entry of snapshot ? Object.values(state.sessions || {}) : []) {
         if (entry.machine !== name || entry.status !== 'live') continue;
-        if (snapshot[`${entry.kind}:${entry.sessionId}`]) entry.state = snapshot[`${entry.kind}:${entry.sessionId}`]; else removed.push(entry);
+        if (snapshot[`${entry.kind}:${entry.sessionId}`]) changed.push(Object.assign(entry, { state: snapshot[`${entry.kind}:${entry.sessionId}`] })); else removed.push(entry);
       }
       // Unknown event types are skipped and still advance the cursor.
       for (const event of events) {
         const entry = event.type === 'session' && state.sessions?.[event.key];
         if (entry?.machine !== name) continue;
-        if (event.row) entry.state = event.row; else removed.push(entry);
+        if (event.row) changed.push(Object.assign(entry, { state: event.row })); else removed.push(entry);
       }
       if (state.machines?.[name]) state.machines[name].cursor = sequence;
     });
     for (const entry of removed) await dropSession(entry.kind, entry.sessionId);
+    for (const entry of [...changed, ...removed.map((gone) => ({ ...gone, state: null }))]) {
+      await fileInteraction(entry).catch((error) => app.log.warn({ err: error.message }, 'Remote session prompt not filed'));
+    }
   }
   // Remote returnResults children: the hub mirrors their prompt and stop events into a local hook log that the observer
   // reads as it reads a local child's. Each mirrored line carries the worker's cursor, so a hub restart or a reconnect
@@ -407,18 +435,22 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     if (supervise) { sup(row.id).attempt = 0; void connect(row.id); }
     return answer(200, { ok: true });
   });
-  routeCommands?.((kind, sessionId, input) => (store.read().sessions?.[`${kind}:${sessionId}`]
-    ? app.inject({ method: 'POST', url: `/api/${kind}/sessions/${sessionId}/input`, headers: buildInternalBypassHeaders(),
-      payload: { text: input.text, enter: input.enter, source: input.source } }).then((res) => {
+  routeCommands?.((kind, sessionId, { keys, text, enter, source, expectedRevision, expectedFingerprint, expectedInteractionKind }) => (store.read().sessions?.[`${kind}:${sessionId}`]
+    ? app.inject({ method: 'POST', url: `/api/${kind}/sessions/${sessionId}/${keys ? 'keys' : 'input'}`,
+      // An in-process interaction answer (a Command Queue answer) was checked as the operator's already, as it is for a local
+      // session, so it goes in with the operator bearer alone.
+      headers: expectedFingerprint ? { authorization: buildInternalBypassHeaders().authorization } : buildInternalBypassHeaders(),
+      payload: { ...(keys ? { keys: keys.join(' ') } : { text, enter, source }), expectedRevision, expectedFingerprint, expectedInteractionKind } }).then((res) => {
       if (res.statusCode >= 300) throw Object.assign(new Error(res.json().error || `input failed with HTTP ${res.statusCode}`), { payload: res.json() });
       return res.json();
     })
     : null));
 
-  async function send(row, method, url, body) {
+  async function send(row, method, url, body, operator = false) {
     const res = await fetch(`${row.url}${url}`, {
       method, signal: AbortSignal.timeout(30_000),
-      headers: { authorization: `Bearer ${row.credential}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+      headers: { authorization: `Bearer ${row.credential}`, ...(operator ? { [HUB_OPERATOR_HEADER]: '1' } : {}),
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     return { status: res.status, text: await res.text() };
@@ -487,7 +519,9 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
         loopRegistrationPolicy: operatorResumeLoopRegistrationPolicy(req.duenoAuth?.principal, entry.metadata) }))?.token || '';
       body = { busCredential: rotated };
     }
-    const result = peer.code ? null : await send(row, req.method, req.url, body).catch(() => null);
+    // The worker accepts a permission answer from the hub only when the hub's own caller holds that authority here.
+    const operator = (() => { try { return Boolean(permissionAuthorityForRequest(req)); } catch { return false; } })();
+    const result = peer.code ? null : await send(row, req.method, req.url, body, operator).catch(() => null);
     // Delete still proceeds while the worker is away: the token is revoked and the row dropped; tmux keeps running there.
     if (!result && deleting) {
       await dropSession(kind, req.params.id);
@@ -510,7 +544,7 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     if (!rows.length) return payload;
     const body = JSON.parse(payload);
     body.sessions = [...(body.sessions || []), ...rows.map(({ sessionId, machine, workDir, displayName, created, state }) => ({
-      id: sessionId, displayName, workDir, created, ...(state ? { state } : {}), machine: machineStatus(machine),
+      id: sessionId, displayName, workDir, created, tmuxSession: `${kind}-${sessionId}`, ...(state ? { state } : {}), machine: machineStatus(machine),
     }))];
     return JSON.stringify(body);
   });

@@ -41,7 +41,7 @@ import { buildMonitorMcpServer } from './modules/platform/monitor-mcp.mjs';
 import { startAgentBusMcpHttpServer } from './modules/agent-bus/mcp-http.mjs';
 import { getAgentBusCredentialStore } from './modules/agent-bus/mcp-auth.mjs';
 import { runtimeStatePath } from './modules/ops/runtime-state.mjs';
-import { assertWorkerHost, LOG_REDACT, machinesPlugin, machineState } from './modules/machines/index.mjs';
+import { assertWorkerHost, LOG_REDACT, machinesPlugin, machineState, relayBinding } from './modules/machines/index.mjs';
 import {
   buildInProcessAgentBusMcpServer,
   buildInProcessFastifyRequest,
@@ -138,7 +138,7 @@ await app.register(fastifyWebsocket);
 await app.register(authPlugin, isWorker ? { workerMachines: machines } : {});
 // The machine supervisors are the hub's one machine loop, gated by the side-effect switch like every other loop.
 await app.register(machinesPlugin, { role: config.role, store: machines, credentialStore: getAgentBusCredentialStore(),
-  supervise: !sideEffectLoopsSuppressed, routeCommands: routeRemoteSessionCommands });
+  supervise: !sideEffectLoopsSuppressed, routeCommands: routeRemoteSessionCommands, wsManager: { broadcast: (...args) => wsManager.broadcast(...args) } });
 await app.register(agentProviderPreferencesPlugin);
 
 // WebSocket manager (must be after websocket plugin)
@@ -393,6 +393,7 @@ async function listTelegramSessions() {
         cliSessionId: session.cliSessionId || '',
         busThreadId: busThread?.id || '',
         busThreadTitle: busThread?.title || '',
+        ...(session.machine ? { machine: session.machine } : {}),
       });
     }
   }
@@ -707,6 +708,7 @@ function buildTelegramRelayLoop() {
     sentStore: buildSentStore({ stateDir }),
     bindingStore: buildBindingStore({ stateDir }),
     listSessions: listTelegramSessions,
+    resolveBinding: relayBinding(internalRequest),
     logger: app.log,
   });
 }

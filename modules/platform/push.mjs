@@ -10,20 +10,24 @@ const PUSH_SERVICE_HOST = /^(fcm\.googleapis\.com|jmt17\.google\.com)$|(^|\.)(pu
 
 // Set by pushPlugin; session alert broadcasts call notifyPush after their 30s throttle.
 let notifier = null;
-export const notifyPush = async (provider, alert, { wsManager } = {}) => {
+// A permission, confirmation or selection prompt becomes one Command Queue item per fingerprint; the hub files remote ones too.
+export async function queueSessionInteraction(provider, alert, { wsManager } = {}) {
   const interaction = alert.interaction;
-  if (notifier && interaction?.fingerprint && ['permission', 'confirmation', 'selection'].includes(interaction.kind)) {
-    const { addHumanQueueItem } = await import('../integrations/command-center-ai.mjs');
-    await addHumanQueueItem({
-      title: `${provider.displayName}: ${alert.sessionName}`,
-      question: interaction.detail || alert.reason || 'Decision needed',
-      source: 'session_interaction', sessionKind: provider.id, sessionId: alert.sessionId, passThrough: true,
-      options: (interaction.options || []).filter((option) => option.key != null || option.index != null).map((option) => ({
-        id: String(option.key ?? option.index), label: option.label, value: String(option.key ?? option.index),
-      })),
-    }, { sessionInteraction: interaction, wsManager });
-    return;
-  }
+  if (!interaction?.fingerprint || !['permission', 'confirmation', 'selection'].includes(interaction.kind)) return false;
+  const { addHumanQueueItem } = await import('../integrations/command-center-ai.mjs');
+  await addHumanQueueItem({
+    title: `${provider.displayName}: ${alert.sessionName}`,
+    question: interaction.detail || alert.reason || 'Decision needed',
+    source: 'session_interaction', sessionKind: provider.id, sessionId: alert.sessionId, passThrough: true,
+    options: (interaction.options || []).filter((option) => option.key != null || option.index != null).map((option) => ({
+      id: String(option.key ?? option.index), label: option.label, value: String(option.key ?? option.index),
+    })),
+  }, { sessionInteraction: interaction, wsManager });
+  return true;
+}
+
+export const notifyPush = async (provider, alert, { wsManager } = {}) => {
+  if (notifier && await queueSessionInteraction(provider, alert, { wsManager })) return;
   return notifier?.({
   title: `${provider.displayName}: ${alert.sessionName}`,
   body: alert.interaction?.detail || alert.reason || 'Waiting for your next prompt',

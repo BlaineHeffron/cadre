@@ -20,7 +20,8 @@ const TOKEN = 'operator-token-for-machines';
 await mkdir(bin, { recursive: true });
 await mkdir(join(root, 'home'), { recursive: true });
 await writeFile(join(bin, 'tmux'), `#!/bin/sh\nexec /usr/bin/tmux -L '${tmuxSocket}' "$@"\n`);
-await writeFile(join(bin, 'claude'), "#!/bin/sh\nprintf 'Claude Code v2.1.296\\n────────────────────\\n❯ \\n────────────────────\\n  ⏵⏵ bypass permissions on\\n'\ncat >/dev/null\n");
+// In a workDir holding prompt.txt the stand-in shows that permission prompt first and waits for an answer.
+await writeFile(join(bin, 'claude'), "#!/bin/sh\n[ -f prompt.txt ] && cat prompt.txt && read answer && printf 'answered\\n'\nprintf 'Claude Code v2.1.296\\n────────────────────\\n❯ \\n────────────────────\\n  ⏵⏵ bypass permissions on\\n'\ncat >/dev/null\n");
 await chmod(join(bin, 'tmux'), 0o755);
 await chmod(join(bin, 'claude'), 0o755);
 delete process.env.CADRE_STATE_DIR;
@@ -46,6 +47,10 @@ const { mcpClientConfigPath, prepareAgentBusCredentialLaunch } = await import('.
 const { runtimeStatePath } = await import('../modules/ops/runtime-state.mjs');
 const { enqueueAgentSessionCommand, routeRemoteSessionCommands } = await import('../modules/sessions/index.mjs');
 const { buildHookSessionPaths, readHookEventsSince, recordHookPayload } = await import('../modules/agent/hook-events.mjs');
+const { commandCenterAIPlugin } = await import('../modules/integrations/command-center-ai.mjs');
+const { buildSentStore, TelegramRelayLoop } = await import('../modules/telegram/relay.mjs');
+const { buildBindingStore, claudeTranscriptPath } = await import('../modules/telegram/binding.mjs');
+const { relayBinding } = await import('../modules/machines/index.mjs');
 
 function fakeTimers() {
   const pending = new Set();
@@ -65,7 +70,7 @@ const workerDir = join(root, 'worker-state');
 const hubStore = machineState(join(hubDir, 'machines'));
 const workerStore = machineState(join(workerDir, 'machines'));
 const busStore = new AgentBusCredentialStore({ stateFile: join(root, 'hub-bus.json'), mode: 'issue_only', env: { APP_STATE_STORAGE: 'file', DATABASE_URL: '' } });
-let hub; let tailnet; let hubMcpUrl; let worker; let workerPort = 0; let workerUrl;
+let hub; let tailnet; let hubMcpUrl; let requestImpl; let worker; let workerPort = 0; let workerUrl;
 
 async function startWorker({ protocol = MACHINE_PROTOCOL, store = workerStore, sessions = true, port = workerPort } = {}) {
   const app = Fastify({ logger: logger() });
@@ -105,8 +110,12 @@ before(async () => {
     await app.register(machinesPlugin, { role: 'hub', store: hubStore, credentialStore: busStore, supervise: true, timers: hubTimers,
       random: () => 0.5, online: () => online, routeCommands: routeRemoteSessionCommands });
     await app.register(agentInterfacePlugin);
+    await app.register(commandCenterAIPlugin);
+    // The real hub has these local routes; the proxy hook answers for a remote id before they run.
+    app.get('/api/claude/sessions/:id/transcript', async (req, reply) => reply.code(404).send({}));
+    app.post('/api/claude/sessions/:id/keys', async (req, reply) => reply.code(404).send({}));
   } });
-  const requestImpl = buildInProcessFastifyRequest({ app: hub.app, buildHeaders: () => buildInternalBypassHeaders() });
+  requestImpl = buildInProcessFastifyRequest({ app: hub.app, buildHeaders: () => buildInternalBypassHeaders() });
   const serverFactory = buildInProcessAgentBusMcpServer({ requestImpl, monitorMcp: buildMonitorMcpServer({ requestImpl }), credentialStore: busStore });
   tailnet = startAgentBusMcpHttpServer({ host: '127.0.0.1', port: 0, credentialStore: busStore, serverFactory, requireCredential: true, machineRoutes: hub.app.machineRoutes, log: { info() {}, error() {} } });
   await once(tailnet, 'listening');
@@ -533,6 +542,84 @@ describe('multi-machine slice 3', () => {
     const read = await call(url, { token: hubStore.read().machines.w6.credential });
     assert.equal(read.status, 200);
     assert.deepEqual(read.json.events.map((event) => event.eventName).slice(0, 2), ['UserPromptSubmit', 'Stop']);
+  });
+});
+
+describe('multi-machine slice 4', () => {
+  const remoteRows = async () => (await hub.app.inject({ url: '/api/claude/sessions', headers: hub.authHeaders })).json().sessions.filter((row) => row.machine);
+  const live = () => until(async () => { await hubTimers.fire(); return (await remoteRows()).every((row) => row.machine.status === 'live'); }, 'w7 live');
+  const spawn = async (workDir) => (await hub.app.inject({ method: 'POST', url: '/api/claude/sessions', headers: hub.authHeaders, payload: { machine: 'w7', workDir } })).json().id;
+
+  it('relays a remote transcript from the hub cursor: each line once across a worker stop and restart', async () => {
+    assert.equal((await addMachine('w7', await pair())).ok, true);
+    const workDir = await mkdtemp(join(root, 'repo-'));
+    const id = await spawn(workDir);
+    const { cliSessionId } = (await hub.app.inject({ url: `/api/claude/sessions/${id}`, headers: hub.authHeaders })).json();
+    const transcript = claudeTranscriptPath(join(process.env.HOME, '.claude', 'projects'), workDir, cliSessionId);
+    await mkdir(join(transcript, '..'), { recursive: true });
+    const say = (text) => appendFile(transcript, `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } })}\n`);
+    const sent = [];
+    const stateDir = await mkdtemp(join(root, 'telegram-'));
+    const bindings = buildBindingStore({ stateDir });
+    const relay = new TelegramRelayLoop({ sender: { deliver: async ({ text }) => ({ msgId: sent.push(text), threadId: 1, topicKey: 'topic' }) },
+      sentStore: buildSentStore({ stateDir }), bindingStore: bindings, agentBusStatePaths: [], logger: {}, resolveBinding: relayBinding(requestImpl),
+      // The bridge's topic list: merged remote rows carry what it needs for a topic.
+      listSessions: async () => (await remoteRows()).filter((row) => row.id === id).map((row) => ({ ...row, runtime: 'claude' })) });
+    const [row] = await remoteRows().then((rows) => rows.filter((item) => item.id === id));
+    assert.deepEqual([row.tmuxSession, row.workDir], [`claude-${id}`, workDir]);
+
+    await say('line one');
+    await relay.step();
+    await worker.close();
+    await say('line two');
+    await relay.step();
+    assert.match(relay.lastError, /machine_unreachable|unreachable/);
+    const offset = bindings.get(id).offset;
+    worker = await startWorker();
+    await live();
+    await say('line three');
+    await relay.step();
+    await relay.step();
+    assert.equal(relay.lastError, null);
+    assert.ok(bindings.get(id).offset > offset, 'the cursor moves only after the worker answers');
+    assert.deepEqual(sent, ['line one', 'line two\n\nline three'], 'each line once, none lost');
+  });
+
+  it('files one queue item per remote prompt, refuses a non-operator answer and routes the operator answer to the worker', async () => {
+    const workDir = await mkdtemp(join(root, 'repo-'));
+    const fixture = await readFile(new URL('./fixtures/session-state/panes/claude-2-1-293-permission.pane', import.meta.url), 'utf8');
+    await writeFile(join(workDir, 'prompt.txt'), fixture.replace(/\x1b\[[0-9;]*m/g, ''));
+    const id = await spawn(workDir);
+    const items = async () => (await hub.app.inject({ url: '/api/command-center/work-queue?status=all', headers: hub.authHeaders })).json().items.filter((item) => item.sessionId === id);
+    await until(async () => { await hubTimers.fire(); return (await items()).length; }, 'a queue item for the remote prompt');
+    hubStore.update((state) => { state.machines.w7.cursor = 1e9; });
+    await hubTimers.fire();
+    await hubTimers.fire();
+    const [item, ...extra] = await items();
+    assert.deepEqual([extra, item.status, item.sessionKind], [[], 'open', 'claude'], 'a snapshot refiles the same prompt into the same item');
+
+    const keys = { keys: 'Enter', expectedFingerprint: item.sessionInteraction.fingerprint, expectedInteractionKind: item.sessionInteraction.kind };
+    const viaHub = await hub.app.inject({ method: 'POST', url: `/api/claude/sessions/${id}/keys`, headers: buildInternalBypassHeaders(), payload: keys });
+    assert.deepEqual([viaHub.statusCode, viaHub.json().code], [403, 'permission_authority_required'], 'a hub caller without operator authority');
+    const credential = hubStore.read().machines.w7.credential;
+    const direct = (token, flag) => fetch(`${workerUrl}/api/claude/sessions/${id}/keys`, { method: 'POST', body: JSON.stringify(keys),
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(flag ? { 'x-cadre-hub-operator': '1' } : {}) } }).then((res) => res.status);
+    assert.deepEqual([await direct(credential, false), await direct(TOKEN, true), await direct(workerStore.read().hub.credential, true)], [403, 401, 401],
+      'the worker credential without the hub flag, and the flag without the worker credential');
+    assert.equal((await pane(id)).includes('answered'), false);
+
+    const answered = await hub.app.inject({ method: 'POST', url: `/api/command-center/work-queue/${item.id}/answer`, headers: hub.authHeaders, payload: { optionId: item.options[0].id } });
+    assert.deepEqual([answered.statusCode, answered.json().status], [200, 'routed'], answered.body);
+    await until(async () => (await pane(id)).includes('answered'), 'the answer in the worker pane');
+  });
+
+  it('a credential with the wrong scope cannot read the transcript route', async () => {
+    const [{ id }] = await remoteRows();
+    const url = `${workerUrl}/api/claude/sessions/${id}/transcript?cursor=0`;
+    assert.equal((await call(url, { token: workerStore.read().hub.credential })).status, 403, 'bus:agent is not a worker credential');
+    assert.equal((await hub.app.inject({ url: `/api/claude/sessions/${id}/transcript?cursor=0`, headers: { authorization: `Bearer ${hubStore.read().machines.w7.credential}` } })).statusCode, 403,
+      'worker:operate cannot read through the hub');
+    assert.equal((await call(url, { token: hubStore.read().machines.w7.credential })).status, 200);
   });
 });
 
