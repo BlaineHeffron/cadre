@@ -2680,9 +2680,13 @@ async function sessionsPlugin(app, {
     // A worker resumes with the rotation token its hub minted and derives no authority itself.
     const hubPeer = req.duenoAuth?.principal?.type === 'hub-peer';
     try {
-      const result = await resumeSession(id, hubPeer
-        ? { busCredential: String(req.body?.busCredential || ''), duenoUrl: req.duenoAuth.mcpUrl || '' }
-        : { loopRegistrationPolicy: operatorResumeLoopRegistrationPolicy(req.duenoAuth?.principal, sessions.get(id)?.metadata) });
+      const result = await resumeSession(id, {
+        loopRegistrationPolicy: operatorResumeLoopRegistrationPolicy(
+          hubPeer ? null : req.duenoAuth?.principal,
+          sessions.get(id)?.metadata,
+        ),
+        ...(hubPeer ? { busCredential: String(req.body?.busCredential || ''), duenoUrl: req.duenoAuth.mcpUrl || '' } : {}),
+      });
       broadcastSessionList(wsManager);
       return result;
     } catch (err) {
