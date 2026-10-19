@@ -50,12 +50,14 @@ Tailscale IPv4 address (`tailscale ip -4` on the worker), `<name>` the name you 
    tmux, git and the Claude CLI, then log in to Claude on this machine. Provider logins never pass
    through the hub.
 2. Clone Cadre and install the service as on the hub, on the worker port:
-   `CADRE_FLEET_PORT=4320 bash scripts/install-fleet-service.sh`.
+   `CADRE_FLEET_PORT=4320 bash scripts/install-fleet-service.sh`. The dev clone can stay on `main`:
+   the live copy is created detached at `origin/main`.
 3. Add to the worker's live `.env` (systemd lets it override the unit's `HOST=127.0.0.1`):
 
    ```sh
    CADRE_ROLE=worker
    HOST=<worker-ip>
+   PORT=4320                      # same as the unit's; the CLI reads it from here
    CADRE_FLEET_PRIVATE_HOSTS_REF=CADRE_MACHINE_HOSTS
    CADRE_MACHINE_HOSTS=<hub>.<tailnet>.ts.net
    AUTH_TOKEN=...                 # gates this worker's own read-only UI
@@ -88,7 +90,9 @@ Native Windows is not a Cadre host. Run the worker inside a WSL2 distro (for exa
    `curl -fsSL https://tailscale.com/install.sh | sh` then `sudo tailscale up --hostname <name>`.
    The hub dials this node's own `100.x` address; the Windows host's Tailscale plays no part, and
    nothing is forwarded through Windows localhost.
-3. Follow the Linux worker steps inside the distro, with `HOST=<worker-ip>` of the WSL node.
+3. Follow the Linux worker steps inside the distro, with `HOST=<worker-ip>` of the WSL node. The
+   installer detects WSL and leaves out `ProtectKernelTunables`, `ProtectKernelModules` and
+   `ProtectControlGroups`, which WSL2's user systemd cannot apply (`status=218/CAPABILITIES`).
 4. Keep repos on the WSL ext4 disk (`/home/<user>/...`). `C:\...`, `\\wsl$\...`,
    `\\wsl.localhost\...` and `/mnt/<drive>/...` work dirs are rejected with
    `workdir_windows_path_unsupported`.
@@ -100,7 +104,9 @@ Native Windows is not a Cadre host. Run the worker inside a WSL2 distro (for exa
 
 ## Pair a worker
 
-Run the CLI from each instance's live checkout so it reads that instance's `.env` and state dir.
+Run each instance's own `scripts/cadre.mjs` (the live checkout's), from any directory. Like the service,
+it works in its checkout: it reads that checkout's `.env` and state dir, and values already set in the
+shell win.
 
 1. On the worker: `node scripts/cadre.mjs pair`. It prints a one-time link
    `http://<worker-ip>:4320/#<machine-id>.<code>`, valid for 5 minutes. Treat it like a password.
