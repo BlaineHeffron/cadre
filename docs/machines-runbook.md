@@ -57,13 +57,17 @@ Tailscale IPv4 address (`tailscale ip -4` on the worker), `<name>` the name you 
    ```sh
    CADRE_ROLE=worker
    HOST=<worker-ip>
-   PORT=4320                      # same as the unit's; the CLI reads it from here
+   # Same as the unit's; the CLI reads it from here.
+   PORT=4320
    CADRE_FLEET_PRIVATE_HOSTS_REF=CADRE_MACHINE_HOSTS
    CADRE_MACHINE_HOSTS=<hub>.<tailnet>.ts.net
-   AUTH_TOKEN=...                 # gates this worker's own read-only UI
-   INTERNAL_BYPASS_TOKEN=...      # distinct values, as on the hub
+   # Gates this worker's own read-only UI. The three secrets take distinct values, as on the hub.
+   AUTH_TOKEN=...
+   INTERNAL_BYPASS_TOKEN=...
    BROWSER_SESSION_SECRET=...
    ```
+
+   systemd reads this file too, and treats `#` as a comment only at the start of a line.
 
    Worker mode refuses to start unless `HOST` is one of this node's `tailscale ip` addresses, and
    refuses a Telegram bot token in `~/.claude/telegram/config.env`. It never binds `0.0.0.0` or a
