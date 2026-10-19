@@ -5,6 +5,8 @@ export function envEnabled(env, name) {
 }
 
 export function shouldSuppressSideEffectLoops({ env = process.env, port } = {}) {
+  // A worker owns no loops, bot or MCP listener, whatever the override says.
+  if (readEnv('CADRE_ROLE', env) === 'worker') return true;
   if (envEnabled(env, 'DUENO_ALLOW_SIDE_EFFECTS')) return false;
   if (envEnabled(env, 'DUENO_DISABLE_SIDE_EFFECTS') || envEnabled(env, 'DUENO_TEST_SERVER')) return true;
   return String(env.PORT || port || '') !== '4310';

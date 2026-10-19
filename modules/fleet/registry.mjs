@@ -88,7 +88,7 @@ function parseOrigin(raw, deploymentId) {
   };
 }
 
-function privateAllowedHosts(env, privateHostAllowedRef) {
+export function privateAllowedHosts(env, privateHostAllowedRef) {
   const ref = normalizeText(privateHostAllowedRef);
   if (!ref) return new Set();
   return new Set(

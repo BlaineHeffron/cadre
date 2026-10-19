@@ -175,6 +175,7 @@ export async function createAgentBusHarness({
   sessionDeliveryAuditStore = null,
   sessionDeleteTimeoutMs = undefined,
   beforeReady = async () => {},
+  logger = false,
   // Reuse a closed harness's directory to restart the agent bus over its persisted state.
   stateDir: reusedStateDir = null,
 } = {}) {
@@ -220,7 +221,7 @@ export async function createAgentBusHarness({
   const wsEvents = [];
   const store = new AgentBusStore({ stateDir });
 
-  const app = Fastify();
+  const app = Fastify({ logger });
   app.decorate('agentBusLifecycle', {});
   await app.register(authPlugin);
 

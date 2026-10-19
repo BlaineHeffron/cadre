@@ -14,7 +14,8 @@ set -euo pipefail
 
 SERVICE="dueno-fleet"
 ACTION="${1:-status}"
-HEALTH_URL="http://127.0.0.1:4310/api/health/ready"
+# A worker listens on its tailnet address and port: run with HOST=... PORT=... set.
+HEALTH_URL="http://${HOST:-127.0.0.1}:${PORT:-4310}/api/health/ready"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 

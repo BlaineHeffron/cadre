@@ -662,6 +662,7 @@ export function buildAgentBusMcpServer({
           kind, sessionId: session.id || session.sessionId,
           displayName: session.displayName || session.sessionName || session.name || '',
           state: session.state?.status || session.status || 'unknown',
+          ...(session.machine ? { machine: session.machine } : {}),
         })).filter((agent) => agent.sessionId);
         const { items, ...page } = paginate(agents.filter((agent) => !args.state || args.state === agent.state), args);
         const result = { agents: items, ...page };

@@ -468,19 +468,21 @@ export function buildMonitorMcpServer({ requestImpl }) {
           initialPrompt: { type: 'string', description: 'Optional prompt to inject after the session starts' },
           parentThreadId: { type: 'string', description: 'Optional existing agent-bus thread id to attach the spawned session to as a participant.' },
           returnResults: { type: 'boolean', description: 'Default false. When true, a Claude session spawned without parentThreadId sends you its final message of each turn with no background work or returnResults workers outstanding as a DM result. Leave off when only handing off context.' },
+          machine: { type: 'string', description: 'Optional paired machine to run on (Claude only); workDir is then a path on that machine. Defaults to the hub.' },
           ...MCP_SELECTION_SCHEMA_PROPERTIES,
           codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
         },
         required: ['provider'],
         additionalProperties: false,
       },
-      handler: async ({ provider, workDir, displayName, model, thinkingLevel, initialPrompt, parentThreadId, returnResults = false, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills }) => {
+      handler: async ({ provider, workDir, displayName, model, thinkingLevel, initialPrompt, parentThreadId, returnResults = false, machine, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills }) => {
         assertMcpProviderModel(provider, model);
         const returnToSpawner = returnResults === true && provider === 'claude' && !parentThreadId;
         const result = await request('/api/agents/sessions', {
           method: 'POST',
           body: {
             workDir, displayName, model, provider, thinkingLevel, initialPrompt,
+            ...(machine ? { machine } : {}),
             ...(returnToSpawner ? { metadata: { returnToSpawner } } : {}),
             ...(skills !== undefined ? { skills } : {}),
             ...(mcpProfile !== undefined ? { mcpProfile } : {}),

@@ -89,13 +89,8 @@ import { createKeyedSingleFlight } from './keyed-single-flight.mjs';
 import { queueControlEvent } from '../ops/control-events.mjs';
 import { removeAgentSessionWorktree } from '../fleet/git-worktree.mjs';
 import {
-  coordinatorOwnerMetadata,
+  deriveSpawnTrust,
   SPAWN_RESULT_NOTE,
-  spawnerMetadata,
-  coordinatorSessionMetadata,
-  loopRegistrationSessionMetadata,
-  normalizeCredentialCoordinatorPolicy,
-  operatorLoopRegistrationPolicy,
   operatorResumeLoopRegistrationPolicy,
   sessionControlProvenance,
   storedCoordinatorPolicy,
@@ -1072,7 +1067,13 @@ async function launchTmuxSession({ sessionName, workDir = '', sessionBinary = ''
   await verifyLaunchedSession(sessionName, launchLogPath, Math.max(Number(config.launchVerifyMs || 0), sandboxed ? 1000 : 0));
 }
 
-async function createSession({ sessionId, initialPrompt = '', workDir, args, model = '', provider = config.id, runtime = '', thinkingLevel = '', source = 'external', displayName = '', autoCloseMode = 'never', autoCloseAfterMs = 0, metadata = {}, coordinatorPolicy = null, loopRegistrationPolicy = null, mcpProfile, mcpServers, mcpCredentialProfile = 'agent', codexPlugins, promptProfile, skills, sandbox, githubToken = '' } = {}) {
+async function createSession({ sessionId, initialPrompt = '', workDir, args, model = '', provider = config.id, runtime = '', thinkingLevel = '', source = 'external', displayName = '', autoCloseMode = 'never', autoCloseAfterMs = 0, metadata = {}, coordinatorPolicy = null, loopRegistrationPolicy = null, mcpProfile, mcpServers, mcpCredentialProfile = 'agent', codexPlugins, promptProfile, skills, sandbox, githubToken = '', busCredential = null, duenoUrl = '' } = {}) {
+  // On a worker the hub minted the bus token; this store only hands it back, so nothing is minted here.
+  const storeOptions = busCredential === null ? credentialStoreOptions() : { credentialStore: {
+    issue: async () => (busCredential ? { token: busCredential, credential: null } : null),
+    revoke: async () => false,
+    authenticate: async () => ({ ok: false }),
+  } };
   const sessionRuntime = config.normalizeRuntime(provider, runtime);
   const sandboxMode = resolveSandbox(sandbox);
   const researchSafeRuntime = config.id === 'codex' && hasResearchWorkbenchLaunchProfile(metadata);
@@ -1093,7 +1094,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     piBin: sessionBinary,
   });
   if (!sessionBinary) sessionBinary = await findCompatibleBinary();
-  const normalizedWorkDir = await normalizeSessionWorkDir(workDir);
+  const normalizedWorkDir = await normalizeSessionWorkDir(workDir, { onWorker: busCredential !== null });
   const resolvedMcp = resolveMcpCapabilities({
     request: canonicalMcpRequest({ mcpProfile, mcpServers }),
     provider: capabilityProvider(config.id, sessionRuntime),
@@ -1124,7 +1125,8 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     coordinatorPolicy,
     loopRegistrationPolicy,
     credentialProfile: mcpCredentialProfile,
-    ...credentialStoreOptions(),
+    duenoUrl,
+    ...storeOptions,
   });
   let promptPreparation = null;
   let launchLogPath = '';
@@ -1193,7 +1195,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     if (launchLogPath) await rm(launchLogPath, { force: true }).catch(() => {});
     if (sandboxMode === 'nono') await removeSandboxState(id);
     await cleanupMcpCapabilityLaunch({
-      backendType: config.id, sessionId: id, credentialProfile: mcpCredentialProfile, ...credentialStoreOptions(),
+      backendType: config.id, sessionId: id, credentialProfile: mcpCredentialProfile, ...storeOptions,
     });
     await cleanupPromptProfileLaunch({ backendType: config.id, sessionId: id });
     await rm(initialPromptPath(id), { force: true }).catch(() => {});
@@ -2585,20 +2587,12 @@ async function sessionsPlugin(app, {
   app.post(`/api/${config.id}/sessions`, async (req, reply) => {
     const body = req.body || {};
     const { workDir, args, model, provider, runtime, thinkingLevel, displayName, initialPrompt, metadata, mcpProfile, mcpServers, codexPlugins, promptProfile, skills, sandbox } = body;
-    const requestCoordinatorPolicy = normalizeCredentialCoordinatorPolicy(req.duenoAuth?.coordinatorPolicy);
-    const principal = req.duenoAuth?.principal || null;
-    const scheduledCoordinatorLaunch = principal?.type === 'service'
-      && principal?.kind === 'scheduled-agent-pump'
-      && requestCoordinatorPolicy;
-    const loopRegistrationPolicy = operatorLoopRegistrationPolicy(principal);
-    const trustedMetadata = {
-      ...stripReservedCoordinatorMetadata(metadata),
-      ...(scheduledCoordinatorLaunch
-        ? coordinatorSessionMetadata(requestCoordinatorPolicy)
-        : (principal?.type === 'agent' ? coordinatorOwnerMetadata(requestCoordinatorPolicy) : {})),
-      ...loopRegistrationSessionMetadata(loopRegistrationPolicy),
-      ...spawnerMetadata(principal, metadata),
-    };
+    // A worker takes its session token, id and metadata from its hub and derives no authority itself.
+    const hubPeer = req.duenoAuth?.principal?.type === 'hub-peer';
+    const trust = hubPeer
+      ? { metadata: stripReservedCoordinatorMetadata(metadata), coordinatorPolicy: null, loopRegistrationPolicy: null }
+      : deriveSpawnTrust(req.duenoAuth, metadata);
+    const trustedMetadata = trust.metadata;
     queueSessionCreateAudit({
       req,
       body,
@@ -2636,8 +2630,9 @@ async function sessionsPlugin(app, {
         source: 'dashboard',
         displayName,
         metadata: trustedMetadata,
-        coordinatorPolicy: scheduledCoordinatorLaunch ? requestCoordinatorPolicy : null,
-        loopRegistrationPolicy,
+        coordinatorPolicy: trust.coordinatorPolicy,
+        loopRegistrationPolicy: trust.loopRegistrationPolicy,
+        ...(hubPeer ? { busCredential: String(body.busCredential || ''), duenoUrl: req.duenoAuth.mcpUrl || '' } : {}),
         mcpProfile,
         mcpServers,
         codexPlugins,
@@ -2680,6 +2675,9 @@ async function sessionsPlugin(app, {
 
   app.post(`/api/${config.id}/sessions/:id/resume`, async (req, reply) => {
     const { id } = req.params;
+    if (req.duenoAuth?.principal?.type === 'hub-peer') {
+      return reply.code(409).send({ error: 'Resume on another machine needs a hub-minted token (not yet supported)', code: 'resume_unsupported' });
+    }
     try {
       const result = await resumeSession(id, {
         loopRegistrationPolicy: operatorResumeLoopRegistrationPolicy(
