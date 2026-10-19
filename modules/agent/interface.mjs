@@ -206,6 +206,7 @@ export function buildAgentInterface({
   sessionExistsImpl = null,
   worktreeCreator = null,
   worktreeBaseDir = '~/.dueno-fleet/agent-worktrees',
+  machineWorktree = null,
 } = {}) {
   if (!requestImpl) throw new Error('requestImpl is required');
 
@@ -272,13 +273,14 @@ export function buildAgentInterface({
     let sessionWorkDir = requestedWorkDir;
     let worktree = null;
     if (flagEnabled(input.isolatedWorktree)) {
-      if (!requestedWorkDir || input.machine) {
-        const error = new Error(input.machine ? 'isolatedWorktree is not supported on another machine yet'
-          : 'workDir is required when isolatedWorktree is enabled');
+      if (!requestedWorkDir) {
+        const error = new Error('workDir is required when isolatedWorktree is enabled');
         error.statusCode = 400;
         throw error;
       }
-      const createWorktree = worktreeCreator || createAgentSessionWorktree;
+      // On another machine the worktree is made there, under that machine's own base dir.
+      const createWorktree = input.machine ? (args) => machineWorktree(input.machine, { isolated: args })
+        : worktreeCreator || createAgentSessionWorktree;
       worktree = await createWorktree({
         repoPath: requestedWorkDir,
         baseDir: expandHomePath(input.worktreeBaseDir || worktreeBaseDir),
@@ -547,6 +549,7 @@ export async function agentInterfacePlugin(app, opts = {}) {
     sessionExistsImpl: opts.sessionExistsImpl,
     worktreeCreator: opts.worktreeCreator,
     worktreeBaseDir: opts.worktreeBaseDir || config.agentInterface.worktreeBaseDir,
+    machineWorktree: (machine, body) => app.machineWorktree(machine, body),
   });
 
   app.addHook('onClose', async () => {

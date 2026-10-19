@@ -22,8 +22,11 @@ await mkdir(join(root, 'home'), { recursive: true });
 await writeFile(join(bin, 'tmux'), `#!/bin/sh\nexec /usr/bin/tmux -L '${tmuxSocket}' "$@"\n`);
 // In a workDir holding prompt.txt the stand-in shows that permission prompt first and waits for an answer.
 await writeFile(join(bin, 'claude'), "#!/bin/sh\n[ -f prompt.txt ] && cat prompt.txt && read answer </dev/tty && printf 'answered\\n'\nprintf 'Claude Code v2.1.296\\n────────────────────\\n❯ \\n────────────────────\\n  ⏵⏵ bypass permissions on\\n'\ncat >/dev/null </dev/tty\n");
-await chmod(join(bin, 'tmux'), 0o755);
-await chmod(join(bin, 'claude'), 0o755);
+// Codex and Pi stand-ins show an idle pane from the state-detector corpus; Pi also answers its version and model checks.
+const paneFixture = (name) => new URL(`./fixtures/session-state/panes/${name}.pane`, import.meta.url).pathname;
+await writeFile(join(bin, 'codex'), `#!/bin/sh\ncat '${paneFixture('codex-idle-placeholder')}'\ncat >/dev/null\n`);
+await writeFile(join(bin, 'pi'), `#!/bin/sh\ncase "$1" in --version) echo 'pi 0.80.7'; exit 0;; --list-models) printf 'provider  model  name\\nxai  grok-4.6  Grok\\n'; exit 0;; esac\ncat '${paneFixture('pi-5427de06-idle')}'\ncat >/dev/null\n`);
+for (const name of ['tmux', 'claude', 'codex', 'pi']) await chmod(join(bin, name), 0o755);
 delete process.env.CADRE_STATE_DIR;
 Object.assign(process.env, {
   AUTH_TOKEN: TOKEN, INTERNAL_BYPASS_TOKEN: 'internal-token-for-machines', HOME: join(root, 'home'),
@@ -42,8 +45,12 @@ const { shouldSuppressSideEffectLoops } = await import('../modules/platform/side
 const { agentInterfacePlugin } = await import('../modules/agent/interface.mjs');
 const { agentProviderPreferencesPlugin } = await import('../modules/agent/provider-preferences.mjs');
 const { claudeSessionsPlugin } = await import('../modules/sessions/claude-sessions.mjs');
+const { codexSessionsPlugin } = await import('../modules/sessions/codex-sessions.mjs');
+const { piSessionsPlugin } = await import('../modules/sessions/pi-sessions.mjs');
+const { AsyncEventQueue, createBaseCapabilities, createTransportEvent } = await import('../modules/agent/agent-transport.mjs');
+const { CLAUDE_STREAM_JSON_MCP_TOKEN_ENV_VAR } = await import('../modules/sessions/claude-stream-json-mcp.mjs');
 const { LOG_REDACT, MACHINE_PROTOCOL, machinesPlugin, machineState } = await import('../modules/machines/index.mjs');
-const { mcpClientConfigPath, prepareAgentBusCredentialLaunch } = await import('../modules/integrations/mcp-launch-preflight.mjs');
+const { mcpClientConfigPath, mcpClientCredentialPath, prepareAgentBusCredentialLaunch } = await import('../modules/integrations/mcp-launch-preflight.mjs');
 const { runtimeStatePath } = await import('../modules/ops/runtime-state.mjs');
 const { enqueueAgentSessionCommand, routeRemoteSessionCommands } = await import('../modules/sessions/index.mjs');
 const { buildHookSessionPaths, readHookEventsSince, recordHookPayload } = await import('../modules/agent/hook-events.mjs');
@@ -67,21 +74,53 @@ const secrets = new Set();
 const responses = [];
 const hubDir = join(root, 'hub-state');
 const workerWorktrees = join(root, 'worker-worktrees');
+const workerAgentWorktrees = join(root, 'worker-agent-worktrees');
+let workerPreferences = {};
+// Structured Claude on the worker runs on this fake transport (as in structured-automated-spawns.test.mjs).
+const transports = [];
+class FakeTransport {
+  constructor() { this.queue = new AsyncEventQueue(); this.prompts = []; transports.push(this); }
+  emit(type, payload = {}) { this.queue.push(createTransportEvent(type, payload, { attemptId: this.attemptId, provider: 'claude', transport: 'structured' })); }
+  async start(spec) {
+    Object.assign(this, { spec, attemptId: spec.attemptId });
+    this.emit('attempt.started', { protocolSessionId: spec.sessionId });
+    return { attemptId: spec.attemptId, protocolSessionId: spec.sessionId, negotiated: this.capabilities() };
+  }
+  async prompt({ turnId, blocks }) {
+    this.prompts.push(blocks[0]?.text || '');
+    this.emit('turn.started', { turnId, evidence: { accepted: true, settled: false, quiescent: false } });
+    this.emit('message.committed', { turnId, blocks: [{ type: 'text', text: 'Structured reply' }] });
+    this.emit('turn.settled', { turnId, stopReason: 'end_turn', evidence: { accepted: true, settled: true, quiescent: true } });
+    return { stopReason: 'end_turn' };
+  }
+  async attach(spec) { return this.start({ ...spec, sessionId: spec.protocolSessionId }); }
+  async cancel() { return { mode: 'best_effort' }; }
+  async answerInteraction() { return { ok: true }; }
+  events() { return this.queue; }
+  snapshot() { return { attemptId: this.attemptId, lifecycle: 'ready' }; }
+  capabilities() { return createBaseCapabilities({ protocol: { name: 'claude-stream-json', version: '1' }, sessionOps: { resume: 'supported' } }); }
+  async terminate() { this.emit('attempt.exited', { code: 0 }); this.queue.close(); return { ok: true, status: 'terminated', residual: [] }; }
+}
 const workerDir = join(root, 'worker-state');
 const hubStore = machineState(join(hubDir, 'machines'));
 const workerStore = machineState(join(workerDir, 'machines'));
 const busStore = new AgentBusCredentialStore({ stateFile: join(root, 'hub-bus.json'), mode: 'issue_only', env: { APP_STATE_STORAGE: 'file', DATABASE_URL: '' } });
 let hub; let tailnet; let hubMcpUrl; let requestImpl; let worker; let workerPort = 0; let workerUrl;
 
-async function startWorker({ protocol = MACHINE_PROTOCOL, store = workerStore, sessions = true, port = workerPort, refuseDeletes = false } = {}) {
+async function startWorker({ protocol = MACHINE_PROTOCOL, store = workerStore, sessions = true, port = workerPort, refuseDeletes = false, structured = false } = {}) {
   const app = Fastify({ logger: logger() });
   // A worker whose session deletes fail (a session it cannot end).
   if (refuseDeletes) app.addHook('onRequest', async (req, reply) => { if (req.method === 'DELETE') { refused += 1; return reply.code(409).send({ code: 'session_delete_failed' }); } });
   await app.register(authPlugin, { workerMachines: store });
-  await app.register(machinesPlugin, { role: 'worker', store, protocol, timers: workerTimers, now: () => Date.now() + skew, worktreeBaseDir: workerWorktrees });
+  await app.register(machinesPlugin, { role: 'worker', store, protocol, timers: workerTimers, now: () => Date.now() + skew, worktreeBaseDir: workerWorktrees, agentWorktreeBaseDir: workerAgentWorktrees });
   await app.register(agentProviderPreferencesPlugin);
-  await app.register(agentInterfacePlugin);
-  if (sessions) await app.register(claudeSessionsPlugin, { wsManager: { broadcast() {}, onChannel() {} } });
+  await app.register(agentInterfacePlugin, { getPreferences: async () => workerPreferences });
+  const wsManager = { broadcast() {}, onChannel() {} };
+  if (structured) process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+  if (sessions) await app.register(claudeSessionsPlugin, { wsManager, transportFactory: () => new FakeTransport(), e2eEvidence: { proven: true, expectedVersion: 'test' } });
+  delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+  if (sessions) await app.register(codexSessionsPlugin, { wsManager });
+  if (sessions) await app.register(piSessionsPlugin, { wsManager });
   await app.listen({ host: '127.0.0.1', port });
   return app;
 }
@@ -103,7 +142,7 @@ const cli = (dir, args, env = {}) => execFileAsync(process.execPath, ['scripts/c
   .then(({ stdout }) => ({ ok: true, out: stdout.trim() }), (error) => ({ ok: false, out: `${error.stdout}${error.stderr}` }));
 const pair = () => cli(workerDir, ['pair'], { CADRE_ROLE: 'worker', HOST: '127.0.0.1', PORT: String(workerPort) }).then(({ out }) => { secrets.add(out.split('.').at(-1)); return out; });
 const addMachine = (name, link) => cli(hubDir, ['machine', 'add', name, link], { CADRE_HUB_MCP_URL: hubMcpUrl });
-const pane = async (id) => (await execFileAsync('/usr/bin/tmux', ['-L', tmuxSocket, 'capture-pane', '-p', '-J', '-S', '-', '-t', `claude-${id}`])).stdout;
+const pane = async (id, kind = 'claude') => (await execFileAsync('/usr/bin/tmux', ['-L', tmuxSocket, 'capture-pane', '-p', '-J', '-S', '-', '-t', `${kind}-${id}`])).stdout;
 async function until(check, label, tries = 200) {
   for (let i = 0; i < tries; i += 1) { const value = await check(); if (value) return value; await new Promise((r) => setTimeout(r, 50)); }
   assert.fail(`timed out waiting for ${label}`);
@@ -240,6 +279,7 @@ describe('multi-machine slice 1', () => {
       const echo = `${req.headers.authorization} ${JSON.parse(raw || '{}').busCredential || ''}`;
       res.setHeader('content-type', 'application/json');
       if (req.url === '/api/machine/descriptor') return res.end(JSON.stringify({ machineId: 'hostile-id', protocol: MACHINE_PROTOCOL }));
+      if (req.url === '/api/agents/providers') return res.end(JSON.stringify({ providers: [{ id: 'claude', backendType: 'claude' }] }));
       if (req.method === 'POST' && req.url === '/api/claude/sessions') return res.end(JSON.stringify({ sessionName: echo, initialPromptError: echo }));
       if (req.method === 'GET') return res.end(JSON.stringify({ content: echo }));
       res.statusCode = 400;
@@ -718,23 +758,25 @@ describe('multi-machine slice 5', () => {
     assert.deepEqual(hubStore.read().worktreeCleanup, {}, 'and it is not retried');
   });
 
-  it('a fetch failure or a failed session delete on the worker leaves cleanup pending', async () => {
+  it('a session the worker cannot end or a fetch failure there leaves cleanup pending', async () => {
     const room = await bootstrap('topic-c');
+    const ids = room.participants.map((participant) => participant.sessionId);
     const { path } = hub.store.getThread(room.thread.id).thread.metadata.machineWorktrees.w8.worktree;
     const origin = (await git(repo, 'remote', 'get-url', 'origin')).stdout.trim();
     await git(repo, 'remote', 'set-url', 'origin', join(root, 'no-such-remote'));
+    await restartWorker({ refuseDeletes: true });
     const ended = await end(room.thread.id);
     assert.equal(ended.json().machineWorktrees.w8.pending, true, ended.body);
     const key = `w8:${room.thread.id}`;
-    await hubTimers.fire();
-    assert.ok(hubStore.read().worktreeCleanup[key], 'a git fetch failure is not an answer');
-    await git(repo, 'remote', 'set-url', 'origin', origin);
-    await restartWorker({ refuseDeletes: true });
     await until(async () => { await hubTimers.fire(); return refused > 0; }, 'a retry against the refusing worker');
     await hubTimers.fire();
     assert.ok(hubStore.read().worktreeCleanup[key], 'a refused session delete stops the cleanup');
-    assert.equal(await exists(path), true);
+    assert.deepEqual(await Promise.all(ids.map(live)), [true, true]);
     await restartWorker();
+    await until(async () => { await hubTimers.fire(); return !(await Promise.all(ids.map(live))).some(Boolean); }, 'the sessions ended on a retry');
+    await hubTimers.fire();
+    assert.ok(hubStore.read().worktreeCleanup[key], 'a git fetch failure is not an answer');
+    await git(repo, 'remote', 'set-url', 'origin', origin);
     await until(async () => { await hubTimers.fire(); return !hubStore.read().worktreeCleanup[key]; }, 'the cleanup once both pass');
     assert.equal(await exists(path), false);
   });
@@ -751,13 +793,14 @@ describe('multi-machine slice 5', () => {
 });
 
 describe('multi-machine slice 6', () => {
+  const REMOTE_PROVIDERS = ['codex', 'claude', 'xai', 'google', 'opencode-go', 'openrouter'];
   const machines = async (app = hub.app, headers = hub.authHeaders) => { const res = await app.inject({ url: '/api/machines', headers }); responses.push(res.body); return res.json(); };
   const w8 = async () => (await machines()).machines.find((machine) => machine.id === 'w8');
 
   it('lists a live machine with its OS, protocol and providers, and an offline one with since and its last report, no secrets', async () => {
     const { os } = (await call(`${workerUrl}/api/machine/descriptor`)).json;
-    const live = { id: 'w8', status: 'live', label: hubStore.read().machines.w8.label, url: workerUrl, os, protocol: MACHINE_PROTOCOL, providers: ['claude'] };
-    assert.deepEqual(await w8(), live, 'only the worker\'s Claude providers: remote spawn runs Claude only');
+    const live = { id: 'w8', status: 'live', label: hubStore.read().machines.w8.label, url: workerUrl, os, protocol: MACHINE_PROTOCOL, providers: REMOTE_PROVIDERS };
+    assert.deepEqual(await w8(), live, 'the worker\'s Claude, Codex and Pi providers; DeepSeek is off by default');
     const { id } = (await hub.app.inject({ method: 'POST', url: '/api/claude/sessions', headers: hub.authHeaders, payload: { machine: 'w8', workDir: root } })).json();
     secrets.add(JSON.parse(await readFile(mcpClientConfigPath('claude', id), 'utf8')).mcpServers.dueno.headers.Authorization.slice('Bearer '.length));
     const detail = async () => (await hub.app.inject({ url: `/api/claude/sessions/${id}`, headers: hub.authHeaders })).json().machine;
@@ -791,7 +834,7 @@ describe('multi-machine slice 6', () => {
     responses.push(added.body);
     assert.deepEqual([added.statusCode, added.json().id], [200, 'w9'], added.body);
     assert.deepEqual((await add('w10')).json().code, 'machine_pairing_failed', 'a used link is refused');
-    assert.deepEqual((await machines(other, headers)).machines.map(({ id, status, providers }) => ({ id, status, providers })), [{ id: 'w9', status: 'live', providers: ['claude'] }]);
+    assert.deepEqual((await machines(other, headers)).machines.map(({ id, status, providers }) => ({ id, status, providers })), [{ id: 'w9', status: 'live', providers: REMOTE_PROVIDERS }]);
     secrets.add(machineState(join(root, 'hub-two')).read().machines.w9.credential);
     await other.close();
   });
@@ -801,6 +844,114 @@ describe('multi-machine slice 6', () => {
     const { url } = parsePairLink(pairLink({ machineId: () => 'id', issueCode: () => 'CODE' }, 'fd7a:115c::1', 4320));
     assert.equal(validateMachineUrl(url, { env }), 'http://[fd7a:115c::1]:4320');
     assert.throws(() => validateMachineUrl('http://[fd7a:115c::2]:4320', { env }), /not an allowed/);
+  });
+});
+
+describe('multi-machine slice 7', () => {
+  let workDir; let parent;
+  const results = (id) => hub.store.listMessages().filter((message) => message.type === 'result' && message.from.sessionId === id).map((message) => message.body);
+  const turn = async (kind, id, answer) => {
+    for (const [name, extra] of [['UserPromptSubmit', { prompt: 'go' }], ['Stop', { last_assistant_message: answer }]]) {
+      await recordHookPayload({ session_id: `cli-${id}`, cwd: workDir, hook_event_name: name, ...extra }, { provider: kind, duenoSessionId: id, workDir });
+    }
+  };
+  // The worker can read a new pane as missing for a while (the slice 4 note); a delivery then fails for good.
+  const running = (kind, id) => until(async () => (await hub.app.inject({ url: `/api/${kind}/sessions/${id}`, headers: hub.authHeaders })).json().canonicalState?.lifecycle === 'running',
+    `the worker sees the ${kind} session running`, 1200);
+  const dm = async (kind, id) => {
+    await running(kind, id);
+    const sent = await tool(parent, 'agent_dm', { kind, session_id: id, body: `hello ${kind}` });
+    assert.equal(sent.isError, false, sent.text);
+    const messageId = sent.value.message_id;
+    await until(() => hub.store.getDeliveryForMessage(messageId)?.status === 'injected', `the DM delivered to ${kind}`, 600);
+    return messageId;
+  };
+  const spawn = async (args) => {
+    const spawned = await tool(parent, 'spawn_session', { machine: 'w11', workDir, returnResults: true, ...args });
+    assert.equal(spawned.isError, false, spawned.text);
+    return spawned.value.participants[0];
+  };
+
+  it('a Codex and a Pi session spawn on the worker, receive a DM and reply to the hub with the hub-minted token', async () => {
+    assert.equal((await addMachine('w11', await pair())).ok, true);
+    workDir = await mkdtemp(join(root, 'repo-'));
+    parent = (await prepareAgentBusCredentialLaunch({ backendType: 'claude', sessionId: 'claude-1', credentialStore: busStore })).token;
+    // returnResults is Claude's, here as on the hub; a Codex or Pi child answers its spawner over the bus.
+    const minted = {
+      codex: async (id) => (await readFile(mcpClientCredentialPath('codex', id), 'utf8')).trim(),
+      pi: async (id) => { const { url, headers } = JSON.parse(await readFile(mcpClientConfigPath('pi', id), 'utf8')).mcpServers.dueno;
+        assert.equal(url, hubMcpUrl); return headers.Authorization.slice('Bearer '.length); },
+    };
+    for (const [provider, kind] of [['codex', 'codex'], ['xai', 'pi']]) {
+      const { session_id: id, kind: spawnedKind } = await spawn({ provider, returnResults: false });
+      assert.deepEqual([spawnedKind, hubStore.read().sessions[`${kind}:${id}`]?.machine], [kind, 'w11']);
+      const messageId = await dm(kind, id);
+      await until(async () => (await pane(id, kind)).includes(`id=${messageId}`), `the DM in the ${kind} pane`, 1200);
+      const token = await minted[kind](id);
+      secrets.add(token);
+      const reply = await tool(token, 'agent_dm', { kind: 'claude', session_id: 'claude-1', body: `${kind} answer` });
+      assert.equal(reply.isError, false, reply.text);
+      assert.ok(hub.store.listMessages().some((message) => message.from.sessionId === id && message.body === `${kind} answer`));
+    }
+  });
+
+  it('a structured Claude session runs on the worker with the hub token, takes a DM, returns a result and ends', async () => {
+    await restartWorker({ structured: true });
+    const { session_id: id } = await spawn({ provider: 'claude' });
+    const transport = transports.at(-1);
+    const token = transport.spec.env[CLAUDE_STREAM_JSON_MCP_TOKEN_ENV_VAR];
+    secrets.add(token);
+    assert.equal((await busStore.authenticate(token)).principal.sessionId, id, 'the hub minted the token');
+    assert.equal(JSON.parse(await readFile(transport.spec.mcpConfigPath, 'utf8')).mcpServers.dueno.url, hubMcpUrl);
+    const row = (await hub.app.inject({ url: '/api/claude/sessions', headers: hub.authHeaders })).json().sessions.find((item) => item.id === id);
+    assert.equal(row.tmuxSession, undefined, 'no Telegram topic, as for a structured session on the hub');
+    const messageId = await dm('claude', id);
+    assert.ok(transport.prompts.some((text) => text.includes(`id=${messageId}`)));
+    await turn('claude', id, 'structured answer');
+    await until(async () => { await hubTimers.fire(); return results(id).length === 1; }, 'the structured result');
+    const deleted = await hub.app.inject({ method: 'DELETE', url: `/api/claude/sessions/${id}`, headers: hub.authHeaders });
+    assert.equal(deleted.json().status, 'terminated', deleted.body);
+    assert.equal((await busStore.authenticate(token)).ok, false);
+  });
+
+  it('isolatedWorktree is made under the worker\'s base dir and cleaned there when the session ends', async () => {
+    const repo = join(root, 'isolated-repo');
+    await execFileAsync('git', ['init', '-q', '--bare', '--initial-branch=main', `${repo}.git`]);
+    await execFileAsync('git', ['clone', '-q', `${repo}.git`, repo]);
+    await execFileAsync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'base']);
+    await execFileAsync('git', ['-C', repo, 'push', '-q', 'origin', 'main']);
+    const created = await hub.app.inject({ method: 'POST', url: '/api/agents/sessions', headers: hub.authHeaders, payload: { provider: 'codex', machine: 'w11', workDir: repo, isolatedWorktree: true } });
+    assert.equal(created.statusCode, 200, created.body);
+    const { id, worktree } = created.json();
+    assert.ok(worktree.worktreePath.startsWith(`${workerAgentWorktrees}/`), worktree.worktreePath);
+    assert.equal((await hub.app.inject({ url: `/api/codex/sessions/${id}`, headers: hub.authHeaders })).json().workDir, worktree.worktreePath);
+    await hub.app.inject({ method: 'DELETE', url: `/api/codex/sessions/${id}`, headers: hub.authHeaders });
+    await until(async () => !await stat(worktree.worktreePath).catch(() => null), 'the worktree removed on the worker');
+  });
+
+  it('a provider the worker lacks, task_spawn with machine and DeepSeek with machine each fail naming the machine', async () => {
+    workerPreferences = { openrouter: false };
+    assert.match((await tool(parent, 'spawn_session', { provider: 'openrouter', machine: 'w11', workDir })).text, /Machine w11 does not offer provider openrouter/);
+    workerPreferences = {};
+    const deepseek = await hub.app.inject({ method: 'POST', url: '/api/deepseek/sessions', headers: hub.authHeaders, payload: { machine: 'w11', workDir } });
+    assert.deepEqual([deepseek.statusCode, deepseek.json()], [400, { error: 'deepseek sessions run only on the hub, not on machine w11', code: 'machine_kind_unsupported' }]);
+    const thread = (await hub.app.inject({ method: 'POST', url: '/api/agent-bus/threads', headers: hub.authHeaders, payload: { title: 'tasks', participants: [{ kind: 'claude', sessionId: 'claude-1' }, { kind: 'claude', sessionId: 'claude-2' }] } })).json().thread;
+    const task = await hub.app.inject({ method: 'POST', url: '/api/agent-bus/tasks/spawn', headers: hub.authHeaders,
+      payload: { thread_id: thread.id, task_key: 'k', spec: { provider: 'codex', workDir, model: 'gpt-5.5', machine: 'w11' } } });
+    assert.deepEqual([task.statusCode, task.json().error], [400, 'task_spawn runs only on the hub, not on machine w11']);
+  });
+
+  it('a collab with a Codex participant on the worker delivers room messages to its pane', async () => {
+    const spawned = await tool(parent, 'spawn_collab_session', { title: 'codex across machines', participants: [{ provider: 'claude' }, { provider: 'codex', machine: 'w11', work_dir: workDir }] });
+    assert.equal(spawned.isError, false, spawned.text);
+    const [local, remote] = spawned.value.participants;
+    assert.deepEqual([remote.kind, hubStore.read().sessions[`codex:${remote.session_id}`]?.machine], ['codex', 'w11']);
+    await running('codex', remote.session_id);
+    const posted = await hub.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: hub.authHeaders,
+      payload: { threadId: spawned.value.thread_id, from: { kind: 'claude', sessionId: local.session_id }, body: 'hello codex' } });
+    const messageId = posted.json().message.id;
+    await until(() => hub.store.getDeliveryForMessage(messageId)?.status === 'injected', 'the room message delivered', 1200);
+    await until(async () => (await pane(remote.session_id, 'codex')).includes(`id=${messageId}`), 'the envelope in the codex pane', 1200);
   });
 });
 

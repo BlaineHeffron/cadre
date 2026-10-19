@@ -13,9 +13,12 @@ import { queueSessionInteraction } from '../platform/push.mjs';
 import { resolveBinding } from '../telegram/binding.mjs';
 import { cleanupAgentBusCredentialLaunch, prepareAgentBusCredentialLaunch } from '../integrations/mcp-launch-preflight.mjs';
 import { cleanupManagedWorktree, createManagedWorktree, managedWorktreeBase } from '../agent-bus/managed-worktrees.mjs';
+import { createAgentSessionWorktree } from '../fleet/git-worktree.mjs';
+import { expandHomePath } from '../sessions/workdir.mjs';
+import { config } from '../../config.mjs';
 
 // Bump when the hub-to-worker contract breaks. A commit mismatch only warns.
-export const MACHINE_PROTOCOL = 2;
+export const MACHINE_PROTOCOL = 3;
 export const LOG_REDACT = ['req.headers.authorization', 'busCredential', '*.busCredential', 'pairCode', '*.pairCode',
   'hubCredential', '*.hubCredential', 'workerCredential', '*.workerCredential'];
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -30,6 +33,8 @@ const SWEEP_MS = 30_000;
 const EVENT_LOG_SIZE = 1000;
 const BLOCKING = new Set(['machine_blocked', 'machine_protocol_mismatch']);
 const QUEUED = new Set(['permission', 'confirmation', 'selection']);
+// Session kinds a worker runs; DeepSeek and tasks stay on the hub.
+const KINDS = ['claude', 'codex', 'pi'];
 // Worktree keeps that are the worker's answer, as at a local room end; any other keep (a git or fetch failure, a session
 // still live there) leaves a remote cleanup pending.
 const SETTLED_KEEP = /^(dirty or untracked files|unpushed commits|new ignored files|cleanup off|cleanup policy not recorded|marker mismatch|metadata missing|path outside managed base|local commits after failed spawn|worktree missing)/;
@@ -197,7 +202,8 @@ export const relayBinding = (request) => async (session, options = {}) => {
 const SESSION_ROUTE = /^\/api\/([a-z]+)\/sessions(?:\/:id(.*))?$/;
 
 export async function machinesPlugin(app, { role = 'hub', store, credentialStore, protocol = MACHINE_PROTOCOL, now = () => Date.now(), hubMcpUrl = '',
-  supervise = false, timers = realTimers, random = Math.random, online = () => addresses() !== '', routeCommands = null, wakeCheckMs = 30_000, wsManager, worktreeBaseDir = managedWorktreeBase }) {
+  supervise = false, timers = realTimers, random = Math.random, online = () => addresses() !== '', routeCommands = null, wakeCheckMs = 30_000, wsManager, worktreeBaseDir = managedWorktreeBase,
+  agentWorktreeBaseDir = expandHomePath(config.agentInterface.worktreeBaseDir) }) {
   app.get('/api/machine/descriptor', async () => descriptor(store, { protocol }));
   const operatorOnly = (req) => { if (req.duenoAuth?.principal?.type !== 'ui') throw fail('Operator required', 'forbidden', 403); };
   if (role === 'worker') {
@@ -229,16 +235,25 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     }, wakeCheckMs); };
     app.addHook('onListen', async () => { void hello(); watch(); });
     app.addHook('onClose', async () => timers.clear(timer));
+    // Every kind's sessions, or null while any list is stale; a kind this worker does not serve lists nothing.
+    const listAll = async (req) => {
+      const rows = [];
+      for (const kind of KINDS.filter((item) => app.hasRoute({ method: 'GET', url: `/api/${item}/sessions` }))) {
+        const list = await app.inject({ url: `/api/${kind}/sessions`, headers: { authorization: req.headers.authorization } });
+        if (list.statusCode !== 200 || list.json().stale) return null;
+        rows.push(...list.json().sessions.map((row) => ({ ...row, kind })));
+      }
+      return rows;
+    };
     // Session-state events with a persisted, monotonic sequence, made by diffing the session list on each read.
     // A cursor the log no longer covers gets a snapshot of every row instead.
     app.get('/api/machine/events', async (req) => {
       if (req.duenoAuth?.principal?.type !== 'hub-peer') throw fail('Hub credential required', 'forbidden', 403);
       const after = Number(req.query.afterSequence) || 0;
-      const list = await app.inject({ url: '/api/claude/sessions', headers: { authorization: req.headers.authorization } });
-      const rows = list.statusCode === 200 && !list.json().stale ? list.json().sessions : null;
+      const rows = await listAll(req);
       return store.update((state) => {
         const log = state.events ||= { sequence: 0, rows: {}, items: [] };
-        const current = rows && Object.fromEntries(rows.map((row) => [`claude:${row.id}`, eventRow(row)]));
+        const current = rows && Object.fromEntries(rows.map((row) => [`${row.kind}:${row.id}`, eventRow(row)]));
         for (const key of current ? new Set([...Object.keys(log.rows), ...Object.keys(current)]) : []) {
           if (JSON.stringify(current[key] || null) === JSON.stringify(log.rows[key] || null)) continue;
           log.items.push({ sequence: ++log.sequence, type: 'session', key, row: current[key] || null });
@@ -261,20 +276,25 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
       return { cursor: read.cursor, events: read.events.filter((event) => ['UserPromptSubmit', 'Stop'].includes(event.eventName))
         .map(({ loggedAt, eventName, lastAssistantMessage, payload }) => ({ loggedAt, eventName, lastAssistantMessage, payload: { background_tasks: payload?.background_tasks } })) };
     });
-    // A remote collab participant's managed worktree, made and cleaned here only when the hub asks (this worker runs no sweep).
+    // A remote collab participant's managed worktree, made and cleaned here only when the hub asks (this worker runs no sweep),
+    // and an isolatedWorktree spawn's worktree, which that session's delete here removes.
     // The worker's own sessions are the live-session guard; the dirty and unpushed guards are cleanupManagedWorktree's.
     app.post('/api/machine/worktree', async (req) => {
       if (req.duenoAuth?.principal?.type !== 'hub-peer') throw fail('Hub credential required', 'forbidden', 403);
-      const { create, cleanup, spawnFailed } = req.body || {};
-      if (create) {
-        const { repo, branch, base, roomId } = create;
-        return createManagedWorktree({ repo, branch, base, roomId, baseDir: worktreeBaseDir }).catch((error) => { throw fail(error.message, 'worktree_create_failed'); });
-      }
+      const { create, isolated, cleanup, spawnFailed, sessionIds = [] } = req.body || {};
+      const made = create ? createManagedWorktree({ ...create, baseDir: worktreeBaseDir })
+        : isolated && createAgentSessionWorktree({ ...isolated, baseDir: agentWorktreeBaseDir });
+      if (made) return made.catch((error) => { throw fail(error.message, 'worktree_create_failed'); });
       // Gone already (an earlier answer the hub did not record) settles a retry.
       if (cleanup?.path && !await stat(cleanup.path).catch(() => null)) return { removed: false, reason: 'worktree missing', report: 'worktree: missing' };
-      const list = await app.inject({ url: '/api/claude/sessions', headers: { authorization: req.headers.authorization } });
-      if (list.statusCode !== 200 || list.json().stale) throw fail('Session list unavailable', 'machine_busy', 503);
-      const sessions = list.json().sessions.map((row) => ({ workDir: row.workDir, lifecycle: row.canonicalState?.lifecycle }));
+      // The room's sessions here end first; one that does not end leaves the cleanup to a retry.
+      for (const row of (await listAll(req) || []).filter((item) => sessionIds.includes(item.id))) {
+        const { statusCode } = await app.inject({ method: 'DELETE', url: `/api/${row.kind}/sessions/${row.id}`, headers: { authorization: req.headers.authorization } });
+        if (statusCode >= 300 && statusCode !== 404) throw fail('A session did not end', 'machine_busy', 503);
+      }
+      const rows = await listAll(req);
+      if (!rows) throw fail('Session list unavailable', 'machine_busy', 503);
+      const sessions = rows.map((row) => ({ workDir: row.workDir, lifecycle: row.canonicalState?.lifecycle }));
       return cleanupManagedWorktree(cleanup, { sessions, baseDir: worktreeBaseDir, spawnFailed: spawnFailed === true });
     });
     app.post('/api/pairing/redeem', async (req, reply) => {
@@ -349,7 +369,7 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
   async function fileInteraction({ kind, sessionId, displayName, state }) {
     const { closeStaleSessionQueueItems } = await import('../integrations/command-center-ai.mjs');
     await closeStaleSessionQueueItems(kind, sessionId, state?.interaction?.fingerprint || null, { wsManager });
-    await queueSessionInteraction({ id: kind, displayName: 'Claude' }, { sessionId, sessionName: displayName || sessionId, interaction: state?.interaction }, { wsManager });
+    await queueSessionInteraction({ id: kind, displayName: `${kind[0].toUpperCase()}${kind.slice(1)}` }, { sessionId, sessionName: displayName || sessionId, interaction: state?.interaction }, { wsManager });
   }
   async function apply(name, { sequence = 0, events = [], snapshot }) {
     const removed = [];
@@ -458,14 +478,16 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     });
     app.addHook('onClose', async () => { timers.clear(sweepTimer); for (const s of supervisors.values()) timers.clear(s.timer); });
   }
+  // The worker's enabled providers of the kinds it can run; null when it does not answer.
+  const workerProviders = async (row) => {
+    const listed = await send(row, 'GET', '/api/agents/providers').catch(() => null);
+    return listed?.status === 200 ? (parse(listed.text).providers || []).filter((entry) => entry.enabled !== false && KINDS.includes(entry.backendType)) : null;
+  };
   // Status from the supervisor; OS, protocol and providers as the machine last reported them, so an away machine still lists.
   async function machineInfo(name, row) {
     const peer = await reach(name, row);
     if (!peer.code) {
-      const listed = await send(row, 'GET', '/api/agents/providers').catch(() => null);
-      // Remote spawn runs Claude only for now, so only the worker's enabled Claude providers are offered.
-      const providers = listed?.status === 200 ? (parse(listed.text).providers || [])
-        .filter((entry) => entry.enabled !== false && entry.backendType === 'claude').map((entry) => entry.id) : row.providers;
+      const providers = (await workerProviders(row))?.map((entry) => entry.id) || row.providers;
       const report = { os: peer.os, protocol: peer.protocol, providers };
       if (JSON.stringify(report) !== JSON.stringify({ os: row.os, protocol: row.protocol, providers: row.providers })) {
         Object.assign(row, report);
@@ -507,20 +529,16 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
   // Collab worktrees of remote participants live on their worker. A cleanup the worker cannot take now (with the room's
   // sessions there to end first) is recorded pending and retried after each successful poll; a worker answer settles it.
   // Resolves to the worker's answer only when it is final: sessions ended (or unknown there) and a removal or settled keep.
-  const worktreeSend = async (row, { sessionIds = [], ...body }) => {
-    for (const id of sessionIds) {
-      const { status } = await send(row, 'DELETE', `/api/claude/sessions/${id}`);
-      if (status >= 300 && status !== 404) return null;
-    }
+  const worktreeSend = async (row, body) => {
     const result = await send(row, 'POST', '/api/machine/worktree', body);
     const answer = result.status === 200 ? parse(result.text) : null;
-    return answer && (body.create || answer.removed || SETTLED_KEEP.test(answer.reason || '')) ? answer : null;
+    return answer && (body.create || body.isolated || answer.removed || SETTLED_KEEP.test(answer.reason || '')) ? answer : null;
   };
   app.decorate('machineWorktree', async (name, body) => {
     const row = store.read().machines?.[name];
     const answer = (await reach(name, row)).code ? null : await worktreeSend(row, body).catch(() => null);
     if (answer) return answer;
-    if (body.create) throw fail(`Machine ${name}: worktree create failed`, 'machine_worktree_failed');
+    if (body.create || body.isolated) throw fail(`Machine ${name}: worktree create failed`, 'machine_worktree_failed');
     store.update((state) => { (state.worktreeCleanup ||= {})[`${name}:${body.cleanup.roomId}`] = { machine: name, ...body }; });
     return { removed: false, pending: true, report: `worktree: cleanup pending until ${name} is reachable` };
   });
@@ -542,14 +560,20 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
   }
 
   async function createRemote(kind, req, reply) {
-    const { machine, busCredential: _ignored, sessionId: requested, structured: _structured, mcpServers: _servers, ...body } = req.body;
+    const { machine, busCredential: _ignored, sessionId: requested, mcpServers: _servers, ...body } = req.body;
     const row = store.read().machines?.[machine];
     if (!row) return reply.code(400).send({ error: `Unknown machine: ${machine}`, code: 'machine_unknown' });
-    if (kind !== 'claude') return reply.code(400).send({ error: `machine ${machine} runs only claude sessions`, code: 'machine_kind_unsupported' });
+    if (!KINDS.includes(kind)) return reply.code(400).send({ error: `${kind} sessions run only on the hub, not on machine ${machine}`, code: 'machine_kind_unsupported' });
     // Never queued: a machine that is down, or on another protocol (426), fails the spawn now.
     const peer = await reach(machine, row);
     if (peer.code) return unreachable(reply, peer, peer.code === 'machine_protocol_mismatch' ? 426 : 503);
     if (peer.commitWarning) req.log.warn({ machine }, peer.commitWarning);
+    // What the worker runs is what it advertises now.
+    const providers = await workerProviders(row);
+    if (!providers) return unreachable(reply, { code: 'machine_unreachable' });
+    if (!providers.some((entry) => entry.backendType === kind && (!body.provider || entry.id === body.provider))) {
+      return reply.code(400).send({ error: `Machine ${machine} does not offer provider ${body.provider || kind}`, code: 'machine_provider_unsupported' });
+    }
     const trust = deriveSpawnTrust(req.duenoAuth, body.metadata);
     // A caller's id (a collab roster's, minted on the hub) is taken only when no local or remote session has it.
     const sessionId = requested ?? randomBytes(4).toString('hex');
@@ -573,7 +597,9 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     if (!ok) await cleanupAgentBusCredentialLaunch({ backendType: kind, sessionId, credentialStore, reason: 'launch_failed' });
     if (!result) return unreachable(reply, { code: 'machine_unreachable' });
     if (!ok) return failure(reply, result);
-    const { sessionName, mcpCapabilities, initialPromptInjected, initialPromptError, initialPromptDelivery } = parse(result.text);
+    const { sessionName, mcpCapabilities, initialPromptInjected, initialPromptError, initialPromptDelivery, transport } = parse(result.text);
+    // A structured session has no tmux pane, so (as on the hub) it gets no Telegram topic.
+    if (transport) store.update((state) => { if (state.sessions?.[key]) state.sessions[key].structured = true; });
     return passThrough(reply, 200, JSON.stringify({ id: sessionId, sessionName, mcpCapabilities, initialPromptInjected,
       initialPromptError, initialPromptDelivery, machine }), [issued?.token, row.credential]);
   }
@@ -638,8 +664,8 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     const rows = Object.values(store.read().sessions || {}).filter((entry) => entry.kind === kind && entry.status === 'live');
     if (!rows.length) return payload;
     const body = JSON.parse(payload);
-    body.sessions = [...(body.sessions || []), ...rows.map(({ sessionId, machine, workDir, displayName, created, state }) => ({
-      id: sessionId, displayName, workDir, created, tmuxSession: `${kind}-${sessionId}`, ...(state ? { state } : {}), machine: machineStatus(machine),
+    body.sessions = [...(body.sessions || []), ...rows.map(({ sessionId, machine, workDir, displayName, created, state, structured }) => ({
+      id: sessionId, displayName, workDir, created, ...(structured ? {} : { tmuxSession: `${kind}-${sessionId}` }), ...(state ? { state } : {}), machine: machineStatus(machine),
     }))];
     return JSON.stringify(body);
   });
