@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, stat } from 'node:fs/promises';
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, networkInterfaces, platform } from 'node:os';
 import { join } from 'node:path';
@@ -30,6 +30,9 @@ const SWEEP_MS = 30_000;
 const EVENT_LOG_SIZE = 1000;
 const BLOCKING = new Set(['machine_blocked', 'machine_protocol_mismatch']);
 const QUEUED = new Set(['permission', 'confirmation', 'selection']);
+// Worktree keeps that are the worker's answer, as at a local room end; any other keep (a git or fetch failure, a session
+// still live there) leaves a remote cleanup pending.
+const SETTLED_KEEP = /^(dirty or untracked files|unpushed commits|new ignored files|cleanup off|cleanup policy not recorded|marker mismatch|metadata missing|path outside managed base|local commits after failed spawn|worktree missing)/;
 // A row's status, plus a prompt the hub files in its Command Queue.
 const eventRow = ({ state }) => ({ status: state?.status || 'unknown', ...(QUEUED.has(state?.interaction?.kind) && state.interaction.fingerprint
   ? { interaction: (({ kind, detail, options, fingerprint }) => ({ kind, detail, options, fingerprint }))(state.interaction) } : {}) });
@@ -254,6 +257,8 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
         const { repo, branch, base, roomId } = create;
         return createManagedWorktree({ repo, branch, base, roomId, baseDir: worktreeBaseDir }).catch((error) => { throw fail(error.message, 'worktree_create_failed'); });
       }
+      // Gone already (an earlier answer the hub did not record) settles a retry.
+      if (cleanup?.path && !await stat(cleanup.path).catch(() => null)) return { removed: false, reason: 'worktree missing', report: 'worktree: missing' };
       const list = await app.inject({ url: '/api/claude/sessions', headers: { authorization: req.headers.authorization } });
       if (list.statusCode !== 200 || list.json().stale) throw fail('Session list unavailable', 'machine_busy', 503);
       const sessions = list.json().sessions.map((row) => ({ workDir: row.workDir, lifecycle: row.canonicalState?.lifecycle }));
@@ -325,6 +330,7 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     timers.clear(supervisors.get(name)?.timer);
     supervisors.delete(name);
     for (const entry of Object.values(store.read().sessions || {})) if (entry.machine === name) await dropSession(entry.kind, entry.sessionId);
+    store.update((state) => { for (const [key, entry] of Object.entries(state.worktreeCleanup || {})) if (entry.machine === name) delete state.worktreeCleanup[key]; });
   }
   // A remote prompt takes the local path into the hub's Command Queue: one item per fingerprint, and a changed or gone prompt closes it.
   async function fileInteraction({ kind, sessionId, displayName, state }) {
@@ -428,7 +434,7 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
   let sweepTimer;
   async function sweep() {
     const state = store.read();
-    const names = new Set([...supervisors.keys(), ...Object.values(state.sessions || {}).map((entry) => entry.machine)]);
+    const names = new Set([...supervisors.keys(), ...[...Object.values(state.sessions || {}), ...Object.values(state.worktreeCleanup || {})].map((entry) => entry.machine)]);
     for (const name of names) if (!state.machines?.[name]) await retire(name);
     sweepTimer = timers.set(sweep, SWEEP_MS);
   }
@@ -464,21 +470,27 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
 
   // Collab worktrees of remote participants live on their worker. A cleanup the worker cannot take now (with the room's
   // sessions there to end first) is recorded pending and retried after each successful poll; a worker answer settles it.
+  // Resolves to the worker's answer only when it is final: sessions ended (or unknown there) and a removal or settled keep.
   const worktreeSend = async (row, { sessionIds = [], ...body }) => {
-    for (const id of sessionIds) await send(row, 'DELETE', `/api/claude/sessions/${id}`);
-    return send(row, 'POST', '/api/machine/worktree', body);
+    for (const id of sessionIds) {
+      const { status } = await send(row, 'DELETE', `/api/claude/sessions/${id}`);
+      if (status >= 300 && status !== 404) return null;
+    }
+    const result = await send(row, 'POST', '/api/machine/worktree', body);
+    const answer = result.status === 200 ? parse(result.text) : null;
+    return answer && (body.create || answer.removed || SETTLED_KEEP.test(answer.reason || '')) ? answer : null;
   };
   app.decorate('machineWorktree', async (name, body) => {
     const row = store.read().machines?.[name];
-    const result = (await reach(name, row)).code ? null : await worktreeSend(row, body).catch(() => null);
-    if (result?.status === 200) return parse(result.text);
-    if (body.create) throw fail(`Machine ${name}: worktree create failed (${result ? `HTTP ${result.status}` : 'machine_unreachable'})`, 'machine_worktree_failed');
+    const answer = (await reach(name, row)).code ? null : await worktreeSend(row, body).catch(() => null);
+    if (answer) return answer;
+    if (body.create) throw fail(`Machine ${name}: worktree create failed`, 'machine_worktree_failed');
     store.update((state) => { (state.worktreeCleanup ||= {})[`${name}:${body.cleanup.roomId}`] = { machine: name, ...body }; });
     return { removed: false, pending: true, report: `worktree: cleanup pending until ${name} is reachable` };
   });
   async function drainWorktrees(name, row) {
     for (const [key, { machine, ...body }] of Object.entries(store.read().worktreeCleanup || {})) {
-      if (machine !== name || (await worktreeSend(row, body).catch(() => null))?.status !== 200) continue;
+      if (machine !== name || !await worktreeSend(row, body).catch(() => null)) continue;
       store.update((state) => { delete state.worktreeCleanup[key]; });
     }
   }

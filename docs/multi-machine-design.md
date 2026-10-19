@@ -947,9 +947,14 @@ nono's Landlock can work.
   - **Pending.** If the worker cannot answer at room end (or at a failed bootstrap's rollback), the hub
     records `{machine, cleanup, sessionIds}` under `worktreeCleanup` in its machine state. After each
     successful poll the supervisor first deletes those sessions on the worker (the hub's delete while
-    away left them running there), then sends the cleanup. Any 200 settles the entry, whether the
-    worktree was removed or kept. If the hub stops between the answer and the update, the retry finds no worktree and changes nothing.
+    away left them running there; a delete answered other than 2xx or 404 stops the attempt), then
+    sends the cleanup. Only a final answer settles the entry: a removal, or a keep a local room end
+    would also leave (dirty, unpushed, new ignored files, cleanup off, marker mismatch). A git or
+    fetch failure, or a session still live there, stays pending and is retried on the next poll. If
+    the hub stops between the answer and the update, the retry finds the worktree missing and settles.
   - **Scope.** `worker:operate` gains exactly this route, which also requires the `hub-peer`
     principal. No protocol bump: an older worker refuses the route (403), a create fails closed, and a
     cleanup stays pending until the worker is updated.
-  - **Accepted gap.** Entries for a machine that is forgotten stay in `worktreeCleanup` unused.
+  - **Forget** drops that machine's pending entries in the hub's 30 s sweep.
+  - **Accepted gap.** A create that the worker completes but whose answer the hub never receives (a
+    timeout) is not recorded, so its worktree and branch stay on the worker until removed by hand.

@@ -59,7 +59,7 @@ function fakeTimers() {
 }
 const hubTimers = fakeTimers();
 const workerTimers = fakeTimers();
-let online = true; let skew = 0;
+let online = true; let skew = 0; let refused = 0;
 
 const logs = [];
 const logger = () => ({ level: 'trace', redact: LOG_REDACT, stream: new Writable({ write(chunk, _enc, done) { logs.push(String(chunk)); done(); } }) });
@@ -73,8 +73,10 @@ const workerStore = machineState(join(workerDir, 'machines'));
 const busStore = new AgentBusCredentialStore({ stateFile: join(root, 'hub-bus.json'), mode: 'issue_only', env: { APP_STATE_STORAGE: 'file', DATABASE_URL: '' } });
 let hub; let tailnet; let hubMcpUrl; let requestImpl; let worker; let workerPort = 0; let workerUrl;
 
-async function startWorker({ protocol = MACHINE_PROTOCOL, store = workerStore, sessions = true, port = workerPort } = {}) {
+async function startWorker({ protocol = MACHINE_PROTOCOL, store = workerStore, sessions = true, port = workerPort, refuseDeletes = false } = {}) {
   const app = Fastify({ logger: logger() });
+  // A worker whose session deletes fail (a session it cannot end).
+  if (refuseDeletes) app.addHook('onRequest', async (req, reply) => { if (req.method === 'DELETE') { refused += 1; return reply.code(409).send({ code: 'session_delete_failed' }); } });
   await app.register(authPlugin, { workerMachines: store });
   await app.register(machinesPlugin, { role: 'worker', store, protocol, timers: workerTimers, now: () => Date.now() + skew, worktreeBaseDir: workerWorktrees });
   await app.register(agentProviderPreferencesPlugin);
@@ -713,6 +715,27 @@ describe('multi-machine slice 5', () => {
     assert.deepEqual(await Promise.all(remoteIds.map(live)), [false, false], 'the room\'s sessions on the worker ended first');
     await hubTimers.fire();
     assert.deepEqual(hubStore.read().worktreeCleanup, {}, 'and it is not retried');
+  });
+
+  it('a fetch failure or a failed session delete on the worker leaves cleanup pending', async () => {
+    const room = await bootstrap('topic-c');
+    const { path } = hub.store.getThread(room.thread.id).thread.metadata.machineWorktrees.w8.worktree;
+    const origin = (await git(repo, 'remote', 'get-url', 'origin')).stdout.trim();
+    await git(repo, 'remote', 'set-url', 'origin', join(root, 'no-such-remote'));
+    const ended = await end(room.thread.id);
+    assert.equal(ended.json().machineWorktrees.w8.pending, true, ended.body);
+    const key = `w8:${room.thread.id}`;
+    await hubTimers.fire();
+    assert.ok(hubStore.read().worktreeCleanup[key], 'a git fetch failure is not an answer');
+    await git(repo, 'remote', 'set-url', 'origin', origin);
+    await restartWorker({ refuseDeletes: true });
+    await until(async () => { await hubTimers.fire(); return refused > 0; }, 'a retry against the refusing worker');
+    await hubTimers.fire();
+    assert.ok(hubStore.read().worktreeCleanup[key], 'a refused session delete stops the cleanup');
+    assert.equal(await exists(path), true);
+    await restartWorker();
+    await until(async () => { await hubTimers.fire(); return !hubStore.read().worktreeCleanup[key]; }, 'the cleanup once both pass');
+    assert.equal(await exists(path), false);
   });
 
   it('a credential with the wrong scope is rejected on the worktree route', async () => {
