@@ -320,7 +320,7 @@ describe('multi-machine slice 2', () => {
     b = (await create('b')).json().id;
     [tokenA, tokenB] = [await tokenOf(a), await tokenOf(b)];
     secrets.add(tokenA).add(tokenB);
-    await until(async () => { await hubTimers.fire(); return (await listed(a))?.state && (await listed(b))?.state; }, 'rows filled from events');
+    await until(async () => { await hubTimers.fire(); return (await listed(a))?.state && (await listed(b))?.state && await status() === 'live'; }, 'rows filled from events');
     assert.deepEqual((await listed(a)).machine, { id: 'w5', status: 'live' });
     assert.deepEqual(pending(), [5000]);
     const all = await events(0);

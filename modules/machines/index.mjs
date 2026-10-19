@@ -260,7 +260,8 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
   const schedule = (name, ms) => { const s = sup(name); timers.clear(s.timer); s.timer = timers.set(() => connect(name), ms); };
   const machineStatus = (name) => {
     const s = sup(name);
-    const status = { blocked: 'blocked', backoff: 'unreachable', offline: 'unreachable' }[supervise ? s.phase : ''] || 'live';
+    // Live only once connected (or before the first contact); a reconnect in progress is still unreachable.
+    const status = { blocked: 'blocked', backoff: 'unreachable', offline: 'unreachable', connecting: 'unreachable' }[supervise ? s.phase : ''] || 'live';
     return status === 'live' ? { id: name, status } : { id: name, status, since: s.since };
   };
   function failed(name, peer) {
