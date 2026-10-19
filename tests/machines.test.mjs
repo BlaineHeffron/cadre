@@ -5,7 +5,7 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { once } from 'node:events';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -45,6 +45,7 @@ const { LOG_REDACT, MACHINE_PROTOCOL, machinesPlugin, machineState } = await imp
 const { mcpClientConfigPath, prepareAgentBusCredentialLaunch } = await import('../modules/integrations/mcp-launch-preflight.mjs');
 const { runtimeStatePath } = await import('../modules/ops/runtime-state.mjs');
 const { enqueueAgentSessionCommand, routeRemoteSessionCommands } = await import('../modules/sessions/index.mjs');
+const { buildHookSessionPaths, readHookEventsSince, recordHookPayload } = await import('../modules/agent/hook-events.mjs');
 
 function fakeTimers() {
   const pending = new Set();
@@ -183,8 +184,6 @@ describe('multi-machine slice 1', () => {
 
     const directory = await tool(agentToken, 'agent_directory');
     assert.deepEqual(directory.value.agents.find((agent) => agent.sessionId === remoteId)?.machine, { id: 'w1', status: 'live' });
-    const returning = await tool(agentToken, 'spawn_session', { provider: 'claude', machine: 'w1', workDir, returnResults: true });
-    assert.match(returning.text, /returnResults is not supported/);
     for (const windowsPath of ['C:\\Users\\me\\repo', '\\\\wsl$\\Ubuntu\\home', '/mnt/c/Users/me']) {
       assert.match((await tool(agentToken, 'spawn_session', { provider: 'claude', machine: 'w1', workDir: windowsPath })).text, /workdir_windows_path_unsupported/);
     }
@@ -444,6 +443,96 @@ describe('multi-machine slice 2', () => {
     assert.equal(await listed(a), undefined);
     await restartWorker();
     assert.match((await cli(hubDir, ['machine', 'forget', 'w5'])).out, /Revoked on both sides/);
+  });
+});
+
+describe('multi-machine slice 3', () => {
+  let workDir; let child; let worker2;
+  const tokenOf = async (id) => JSON.parse(await readFile(mcpClientConfigPath('claude', id), 'utf8')).mcpServers.dueno.headers.Authorization.slice('Bearer '.length);
+  // The worker side of a hook: the same recorder the claude hook script runs, appending to the session's hook log.
+  const record = (id, name, extra = {}) => recordHookPayload({ session_id: `cli-${id}`, cwd: workDir, hook_event_name: name, ...extra },
+    { provider: 'claude', duenoSessionId: id, workDir });
+  const turn = async (id, answer, extra = {}) => { await record(id, 'UserPromptSubmit', { prompt: 'go' }); await record(id, 'Stop', { last_assistant_message: answer, ...extra }); };
+  const results = (id) => hub.store.listMessages().filter((message) => message.type === 'result' && message.from.sessionId === id).map((message) => message.body);
+  const poll = (check, label) => until(async () => { await hubTimers.fire(); return check(); }, label);
+  const spawn = async (token) => {
+    const spawned = await tool(token, 'spawn_session', { provider: 'claude', machine: 'w6', workDir, returnResults: true });
+    assert.equal(spawned.isError, false, spawned.text);
+    const id = spawned.value.participants[0].session_id;
+    secrets.add(await tokenOf(id));
+    return id;
+  };
+
+  it('returns a remote child\'s finished turn to its spawner once, and holds a turn with background work or a busy worker', async () => {
+    assert.equal((await addMachine('w6', await pair())).ok, true);
+    workDir = await mkdtemp(join(root, 'repo-'));
+    child = await spawn((await prepareAgentBusCredentialLaunch({ backendType: 'claude', sessionId: 'claude-1', credentialStore: busStore })).token);
+    await turn(child, 'first answer');
+    await poll(() => results(child).length === 1, 'the first result');
+    await turn(child, 'still in the background', { background_tasks: [{ id: 'bg-1' }] });
+    worker2 = await spawn(await tokenOf(child));
+    await record(worker2, 'UserPromptSubmit', { prompt: 'work' });
+    await turn(child, 'waiting on my worker');
+    await turn(worker2, 'worker done');
+    await poll(() => results(worker2).length === 1, 'the worker result to its remote spawner');
+    await turn(child, 'final answer');
+    await poll(() => results(child).length === 2, 'the final result');
+    assert.deepEqual(results(child), ['first answer', 'final answer']);
+    assert.deepEqual(results(worker2), ['worker done']);
+  });
+
+  it('a turn that ends while the worker is down or restarting arrives once on reconnect, none lost', async () => {
+    await record(child, 'UserPromptSubmit', { prompt: 'long task' });
+    await worker.close();
+    await hubTimers.fire();
+    await record(child, 'Stop', { last_assistant_message: 'done while away' });
+    await turn(child, 'and one more');
+    worker = await startWorker();
+    await poll(() => results(child).length === 4, 'both results after the reconnect');
+    await restartWorker();
+    await poll(async () => (await hub.app.inject({ url: '/api/claude/sessions', headers: hub.authHeaders })).json().sessions.find((row) => row.id === child)?.machine.status === 'live', 'a second reconnect');
+    await hubTimers.fire();
+    assert.deepEqual(results(child), ['first answer', 'final answer', 'done while away', 'and one more']);
+    const mirror = await readHookEventsSince({ workDir: join(hubDir, 'machines', 'hooks'), provider: 'claude', sessionId: child });
+    assert.deepEqual(mirror.events.filter((event) => event.eventName === 'Stop').map((event) => event.lastAssistantMessage),
+      ['first answer', 'still in the background', 'waiting on my worker', 'final answer', 'done while away', 'and one more'], 'each event mirrored once, in order');
+    const before = hubStore.read().sessions[`claude:${child}`].hookCursor || 0;
+    await record(child, 'PreToolUse', { tool_name: 'Read' });
+    await hubTimers.fire();
+    assert.ok(hubStore.read().sessions[`claude:${child}`].hookCursor > Math.max(before, mirror.events.at(-1).machineCursor), 'a batch with no prompt or stop still advances the cursor');
+    assert.equal((await readHookEventsSince({ workDir: join(hubDir, 'machines', 'hooks'), provider: 'claude', sessionId: child })).events.length, mirror.events.length);
+  });
+
+  it('holds a turn while its remote worker is busy even if the worker clock was 10 min behind and stepped before the poll', async () => {
+    // Hook lines stamped by the worker's old clock; the worker itself now answers on the right one.
+    const behind = async (id, eventName, lastAssistantMessage = '') => {
+      const { hooksDir, eventsPath } = await buildHookSessionPaths({ workDir, provider: 'claude', sessionId: id });
+      await mkdir(hooksDir, { recursive: true });
+      await appendFile(eventsPath, `${JSON.stringify({ loggedAt: new Date(Date.now() - 10 * 60_000).toISOString(), eventName, lastAssistantMessage, payload: {} })}\n`);
+    };
+    const worker3 = await spawn(await tokenOf(child));
+    await behind(worker3, 'UserPromptSubmit');
+    await behind(child, 'UserPromptSubmit');
+    await behind(child, 'Stop', 'too early');
+    await behind(worker3, 'UserPromptSubmit');
+    await behind(worker3, 'Stop', 'late worker done');
+    await poll(() => results(worker3).length === 1, 'the worker result');
+    await behind(child, 'UserPromptSubmit');
+    await behind(child, 'Stop', 'after the worker');
+    await poll(() => results(child).length === 5, 'the result after the worker');
+    assert.deepEqual(results(child).slice(4), ['after the worker'], 'the turn that ended while the worker was busy is held');
+    assert.deepEqual(results(worker3), ['late worker done']);
+  });
+
+  it('only the hub\'s worker credential reads hook events', async () => {
+    const url = `${workerUrl}/api/machine/hook-events?sessionId=${child}&cursor=0`;
+    assert.equal((await call(url)).status, 401);
+    const answer = async (token) => { const { status, json } = await call(url, { token }); return [status, json.error]; };
+    assert.deepEqual(await answer(workerStore.read().hub.credential), [403, 'Invalid token'], 'bus:agent is not a worker credential');
+    assert.deepEqual(await answer(TOKEN), [403, 'Forbidden'], 'the worker UI token is not the hub');
+    const read = await call(url, { token: hubStore.read().machines.w6.credential });
+    assert.equal(read.status, 200);
+    assert.deepEqual(read.json.events.map((event) => event.eventName).slice(0, 2), ['UserPromptSubmit', 'Stop']);
   });
 });
 

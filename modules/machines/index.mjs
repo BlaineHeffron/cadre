@@ -1,11 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { appendFile, mkdir } from 'node:fs/promises';
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, networkInterfaces, platform } from 'node:os';
 import { join } from 'node:path';
 import { privateAllowedHosts } from '../fleet/registry.mjs';
 import { readEnv } from '../platform/cadre-env.mjs';
-import { deriveSpawnTrust, operatorResumeLoopRegistrationPolicy, storedCoordinatorPolicy } from '../agent-bus/coordinator-policy.mjs';
+import { deriveSpawnTrust, operatorResumeLoopRegistrationPolicy, SPAWN_RESULT_NOTE, storedCoordinatorPolicy } from '../agent-bus/coordinator-policy.mjs';
+import { buildHookSessionPaths, readHookEventsSince, registerHookSessionRegistry } from '../agent/hook-events.mjs';
 import { buildInternalBypassHeaders } from '../platform/auth.mjs';
 import { cleanupAgentBusCredentialLaunch, prepareAgentBusCredentialLaunch } from '../integrations/mcp-launch-preflight.mjs';
 
@@ -59,7 +61,7 @@ export function machineState(dir) {
     return token;
   };
   return {
-    read, update, machineId, issueCredential,
+    dir, read, update, machineId, issueCredential,
     issueCode(now = Date.now()) {
       const code = Array.from(randomBytes(12), (byte) => CODE_ALPHABET[byte & 31]).join('');
       update((state) => { (state.codes ||= {})[sha(code)] = now + CODE_TTL_MS; });
@@ -214,6 +216,16 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
         return { sequence: log.sequence, events: gap ? [] : log.items.filter((event) => event.sequence > after), ...(gap ? { snapshot: log.rows } : {}) };
       });
     });
+    // A returnResults child's prompt and stop hook events after `cursor`, read from the append-only log they are recorded in.
+    app.get('/api/machine/hook-events', async (req) => {
+      if (req.duenoAuth?.principal?.type !== 'hub-peer') throw fail('Hub credential required', 'forbidden', 403);
+      const { sessionId = '', cursor = 0 } = req.query;
+      const detail = /^[a-f0-9]{8,32}$/.test(sessionId) && await app.inject({ url: `/api/claude/sessions/${sessionId}?lines=50`, headers: { authorization: req.headers.authorization } });
+      if (detail?.statusCode !== 200 || !detail.json().workDir) return { cursor: Number(cursor) || 0, events: [] };
+      const read = await readHookEventsSince({ workDir: detail.json().workDir, provider: 'claude', sessionId, cursor });
+      return { cursor: read.cursor, events: read.events.filter((event) => ['UserPromptSubmit', 'Stop'].includes(event.eventName))
+        .map(({ loggedAt, eventName, lastAssistantMessage, payload }) => ({ loggedAt, eventName, lastAssistantMessage, payload: { background_tasks: payload?.background_tasks } })) };
+    });
     app.post('/api/pairing/redeem', async (req, reply) => {
       const { pairCode, hubEnvId, hubCredential, hubMcpUrl } = req.body || {};
       let mcpUrl;
@@ -299,6 +311,44 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     });
     for (const entry of removed) await dropSession(entry.kind, entry.sessionId);
   }
+  // Remote returnResults children: the hub mirrors their prompt and stop events into a local hook log that the observer
+  // reads as it reads a local child's. Each mirrored line carries the worker's cursor, so a hub restart or a reconnect
+  // resumes after the last event seen and the mirror never holds an event twice.
+  const hookFile = (entry) => ({ workDir: join(store.dir, 'hooks'), provider: entry.kind, sessionId: entry.sessionId });
+  // A .git marker ends buildHookSessionPaths' walk up, so the mirror stays under the state dir even inside a checkout.
+  mkdirSync(hookFile({}).workDir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(hookFile({}).workDir, '.git'), '', { flag: 'a' });
+  const returning = () => Object.values(store.read().sessions || {}).filter((entry) => entry.status === 'live' && entry.metadata?.spawnedBy);
+  const unregisterHooks = registerHookSessionRegistry('claude', () => returning().map((entry) => [entry.sessionId,
+    { workDir: hookFile(entry).workDir, metadata: entry.metadata, created: entry.created, lifecycle: entry.state?.status }]));
+  app.addHook('onClose', async () => unregisterHooks());
+  const hookCursors = new Map();
+  let lastStamp = 0;
+  async function mirrorHooks(name, row) {
+    const fetched = [];
+    for (const entry of returning().filter((item) => item.machine === name)) {
+      const key = `${entry.kind}:${entry.sessionId}`;
+      // Read once per hub process: the mirror's last line, or the cursor of a batch with no prompt or stop (which wrote no line).
+      if (!hookCursors.has(key)) hookCursors.set(key, Math.max((await readHookEventsSince(hookFile(entry))).events.at(-1)?.machineCursor || 0, entry.hookCursor || 0));
+      const cursor = hookCursors.get(key);
+      const result = await send(row, 'GET', `/api/machine/hook-events?sessionId=${entry.sessionId}&cursor=${cursor}`).catch(() => null);
+      const { events = [], cursor: next } = result?.status === 200 ? parse(result.text) : {};
+      if (!(next > cursor)) continue;
+      if (events.length) { fetched.push({ entry, key, events, next }); continue; }
+      store.update((state) => { if (state.sessions?.[key]) state.sessions[key].hookCursor = next; });
+      hookCursors.set(key, next);
+    }
+    // The observer compares these times with hub times (spawns, rooms, messages), and the worker clock can step between a hook
+    // and this read. So each event gets the hub's receive time, strictly increasing in the worker's order across sessions.
+    const order = fetched.flatMap(({ events }) => { let at = 0; return events.map((event) => ({ event, at: at = Math.max(at, Date.parse(event.loggedAt) || 0) })); });
+    for (const { event } of order.sort((a, b) => a.at - b.at)) event.loggedAt = new Date(lastStamp = Math.max(now(), lastStamp + 1)).toISOString();
+    for (const { entry, key, events, next } of fetched) {
+      const { hooksDir, eventsPath } = await buildHookSessionPaths(hookFile(entry));
+      await mkdir(hooksDir, { recursive: true });
+      await appendFile(eventsPath, events.map((event) => `${JSON.stringify({ ...event, machineCursor: next })}\n`).join(''));
+      hookCursors.set(key, next);
+    }
+  }
   async function attempt(name) {
     const s = sup(name);
     const row = store.read().machines?.[name];
@@ -310,6 +360,7 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
       const result = await send(row, 'GET', `/api/machine/events?afterSequence=${Number(row.cursor) || 0}`).catch(() => null);
       if (result?.status === 200) {
         await apply(name, parse(result.text));
+        await mirrorHooks(name, row);
         enter(s, 'connected');
         s.attempt = 0;
         return schedule(name, POLL_MS);
@@ -378,7 +429,6 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     const row = store.read().machines?.[machine];
     if (!row) return reply.code(400).send({ error: `Unknown machine: ${machine}`, code: 'machine_unknown' });
     if (kind !== 'claude') return reply.code(400).send({ error: `machine ${machine} runs only claude sessions`, code: 'machine_kind_unsupported' });
-    if (body.metadata?.returnToSpawner) return reply.code(400).send({ error: 'returnResults is not supported on another machine yet', code: 'machine_return_results_unsupported' });
     // Never queued: a machine that is down, or on another protocol (426), fails the spawn now.
     const peer = await reach(machine, row);
     if (peer.code) return unreachable(reply, peer, peer.code === 'machine_protocol_mismatch' ? 426 : 503);
@@ -390,8 +440,11 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
       coordinatorPolicy: trust.coordinatorPolicy, loopRegistrationPolicy: trust.loopRegistrationPolicy });
     const entry = { machine, kind, sessionId, workDir: String(body.workDir || ''), displayName: String(body.displayName || ''), created: now(), status: 'pending', metadata: trust.metadata };
     store.update((state) => { (state.sessions ||= {})[key] = entry; });
+    // spawnedBy stays on the hub, which returns the child's results; the worker gets only the note it would have added.
+    const { spawnedBy, ...metadata } = trust.metadata;
+    const initialPrompt = spawnedBy && body.initialPrompt ? `${body.initialPrompt}\n\n${SPAWN_RESULT_NOTE}` : body.initialPrompt;
     const result = await send(row, 'POST', `/api/${kind}/sessions`, {
-      ...body, mcpProfile: 'dueno', metadata: trust.metadata, sessionId, busCredential: issued?.token || '',
+      ...body, initialPrompt, mcpProfile: 'dueno', metadata, sessionId, busCredential: issued?.token || '',
     }).catch(() => null);
     const ok = result && result.status < 300;
     store.update((state) => { if (ok) state.sessions[key].status = 'live'; else delete state.sessions[key]; });
