@@ -92,6 +92,13 @@ function text(value) {
   return String(value || '').trim();
 }
 
+// On a worker the hub minted the bus token; this store only hands it back, so nothing is minted there.
+export const preIssuedCredentialStore = (token) => ({
+  issue: async () => (token ? { token, credential: null } : null),
+  revoke: async () => false,
+  authenticate: async () => ({ ok: false }),
+});
+
 function assertLoopbackUrl(value) {
   const url = new URL(text(value));
   if (!['http:', 'https:'].includes(url.protocol) || !['127.0.0.1', '::1', 'localhost'].includes(url.hostname)) {
@@ -434,8 +441,8 @@ export async function prepareMcpCapabilityLaunch({
     for (const id of serverIds) {
       if (id === 'dueno') {
         // A worker session dials its paired hub's MCP origin, never a caller-supplied URL.
-        const configuredUrl = duenoUrl || buildAgentBusMcpUrl(sourceConfig);
-        const url = duenoCredentialEnvVar ? assertLoopbackUrl(configuredUrl) : configuredUrl;
+        const configuredUrl = buildAgentBusMcpUrl(sourceConfig);
+        const url = duenoUrl || (duenoCredentialEnvVar ? assertLoopbackUrl(configuredUrl) : configuredUrl);
         const authorization = busCredential?.token ? `Bearer ${busCredential.token}` : '';
         if (backendType === 'codex') codexArgs.push(...codexHttpServerArgs(id, url, {
           bearerTokenEnvVar: busCredential?.token ? 'DUENO_AGENT_BUS_TOKEN' : '',

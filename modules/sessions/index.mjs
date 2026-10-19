@@ -54,6 +54,7 @@ import { buildMcpCapabilityCatalog } from '../integrations/mcp-server-catalog.mj
 import {
   cleanupMcpCapabilityLaunch,
   prepareMcpCapabilityLaunch,
+  preIssuedCredentialStore,
   sanitizedMcpSnapshot,
 } from '../integrations/mcp-launch-preflight.mjs';
 import { resolvePromptProfile } from '../integrations/prompt-profile-catalog.mjs';
@@ -509,12 +510,7 @@ export function createAgentSessionsProvider(providerId) {
   let agentBusCredentialStore = null;
 
   function credentialStoreOptions(busCredential = null) {
-    // On a worker the hub minted the bus token; this store only hands it back, so nothing is minted here.
-    if (busCredential !== null) return { credentialStore: {
-      issue: async () => (busCredential ? { token: busCredential, credential: null } : null),
-      revoke: async () => false,
-      authenticate: async () => ({ ok: false }),
-    } };
+    if (busCredential !== null) return { credentialStore: preIssuedCredentialStore(busCredential) };
     return agentBusCredentialStore ? { credentialStore: agentBusCredentialStore } : {};
   }
 
@@ -1151,7 +1147,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     const headroom = await prepareHeadroomLaunch(sessionRuntime.provider);
     sandboxLaunch = sandboxMode === 'nono' ? await prepareNonoLaunch({
       provider: config.id, sessionId: id, workDir: normalizedWorkDir, mcpLaunch: mcpPreparation.prepared,
-      promptLaunch: promptPreparation.prepared, headroom, githubToken,
+      promptLaunch: promptPreparation.prepared, headroom, githubToken, duenoUrl,
     }) : null;
     const renderedLaunch = renderAgentSessionLaunch({
       headroom,
@@ -1392,7 +1388,7 @@ async function resumeSession(id, { loopRegistrationPolicy = null, busCredential 
     const headroom = await prepareHeadroomLaunch(sessionRuntime.provider);
     const sandboxLaunch = sandboxMode === 'nono' ? await prepareNonoLaunch({
       provider: config.id, sessionId: id, workDir: normalizedWorkDir, grants: refreshed.sandboxGrants || {},
-      mcpLaunch: mcpPreparation.prepared, promptLaunch: promptPreparation.prepared, headroom,
+      mcpLaunch: mcpPreparation.prepared, promptLaunch: promptPreparation.prepared, headroom, duenoUrl,
     }) : null;
     const { allArgs, paneCommand } = renderAgentSessionLaunch({
       headroom,

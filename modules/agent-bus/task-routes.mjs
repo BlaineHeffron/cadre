@@ -11,7 +11,7 @@ export const TASK_TOOLS = [
   { name: 'task_spawn', description: 'Persist and launch one bounded child task. Reusing parent/task_key returns the same task, including unknown startup outcomes. Returns task_id, thread_id, session_id and status.',
     inputSchema: object({ ...thread, parent_task_id: id, task_key: id,
       spec: object({ provider: id, workDir: { ...id, maxLength: 4096 }, model: id,
-        displayName: id, initialPrompt: { type: 'string', maxLength: 200000 } }, ['provider', 'workDir', 'model']),
+        displayName: id, initialPrompt: { type: 'string', maxLength: 200000 }, machine: id }, ['provider', 'workDir', 'model']),
     }, ['thread_id', 'task_key', 'spec']) },
   { name: 'task_send', description: 'Persist idempotent task input. Ordinary input queues while busy; explicit steer requires the expected active turn and negotiated support. Returns message_id and status.',
     inputSchema: object({ ...task, message_key: id, input: { type: 'string', minLength: 1, maxLength: 200000 },
@@ -79,6 +79,7 @@ export function registerTaskRoutes({ app, store, service }) {
             const assigned = (store.listThreads?.() || []).find((entry) => isDurableTaskRecord(entry.metadata?.task) && entry.metadata.task.provider === actor.kind
               && entry.metadata.task.attempts?.at(-1)?.sessionId === actor.sessionId);
             if (!operator && assigned && args.parent_task_id !== assigned.id) throw forbidden('A task child must delegate through its own parent_task_id', 'task_parent_required');
+            if (args.spec.machine) return reply.code(400).send({ error: `task_spawn runs only on the hub, not on machine ${args.spec.machine}`, code: 'machine_kind_unsupported' });
             if (!isAbsolute(args.spec.workDir)) return reply.code(400).send({ error: 'workDir must be absolute', code: 'invalid_workdir' });
             const workDir = await realpath(args.spec.workDir);
             const allowed = ['mcp:discover', 'room_context', 'room_send', ...TASK_TOOLS.map((entry) => entry.name)];
