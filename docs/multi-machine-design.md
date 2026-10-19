@@ -1009,7 +1009,7 @@ nono's Landlock can work.
     `AGENT_SESSION_WORKTREE_BASE_DIR`. The session's metadata carries the worktree, so the worker's delete removes
     it, as locally. As locally, a create that fails after the worktree is made leaves it behind.
   - **nono.** Decided on the worker as on the hub (`CADRE_SANDBOX=nono` plus nono's version and profile checks;
-    nono itself needs Landlock). In nono's proxy mode the port grant is the hub MCP URL's port (443 by default)
+    nono itself needs Landlock). In nono's proxy mode the port grant is the hub MCP URL's port (its scheme's default when none is given)
     instead of the local listener's.
   - **Protocol 3.** An older worker would treat the `isolated` op as a cleanup and would not end a room's sessions,
     so `MACHINE_PROTOCOL` is 3 and older workers show `blocked` until redeployed.

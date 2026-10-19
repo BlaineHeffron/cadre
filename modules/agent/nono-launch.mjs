@@ -126,8 +126,9 @@ export async function prepareNonoLaunch({ provider, sessionId, workDir, grants, 
   else if (credential && !await lstat(tokenFile).then((info) => info.isFile(), () => false)) {
     throw sandboxError('Sandboxed session has no GitHub token to resume with', 'sandbox_credential_missing', 409);
   }
-  // A worker session dials its hub's MCP origin (https, port 443 unless given) instead of the local listener.
-  const ports = [duenoUrl ? new URL(duenoUrl).port || 443 : config.agentBusMcpHttp.port, ...['ANTHROPIC_BASE_URL', 'OPENAI_BASE_URL']
+  // A worker session dials its hub's MCP origin instead of the local listener.
+  const hub = duenoUrl && new URL(duenoUrl);
+  const ports = [hub ? hub.port || (hub.protocol === 'https:' ? 443 : 80) : config.agentBusMcpHttp.port, ...['ANTHROPIC_BASE_URL', 'OPENAI_BASE_URL']
     .filter((key) => headroom.env?.[key]).map((key) => new URL(headroom.env[key]).port)];
   return {
     stateDir,

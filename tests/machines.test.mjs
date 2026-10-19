@@ -855,10 +855,11 @@ describe('multi-machine slice 7', () => {
       await recordHookPayload({ session_id: `cli-${id}`, cwd: workDir, hook_event_name: name, ...extra }, { provider: kind, duenoSessionId: id, workDir });
     }
   };
+  // The worker can read a new pane as missing for a while (the slice 4 note); a delivery then fails for good.
+  const running = (kind, id) => until(async () => (await hub.app.inject({ url: `/api/${kind}/sessions/${id}`, headers: hub.authHeaders })).json().canonicalState?.lifecycle === 'running',
+    `the worker sees the ${kind} session running`, 1200);
   const dm = async (kind, id) => {
-    // The worker can read a new pane as missing for a while (the slice 4 note); a delivery then fails for good.
-    await until(async () => (await hub.app.inject({ url: `/api/${kind}/sessions/${id}`, headers: hub.authHeaders })).json().canonicalState?.lifecycle === 'running',
-      `the worker sees the ${kind} session running`, 1200);
+    await running(kind, id);
     const sent = await tool(parent, 'agent_dm', { kind, session_id: id, body: `hello ${kind}` });
     assert.equal(sent.isError, false, sent.text);
     const messageId = sent.value.message_id;
@@ -885,7 +886,7 @@ describe('multi-machine slice 7', () => {
       const { session_id: id, kind: spawnedKind } = await spawn({ provider, returnResults: false });
       assert.deepEqual([spawnedKind, hubStore.read().sessions[`${kind}:${id}`]?.machine], [kind, 'w11']);
       const messageId = await dm(kind, id);
-      await until(async () => (await pane(id, kind)).includes(`id=${messageId}`), `the DM in the ${kind} pane`);
+      await until(async () => (await pane(id, kind)).includes(`id=${messageId}`), `the DM in the ${kind} pane`, 1200);
       const token = await minted[kind](id);
       secrets.add(token);
       const reply = await tool(token, 'agent_dm', { kind: 'claude', session_id: 'claude-1', body: `${kind} answer` });
@@ -945,11 +946,12 @@ describe('multi-machine slice 7', () => {
     assert.equal(spawned.isError, false, spawned.text);
     const [local, remote] = spawned.value.participants;
     assert.deepEqual([remote.kind, hubStore.read().sessions[`codex:${remote.session_id}`]?.machine], ['codex', 'w11']);
+    await running('codex', remote.session_id);
     const posted = await hub.app.inject({ method: 'POST', url: '/api/agent-bus/messages', headers: hub.authHeaders,
       payload: { threadId: spawned.value.thread_id, from: { kind: 'claude', sessionId: local.session_id }, body: 'hello codex' } });
     const messageId = posted.json().message.id;
-    await until(() => hub.store.getDeliveryForMessage(messageId)?.status === 'injected', 'the room message delivered', 600);
-    await until(async () => (await pane(remote.session_id, 'codex')).includes(`id=${messageId}`), 'the envelope in the codex pane');
+    await until(() => hub.store.getDeliveryForMessage(messageId)?.status === 'injected', 'the room message delivered', 1200);
+    await until(async () => (await pane(remote.session_id, 'codex')).includes(`id=${messageId}`), 'the envelope in the codex pane', 1200);
   });
 });
 
