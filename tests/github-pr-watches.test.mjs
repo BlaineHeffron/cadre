@@ -109,13 +109,14 @@ test('pollRepo reviews a moved trusted head once, after the live reviewer ends, 
   s.poller.spawnBackoff.clear();
   launch = async () => ({ sessionId: `sess_${launches.length}` });
   assert.deepEqual(await poll().then(({ lastSeen, head }) => [lastSeen, head]), [5, 'bbb222']);
+  s.setReviews([{ id: 1, state: 'COMMENTED', commit_id: 'bbb222' }]);
   await poll();
   s.setPr({ head: { sha: 'ccc333' }, author_association: 'NONE' });
   await poll();
   assert.deepEqual(launches, [1, 1]);
   s.setPr({ head: { sha: 'ddd444' }, author_association: 'MEMBER' });
   assert.equal((await poll(0)).head, 'ddd444');
-  s.setReviews([{ id: 1, state: 'COMMENTED' }]);
+  s.setReviews([{ id: 2, state: 'COMMENTED', commit_id: 'ddd444' }]);
   await poll();
   assert.deepEqual(launches, [1, 1, 1]);
 });

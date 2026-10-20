@@ -1523,6 +1523,44 @@ describe('GitHub agents poller', () => {
     assert.deepEqual(thrown.keys, ['pr:8', 'pr:9']);
   });
 
+  it('re-reviews a moved head without a watch and retries a dead head reviewer until its head is reviewed', async () => {
+    const run = async ({ keys, heads, reviews = [], live = true, fail = false }) => withRepoStore(async (store) => {
+      await store.upsertRepo({ ...BASE_REPO, issueEnabled: false, lastSeenPrNumber: 20, spawnedItemKeys: keys });
+      const launches = [];
+      const sessions = [];
+      let head = '';
+      let nowMs = 0;
+      const poller = new GithubAgentPoller({
+        repoStore: store, config: { enabled: true, env: { GITHUB_TOKEN_REF: 'test-token' } }, now: () => nowMs,
+        listExistingSessions: async () => sessions, tmuxSessionExists: async () => true,
+        fetchImpl: async (url) => {
+          if (String(url).endsWith('/user')) return response(200, { login: 'fleet-bot' });
+          if (String(url).includes('/reviews')) return response(200, reviews);
+          if (String(url).includes('/pulls?')) return response(200, [{ ...githubItem(8, 'PR 8'), head: { sha: head } }]);
+          return response(404, {});
+        },
+        resolveScratchWorkDir: async () => '/tmp/unused-github-head',
+        sessionLauncher: async (input) => {
+          launches.push(head);
+          if (fail) return { sessionId: '' };
+          if (live) sessions.push({ id: `pr-8-${head}`, tmuxSession: `pr-8-${head}`, metadata: input.metadata });
+          return { sessionId: `sess_${head}` };
+        },
+      });
+      for (const [at, sha] of heads) { nowMs = at; head = sha; await poller.pollOnce(); }
+      return { launches, keys: (await store.getRepo('octo/demo')).spawnedItemKeys };
+    });
+    // (a) A PR reviewed before heads were recorded baselines its head, then a push spawns one reviewer for the new head.
+    assert.deepEqual(await run({ keys: ['pr:8'], heads: [[0, 'aaa111'], [1, 'bbb222'], [2, 'bbb222']] }),
+      { launches: ['bbb222'], keys: ['pr:8', 'pr:8@aaa111', 'pr:8@bbb222'] });
+    // (b) A head reviewer that ended without reviewing its head is retried once, then backs off.
+    const dead = { keys: ['pr:8', 'pr:8@bbb222'], reviews: [{ id: 1, commit_id: 'aaa111' }] };
+    assert.deepEqual((await run({ ...dead, live: false, heads: [[0, 'bbb222']] })).launches, ['bbb222']);
+    assert.deepEqual((await run({ ...dead, fail: true, heads: [[0, 'bbb222'], [1_000, 'bbb222'], [61_000, 'bbb222']] })).launches, ['bbb222', 'bbb222']);
+    // (c) A head that already has a review is not retried.
+    assert.deepEqual((await run({ ...dead, reviews: [{ id: 2, commit_id: 'bbb222' }], live: false, heads: [[0, 'bbb222'], [1, 'bbb222']] })).launches, []);
+  });
+
   it('preserves a successful sibling ledger when a later spawn throws', async () => {
     let saved = null;
     const store = buildGithubAgentRepoStore({

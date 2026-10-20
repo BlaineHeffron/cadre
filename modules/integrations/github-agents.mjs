@@ -610,27 +610,38 @@ export class GithubAgentPoller {
       now: this.now,
       timeoutMs: this.timeoutMs,
     });
+    if (!suppressSpawn && !result.error && !result.skipped) {
+      // Any reviewed open PR whose listed head has no spawn key moved since its last review.
+      const keys = result.updatedRepo.spawnedItemKeys;
+      for (const item of result.openPullRequests) {
+        if (item.head && !moved.some((entry) => entry.number === item.number) && keys.some((key) => key.startsWith(`pr:${item.number}@`))
+          && !keys.includes(`pr:${item.number}@${item.head}`)) moved.push({ ...item, headSha: item.head });
+      }
+    }
     if (moved.length && !result.error && !result.skipped) {
       const fresh = new Set((result.newPullRequests || []).map((item) => item.number));
       result.newPullRequests = [...(result.newPullRequests || []), ...moved.filter((item) => !fresh.has(item.number))];
     }
     if (!suppressSpawn && !result.error && !result.skipped) {
-      // A reviewer that died without reviewing leaves pr:N recorded; retry it while it has no live session and no review.
+      // A reviewer that died without reviewing leaves its head's key recorded; retry it while it has no live session and no review of that head.
       const fresh = new Set(result.newPullRequests.map((item) => item.number));
       let fetches = normalizeMaxSpawns(this.config.maxSpawnsPerPoll);
       result.retryPullRequests = [];
       for (const item of result.openPullRequests) {
-        if (fresh.has(item.number) || this.reviewedPrs.has(`${repo.id}#${item.number}`) || !result.updatedRepo.spawnedItemKeys.includes(githubItemSpawnKey('pr', item))) continue;
+        const headItem = { ...item, headSha: item.head };
+        const reviewedKey = `${repo.id}#${item.number}@${item.head}`;
+        if (fresh.has(item.number) || this.reviewedPrs.has(reviewedKey) || !result.updatedRepo.spawnedItemKeys.includes(githubItemSpawnKey('pr', headItem))) continue;
         if (await findExistingGithubItemSession(repo, 'pr', item, { config: this.config, listExistingSessions: this.listExistingSessions, tmuxSessionExists: this.tmuxSessionExists })) continue;
         if (!unreviewed.includes(item.number)) {
           if (fetches-- <= 0) break;
-          const reviews = await fetchGithubList(this.fetchImpl, `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${item.number}/reviews?per_page=1`, {
+          const reviews = await fetchGithubList(this.fetchImpl, `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${item.number}/reviews?per_page=100`, {
             token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs,
           }).catch(() => null);
-          if (reviews?.length) this.reviewedPrs.add(`${repo.id}#${item.number}`);
-          if (!reviews || reviews.length) continue;
+          // A full page may hide the head's review on a later page; treat it as reviewed rather than respawn forever.
+          if (reviews?.length === 100 || reviews?.some((review) => !item.head || review.commit_id === item.head)) this.reviewedPrs.add(reviewedKey);
+          if (!reviews || this.reviewedPrs.has(reviewedKey)) continue;
         }
-        result.retryPullRequests.push(item);
+        result.retryPullRequests.push(headItem);
       }
     }
     const deletedSessions = [];
@@ -689,6 +700,14 @@ export class GithubAgentPoller {
         log: this.log,
       });
     const updatedRepo = spawn.updatedRepo || result.updatedRepo;
+    // Record the head each new reviewer started on, and the current head of PRs reviewed before heads were recorded.
+    const started = new Set(spawn.spawned.filter((outcome) => outcome.sessionId && outcome.kind === 'pr').map((outcome) => outcome.number));
+    for (const item of result.openPullRequests || []) {
+      const keys = updatedRepo.spawnedItemKeys || [];
+      if (item.head && (started.has(item.number) || (keys.includes(`pr:${item.number}`) && !keys.some((key) => key.startsWith(`pr:${item.number}@`))))) {
+        updatedRepo.spawnedItemKeys = withSpawnedItemKey(updatedRepo, `pr:${item.number}@${item.head}`).spawnedItemKeys;
+      }
+    }
     for (const item of moved) {
       const reviewed = spawn.spawned.some((outcome) => outcome.sessionId && outcome.kind === 'pr' && outcome.number === item.number);
       if (reviewed || updatedRepo?.spawnedItemKeys?.includes(githubItemSpawnKey('pr', item))) await this.repoStore.updateWatch(repo.id, item.number, { headSha: item.headSha });
@@ -737,8 +756,8 @@ export class GithubAgentPoller {
           await this.repoStore.updateWatch(repo.id, watch.number, { lastReviewId: review.id });
           reviewed.push(watch.number);
         }
-        if (reviews.length || watch.lastReviewId) this.reviewedPrs.add(`${repo.id}#${watch.number}`);
-        else unreviewed.push(watch.number);
+        for (const review of reviews) this.reviewedPrs.add(`${repo.id}#${watch.number}@${review.commit_id}`);
+        if (!reviews.length && !watch.lastReviewId) unreviewed.push(watch.number);
         if (reviews.length === 100) await this.repoStore.updateWatch(repo.id, watch.number, { reviewPage: (watch.reviewPage || 1) + 1 });
         if (pr.merged || pr.state === 'closed') {
           await notify(pr.merged ? `merged (${String(pr.merge_commit_sha || pr.head?.sha || '').slice(0, 7)})` : 'closed without merge');
@@ -1261,6 +1280,7 @@ function normalizeGithubItem(item = {}) {
     createdAt: normalizeText(item.created_at),
     updatedAt: normalizeText(item.updated_at),
     user: normalizeText(item.user?.login),
+    head: normalizeText(item.head?.sha),
   };
 }
 
