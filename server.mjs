@@ -26,6 +26,7 @@ import { agentBusPlugin } from './modules/agent-bus/index.mjs';
 import { getOpsMetricsRegistry, opsLogMethod, opsObservabilityPlugin } from './modules/ops/observability.mjs';
 import { commandCenterAIPlugin, onHumanQueueChange } from './modules/integrations/command-center-ai.mjs';
 import { agentProviderPreferencesPlugin } from './modules/agent/provider-preferences.mjs';
+import { exec } from './lib/exec.mjs';
 import { fleetPlugin } from './modules/fleet/index.mjs';
 import { githubAgentsPlugin } from './modules/integrations/github-agents-plugin.mjs';
 import { buildGithubAgentRepoStore } from './modules/integrations/github-agents.mjs';
@@ -139,7 +140,7 @@ await app.register(authPlugin, isWorker ? { workerMachines: machines } : {});
 // The machine supervisors are the hub's one machine loop, gated by the side-effect switch like every other loop.
 await app.register(machinesPlugin, { role: config.role, store: machines, credentialStore: getAgentBusCredentialStore(), hubMcpUrl: config.machines.hubMcpUrl,
   supervise: !sideEffectLoopsSuppressed, routeCommands: routeRemoteSessionCommands, wsManager: { broadcast: (...args) => wsManager.broadcast(...args) } });
-await app.register(agentProviderPreferencesPlugin);
+await app.register(agentProviderPreferencesPlugin, sideEffectLoopsSuppressed ? {} : { exec });
 
 // WebSocket manager (must be after websocket plugin)
 const wsManager = new WsManager(app);

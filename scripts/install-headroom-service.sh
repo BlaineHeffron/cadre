@@ -4,6 +4,12 @@ set -euo pipefail
 script_root="$(cd "$(dirname "$0")/.." && pwd)"
 user_unit_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
 headroom_binary="${HOME}/.local/bin/headroom"
+prefs="${AGENT_PROVIDER_PREFERENCES_FILE:-$script_root/.dueno/state/agent_provider_preferences.json}"
+if grep -Eqs '"headroomEnabled"[[:space:]]*:[[:space:]]*false' "$prefs"; then
+    systemctl --user disable --now dueno-headroom.service 2>/dev/null || true
+    echo 'Headroom is disabled in Settings; dueno-headroom.service stopped.'
+    exit 0
+fi
 if [[ ! -x "$headroom_binary" ]] || [[ "$("$headroom_binary" --version)" != 'headroom, version 0.37.0' ]]; then
     echo 'Headroom 0.37.0 is required: uv tool install --python 3.13 "headroom-ai[proxy]==0.37.0"' >&2
     exit 1
