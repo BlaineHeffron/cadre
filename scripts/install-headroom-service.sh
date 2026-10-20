@@ -6,8 +6,14 @@ user_unit_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
 headroom_binary="${HOME}/.local/bin/headroom"
 prefs="${AGENT_PROVIDER_PREFERENCES_FILE:-$script_root/.dueno/state/agent_provider_preferences.json}"
 if grep -Eqs '"headroomEnabled"[[:space:]]*:[[:space:]]*false' "$prefs"; then
-    systemctl --user disable --now dueno-headroom.service 2>/dev/null || true
-    echo 'Headroom is disabled in Settings; dueno-headroom.service stopped.'
+    users="$(bash "$script_root/scripts/headroom-users.sh" 2>/dev/null)" || users=''
+    if [[ "$users" == 0 ]]; then
+        systemctl --user disable --now dueno-headroom.service 2>/dev/null || true
+        echo 'Headroom is disabled in Settings; dueno-headroom.service stopped.'
+    else
+        systemctl --user disable dueno-headroom.service 2>/dev/null || true
+        echo "Headroom is disabled in Settings; dueno-headroom.service left running for ${users:-an unknown number of} process(es) still using it."
+    fi
     exit 0
 fi
 if [[ ! -x "$headroom_binary" ]] || [[ "$("$headroom_binary" --version)" != 'headroom, version 0.37.0' ]]; then

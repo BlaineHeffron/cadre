@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildAgentProviderCatalog } from './provider-interface.mjs';
 import {
   DEFAULT_CODEX_MODEL,
@@ -12,6 +13,7 @@ import { legacyRootStatePath, runtimeStatePath } from '../ops/runtime-state.mjs'
 
 const DEFAULT_STORE_FILE = runtimeStatePath('agent_provider_preferences.json');
 const LEGACY_STORE_FILE = legacyRootStatePath('agent_provider_preferences.json');
+const HEADROOM_USERS_SCRIPT = fileURLToPath(new URL('../../scripts/headroom-users.sh', import.meta.url));
 
 const DEFAULT_PREFERENCES = Object.freeze({
   claude: true,
@@ -209,9 +211,18 @@ export async function agentProviderPreferencesPlugin(app, opts = {}) {
     }
     // Production only (smoke servers pass no exec): keep the proxy unit in step with the toggle.
     if (opts.exec && req.body?.headroomEnabled !== undefined) {
+      const fail = (error) => ({ code: 1, stdout: '', stderr: error.message });
       const verb = preferences.headroomEnabled ? 'enable' : 'disable';
-      const result = await opts.exec('systemctl', ['--user', verb, '--now', 'dueno-headroom.service'])
-        .catch((error) => ({ code: 1, stderr: error.message }));
+      let now = true;
+      if (!preferences.headroomEnabled) {
+        // Live sessions keep the proxy URL in their environment; stopping it would cut them off.
+        const users = await opts.exec('bash', [HEADROOM_USERS_SCRIPT]).catch(fail);
+        const count = users.code === 0 ? users.stdout.trim() : 'an unknown number of';
+        now = count === '0';
+        if (!now) req.log.info(`Headroom left running for ${count} process(es) still using it`);
+      }
+      const args = ['--user', verb, ...(now ? ['--now'] : []), 'dueno-headroom.service'];
+      const result = await opts.exec('systemctl', args).catch(fail);
       if (result.code !== 0) req.log.warn({ stderr: result.stderr }, `systemctl ${verb} dueno-headroom.service failed`);
     }
     return preferences;
