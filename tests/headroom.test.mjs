@@ -117,33 +117,45 @@ test('Pi routing preserves mixed wire formats, metadata, and upstream path prefi
   assert.equal(models[0].baseUrl, 'https://opencode.ai/zen/go/v1');
 });
 
-test('settings toggle enables or disables the Headroom unit and a failure only warns', async (t) => {
+test('settings toggle enables the Headroom unit, stops it only when idle, and a failure only warns', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dueno-headroom-unit-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const calls = [];
   let code = 0;
+  let users = { code: 0, stdout: '0\n' };
   const app = Fastify();
   t.after(() => app.close());
   await app.register(agentProviderPreferencesPlugin, {
     storeFile: join(dir, 'preferences.json'),
-    exec: async (cmd, args) => { calls.push([cmd, ...args].join(' ')); return { code, stdout: '', stderr: 'boom' }; },
+    exec: async (cmd, args) => {
+      if (cmd === 'bash') { assert.match(args[0], /scripts\/headroom-users\.sh$/); return users; }
+      calls.push([cmd, ...args].join(' '));
+      return { code, stdout: '', stderr: 'boom' };
+    },
   });
   const put = (payload) => app.inject({ method: 'PUT', url: '/api/agent-provider-preferences', payload });
   assert.equal((await put({ headroomEnabled: false })).statusCode, 200);
   assert.equal((await put({ headroomEnabled: true })).statusCode, 200);
+  users = { code: 0, stdout: '3\n' };
+  await put({ headroomEnabled: false });
+  users = { code: 1, stdout: '' };
+  await put({ headroomEnabled: false });
   await put({ piEnabled: true });
   code = 1;
+  users = { code: 0, stdout: '0\n' };
   const failed = await put({ headroomEnabled: false });
   assert.equal(failed.statusCode, 200);
   assert.equal(failed.json().headroomEnabled, false);
   assert.deepEqual(calls, [
     'systemctl --user disable --now dueno-headroom.service',
     'systemctl --user enable --now dueno-headroom.service',
+    'systemctl --user disable dueno-headroom.service',
+    'systemctl --user disable dueno-headroom.service',
     'systemctl --user disable --now dueno-headroom.service',
   ]);
 });
 
-test('install script stops the unit when Headroom is disabled and starts it otherwise', async (t) => {
+test('install script stops the unit only when no process uses it, disables it when off, and starts it otherwise', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'dueno-headroom-install-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const bin = join(dir, 'bin');
@@ -155,19 +167,36 @@ test('install script stops the unit when Headroom is disabled and starts it othe
   await writeFile(join(bin, 'systemctl'), stub(`echo "systemctl $*" >> "${log}"`), { mode: 0o755 });
   await writeFile(join(bin, 'curl'), stub('exit 0'), { mode: 0o755 });
   const prefs = join(dir, 'preferences.json');
+  const proc = join(dir, 'proc');
+  const fakeProcess = async (pid, ...vars) => {
+    await mkdir(join(proc, pid), { recursive: true });
+    await writeFile(join(proc, pid, 'environ'), `${['HOME=/home/agent', ...vars].join('\0')}\0`);
+  };
   const run = async (headroomEnabled) => {
     await writeFile(prefs, `${JSON.stringify({ codex: true, headroomEnabled })}\n`);
     await rm(log, { force: true });
-    await promisify(execFile)('bash', ['scripts/install-headroom-service.sh'], {
+    const { stdout } = await promisify(execFile)('bash', ['scripts/install-headroom-service.sh'], {
       env: { ...process.env, HOME: dir, XDG_CONFIG_HOME: join(dir, 'config'), PATH: `${bin}:${process.env.PATH}`,
-        AGENT_PROVIDER_PREFERENCES_FILE: prefs },
+        AGENT_PROVIDER_PREFERENCES_FILE: prefs, HEADROOM_PROC_DIR: proc },
     });
-    return (await readFile(log, 'utf8')).trim().split('\n');
+    return [...(await readFile(log, 'utf8')).trim().split('\n'), stdout.trim()];
   };
-  assert.deepEqual(await run(false), ['systemctl --user disable --now dueno-headroom.service']);
+  await mkdir(proc);
+  assert.deepEqual(await run(false), ['systemctl --user disable dueno-headroom.service',
+    'Headroom is disabled in Settings; dueno-headroom.service left running for an unknown number of process(es) still using it.']);
+  await fakeProcess('100', 'ANTHROPIC_BASE_URL=http://127.0.0.1:8787');
+  await fakeProcess('101', 'OPENAI_BASE_URL=http://127.0.0.1:8787/v1');
+  await fakeProcess('102', 'ANTHROPIC_BASE_URL=https://api.anthropic.com');
+  assert.deepEqual(await run(false), ['systemctl --user disable dueno-headroom.service',
+    'Headroom is disabled in Settings; dueno-headroom.service left running for 2 process(es) still using it.']);
+  await rm(join(proc, '100'), { recursive: true });
+  await rm(join(proc, '101'), { recursive: true });
+  assert.deepEqual(await run(false), ['systemctl --user disable --now dueno-headroom.service',
+    'Headroom is disabled in Settings; dueno-headroom.service stopped.']);
   assert.deepEqual(await run(true), [
     'systemctl --user daemon-reload',
     'systemctl --user enable dueno-headroom.service',
     'systemctl --user restart dueno-headroom.service',
+    '',
   ]);
 });
