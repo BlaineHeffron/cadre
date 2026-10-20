@@ -21,10 +21,11 @@ await mkdir(bin, { recursive: true });
 await mkdir(join(root, 'home'), { recursive: true });
 await writeFile(join(bin, 'tmux'), `#!/bin/sh\nexec /usr/bin/tmux -L '${tmuxSocket}' "$@"\n`);
 // In a workDir holding prompt.txt the stand-in shows that permission prompt first and waits for an answer.
-await writeFile(join(bin, 'claude'), "#!/bin/sh\n[ -f prompt.txt ] && cat prompt.txt && read answer && printf 'answered\\n'\nprintf 'Claude Code v2.1.296\\n────────────────────\\n❯ \\n────────────────────\\n  ⏵⏵ bypass permissions on\\n'\ncat >/dev/null\n");
+await writeFile(join(bin, 'claude'), "#!/bin/sh\n[ -f prompt.txt ] && cat prompt.txt && read answer </dev/tty && printf 'answered\\n'\nprintf 'Claude Code v2.1.296\\n────────────────────\\n❯ \\n────────────────────\\n  ⏵⏵ bypass permissions on\\n'\ncat >/dev/null </dev/tty\n");
 // Codex and Pi stand-ins show an idle pane from the state-detector corpus; Pi also answers its version and model checks.
 const paneFixture = (name) => new URL(`./fixtures/session-state/panes/${name}.pane`, import.meta.url).pathname;
-await writeFile(join(bin, 'codex'), `#!/bin/sh\ncat '${paneFixture('codex-idle-placeholder')}'\ncat >/dev/null\n`);
+// Like the real TUI, the Codex stand-in redraws its idle composer at the bottom after each submitted line.
+await writeFile(join(bin, 'codex'), `#!/bin/sh\ncat '${paneFixture('codex-idle-placeholder')}'\nwhile IFS= read -r line; do cat '${paneFixture('codex-idle-placeholder')}'; done\n`);
 await writeFile(join(bin, 'pi'), `#!/bin/sh\ncase "$1" in --version) echo 'pi 0.80.7'; exit 0;; --list-models) printf 'provider  model  name\\nxai  grok-4.6  Grok\\n'; exit 0;; esac\ncat '${paneFixture('pi-5427de06-idle')}'\ncat >/dev/null\n`);
 for (const name of ['tmux', 'claude', 'codex', 'pi']) await chmod(join(bin, name), 0o755);
 delete process.env.CADRE_STATE_DIR;

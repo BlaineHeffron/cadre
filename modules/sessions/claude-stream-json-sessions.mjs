@@ -181,7 +181,9 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       const { codexEnv } = mcpPreparation;
       return { env: { ...env, ...codexEnv }, preflight: mcpPreparation.preflight, approvalPolicy,
         allowedEnvKeys: [...CODEX_APP_SERVER_ENV_ALLOWLIST, ...Object.keys(codexEnv)],
-        args: [...headroom.args, ...pluginArgs, ...mcpPreparation.prepared.codexArgs, ...promptArgs,
+        // Instructions go over JSON-RPC (thread/start), not argv.
+        ...(promptLaunch?.body ? { developerInstructions: promptLaunch.body } : {}),
+        args: [...headroom.args, ...pluginArgs, ...mcpPreparation.prepared.codexArgs,
         ...(headroom.modelProvider ? ['-c', `model_provider=${JSON.stringify(headroom.modelProvider)}`] : [])] };
     }
     const discovery = await mcpDiscovery({ url: hub?.duenoUrl || buildAgentBusMcpUrl(sourceConfig), token: mcpPreparation.credentialToken });

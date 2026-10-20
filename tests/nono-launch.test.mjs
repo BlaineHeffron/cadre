@@ -152,14 +152,14 @@ test('renderAgentSessionLaunch wraps the binary in nono without leaking the GitH
   for (const [key, value] of Object.entries(sandbox.env)) assert.ok(paneCommand.includes(`export ${key}='${value}'`), key);
   assert.ok(paneCommand.includes(`unset CLAUDECODE; 'nono' 'run' '-s' '--no-diagnostics' '--profile' '${nonoProfilePath('claude')}'`));
   assert.ok(paneCommand.includes(`'--' '/bin/claude' '--dangerously-skip-permissions'`));
-  assert.ok(paneCommand.endsWith(`-- "$(< '/p.txt')"`));
+  assert.ok(paneCommand.endsWith(` < '/p.txt'`));
 });
 
 test('the pane command preserves the unsandboxed launch contract', () => {
   const { paneCommand } = renderAgentSessionLaunch({ backendType: 'codex', sessionBinary: '/bin/codex', launchLogPath: '/state/launch.log',
-    sessionId: 'abcd1234', provider: 'openai', buildOptions: { workDir: '/work', initialPromptFile: '/state/prompt.txt',
+    sessionId: 'abcd1234', provider: 'openai', buildOptions: { workDir: '/work',
       mcpLaunch: { codexArgs: ['-c', 'mcp_servers={}'], credentialPath: '/state/cred', credentialEnvVar: 'DUENO_AGENT_BUS_TOKEN' } } });
-  assert.equal(paneCommand, "export CADRE_SESSION_ID='abcd1234'; export DUENO_SESSION_ID='abcd1234'; export CADRE_PROVIDER='openai'; export DUENO_PROVIDER='openai'; export CADRE_SESSION_WORK_DIR='/work'; export DUENO_SESSION_WORK_DIR='/work'; export CODEX_INTERNAL_ORIGINATOR_OVERRIDE='dueno-abcd1234'; export DUENO_AGENT_BUS_TOKEN=\"$(< '/state/cred')\"; export CADRE_AGENT_BUS_TOKEN=\"$DUENO_AGENT_BUS_TOKEN\"; '/bin/codex' '--dangerously-bypass-approvals-and-sandbox' '--cd' '/work' '-c' 'model_provider=\"openai\"' '-c' 'features.hooks=true' '-c' 'check_for_update_on_startup=false' '-c' 'plugins.\"browser@openai-bundled\".enabled=false' '--no-alt-screen' '-c' 'mcp_servers={}' -- \"$(< '/state/prompt.txt')\" 2> >(tee -a '/state/launch.log' >&2)");
+  assert.equal(paneCommand, "export CADRE_SESSION_ID='abcd1234'; export DUENO_SESSION_ID='abcd1234'; export CADRE_PROVIDER='openai'; export DUENO_PROVIDER='openai'; export CADRE_SESSION_WORK_DIR='/work'; export DUENO_SESSION_WORK_DIR='/work'; export CODEX_INTERNAL_ORIGINATOR_OVERRIDE='dueno-abcd1234'; export DUENO_AGENT_BUS_TOKEN=\"$(< '/state/cred')\"; export CADRE_AGENT_BUS_TOKEN=\"$DUENO_AGENT_BUS_TOKEN\"; '/bin/codex' '--dangerously-bypass-approvals-and-sandbox' '--cd' '/work' '-c' 'model_provider=\"openai\"' '-c' 'features.hooks=true' '-c' 'check_for_update_on_startup=false' '-c' 'plugins.\"browser@openai-bundled\".enabled=false' '--no-alt-screen' '-c' 'mcp_servers={}' 2> >(tee -a '/state/launch.log' >&2)");
 });
 
 test('seedClaudeWorkspaceTrust writes to an explicit config path', async (t) => {

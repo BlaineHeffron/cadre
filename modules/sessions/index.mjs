@@ -265,8 +265,8 @@ const PROVIDER_CONFIGS = {
     shellPrefix(sessionId, provider) {
       return buildLaunchEnvPrefix(sessionId, provider);
     },
-    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, workDir, mcpLaunch = {}, initialPromptFile = '' }) {
-      const baseCommand = `${shellQuote(sessionBinary)} ${allArgs.map(shellQuote).join(' ')}${initialPromptFile ? ` -- "$(< ${shellQuote(initialPromptFile)})"` : ''}`;
+    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, workDir, mcpLaunch = {} }) {
+      const baseCommand = `${shellQuote(sessionBinary)} ${allArgs.map(shellQuote).join(' ')}`;
       const command = launchLogPath
         ? `${baseCommand} 2> >(tee -a ${shellQuote(launchLogPath)} >&2)`
         : baseCommand;
@@ -332,7 +332,8 @@ const PROVIDER_CONFIGS = {
     },
     shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, workDir, initialPromptFile = '' }) {
       const baseCommand = [sessionBinary, ...allArgs].map(shellQuote).join(' ')
-        + (initialPromptFile ? ` -- "$(< ${shellQuote(initialPromptFile)})"` : '');
+        // Claude takes a piped first prompt and stays interactive, so the prompt never enters argv.
+        + (initialPromptFile ? ` < ${shellQuote(initialPromptFile)}` : '');
       const command = launchLogPath
         ? `${baseCommand} 2> >(tee -a ${shellQuote(launchLogPath)} >&2)`
         : baseCommand;
@@ -409,7 +410,8 @@ const PROVIDER_CONFIGS = {
     },
     shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, workDir, mcpLaunch = {}, initialPromptFile = '' }) {
       const baseCommand = [sessionBinary, ...allArgs].map(shellQuote).join(' ')
-        + (initialPromptFile ? ` "$(< ${shellQuote(initialPromptFile)})"` : '');
+        // Pi reads `@file` into its first message; piped stdin would switch it to print mode.
+        + (initialPromptFile ? ` ${shellQuote(`@${initialPromptFile}`)}` : '');
       const command = launchLogPath
         ? `${baseCommand} 2> >(tee -a ${shellQuote(launchLogPath)} >&2)`
         : baseCommand;
@@ -1107,9 +1109,10 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
   const id = sessionId || generateId();
   if (typeof id !== 'string' || !/^[a-f0-9]{8,32}$/.test(id) || sessions.has(id)) throw Object.assign(new Error('Invalid or duplicate sessionId'), { statusCode: 400 });
   const launchPrompt = resolveHarnessUserText(initialPrompt);
-  const initialPromptFile = launchPrompt ? initialPromptPath(id) : '';
-  if (launchPrompt.includes('\0') || (config.id === 'pi' && launchPrompt.startsWith('-')) || Buffer.byteLength(launchPrompt, 'utf8') >= 128 * 1024) {
-    throw Object.assign(new Error('Initial prompt must be under 128 KiB, contain no NUL, and for Pi must not start with a dash'), { statusCode: 400 });
+  // Codex reads a first prompt only from argv, so it is typed into the pane after launch instead.
+  const initialPromptFile = launchPrompt && config.id !== 'codex' ? initialPromptPath(id) : '';
+  if (launchPrompt.includes('\0') || Buffer.byteLength(launchPrompt, 'utf8') >= 128 * 1024) {
+    throw Object.assign(new Error('Initial prompt must be under 128 KiB and contain no NUL'), { statusCode: 400 });
   }
   const sessionName = `${config.tmuxPrefix}-${id}`;
   const launchStartedAt = Date.now();
@@ -1138,6 +1141,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
       promptProfile,
       backendType: config.id,
       sessionId: id,
+      codexHome: sandboxMode === 'nono' ? join(nonoStatePaths(config.id, id).stateDir, config.id) : '',
     });
     if (initialPromptFile) {
       await mkdir(resolve(initialPromptFile, '..'), { recursive: true });
@@ -1237,7 +1241,25 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
   await persistSessions();
   if (_registerSession) _registerSession(id, meta);
 
-  return { id, sessionName, mcpCapabilities: meta.mcpCapabilities };
+  let initialPromptError = null;
+  if (config.id === 'codex' && launchPrompt) {
+    try {
+      if (!_enqueueSessionCommand) throw new Error('codex session command gate is not ready');
+      await waitForStartupPane(exec, sessionName, launchLogPath);
+      // The pane opens on a login shell; the gate would read that wrapper as a dead agent.
+      for (let tries = 0; ; tries += 1) {
+        const [evidence] = await observeProcessLiveness({ sessionName, now: Date.now(), execFn: exec, expectedCli: 'codex', paneProbe: createTmuxPaneProbe(exec) });
+        if (evidence?.value?.lifecycle === 'running') break;
+        if (tries >= 40) throw new Error(`Codex did not start in ${sessionName}`);
+        await sleep(250);
+      }
+      const delivered = await _enqueueSessionCommand(id, { source: 'codex_initial_prompt', operation: 'startup', text: launchPrompt, enter: true });
+      if (delivered?.submissionConfirmed === false) throw new Error('Codex did not confirm the initial prompt was submitted');
+    } catch (error) {
+      initialPromptError = error.message;
+    }
+  }
+  return { id, sessionName, mcpCapabilities: meta.mcpCapabilities, ...(initialPromptError ? { initialPromptError } : {}) };
 }
 
 async function refreshSessionCliMetadata(id, meta = {}, targetSessions = sessions) {
@@ -1383,6 +1405,7 @@ async function resumeSession(id, { loopRegistrationPolicy = null, busCredential 
       promptProfile: refreshed.promptProfile?.profileId,
       backendType: config.id,
       sessionId: id,
+      codexHome: sandboxMode === 'nono' ? join(nonoStatePaths(config.id, id).stateDir, config.id) : '',
     });
     launchLogPath = await prepareLaunchLog(sessionName);
     const headroom = await prepareHeadroomLaunch(sessionRuntime.provider);
@@ -2639,7 +2662,7 @@ async function sessionsPlugin(app, {
         skills,
         sandbox,
       });
-      const injection = { injected: Boolean(launchSourcePrompt), error: null,
+      const injection = { injected: Boolean(launchSourcePrompt) && !result.initialPromptError, error: result.initialPromptError || null,
         resolution: { ...skillDeliveryResolution(launchSourcePrompt, resolveHarnessUserText(launchSourcePrompt)), channel: 'launch' } };
       broadcastSessionList(wsManager);
       queueSessionCreateAudit({
