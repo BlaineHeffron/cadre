@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -115,4 +115,59 @@ test('Pi routing preserves mixed wire formats, metadata, and upstream path prefi
   assert.equal(mapped[0].reasoning, true);
   assert.equal(mapped[1].contextWindow, 1000000);
   assert.equal(models[0].baseUrl, 'https://opencode.ai/zen/go/v1');
+});
+
+test('settings toggle enables or disables the Headroom unit and a failure only warns', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dueno-headroom-unit-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const calls = [];
+  let code = 0;
+  const app = Fastify();
+  t.after(() => app.close());
+  await app.register(agentProviderPreferencesPlugin, {
+    storeFile: join(dir, 'preferences.json'),
+    exec: async (cmd, args) => { calls.push([cmd, ...args].join(' ')); return { code, stdout: '', stderr: 'boom' }; },
+  });
+  const put = (payload) => app.inject({ method: 'PUT', url: '/api/agent-provider-preferences', payload });
+  assert.equal((await put({ headroomEnabled: false })).statusCode, 200);
+  assert.equal((await put({ headroomEnabled: true })).statusCode, 200);
+  await put({ piEnabled: true });
+  code = 1;
+  const failed = await put({ headroomEnabled: false });
+  assert.equal(failed.statusCode, 200);
+  assert.equal(failed.json().headroomEnabled, false);
+  assert.deepEqual(calls, [
+    'systemctl --user disable --now dueno-headroom.service',
+    'systemctl --user enable --now dueno-headroom.service',
+    'systemctl --user disable --now dueno-headroom.service',
+  ]);
+});
+
+test('install script stops the unit when Headroom is disabled and starts it otherwise', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dueno-headroom-install-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const bin = join(dir, 'bin');
+  const log = join(dir, 'calls.log');
+  await mkdir(join(dir, '.local/bin'), { recursive: true });
+  await mkdir(bin);
+  const stub = (body) => `#!/usr/bin/env bash\n${body}\n`;
+  await writeFile(join(dir, '.local/bin/headroom'), stub("echo 'headroom, version 0.37.0'"), { mode: 0o755 });
+  await writeFile(join(bin, 'systemctl'), stub(`echo "systemctl $*" >> "${log}"`), { mode: 0o755 });
+  await writeFile(join(bin, 'curl'), stub('exit 0'), { mode: 0o755 });
+  const prefs = join(dir, 'preferences.json');
+  const run = async (headroomEnabled) => {
+    await writeFile(prefs, `${JSON.stringify({ codex: true, headroomEnabled })}\n`);
+    await rm(log, { force: true });
+    await promisify(execFile)('bash', ['scripts/install-headroom-service.sh'], {
+      env: { ...process.env, HOME: dir, XDG_CONFIG_HOME: join(dir, 'config'), PATH: `${bin}:${process.env.PATH}`,
+        AGENT_PROVIDER_PREFERENCES_FILE: prefs },
+    });
+    return (await readFile(log, 'utf8')).trim().split('\n');
+  };
+  assert.deepEqual(await run(false), ['systemctl --user disable --now dueno-headroom.service']);
+  assert.deepEqual(await run(true), [
+    'systemctl --user daemon-reload',
+    'systemctl --user enable dueno-headroom.service',
+    'systemctl --user restart dueno-headroom.service',
+  ]);
 });

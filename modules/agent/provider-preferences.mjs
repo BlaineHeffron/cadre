@@ -201,10 +201,19 @@ export function resolveCollabModels(preferences = DEFAULT_PREFERENCES, requested
 export async function agentProviderPreferencesPlugin(app, opts = {}) {
   app.get('/api/agent-provider-preferences', async () => getAgentProviderPreferences(opts));
   app.put('/api/agent-provider-preferences', async (req, reply) => {
+    let preferences;
     try {
-      return await updateAgentProviderPreferences(req.body || {}, opts);
+      preferences = await updateAgentProviderPreferences(req.body || {}, opts);
     } catch (error) {
       return reply.code(400).send({ error: error.message });
     }
+    // Production only (smoke servers pass no exec): keep the proxy unit in step with the toggle.
+    if (opts.exec && req.body?.headroomEnabled !== undefined) {
+      const verb = preferences.headroomEnabled ? 'enable' : 'disable';
+      const result = await opts.exec('systemctl', ['--user', verb, '--now', 'dueno-headroom.service'])
+        .catch((error) => ({ code: 1, stderr: error.message }));
+      if (result.code !== 0) req.log.warn({ stderr: result.stderr }, `systemctl ${verb} dueno-headroom.service failed`);
+    }
+    return preferences;
   });
 }
