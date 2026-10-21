@@ -251,7 +251,7 @@ export function coordinatorOwnerMetadata(policy) {
   };
 }
 
-export const SPAWN_RESULT_NOTE = 'Cadre returns your final message of each turn with no background work or returnResults workers outstanding to your spawner. End with your answer; do not message it separately. For your own bounded reading, searching, and checks, use built-in subagents when available: Haiku (model: "haiku") on Claude, GPT-6 Luna (gpt-6-luna) on Codex. Reply only if this is new work. Do not reply to delayed copies or courtesy acks.';
+export const SPAWN_RESULT_NOTE = 'Cadre returns your final message of each turn with no background work or returnResults workers outstanding to your spawner. End with your answer. Do not message your spawner any other way (native SendMessage or cross-session messages, agent_dm, room_send); Cadre already delivers the turn. If you are only acknowledging or holding, end the turn with no closing message. For your own bounded reading, searching, and checks, use built-in subagents when available: Haiku (model: "haiku") on Claude, GPT-6 Luna (gpt-6-luna) on Codex. Reply only if this is new work. Do not reply to delayed copies or courtesy acks.';
 
 // The agent bus returns each finished turn of a spawn_session child to this authenticated spawner.
 // The caller only opts in; the identity always comes from the credential.
