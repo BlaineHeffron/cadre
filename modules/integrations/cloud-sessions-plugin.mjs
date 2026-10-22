@@ -25,7 +25,7 @@ function cloudNotices(seen, view) {
   // An attached session's replies already reach its room, so its end of turn is not news.
   else if (view.state === 'done' && seen.state === 'working' && !seen.threadId) lines.push(`done: ${view.detail}`);
   if (asks && view.state !== 'blocked') lines.push(`needs action: ${view.needs_action}`);
-  if (view.pr && !seen.prs.includes(view.pr.number)) lines.push(`PR opened #${view.pr.number} ${view.pr.url}`);
+  if (view.pr?.state === 'OPEN' && !seen.prs.includes(view.pr.number)) lines.push(`PR opened #${view.pr.number} ${view.pr.url}`);
   return lines;
 }
 
@@ -61,7 +61,8 @@ export async function cloudSessionsPlugin(app, {
   async function track(id, owner, view, patch = {}) {
     assertOwner(id, owner);
     const prior = state.sessions[id];
-    state.sessions[id] = { prs: [], ...prior, owner, state: view.state, needs_action: view.needs_action || '', ...(view.pr ? { prs: [view.pr.number] } : {}), ...patch };
+    const prs = [...new Set([...(prior?.prs || []), ...(view.pr ? [view.pr.number] : [])])];
+    state.sessions[id] = { ...prior, owner, state: view.state, needs_action: view.needs_action || '', prs, ...patch };
     await save();
     return state.sessions[id];
   }
@@ -133,10 +134,11 @@ export async function cloudSessionsPlugin(app, {
         const view = await cloudStatus({ id }, cloudOpts);
         const lines = cloudNotices(seen, view);
         if (!lines.length || await notify(id, seen.owner, `Cloud session ${id} (${view.title}) ${lines.join('\n')}\n${view.url || ''}`.trim())) {
+          // A merged or closed PR is recorded unannounced, so it never surfaces later.
           if (view.pr && !seen.prs.includes(view.pr.number)) {
             seen.prs.push(view.pr.number);
             const repo = /github\.com\/([^/]+\/[^/]+)\/pull\//.exec(view.pr.url || '')?.[1];
-            await watchPr({ repo, number: view.pr.number }, seen.owner).catch((err) => app.log.warn({ id, repo, err: err.message }, 'Cloud session PR watch not registered'));
+            if (view.pr.state === 'OPEN') await watchPr({ repo, number: view.pr.number }, seen.owner).catch((err) => app.log.warn({ id, repo, err: err.message }, 'Cloud session PR watch not registered'));
           }
           Object.assign(seen, { state: view.state, needs_action: view.needs_action });
         }

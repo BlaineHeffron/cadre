@@ -384,3 +384,32 @@ test('cloud_watch baselines an existing session without notifying and keeps its 
   const taken = await w.app.inject({ method: 'POST', url: '/api/cloud/watch', payload: { id: 'cse_a' } });
   assert.equal(taken.statusCode, 403);
 });
+
+test('the watcher announces each open PR once and never a merged or already-seen one', async (t) => {
+  const f = await fixture(t);
+  let branch = 'claude/has-pr';
+  f.routes['GET /v1/code/sessions/cse_p'] = () => [200, { response_shape: cloudSession('cse_p', { external_metadata: { current_branches: { '': branch } } }) }];
+  const w = await watcherApp(t, f, memoryStore(), { kind: 'claude', sessionId: 'claude-1' });
+  const watch = () => w.app.inject({ method: 'POST', url: '/api/cloud/watch', payload: { id: 'cse_p' } });
+  const prs = () => w.app.agentBusLifecycle.cloudSessions.get('cse_p').prs;
+  await watch();
+
+  branch = 'claude/new-pr';
+  await w.step();
+  await w.step();
+  assert.equal(w.dms.length, 1);
+  assert.match(w.dms[0].body, /PR opened #9 https:\/\/github.com\/o\/r\/pull\/9/);
+  assert.deepEqual(w.watches.map((x) => x.watch.number), [9]);
+
+  // An older merged PR the session reports is recorded silently.
+  branch = 'claude/old-pr';
+  await w.step();
+  assert.deepEqual(prs(), [7, 9, 3]);
+
+  // Registering again keeps the PR history, so earlier PRs stay announced.
+  await watch();
+  assert.deepEqual(prs(), [7, 9, 3]);
+  for (branch of ['claude/has-pr', 'claude/new-pr', 'claude/old-pr']) await w.step();
+  assert.equal(w.dms.length, 1);
+  assert.deepEqual(w.watches.map((x) => x.watch.number), [9]);
+});
