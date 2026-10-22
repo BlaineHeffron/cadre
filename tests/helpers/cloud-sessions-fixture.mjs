@@ -41,7 +41,9 @@ export async function fixture(t, { expiresAt = Date.now() + 3600000 } = {}) {
   await writeFile(ghBin, `#!/usr/bin/env node
 require('node:fs').appendFileSync(${JSON.stringify(ghLog)}, JSON.stringify(process.argv.slice(2)) + '\\n');
 const branch = process.argv[process.argv.indexOf('--head') + 1];
-process.stdout.write(branch === 'claude/has-pr' ? '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"OPEN"}]' : '[]');
+const prs = { 'claude/has-pr': [7, 'OPEN'], 'claude/new-pr': [9, 'OPEN'], 'claude/old-pr': [3, 'MERGED'] };
+const [number, state] = prs[branch] || [];
+process.stdout.write(JSON.stringify(number ? [{ number, url: 'https://github.com/o/r/pull/' + number, state }] : []));
 `);
   await chmod(ghBin, 0o755);
 
