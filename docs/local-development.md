@@ -35,4 +35,4 @@ To smoke the structured runtime or real agent launches:
 - End commits with a `Co-Authored-By` trailer naming your model.
 - Write the PR body per `config/skills/pr.md` and end it with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
 - Address blocking findings from automatic Grok PR review if it posts; wait at most about 20 minutes.
-- Land a reviewed PR with `bash scripts/land-pr.sh <pr> <sha> [worktree-path]`; it refuses unless the head and the optional clean worktree are at `<sha>` and every check is SUCCESS (SKIPPED or NEUTRAL also refuse), and cleans up only after the merge reaches `origin/main`.
+- Land a reviewed PR with `bash scripts/land-pr.sh <pr> <sha>`; no review worktree is needed. It refuses unless the head is at `<sha>` and every check is SUCCESS (SKIPPED or NEUTRAL also refuse), cleans up only after the merge reaches `origin/main`, and prints the merge commit. Once the operator approves the deploy, run `bash scripts/deploy-check.sh`: it runs `scripts/server.sh restart`, then fails unless `/api/health` returns 200 and the service journal since the restart has lines and no level 50/60 errors.
