@@ -205,6 +205,7 @@ export async function githubAgentsPlugin(app, opts = {}) {
   });
 
   app.get('/api/agents/github/watches', async () => ({ watches: await repoStore.listWatches() }));
+  app.get('/api/agents/github/status', async (req) => poller.prStatus(req.query?.repo, Number(req.query?.pr)));
   app.route({ method: ['POST', 'DELETE'], url: '/api/agents/github/watches', handler: async (req, reply) => {
     const principal = req.duenoAuth?.principal;
     const input = req.body || {};

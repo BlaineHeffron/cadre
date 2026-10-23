@@ -593,6 +593,22 @@ export class GithubAgentPoller {
     return this.repoStore?.listRepos ? await this.repoStore.listRepos() : [];
   }
 
+  // Read-only: stored state and the session registry, no GitHub calls.
+  async prStatus(repoId, number) {
+    const repo = await this.repoStore.getRepo(normalizeText(repoId));
+    const sessions = repo ? await (this.listExistingSessions || (() => listRegisteredGithubSessions(this.config)))() : [];
+    const watch = repo?.watches.find((item) => item.number === number);
+    return {
+      repo: repo?.id || normalizeText(repoId), pr: number, enabled: repo?.enabled === true, prEnabled: repo?.prEnabled === true,
+      spawnKeys: (repo?.spawnedItemKeys || []).filter((key) => key === `pr:${number}` || key.startsWith(`pr:${number}@`)),
+      watch: watch ? { headSha: watch.headSha || null, lastReviewId: watch.lastReviewId ?? null, mergeableState: watch.mergeableState || null, creator: watch.creator || null } : null,
+      reviewers: sessions.filter((session) => session.source === 'github-agent' && sessionMatchesGithubItem(session, repo, 'pr', { number }, this.config))
+        .map((session) => ({ id: session.id || session.sessionId, kind: session.backendType || null,
+          state: session.endedAt ? 'ended' : normalizeText(session.lifecycle || session.status) || 'registered',
+          created: session.created || null, endedAt: session.endedAt || null, headSha: session.metadata?.github_head_sha || null })),
+    };
+  }
+
   async pollRepo(repo, { suppressSpawn = false } = {}) {
     if (this.config?.enabled !== true) {
       return {
@@ -1091,6 +1107,7 @@ export async function spawnGithubAgentForItem({
     github_repo: repoId,
     github_kind: kind,
     github_number: number,
+    github_head_sha: normalizeText(item.headSha || item.head) || null,
     github_branch: normalizeText(repoContext.branch || ''),
     github_base_ref: normalizeText(repoContext.baseRef || '') || null,
     github_base_head: normalizeText(repoContext.baseHead || '') || null,
