@@ -26,7 +26,7 @@ it('refuses dirty worktrees, non-SUCCESS or mismatched heads, keeps everything w
   const git = (...args) => execFileSync('git', args, { cwd: dev, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const run = (sha, checks, { prHead = head, mergeFails = '' } = {}) => spawnSync('bash', [script, '7', sha, '.'], {
     cwd: worktree,
-    env: { ...env, GH_MERGE_FAILS: mergeFails, GH_PR_JSON: JSON.stringify({ headRefOid: prHead, headRefName: 'feat', statusCheckRollup: checks }) },
+    env: { ...env, GH_MERGE_FAILS: mergeFails, GH_PR_JSON: JSON.stringify({ headRefOid: prHead, headRefName: 'feat', statusCheckRollup: checks, mergeCommit: { oid: 'f'.repeat(40) } }) },
     encoding: 'utf8',
   });
   let head;
@@ -92,7 +92,7 @@ esac
     assert.equal(git('rev-parse', 'origin/main'), head);
     assert.equal(git('ls-remote', '--heads', 'origin', 'feat'), '');
     assert.equal(git('symbolic-ref', '--short', 'HEAD'), 'main');
-    assert.equal(landed.stdout.trim(), 'origin/stale');
+    assert.equal(landed.stdout.trim(), 'f'.repeat(40));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
