@@ -577,7 +577,7 @@ export class TaskService {
       if (task.tombstone) { await this.#reconcile(task); return true; }
       if (!TERMINAL.has(task.state) || this.#tasks().some((child) => child.parentTaskId === taskId && !child.tombstone)) throw fail('task_retained', 'Task or descendants are unresolved');
       const consumed = task.parentTaskId ? this.#task(task.parentTaskId).consumed : task.consumed;
-      if (!task.results.length || task.results.some((result) => (consumed[keyOf(taskId, result)] || 0) < result.seq
+      if (task.results.some((result) => (consumed[keyOf(taskId, result)] || 0) < result.seq
         || this.now() < result.recordedAt + this.retentionMs)) throw fail('task_retained', 'Parent has not consumed retained outcomes');
       const { service } = await this.#binding(task.provider);
       for (const attempt of task.attempts) {

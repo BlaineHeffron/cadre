@@ -103,6 +103,11 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     catch (err) { if (err.statusCode === 404) return false; throw err; }
   }
 
+  // Closing a managed task room releases its task; release() enforces retention guards.
+  async function releaseTask(thread) {
+    if (taskService && isDurableTaskRecord(thread.metadata?.task) && !thread.metadata.task.tombstone) await taskService.release(thread.id);
+  }
+
   async function authorizeLifecycle(req, thread, action) {
     if (req.duenoAuth?.principal?.type !== 'agent' || threadHasOwner(thread, createdByFromRequest(req))) return;
     if (action === 'transfer' && participantKey(req.body.to) === participantKey(createdByFromRequest(req))
@@ -338,6 +343,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (snapshot.deliveries.some((item) => deliveryInFlight.has(item.id))) {
       return reply.code(409).send({ error: 'Room has delivery in flight; retry after it settles', code: 'delivery_in_flight' });
     }
+    await releaseTask(snapshot.thread);
     const thread = await store.closeThread(req.params.threadId, req.body?.reason || '');
     if (!thread) return reply.code(404).send({ error: 'Thread not found' });
     await broadcastThreadSummary(thread.id);
@@ -361,6 +367,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
     if (endingThreads.has(snapshot.thread.id)) return reply.code(409).send({ error: 'Room is ending', code: 'room_ending' });
     endingThreads.add(snapshot.thread.id);
     try {
+    await releaseTask(snapshot.thread);
     const thread = await store.closeThread(snapshot.thread.id, req.body?.reason || 'ended');
     const openRooms = store.listThreads({ status: 'open' });
     const participants = snapshot.thread.participants || [];
