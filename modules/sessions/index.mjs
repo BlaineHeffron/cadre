@@ -142,7 +142,7 @@ export async function validatePiCliContract(binary, {
     const nodeCompatible = nodeMatch
       && compareSemanticVersions(nodeMatch.slice(1, 4), [22, 19, 0]) >= 0;
     if (!nodeCompatible) {
-      const error = new Error(`Pi CLI 0.80.7 requires Node.js 22.19.0 or newer${nodeVersion ? `; found ${nodeVersion}` : ''}`);
+      const error = new Error(`Pi CLI 0.84.0 requires Node.js 22.19.0 or newer${nodeVersion ? `; found ${nodeVersion}` : ''}`);
       error.statusCode = 503;
       error.code = 'pi_node_version_incompatible';
       throw error;
@@ -152,9 +152,9 @@ export async function validatePiCliContract(binary, {
   const result = await execImpl(binary, ['--version'], { timeout: 5000 });
   const rawVersion = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
   const match = rawVersion.match(/(?:^|\s)v?(\d+)\.(\d+)\.(\d+)(?:\s|$)/);
-  const compatible = result.code === 0 && match && compareSemanticVersions(match.slice(1, 4), [0, 80, 7]) >= 0;
+  const compatible = result.code === 0 && match && compareSemanticVersions(match.slice(1, 4), [0, 84, 0]) >= 0;
   if (!compatible) {
-    const error = new Error(`Pi CLI 0.80.7 or newer is required${rawVersion ? `; found ${rawVersion}` : ''}`);
+    const error = new Error(`Pi CLI 0.84.0 or newer is required${rawVersion ? `; found ${rawVersion}` : ''}`);
     error.statusCode = 503;
     error.code = 'pi_version_incompatible';
     throw error;
@@ -1619,7 +1619,7 @@ async function getProviderHealth() {
       status: 'ok',
       detail: `${config.id}_runtime_ready`,
       data: config.id === 'pi'
-        ? { binary, nodeVersion: process.version, minimumNodeVersion: '22.19.0', minimumPiVersion: '0.80.7' }
+        ? { binary, nodeVersion: process.version, minimumNodeVersion: '22.19.0', minimumPiVersion: '0.84.0' }
         : { binary },
     };
   } catch (error) {

@@ -19,7 +19,7 @@ test('collab launches keep prompt and profile text out of every agent argv', asy
     await writeFile(join(bin, kind), recorder);
     await chmod(join(bin, kind), 0o755);
   }
-  await writeFile(join(bin, 'pi'), '#!/bin/sh\ncase \"$1\" in --version) echo \"pi 0.80.7\"; exit 0;; --list-models) printf \"provider  model  name\\nxai  grok-4.3  Grok\\n\"; exit 0;; esac\nexec ' + process.execPath + ' ' + join(bin, 'pi-recorder.cjs') + ' \"$@\"\n');
+  await writeFile(join(bin, 'pi'), '#!/bin/sh\ncase \"$1\" in --version) echo \"pi 0.84.0\"; exit 0;; --list-models) printf \"provider  model  name\\nxai  grok-4.3  Grok\\n\"; exit 0;; esac\nexec ' + process.execPath + ' ' + join(bin, 'pi-recorder.cjs') + ' \"$@\"\n');
   await writeFile(join(bin, 'pi-recorder.cjs'), recorder.split('\n').slice(1).join('\n'));
   await writeFile(join(bin, 'tmux'), '#!/bin/sh\nif [ "$1" = new-session ]; then for arg do command="$arg"; done; printf "%s" "$command" > "$TEST_COMMAND"; fi\nexit 0\n');
   await chmod(join(bin, 'tmux'), 0o755);

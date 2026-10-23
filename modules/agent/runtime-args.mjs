@@ -199,7 +199,8 @@ class PiRuntimeHarness extends AgentRuntimeHarness {
     thinkingLevel = '',
     cliSessionId = '',
   } = {}) {
-    const nextArgs = ['--approve'];
+    // Regular mode keeps tmux scrollback; fullscreen (alt-screen) panes have no history.
+    const nextArgs = ['--approve', '--tui-mode', 'regular'];
     if (provider) nextArgs.push('--provider', provider);
     if (model) nextArgs.push('--model', model);
     const sessionId = String(cliSessionId || '').trim();

@@ -26,7 +26,7 @@ await writeFile(join(bin, 'claude'), "#!/bin/sh\n[ -f prompt.txt ] && cat prompt
 const paneFixture = (name) => new URL(`./fixtures/session-state/panes/${name}.pane`, import.meta.url).pathname;
 // Like the real TUI, the Codex stand-in redraws its idle composer at the bottom after each submitted line.
 await writeFile(join(bin, 'codex'), `#!/bin/sh\ncat '${paneFixture('codex-idle-placeholder')}'\nwhile IFS= read -r line; do cat '${paneFixture('codex-idle-placeholder')}'; done\n`);
-await writeFile(join(bin, 'pi'), `#!/bin/sh\ncase "$1" in --version) echo 'pi 0.80.7'; exit 0;; --list-models) printf 'provider  model  name\\nxai  grok-4.6  Grok\\n'; exit 0;; esac\ncat '${paneFixture('pi-5427de06-idle')}'\ncat >/dev/null\n`);
+await writeFile(join(bin, 'pi'), `#!/bin/sh\ncase "$1" in --version) echo 'pi 0.84.0'; exit 0;; --list-models) printf 'provider  model  name\\nxai  grok-4.6  Grok\\n'; exit 0;; esac\ncat '${paneFixture('pi-5427de06-idle')}'\ncat >/dev/null\n`);
 for (const name of ['tmux', 'claude', 'codex', 'pi']) await chmod(join(bin, name), 0o755);
 delete process.env.CADRE_STATE_DIR;
 Object.assign(process.env, {

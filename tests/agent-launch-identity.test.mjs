@@ -82,6 +82,7 @@ describe('pi launch identity', () => {
 
     assert.deepEqual(args, [
       '--approve',
+      '--tui-mode', 'regular',
       '--provider', 'openrouter',
       '--model', 'openai/gpt-5.5',
       '--session-id', 'dueno.pi-1',
@@ -99,6 +100,7 @@ describe('pi launch identity', () => {
     });
 
     assert.equal(args[args.indexOf('--session-id') + 1], 'dueno-pi-2');
+    assert.equal(args[args.indexOf('--tui-mode') + 1], 'regular', 'Pi panes need tmux scrollback');
     assert.ok(!args.includes('--resume'));
   });
 
@@ -129,7 +131,7 @@ describe('pi launch identity', () => {
     await validatePiCliContract('/tmp/pi', {
       readFileImpl: async () => '#!/usr/bin/env node\n',
       nodeVersion: 'v22.19.0',
-      execImpl: async () => ({ code: 0, stdout: 'pi 0.80.7', stderr: '' }),
+      execImpl: async () => ({ code: 0, stdout: 'pi 0.84.0', stderr: '' }),
     });
   });
 });

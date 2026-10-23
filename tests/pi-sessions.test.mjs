@@ -258,7 +258,7 @@ async function runPiScenario({ action, piMode = 'ready', promptProfile = '', cgr
 }
 
 async function writeFakePi(piBin, mode) {
-  const version = mode === 'old-version' ? '0.80.6' : '0.80.7';
+  const version = mode === 'old-version' ? '0.83.0' : '0.84.0';
   const modelOutput = mode === 'missing-credentials'
     ? ['echo "No models available. Use /login to authenticate."', 'exit 0']
     : [
