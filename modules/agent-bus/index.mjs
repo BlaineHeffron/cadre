@@ -69,6 +69,11 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
   store = new AgentBusStore(), credentialStore = getAgentBusCredentialStore(), taskService = null, managedWorktreeBaseDir,
   sessionDeliveryAuditStore = null } = {}) {
   if (!app.hasDecorator('agentBusLifecycle')) app.decorate('agentBusLifecycle', {});
+  // MCP clients read `error`; Fastify's default 4xx body puts the thrown reason in `message`. 5xx stays default.
+  app.setErrorHandler((err, req, reply) => {
+    if (!(err.statusCode >= 400 && err.statusCode < 500)) throw err;
+    return reply.code(err.statusCode).send({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+  });
   store.setLogger?.(app.log);
   const adapters = createAgentAdapters();
   const deliveryInFlight = new Set();

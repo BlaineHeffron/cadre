@@ -156,7 +156,8 @@ export function buildAgentBusMcpRequest({
     });
 
     if (!response.ok) {
-      throw new Error(response.payload?.error || `${method} ${path} failed with ${response.status}`);
+      throw Object.assign(new Error(response.payload?.error || `${method} ${path} failed with ${response.status}`),
+        { statusCode: response.status, ...(response.payload?.code ? { code: response.payload.code } : {}) });
     }
 
     return response.payload;
@@ -858,7 +859,7 @@ export function buildAgentBusMcpServer({
           error: {
             code: err?.code === 'mcp_forbidden' ? -32003 : err?.code === 'mcp_invalid_arguments' ? -32602 : -32000,
             message: err.message || 'Tool call failed',
-            ...(err?.reason ? { data: { reason: err.reason } } : {}),
+            ...(err?.reason || err?.code ? { data: { ...(err.reason ? { reason: err.reason } : {}), ...(err.code ? { code: err.code } : {}) } } : {}),
           },
         };
       }
