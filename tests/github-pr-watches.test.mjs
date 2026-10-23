@@ -68,6 +68,30 @@ test('authenticated MCP/REST create, persist, update and remove watches', async 
   await assert.rejects(s.requestImpl('/api/agents/github/watches', { method: 'POST', body: { repo: 'octo/demo', number: 2, creator } }), /Authenticated agent/);
 });
 
+test('github_agent_status reports stored spawn keys, watch and reviewers without calling GitHub', async (t) => {
+  const s = await setup(t);
+  await s.watch(7);
+  await s.store.updateRepo('octo/demo', { enabled: true, prEnabled: true, spawnedItemKeys: ['pr:7', 'pr:70', 'pr:7@bbb222', 'issue:7'] });
+  await s.store.updateWatch('octo/demo', 7, { headSha: 'bbb222', lastReviewId: 3, mergeableState: 'clean' });
+  const meta = (number, head) => ({ github_repo: 'octo/demo', github_kind: 'pr', github_number: number, ...(head ? { github_head_sha: head } : {}) });
+  s.poller.listExistingSessions = async () => [
+    { id: 'rev-old', backendType: 'codex', source: 'github-agent', created: 1, endedAt: 2, metadata: meta(7, 'aaa111') },
+    { id: 'rev-new', backendType: 'codex', source: 'github-agent', created: 3, status: 'running', metadata: meta(7, 'bbb222') },
+    { id: 'other-pr', backendType: 'codex', source: 'github-agent', created: 4, metadata: meta(70) },
+    { id: 'manual', backendType: 'claude', source: 'dashboard', created: 5, metadata: meta(7) },
+  ];
+  const status = (await s.call('github_agent_status', { repo: 'octo/demo', pr: 7 })).structuredContent;
+  assert.deepEqual(status, { repo: 'octo/demo', pr: 7, enabled: true, prEnabled: true, spawnKeys: ['pr:7', 'pr:7@bbb222'],
+    watch: { headSha: 'bbb222', lastReviewId: 3, mergeableState: 'clean', creator },
+    reviewers: [
+      { id: 'rev-old', kind: 'codex', state: 'ended', created: 1, endedAt: 2, headSha: 'aaa111' },
+      { id: 'rev-new', kind: 'codex', state: 'running', created: 3, endedAt: null, headSha: 'bbb222' },
+    ] });
+  assert.deepEqual((await s.call('github_agent_status', { repo: 'octo/demo', pr: 99 })).structuredContent,
+    { repo: 'octo/demo', pr: 99, enabled: true, prEnabled: true, spawnKeys: [], watch: null, reviewers: [] });
+  assert.equal(s.calls.length, 0);
+});
+
 test('authenticated operator can delete an agent watch linked to a room it does not own', async (t) => {
   const s = await setup(t);
   await s.watch();

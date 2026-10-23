@@ -469,6 +469,12 @@ export function buildAgentBusMcpServer({
         ...(name === 'watch_pr' ? { thread_id: { type: 'string' } } : {}) }, required: ['repo', 'number'], additionalProperties: false },
     })),
     {
+      name: 'github_agent_status',
+      description: 'Read stored auto-review state for a configured repo PR without calling GitHub. Returns repo enabled/prEnabled, spawn keys, watch, and reviewer sessions.',
+      inputSchema: { type: 'object', properties: { repo: { type: 'string' }, pr: { type: 'integer', minimum: 1 } },
+        required: ['repo', 'pr'], additionalProperties: false },
+    },
+    {
       name: 'room_send',
       description: 'Post in any non-DM room without subscribing; DMs require membership. Participants receive messages; the owner also receives results. Set summary on type=result as <merged|ready|blocked|needs-decision> · PR #n · <one line>. Returns message_id, delivery_count and failed_targets on failure.',
       inputSchema: { type: 'object', properties: {
@@ -574,6 +580,11 @@ export function buildAgentBusMcpServer({
           body: { repo: assertMcpString(args.repo, 'repo'), number: args.number,
             ...(name === 'watch_pr' && args.thread_id ? { thread_id: assertMcpString(args.thread_id, 'thread_id') } : {}) } });
         const result = { repo: args.repo, number: args.number, status: name === 'watch_pr' ? 'watching' : 'removed' };
+        return textResult(JSON.stringify(result), result);
+      }
+
+      case 'github_agent_status': {
+        const result = await request(`/api/agents/github/status?repo=${encodeURIComponent(assertMcpString(args.repo, 'repo'))}&pr=${args.pr}`);
         return textResult(JSON.stringify(result), result);
       }
 
