@@ -26,7 +26,10 @@ async function setup(t) {
   const requestImpl = buildInProcessFastifyRequest({ app: h.app, buildHeaders: () => buildInternalBypassHeaders({ authToken: h.authToken, bypassToken: 'open-rooms-test-bypass' }) });
   const mcp = buildAgentBusMcpServer({ requestImpl, credentialStore: credentials });
   const thread = await h.store.createThread({ title: 'Open room', participants, createdBy: owner });
-  return { h, thread, call: async (name, args, ref = owner) => mcp.callTool(name, args, await credentials.authenticate(tokens.get(ref))), requestImpl };
+  const auth = (ref) => credentials.authenticate(tokens.get(ref));
+  const rpc = async (name, args, ref = owner) => (await mcp.handleRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+    params: { name, arguments: args } }, { authContext: await auth(ref) })).error;
+  return { h, thread, call: async (name, args, ref = owner) => mcp.callTool(name, args, await auth(ref)), rpc, requestImpl };
 }
 
 test('nonmembers read and post without subscribing; all scope lists only open rooms', async (t) => {
@@ -102,6 +105,16 @@ test('owner end refuses DM rooms', async (t) => {
   const dm = await h.store.createThread({ participants, createdBy: owner, metadata: { dm: true } });
   await assert.rejects(call('room_end', { thread_id: dm.id }), /DM rooms may only be closed/);
   assert.deepEqual(h.deletedSessions.claude, []);
+});
+
+test('room tools surface thrown 4xx codes and keep explicit 409 bodies', async (t) => {
+  const { h, thread, rpc } = await setup(t);
+  h.store.state.threads.find((item) => item.id === thread.id).metadata.task = { recordType: 'dueno.durable-task.v1' };
+  assert.deepEqual(await rpc('room_close', { thread_id: thread.id }),
+    { code: -32000, message: 'Task or descendants are unresolved', data: { code: 'task_retained' } });
+  const closed = await h.store.createThread({ title: 'Archived', participants: [], createdBy: owner });
+  await h.store.closeThread(closed.id);
+  assert.equal((await rpc('room_send', { thread_id: closed.id, body: 'late' })).message, 'Thread is closed');
 });
 
 test('outsiders close and reopen non-DM rooms while participants live without terminating them', async (t) => {
@@ -195,7 +208,7 @@ test('poster summaries persist through MCP room and DM calls and compact context
     ['/api/agent-bus/messages', { threadId: thread.id, from: owner }],
     ['/api/agent-bus/dm', { from: owner, target: participants[0] }],
   ]) {
-    await assert.rejects(requestImpl(path, { method: 'POST', body: { ...args, body: 'Rejected', summary: 'x'.repeat(201) } }), (err) => err.statusCode === 400 && /summary/.test(err.payload?.message));
+    await assert.rejects(requestImpl(path, { method: 'POST', body: { ...args, body: 'Rejected', summary: 'x'.repeat(201) } }), (err) => err.statusCode === 400 && /summary/.test(err.message));
   }
   for (const summary of ['', '   ']) {
     const sent = await call('room_send', { thread_id: thread.id, body: 'Fallback headline\n' + 'd'.repeat(6000), summary });
