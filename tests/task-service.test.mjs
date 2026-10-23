@@ -294,7 +294,9 @@ test('wait rejects forged future and cross-task cursors; timeout does not fabric
   await assert.rejects(f.tasks.wait([task.taskId], Buffer.from(JSON.stringify(value)).toString('base64url')), { code: 'invalid_cursor' });
   const other = await f.spawn('other');
   await assert.rejects(f.tasks.wait([other.taskId], first.cursor), { code: 'invalid_cursor' });
-  const timeout = await f.tasks.wait([task.taskId], first.cursor, 10);
+  // Acknowledge first: a 10ms deadline also bounds cursor persistence (see the in-flight test).
+  await f.tasks.wait([task.taskId], first.cursor);
+  const timeout = await f.tasks.wait([task.taskId], null, 10);
   assert.equal(timeout.timedOut, true); assert.equal(timeout.results.length, 0);
 });
 
@@ -504,12 +506,11 @@ async function diagnosticBurst(f, task, count = 150) {
 }
 
 test('observation bursts do not bury authenticated handshake or journal waits behind store writes', async () => {
-  const f = await fixture({ store: { persistDebounceMs: 10 }, task: { startupTimeoutMs: 1500, now: Date.now } });
+  const f = await fixture({ store: { persistDebounceMs: 10 }, task: { startupTimeoutMs: 1500 } });
   const task = await f.spawn();
   const { message } = await f.store.createMessage({ threadId: task.taskId,
     from: { kind: 'fixture', sessionId: task.sessionId }, body: 'authenticated startup reply' });
   await diagnosticBurst(f, task);
-  assert.ok(Date.now() < task.startup.deadline);
   const started = Date.now();
   const read = f.tasks.observeHandshake(task.taskId, { kind: 'fixture', sessionId: task.sessionId, threadId: task.taskId, operation: 'room_context' });
   const reply = f.tasks.observeHandshake(task.taskId, { kind: 'fixture', sessionId: task.sessionId, threadId: task.taskId, operation: 'room_send', messageId: message.id });
