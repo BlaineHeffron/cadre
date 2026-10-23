@@ -9,6 +9,8 @@ import { FileJournalStore } from '../modules/sessions/journal-store.mjs';
 import { SessionService } from '../modules/sessions/session-service.mjs';
 import { createSessionStateTracker } from '../modules/session-state/tracker.mjs';
 import { TaskService } from '../modules/sessions/task-service.mjs';
+import Fastify from 'fastify';
+import { registerAgentBusRoutes } from '../modules/agent-bus/routes.mjs';
 
 // A disposable provider implementing the public transport contract. Stores and
 // service projections below are real; fixture controls only provider responses.
@@ -352,6 +354,31 @@ test('managed room closure rejects while task history is retained', async () => 
   await f.tasks.send(task.taskId, 'two', 'two');
   await assert.rejects(f.store.closeThread(task.taskId), { code: 'task_retained', statusCode: 409 });
   assert.equal(f.store.getThread(task.taskId).thread.status, 'open');
+});
+
+
+test('room close releases a terminal task without results and keeps retained tasks open', async (t) => {
+  const f = await fixture();
+  const app = Fastify().decorate('agentBusLifecycle', {}); t.after(() => app.close());
+  registerAgentBusRoutes({ app, store: f.store, adapters: {}, taskService: f.tasks, broadcastThreadSummary: async () => {},
+    enrichThread: async (thread) => thread, normalizeThreadSummary: (thread) => thread, participantRef: (ref) => ref });
+  const close = (task) => app.inject({ method: 'POST', url: `/api/agent-bus/threads/${task.taskId}/close`, payload: {} });
+  const idle = await f.spawn('idle'); await f.handshake(idle);
+  assert.equal((await close(idle)).json().code, 'task_retained');
+  const answered = await f.spawn('answered'); await f.handshake(answered);
+  await f.tasks.send(answered.taskId, 'work', 'work'); await finish(f, answered);
+  await f.service.terminate(answered.sessionId); await f.tasks.reconcile(); f.time += 1000;
+  assert.equal((await close(answered)).json().code, 'task_retained');
+  assert.equal((await f.tasks.cancel(idle.taskId, 'stop')).state, 'cancelled');
+  assert.equal((await close(idle)).json().code, 'task_retained');
+  // Records persisted before lifecycle results existed hold a terminal state and no results.
+  await f.service.terminate(idle.sessionId); await f.tasks.reconcile();
+  await f.store.updateThreadMetadata(idle.taskId, { task: { ...f.store.getThread(idle.taskId).thread.metadata.task, results: [] } });
+  const res = await close(idle);
+  assert.equal(res.statusCode, 200);
+  assert.equal(f.store.getThread(idle.taskId).thread.status, 'closed');
+  assert.ok((await f.tasks.status(idle.taskId)).tombstone);
+  assert.equal(f.store.getThread(answered.taskId).thread.status, 'open');
 });
 
 
