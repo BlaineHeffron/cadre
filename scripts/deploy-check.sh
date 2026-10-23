@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Restart production, then verify health and a clean journal since the restart.
 # Usage: bash scripts/deploy-check.sh
+# The journal window starts before the restart, so errors from the old process's shutdown count.
 # CADRE_RESTART_CMD overrides the restart; curl and journalctl resolve from PATH.
 set -euo pipefail
 

@@ -93,6 +93,7 @@ esac
     assert.equal(git('ls-remote', '--heads', 'origin', 'feat'), '');
     assert.equal(git('symbolic-ref', '--short', 'HEAD'), 'main');
     assert.equal(landed.stdout.trim(), 'f'.repeat(40));
+    assert.equal(landed.stderr.trim(), 'origin/stale');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

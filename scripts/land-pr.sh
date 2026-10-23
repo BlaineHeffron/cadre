@@ -38,5 +38,6 @@ if git show-ref -q --verify "refs/heads/$branch"; then git branch -q -D "$branch
 remote_ref=$(git ls-remote --heads origin "refs/heads/$branch")
 if [[ -n $remote_ref ]]; then git push -q origin --delete "$branch"; fi
 gh pr view "$pr" --json mergeCommit --jq .mergeCommit.oid
+git branch -r --no-merged origin/main >&2
 }
 main "$@"
