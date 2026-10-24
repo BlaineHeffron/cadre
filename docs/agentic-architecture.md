@@ -160,7 +160,7 @@ Current provider mapping:
 - `opencode-go` (`opencode` alias) -> backend `pi`, runtime `pi`, Pi provider `opencode-go`
 
 Pi provider and model are separate values. The server requires a compatible external
-Pi CLI (`pi`, version 0.80.7 or newer; override with `PI_BIN`). Canonical Node-based Pi
+Pi CLI (`pi`, version 0.84.0 or newer; override with `PI_BIN`). Canonical Node-based Pi
 installs require Node.js 22.19.0 or newer. Pi credentials remain owned by Pi. Missing
 binary, incompatible runtime, and missing provider credentials produce explicit API errors.
 The project runtime is pinned by `.node-version`. Install that exact version before deploying,
