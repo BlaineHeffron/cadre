@@ -1561,6 +1561,39 @@ describe('GitHub agents poller', () => {
     assert.deepEqual((await run({ ...dead, reviews: [{ id: 2, commit_id: 'bbb222' }], live: false, heads: [[0, 'bbb222'], [1, 'bbb222']] })).launches, []);
   });
 
+  it('reviews a trusted open PR the cursor passed without spawning, unless it predates the repo or its head is reviewed', async () => {
+    const run = async ({ createdAtMs, reviews = [] }) => withRepoStore(async (store) => {
+      await store.upsertRepo({ ...BASE_REPO, issueEnabled: false, lastSeenPrNumber: 20, spawnedItemKeys: ['pr:80'], createdAtMs });
+      const launches = [];
+      const sessions = [];
+      const poller = new GithubAgentPoller({
+        repoStore: store, config: { enabled: true, env: { GITHUB_TOKEN_REF: 'test-token' } }, now: () => 0,
+        listExistingSessions: async () => sessions, tmuxSessionExists: async () => true,
+        fetchImpl: async (url) => {
+          if (String(url).endsWith('/user')) return response(200, { login: 'fleet-bot' });
+          if (String(url).includes('/reviews')) return response(200, reviews);
+          if (String(url).includes('/pulls?')) return response(200, [{ ...githubItem(8, 'PR 8'), head: { sha: 'aaa111' } }]);
+          return response(404, {});
+        },
+        resolveScratchWorkDir: async () => '/tmp/unused-github-unspawned',
+        sessionLauncher: async (input) => {
+          launches.push(`${input.metadata.github_number}@${input.metadata.github_head_sha}`);
+          sessions.push({ id: `pr-${launches.length}`, tmuxSession: `pr-${launches.length}`, metadata: input.metadata });
+          return { sessionId: `sess_${launches.length}` };
+        },
+      });
+      await poller.pollOnce();
+      await poller.pollOnce();
+      return { launches, keys: (await store.getRepo('octo/demo')).spawnedItemKeys };
+    });
+    const enabledBefore = Date.parse('2026-06-01T00:00:00Z');
+    assert.deepEqual(await run({ createdAtMs: enabledBefore }), { launches: ['8@aaa111'], keys: ['pr:80', 'pr:8@aaa111'] });
+    // A PR opened before the repo was enabled stays skipped, as the baseline poll intends.
+    assert.deepEqual((await run({ createdAtMs: Date.parse('2026-07-01T00:00:00Z') })).launches, []);
+    // A head already reviewed by other means is not re-reviewed.
+    assert.deepEqual((await run({ createdAtMs: enabledBefore, reviews: [{ id: 1, commit_id: 'aaa111' }] })).launches, []);
+  });
+
   it('preserves a successful sibling ledger when a later spawn throws', async () => {
     let saved = null;
     const store = buildGithubAgentRepoStore({

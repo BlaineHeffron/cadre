@@ -640,13 +640,16 @@ export class GithubAgentPoller {
     }
     if (!suppressSpawn && !result.error && !result.skipped) {
       // A reviewer that died without reviewing leaves its head's key recorded; retry it while it has no live session and no review of that head.
+      // A PR opened after the repo was enabled but never spawned (e.g. the startup poll passed it) is treated the same way.
       const fresh = new Set(result.newPullRequests.map((item) => item.number));
+      const keys = result.updatedRepo.spawnedItemKeys;
       let fetches = normalizeMaxSpawns(this.config.maxSpawnsPerPoll);
       result.retryPullRequests = [];
       for (const item of result.openPullRequests) {
         const headItem = { ...item, headSha: item.head };
         const reviewedKey = `${repo.id}#${item.number}@${item.head}`;
-        if (fresh.has(item.number) || this.reviewedPrs.has(reviewedKey) || !result.updatedRepo.spawnedItemKeys.includes(githubItemSpawnKey('pr', headItem))) continue;
+        const neverSpawned = Date.parse(item.createdAt) > repo.createdAtMs && !keys.some((key) => key === `pr:${item.number}` || key.startsWith(`pr:${item.number}@`));
+        if (fresh.has(item.number) || this.reviewedPrs.has(reviewedKey) || (!neverSpawned && !keys.includes(githubItemSpawnKey('pr', headItem)))) continue;
         if (await findExistingGithubItemSession(repo, 'pr', item, { config: this.config, listExistingSessions: this.listExistingSessions, tmuxSessionExists: this.tmuxSessionExists })) continue;
         if (!unreviewed.includes(item.number)) {
           if (fetches-- <= 0) break;
