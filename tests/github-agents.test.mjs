@@ -1561,6 +1561,46 @@ describe('GitHub agents poller', () => {
     assert.deepEqual((await run({ ...dead, reviews: [{ id: 2, commit_id: 'bbb222' }], live: false, heads: [[0, 'bbb222'], [1, 'bbb222']] })).launches, []);
   });
 
+  it('reviews a trusted open PR the cursor passed without spawning, unless it predates the PR baseline or its head is reviewed', async () => {
+    const run = async ({ repo = {}, reviews = [] }) => withRepoStore(async (store) => {
+      await store.upsertRepo({ ...BASE_REPO, issueEnabled: false, lastSeenPrNumber: 20, spawnedItemKeys: ['pr:80'], createdAtMs: 1, ...repo });
+      const launches = [];
+      const sessions = [];
+      const poller = new GithubAgentPoller({
+        repoStore: store, config: { enabled: true, env: { GITHUB_TOKEN_REF: 'test-token' } }, now: () => 0,
+        listExistingSessions: async () => sessions, tmuxSessionExists: async () => true,
+        fetchImpl: async (url) => {
+          if (String(url).endsWith('/user')) return response(200, { login: 'fleet-bot' });
+          if (String(url).includes('/reviews')) return response(200, reviews);
+          if (String(url).includes('/pulls?')) return response(200, [{ ...githubItem(8, 'PR 8'), head: { sha: 'aaa111' } }]);
+          return response(404, {});
+        },
+        resolveScratchWorkDir: async () => '/tmp/unused-github-unspawned',
+        sessionLauncher: async (input) => {
+          launches.push(`${input.metadata.github_number}@${input.metadata.github_head_sha}`);
+          sessions.push({ id: `pr-${launches.length}`, tmuxSession: `pr-${launches.length}`, metadata: input.metadata });
+          return { sessionId: `sess_${launches.length}` };
+        },
+      });
+      await poller.pollOnce();
+      await poller.pollOnce();
+      const saved = await store.getRepo('octo/demo');
+      return { launches, keys: saved.spawnedItemKeys, prBaselineNumber: saved.prBaselineNumber };
+    });
+    // The cursor passed PR 8 after the baseline at 5 without spawning: one review at its head.
+    assert.deepEqual(await run({ repo: { prBaselineNumber: 5 } }), { launches: ['8@aaa111'], keys: ['pr:80', 'pr:8@aaa111'], prBaselineNumber: 5 });
+    // A PR at or below the baseline predates PR review and stays skipped.
+    assert.deepEqual((await run({ repo: { prBaselineNumber: 8 } })).launches, []);
+    // A head already reviewed by other means is not re-reviewed.
+    assert.deepEqual((await run({ repo: { prBaselineNumber: 5 }, reviews: [{ id: 1, commit_id: 'aaa111' }] })).launches, []);
+    // Enabling PR review or resetting the cursor re-baselines, so open PRs newer than the record are not mass-reviewed.
+    assert.deepEqual(await run({ repo: { lastSeenPrNumber: null, spawnedItemKeys: [], prBaselineNumber: 5 } }), { launches: [], keys: [], prBaselineNumber: 8 });
+    // Records baselined before the field existed use their lowest spawned PR as the baseline.
+    assert.deepEqual((await run({ repo: { spawnedItemKeys: ['pr:7', 'pr:7@bbb222'] } })).launches, ['8@aaa111']);
+    assert.deepEqual((await run({ repo: { spawnedItemKeys: ['pr:9'] } })).launches, []);
+    assert.deepEqual((await run({ repo: { spawnedItemKeys: [] } })).launches, []);
+  });
+
   it('preserves a successful sibling ledger when a later spawn throws', async () => {
     let saved = null;
     const store = buildGithubAgentRepoStore({

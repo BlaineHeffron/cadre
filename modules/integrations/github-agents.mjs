@@ -309,6 +309,7 @@ export function normalizeGithubAgentRepo(input = {}, {
     ),
     lastSeenPrNumber: normalizeCursor(input.lastSeenPrNumber ?? input.last_seen_pr_number),
     lastSeenIssueNumber: normalizeCursor(input.lastSeenIssueNumber ?? input.last_seen_issue_number),
+    prBaselineNumber: normalizeCursor(input.prBaselineNumber ?? input.pr_baseline_number),
     lastPollMs: normalizeMs(input.lastPollMs ?? input.last_poll_ms),
     lastEvent: normalizeText(input.lastEvent ?? input.last_event),
     lastSpawnSessionId: normalizeText(input.lastSpawnSessionId ?? input.last_spawn_session_id),
@@ -374,6 +375,7 @@ export function buildGithubAgentRepoStore({
       ['lastSeenPrNumber', 'last_seen_pr_number'],
       ['lastSeenIssueNumber', 'last_seen_issue_number'],
       ['spawnedItemKeys', 'spawned_item_keys'],
+      ['prBaselineNumber', 'pr_baseline_number'],
     ]) {
       if (prior && !Object.hasOwn(input, key) && !Object.hasOwn(input, alias)) repo[key] = prior[key];
     }
@@ -508,6 +510,7 @@ export async function pollGithubRepo(repoInput = {}, {
       ...repo,
       lastSeenPrNumber: maxPrNumber,
       lastSeenIssueNumber: maxIssueNumber,
+      prBaselineNumber: baselinePr ? maxPrNumber : repo.prBaselineNumber,
       lastPollMs: nowMs,
       lastEvent: eventLabel({ baselined, newPullRequests, newIssues }),
       lastError: '',
@@ -640,13 +643,18 @@ export class GithubAgentPoller {
     }
     if (!suppressSpawn && !result.error && !result.skipped) {
       // A reviewer that died without reviewing leaves its head's key recorded; retry it while it has no live session and no review of that head.
+      // A PR opened after the PR cursor was baselined but never spawned (e.g. the startup poll passed it) is treated the same way.
+      // Records baselined before prBaselineNumber existed fall back to the lowest spawned PR, which was opened after their baseline.
       const fresh = new Set(result.newPullRequests.map((item) => item.number));
+      const keys = result.updatedRepo.spawnedItemKeys;
+      const baseline = result.updatedRepo.prBaselineNumber ?? Math.min(...keys.map((key) => Number(key.match(/^pr:(\d+)/)?.[1])).filter(Boolean));
       let fetches = normalizeMaxSpawns(this.config.maxSpawnsPerPoll);
       result.retryPullRequests = [];
       for (const item of result.openPullRequests) {
         const headItem = { ...item, headSha: item.head };
         const reviewedKey = `${repo.id}#${item.number}@${item.head}`;
-        if (fresh.has(item.number) || this.reviewedPrs.has(reviewedKey) || !result.updatedRepo.spawnedItemKeys.includes(githubItemSpawnKey('pr', headItem))) continue;
+        const neverSpawned = item.number > baseline && !keys.some((key) => key === `pr:${item.number}` || key.startsWith(`pr:${item.number}@`));
+        if (fresh.has(item.number) || this.reviewedPrs.has(reviewedKey) || (!neverSpawned && !keys.includes(githubItemSpawnKey('pr', headItem)))) continue;
         if (await findExistingGithubItemSession(repo, 'pr', item, { config: this.config, listExistingSessions: this.listExistingSessions, tmuxSessionExists: this.tmuxSessionExists })) continue;
         if (!unreviewed.includes(item.number)) {
           if (fetches-- <= 0) break;
@@ -1185,6 +1193,7 @@ function safeRepoRecord(repo = {}) {
     autoReviewEnabled: repo.autoReviewEnabled,
     lastSeenPrNumber: repo.lastSeenPrNumber,
     lastSeenIssueNumber: repo.lastSeenIssueNumber,
+    prBaselineNumber: repo.prBaselineNumber,
     lastPollMs: repo.lastPollMs,
     lastEvent: repo.lastEvent,
     lastSpawnSessionId: repo.lastSpawnSessionId,
