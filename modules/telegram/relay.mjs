@@ -189,10 +189,11 @@ function operatorQuestionFromEvent(event = {}) {
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : event;
   const eventName = event.eventName || payload.hook_event_name || '';
 
-  if (eventName === 'PreToolUse') {
+  if (eventName === 'PreToolUse' || eventName === 'PermissionRequest') {
     const toolName = payload.tool_name || payload.tool?.name || '';
     if (toolName !== 'AskUserQuestion') return null;
-    const toolInput = payload.tool_input || payload.tool?.input || {};
+    // The Claude fleet plugin records tool arguments at the top level of the event.
+    const toolInput = payload.tool_input || payload.tool?.input || payload;
     const firstQuestion = Array.isArray(toolInput.questions) ? toolInput.questions[0] : null;
     if (!firstQuestion) return null;
     const text = findPromptText(firstQuestion);
@@ -570,6 +571,9 @@ export class TelegramRelayLoop {
     });
     if (state?.status === 'blocked' && state.relayable) {
       await this.deliverInteraction(routedSession, { state, route });
+    } else if (state && this.sentStore.get(routedSession.id)?.last_interaction_key) {
+      // Dedupe covers one blocked episode; the next prompt is new even with the same fingerprint.
+      await this.sentStore.set(routedSession.id, { last_interaction_key: '' });
     }
   }
 
@@ -678,7 +682,6 @@ export class TelegramRelayLoop {
     const interactionKey = `${state.status}:${state.interaction?.kind || 'none'}:${interactionIdentity}`;
     if (previous?.last_interaction_key === interactionKey) return false;
     const runtime = String(session.runtime || '').toLowerCase();
-    const answerableInteraction = ['permission', 'confirmation', 'selection'].includes(state.interaction?.kind);
     let body = '';
     let buttons;
 
@@ -693,7 +696,7 @@ export class TelegramRelayLoop {
       const answeredAfterQuestion = question?.recordedAt
         && previous?.answer_consumed_at_ms
         && Number(previous.answer_consumed_at_ms) > question.recordedAt;
-      if (question && !answeredAfterQuestion && answerableInteraction) {
+      if (question && !answeredAfterQuestion) {
         body = renderOperatorQuestion(question);
         buttons = operatorQuestionButtons(question);
       }

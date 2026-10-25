@@ -1134,6 +1134,44 @@ describe('telegram relay loop', () => {
     });
   });
 
+  it('relays a fleet-plugin AskUserQuestion on an unknown screen, again in each blocked episode', async () => {
+    await withTempDir(async (stateDir) => {
+      const deliveries = [];
+      const unknown = canonicalState('blocked', {
+        interaction: { kind: 'unknown_blocking', detail: 'Unknown session screen', options: [], fingerprint: 'unknown-1' },
+      });
+      const loop = buildLoop({
+        stateDir,
+        sessions: [session({ runtime: 'claude', tmuxSession: 'claude-session-123456' })],
+        deliveries,
+        states: { 'session-123456': [unknown, 'working', unknown] },
+        hookEvents: {
+          'claude:session-123456': [{
+            eventName: 'PreToolUse',
+            loggedAt: '2026-06-28T12:00:00.000Z',
+            payload: {
+              hook_event_name: 'PreToolUse',
+              tool_name: 'AskUserQuestion',
+              questions: [{ question: 'Which storage backend?', options: [{ label: 'SQLite' }, { label: 'Redis' }] }],
+            },
+          }],
+        },
+        now: () => Date.parse('2026-06-28T12:01:00.000Z'),
+      });
+
+      await loop.step();
+      await loop.step();
+      await loop.step();
+
+      const prompt = 'Which storage backend?\n1. SQLite\n2. Redis';
+      assert.deepEqual(deliveries.map((delivery) => delivery.text), [prompt, prompt]);
+      assert.deepEqual(deliveries[0].buttons, [
+        { text: '1. SQLite', callback_data: 'answer:1' },
+        { text: '2. Redis', callback_data: 'answer:2' },
+      ]);
+    });
+  });
+
   it('does not resend an unchanged blocking interaction when only state revision changes', async () => {
     await withTempDir(async (stateDir) => {
       const deliveries = [];

@@ -144,7 +144,7 @@ export async function defaultSendSessionInput({
     },
   });
   if (response?.statusCode && response.statusCode >= 400) {
-    throw new Error(response.payload?.error || `session_input_${response.statusCode}`);
+    throw Object.assign(new Error(response.payload?.error || `session_input_${response.statusCode}`), { statusCode: response.statusCode });
   }
   return response?.payload || { ok: true };
 }
@@ -450,12 +450,19 @@ export class TelegramBridgeLoop {
       };
     }
 
-    await this.sendSessionInput({
-      session: resolved.session,
-      text,
-      interactionAnswer: isAnswerCallback(callback),
-      interactionExpectation,
-    });
+    let rejected = null;
+    try {
+      await this.sendSessionInput({
+        session: resolved.session,
+        text,
+        interactionAnswer: isAnswerCallback(callback),
+        interactionExpectation,
+      });
+    } catch (error) {
+      // A 4xx will fail the same way on retry; tell the operator instead of dropping it silently.
+      if (!(error?.statusCode >= 400 && error.statusCode < 500)) throw error;
+      rejected = error;
+    }
 
     // Commit the processed marker immediately after the input lands so a
     // failure in the bookkeeping below cannot replay the input on retry.
@@ -464,9 +471,20 @@ export class TelegramBridgeLoop {
       message_id: message.message_id,
       thread_id: threadId,
       session_id: resolved.session.id,
+      ...(rejected ? { undelivered: rejected.message } : {}),
       ts: this.now() / 1000,
     };
     await writeJsonAtomic(this.processedPath(), processed);
+
+    if (rejected) {
+      const reason = rejected.statusCode === 403
+        ? 'the session is waiting on a prompt; answer it in the dashboard.'
+        : rejected.message;
+      await this.sender.sendMessage(clip(`Not delivered: ${reason}`, 300), { threadId }).catch((error) => {
+        this.logger?.warn?.(`telegram bridge undelivered notice failed: ${error.message || error}`);
+      });
+      return this.ignoreUpdate(updateId, 'input_rejected', { threadId, sessionId: resolved.session.id, statusCode: rejected.statusCode });
+    }
 
     if (callback?.id) {
       await this.sender.answerCallbackQuery(callback.id, 'Sent to agent').catch((error) => {
