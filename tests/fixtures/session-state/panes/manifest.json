@@ -321,6 +321,38 @@
       "knownDefect": false
     },
     {
+      "id": "claude-reconstructed-ask-user-question",
+      "file": "claude-reconstructed-ask-user-question.pane",
+      "provider": "claude",
+      "source": "reconstructed",
+      "capturedFrom": null,
+      "intendedState": "selection-menu",
+      "intendedLegacyState": "unknown",
+      "intendedExecution": "unknown",
+      "intendedInteraction": "selection",
+      "notes": "AskUserQuestion picker with an indented description under each option, Type something and Chat about this rows, and the navigation footer.",
+      "currentLegacyState": "unknown",
+      "currentExecution": "unknown",
+      "currentInteraction": "selection",
+      "knownDefect": false
+    },
+    {
+      "id": "claude-reconstructed-ask-user-question-plain",
+      "file": "claude-reconstructed-ask-user-question-plain.pane",
+      "provider": "claude",
+      "source": "reconstructed",
+      "capturedFrom": null,
+      "intendedState": "selection-menu",
+      "intendedLegacyState": "waiting_for_input",
+      "intendedExecution": "idle",
+      "intendedInteraction": "selection",
+      "notes": "AskUserQuestion picker without option descriptions.",
+      "currentLegacyState": "waiting_for_input",
+      "currentExecution": "idle",
+      "currentInteraction": "selection",
+      "knownDefect": false
+    },
+    {
       "id": "claude-reconstructed-exited",
       "file": "claude-reconstructed-exited.pane",
       "provider": "claude",

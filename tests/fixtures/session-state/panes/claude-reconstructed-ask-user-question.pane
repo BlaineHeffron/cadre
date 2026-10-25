@@ -1,0 +1,18 @@
+● I need one decision before continuing.
+
+────────────────────────────────────────────────────────────────────────────────
+ ☐ Storage
+
+Which storage backend should the cache use?
+
+❯ 1. SQLite
+     Single file, no extra service to run.
+  2. Redis
+     Shared across workers; needs a running server.
+  3. In-memory
+     Fastest, but lost on restart.
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

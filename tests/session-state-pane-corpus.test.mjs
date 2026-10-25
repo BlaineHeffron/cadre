@@ -202,6 +202,18 @@ describe('captured pane corpus', () => {
     assert.equal(snapshot.capabilities.needsAttention, false);
   });
 
+  for (const [file, detail, labels] of [
+    ['claude-reconstructed-ask-user-question.pane', 'Which storage backend should the cache use?', ['SQLite', 'Redis', 'In-memory', 'Type something.']],
+    ['claude-reconstructed-ask-user-question-plain.pane', 'Which branch should the fix target?', ['main', 'release', 'Type something.']],
+  ]) it(`reads a Claude AskUserQuestion picker as a selection (${file})`, async () => {
+    const content = (await loadPane(file)).toString('utf8');
+    const interaction = observeClaudePane(content, { observedAt: 100, expiresAt: 0 })
+      .find((item) => item.kind === 'interaction').value;
+    assert.equal(interaction.kind, 'selection');
+    assert.equal(interaction.detail, detail);
+    assert.deepEqual(interaction.options, labels.map((label, index) => ({ key: String(index + 1), label })));
+  });
+
   it('keeps knownDefect flags aligned with intended vs current classification', async () => {
     const manifest = await loadManifest();
     for (const fixture of manifest.fixtures) {

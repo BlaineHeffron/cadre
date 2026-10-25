@@ -50,9 +50,11 @@ function parseNumberedSelection(content = '', { composerVisible = false } = {}) 
   const runs = [];
   let current = null;
   for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].match(/^\s*([❯>›])?\s*(\d+)[.)]\s+(.+?)\s*$/);
+    const match = lines[index].match(/^\s*([❯>›])?\s*(\d+)[.)]\s+(.+?)\s*$/d);
     if (!match) {
-      if (lines[index].trim()) current = null;
+      // A line indented to the option label is that option's description.
+      const indent = lines[index].length - lines[index].trimStart().length;
+      if (lines[index].trim() && !(current && indent >= current.labelColumn)) current = null;
       continue;
     }
     const optionNumber = Number(match[2]);
@@ -61,6 +63,7 @@ function parseNumberedSelection(content = '', { composerVisible = false } = {}) 
       current = { firstOptionIndex: index, selected: false, options: [] };
       runs.push(current);
     }
+    current.labelColumn = match.indices[3][0];
     current.selected ||= Boolean(match[1]);
     current.options.push({ key: match[2], label: match[3].trim().slice(0, 80) });
   }
