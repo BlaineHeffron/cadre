@@ -918,6 +918,43 @@ describe('telegram bridge inbound loop', () => {
     });
   });
 
+  it('acknowledges a rejected answer button so the Telegram spinner ends', async () => {
+    await withTempState(async (stateDir) => {
+      await writeFile(join(stateDir, 'topics.json'), JSON.stringify({
+        'session:session-123456': { thread_id: 177, session_id: 'session-123456', backend: 'codex' },
+      }));
+      await writeFile(join(stateDir, 'sent.json'), JSON.stringify({
+        'session-123456': { message_id: 902, thread_id: 177, interaction_revision: 3, interaction_kind: 'selection', interaction_fingerprint: 'selection-3' },
+      }));
+      const fetchCalls = [];
+      const loop = new TelegramBridgeLoop({
+        sender: new TelegramSender({
+          stateDir,
+          fetchImpl: async (url, options = {}) => {
+            fetchCalls.push({ url, body: JSON.parse(options.body || '{}') });
+            return response({ ok: true, result: true });
+          },
+        }),
+        stateDir,
+        listSessions: async () => [session({ state: selectionState(3) })],
+        requestImpl: async () => ({ statusCode: 409, payload: { error: 'interaction_changed' } }),
+        now: () => 5000,
+        logger: { warn() {} },
+      });
+
+      assert.equal(await loop.handleUpdate({
+        update_id: 60,
+        callback_query: { id: 'cb-9', data: 'answer:1', message: { message_id: 902, chat: { id: -100123 }, message_thread_id: 177 } },
+      }), false);
+
+      const ack = fetchCalls.find((call) => call.url.endsWith('/answerCallbackQuery'));
+      assert.equal(ack.body.callback_query_id, 'cb-9');
+      assert.equal(ack.body.text, 'Not delivered');
+      const notice = fetchCalls.find((call) => call.url.endsWith('/sendMessage'));
+      assert.equal(notice.body.text, 'Not delivered: interaction_changed');
+    });
+  });
+
   it('prefers the forum thread mapping over stale reply metadata', async () => {
     await withTempState(async (stateDir) => {
       await writeFile(join(stateDir, 'topics.json'), JSON.stringify({

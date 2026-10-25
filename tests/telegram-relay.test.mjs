@@ -1134,41 +1134,72 @@ describe('telegram relay loop', () => {
     });
   });
 
-  it('relays a fleet-plugin AskUserQuestion on an unknown screen, again in each blocked episode', async () => {
+  const fleetQuestion = (eventName, loggedAt) => ({
+    eventName,
+    loggedAt,
+    payload: {
+      hook_event_name: eventName,
+      tool_name: 'AskUserQuestion',
+      questions: [{ question: 'Which storage backend?', options: [{ label: 'SQLite' }, { label: 'Redis' }] }],
+    },
+  });
+  const unknownScreen = canonicalState('blocked', {
+    interaction: { kind: 'unknown_blocking', detail: 'Unknown session screen', options: [], fingerprint: 'unknown-1' },
+  });
+
+  it('relays a fleet-plugin AskUserQuestion on an unknown screen only in its own blocked episode', async () => {
     await withTempDir(async (stateDir) => {
       const deliveries = [];
-      const unknown = canonicalState('blocked', {
-        interaction: { kind: 'unknown_blocking', detail: 'Unknown session screen', options: [], fingerprint: 'unknown-1' },
-      });
+      let now = Date.parse('2026-06-28T12:01:00.000Z');
       const loop = buildLoop({
         stateDir,
         sessions: [session({ runtime: 'claude', tmuxSession: 'claude-session-123456' })],
         deliveries,
-        states: { 'session-123456': [unknown, 'working', unknown] },
+        states: { 'session-123456': [unknownScreen, 'working', unknownScreen] },
+        hookEvents: { 'claude:session-123456': [fleetQuestion('PreToolUse', '2026-06-28T12:00:00.000Z')] },
+        now: () => now,
+      });
+
+      await loop.step();
+      now += 5000;
+      await loop.step();
+      now += 5000;
+      await loop.step();
+
+      // The later prompt has the same fingerprint, so it is relayed again, but the
+      // question from the earlier episode is stale and must not be shown for it.
+      assert.deepEqual(deliveries.map((delivery) => delivery.text), [
+        'Which storage backend?\n1. SQLite\n2. Redis',
+        'Unknown session screen',
+      ]);
+      assert.deepEqual(deliveries[0].buttons, [
+        { text: '1. SQLite', callback_data: 'answer:1' },
+        { text: '2. Redis', callback_data: 'answer:2' },
+      ]);
+      assert.equal(deliveries[1].buttons, undefined);
+    });
+  });
+
+  it('does not show an AskUserQuestion after its PostToolUse', async () => {
+    await withTempDir(async (stateDir) => {
+      const deliveries = [];
+      const loop = buildLoop({
+        stateDir,
+        sessions: [session({ runtime: 'claude', tmuxSession: 'claude-session-123456' })],
+        deliveries,
+        states: { 'session-123456': [unknownScreen] },
         hookEvents: {
-          'claude:session-123456': [{
-            eventName: 'PreToolUse',
-            loggedAt: '2026-06-28T12:00:00.000Z',
-            payload: {
-              hook_event_name: 'PreToolUse',
-              tool_name: 'AskUserQuestion',
-              questions: [{ question: 'Which storage backend?', options: [{ label: 'SQLite' }, { label: 'Redis' }] }],
-            },
-          }],
+          'claude:session-123456': [
+            fleetQuestion('PreToolUse', '2026-06-28T12:00:00.000Z'),
+            fleetQuestion('PostToolUse', '2026-06-28T12:00:30.000Z'),
+          ],
         },
         now: () => Date.parse('2026-06-28T12:01:00.000Z'),
       });
 
       await loop.step();
-      await loop.step();
-      await loop.step();
 
-      const prompt = 'Which storage backend?\n1. SQLite\n2. Redis';
-      assert.deepEqual(deliveries.map((delivery) => delivery.text), [prompt, prompt]);
-      assert.deepEqual(deliveries[0].buttons, [
-        { text: '1. SQLite', callback_data: 'answer:1' },
-        { text: '2. Redis', callback_data: 'answer:2' },
-      ]);
+      assert.deepEqual(deliveries.map((delivery) => delivery.text), ['Unknown session screen']);
     });
   });
 

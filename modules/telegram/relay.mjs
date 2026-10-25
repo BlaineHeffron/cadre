@@ -16,7 +16,7 @@ const DEFAULT_AGENT_BUS_STATE_PATHS = [
   join(runtimeStatePath('agent_bus'), 'state.json'),
   '.agent_bus/state.json',
 ];
-const OPERATOR_QUESTION_CLOSED_EVENTS = new Set(['UserPromptSubmit', 'Stop', 'SessionEnd']);
+const OPERATOR_QUESTION_CLOSED_EVENTS = new Set(['UserPromptSubmit', 'PostToolUse', 'Stop', 'SessionEnd']);
 const LEGACY_RELAYABLE_STATUSES = new Set(['ready', 'blocked']);
 const DEFAULT_ORPHAN_DRAIN_SEC = 120;
 const sentStoreWriteQueues = new Map();
@@ -552,6 +552,7 @@ export class TelegramRelayLoop {
       busThreadTitle: busThread.title || '',
     } : session;
     const state = canonicalRelayState(routedSession);
+    const wasBlocked = this.lastCanonicalStateById.get(routedSession.id)?.status === 'blocked';
     if (state) {
       this.lastCanonicalStateById.set(routedSession.id, {
         status: state.status,
@@ -571,9 +572,9 @@ export class TelegramRelayLoop {
     });
     if (state?.status === 'blocked' && state.relayable) {
       await this.deliverInteraction(routedSession, { state, route });
-    } else if (state && this.sentStore.get(routedSession.id)?.last_interaction_key) {
-      // Dedupe covers one blocked episode; the next prompt is new even with the same fingerprint.
-      await this.sentStore.set(routedSession.id, { last_interaction_key: '' });
+    } else if (state && (wasBlocked || this.sentStore.get(routedSession.id)?.last_interaction_key)) {
+      // Dedupe and hook questions cover one blocked episode; the next prompt is new even with the same fingerprint.
+      await this.sentStore.set(routedSession.id, { last_interaction_key: '', left_blocked_at_ms: this.now() });
     }
   }
 
@@ -693,10 +694,8 @@ export class TelegramRelayLoop {
         cursor: 0,
       });
       const question = latestOpenOperatorQuestion(hookResult.events || []);
-      const answeredAfterQuestion = question?.recordedAt
-        && previous?.answer_consumed_at_ms
-        && Number(previous.answer_consumed_at_ms) > question.recordedAt;
-      if (question && !answeredAfterQuestion) {
+      const closedAt = Math.max(Number(previous?.answer_consumed_at_ms) || 0, Number(previous?.left_blocked_at_ms) || 0);
+      if (question && !(question.recordedAt && closedAt > question.recordedAt)) {
         body = renderOperatorQuestion(question);
         buttons = operatorQuestionButtons(question);
       }

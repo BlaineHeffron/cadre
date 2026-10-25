@@ -480,6 +480,11 @@ export class TelegramBridgeLoop {
       const reason = rejected.statusCode === 403
         ? 'the session is waiting on a prompt; answer it in the dashboard.'
         : rejected.message;
+      if (callback?.id) {
+        await this.sender.answerCallbackQuery(callback.id, 'Not delivered').catch((error) => {
+          this.logger?.warn?.(`telegram callback ack failed: ${error.message || error}`);
+        });
+      }
       await this.sender.sendMessage(clip(`Not delivered: ${reason}`, 300), { threadId }).catch((error) => {
         this.logger?.warn?.(`telegram bridge undelivered notice failed: ${error.message || error}`);
       });
