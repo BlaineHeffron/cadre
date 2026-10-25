@@ -198,6 +198,13 @@ function expiredCookie(request, name) {
   return `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${cookieSecureAttribute(request)}`;
 }
 
+// The Telegram bridge's own policy for answers from the verified operator chat. Only this process can mint the
+// nonce, so no HTTP client can claim it, and it covers only session input/keys routes.
+export const TELEGRAM_OPERATOR_POLICY = 'telegram-operator';
+const IN_PROCESS_POLICY_HEADER = 'x-cadre-in-process-policy';
+const IN_PROCESS_POLICY_NONCE = randomBytes(32).toString('hex');
+const TELEGRAM_OPERATOR_ROUTE = /^\/api\/[^/]+\/sessions\/[^/]+\/(?:input|keys)$/;
+
 export function buildInternalBypassHeaders({
   authToken = currentAuthToken(),
   bypassToken = currentInternalBypassToken(),
@@ -208,7 +215,10 @@ export function buildInternalBypassHeaders({
   if (authToken) headers.authorization = `Bearer ${authToken}`;
   if (bypassToken) headers['x-dueno-internal'] = bypassToken;
   headers['x-dueno-internal-ts'] = now.toISOString();
-  if (automationPolicy) headers['x-dueno-automation-policy'] = String(automationPolicy);
+  if (automationPolicy) {
+    headers['x-dueno-automation-policy'] = String(automationPolicy);
+    headers[IN_PROCESS_POLICY_HEADER] = IN_PROCESS_POLICY_NONCE;
+  }
   return headers;
 }
 
@@ -222,9 +232,11 @@ export function permissionAuthorityForRequest(request, {
   const auth = request?.duenoAuth || null;
   const principal = auth?.principal || null;
   const policy = String(auth?.automationPolicy || '').trim();
+  const telegramApproved = policy === TELEGRAM_OPERATOR_POLICY && auth?.inProcessPolicy === true
+    && TELEGRAM_OPERATOR_ROUTE.test(String(request.url || '').split('?')[0]);
   const automationApproved = principal?.type === 'service'
     && policy
-    && config.permissionAuthority.preapprovedAutomationPolicies.includes(policy);
+    && (telegramApproved || config.permissionAuthority.preapprovedAutomationPolicies.includes(policy));
   // A hub relays an operator's answer to a worker with its worker credential, and flags it only after its own check.
   const operatorApproved = auth?.authenticated === true
     && (principal?.type === 'ui' || (principal?.type === 'hub-peer' && auth.hubOperator === true));
@@ -429,6 +441,7 @@ function authPluginImpl(app, opts = {}, done) {
         coordinatorPolicy: mcpAuth?.coordinatorPolicy || null,
         loopRegistrationPolicy: mcpAuth?.loopRegistrationPolicy || null,
         automationPolicy: mcpAuth ? '' : automationPolicy,
+        inProcessPolicy: !mcpAuth && constantTimeMatch(request.headers[IN_PROCESS_POLICY_HEADER], IN_PROCESS_POLICY_NONCE),
         source: mcpAuth ? 'agent_bus_mcp' : 'internal',
       };
       request.log.debug({

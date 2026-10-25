@@ -9,7 +9,7 @@ import {
 export function buildInProcessFastifyRequest({ app, buildHeaders }) {
   if (!app?.inject) throw new TypeError('app.inject is required');
   if (typeof buildHeaders !== 'function') throw new TypeError('buildHeaders is required');
-  return async function inProcessFastifyRequest(path, { method = 'GET', body, authContext = null } = {}) {
+  return async function inProcessFastifyRequest(path, { method = 'GET', body, authContext = null, automationPolicy = '' } = {}) {
     const contextId = registerAgentBusMcpInProcessRequestContext(authContext);
     let response;
     try {
@@ -21,7 +21,7 @@ export function buildInProcessFastifyRequest({ app, buildHeaders }) {
           accept: 'application/json',
           ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
           ...(contextId ? { [AGENT_BUS_MCP_IN_PROCESS_CONTEXT_HEADER]: contextId } : {}),
-          ...buildHeaders(),
+          ...buildHeaders({ automationPolicy }),
         },
       }));
     } finally {
