@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { TELEGRAM_OPERATOR_POLICY } from '../platform/auth.mjs';
 import { buildSentStore, listSessionsFromRegistry } from './relay.mjs';
 import { synthesizeSpeech } from './tts.mjs';
 
@@ -142,6 +143,8 @@ export async function defaultSendSessionInput({
         expectedInteractionKind: interactionKind,
       } : {}),
     },
+    // Only updates from the configured operator chat reach here (handleUpdate).
+    automationPolicy: TELEGRAM_OPERATOR_POLICY,
   });
   if (response?.statusCode && response.statusCode >= 400) {
     throw Object.assign(new Error(response.payload?.error || `session_input_${response.statusCode}`), { statusCode: response.statusCode });
@@ -344,7 +347,7 @@ export class TelegramBridgeLoop {
     const config = await this.sender.loadConfig();
     const expectedChatId = normalizeChatId(config.chatId);
     const actualChatId = normalizeChatId(message.chat?.id);
-    if (expectedChatId && (!actualChatId || actualChatId !== expectedChatId)) {
+    if (!expectedChatId || actualChatId !== expectedChatId) {
       return this.ignoreUpdate(updateId, 'wrong_chat', { chatId: actualChatId || null });
     }
 

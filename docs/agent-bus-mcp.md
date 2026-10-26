@@ -98,8 +98,10 @@ identity is carried from the authenticated dispatcher to Fastify through a
 one-use, server-minted in-process handle; inbound clients cannot assert that
 handle or a principal header. Blocking tmux `/keys` and `/input` routes consult
 the live interaction snapshot even when the caller omitted a fingerprint.
-Only an authenticated UI operator or a service principal with a configured
-pre-approved automation policy may answer. Audits record actor, policy, tool,
+Only an authenticated UI operator, a service principal with a configured
+pre-approved automation policy, or the Telegram bridge relaying an update from
+its configured operator chat (built-in `telegram-operator` policy, only
+mintable in-process and only on session `/input` and `/keys`) may answer. Audits record actor, policy, tool,
 scope, risk, decision, attempt, turn, and interaction.
 
 Low-cardinality counters cover authentication accept/reject reason, issued /

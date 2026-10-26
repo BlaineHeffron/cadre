@@ -916,8 +916,8 @@ nono's Landlock can work.
     (`enqueueAgentSessionCommand` for a remote id) now forwards `keys` and the expected fingerprint to
     `/keys`, and presents the operator bearer for an interaction answer, matching the local
     in-process path, which has no authority check. Telegram answers keep their local behavior: the
-    bridge's internal-bypass `service` principal needs a pre-approved automation policy for a
-    blocking prompt, here as locally.
+    bridge's internal-bypass `service` principal answers a blocking prompt from its configured
+    operator chat with the built-in `telegram-operator` policy, here as locally.
   - **No protocol bump.** An older worker ignores the cursor (its full-text answer has no
     `nextOffset`, so the relay sends nothing) and the flag; an older hub ignores the prompt fields.
   - **Tests** add stub `/transcript` and `/keys` routes to the test hub, because the agent-bus
