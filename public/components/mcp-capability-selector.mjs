@@ -61,6 +61,7 @@ const REASON_LABELS = {
   local_server_not_configured: 'Local server URL unset',
   entry_point_missing: 'Not built',
   health_check_failed: 'Local server unreachable',
+  dependencies_missing: 'Dependencies not installed',
 };
 
 function availabilityLabel(server) {
