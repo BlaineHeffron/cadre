@@ -2,7 +2,7 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const skippedDirectories = new Set(['.git', 'node_modules']);
+const skippedDirectories = new Set(['.git', 'node_modules', 'agent-worktrees']);
 const checkedExtensions = new Set(['.js', '.mjs']);
 
 function collectJavaScriptFiles(directory) {
