@@ -1,5 +1,6 @@
-import { access, chmod, mkdir, rm, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { access, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -300,17 +301,27 @@ function mcpLaunchError(message, code, cause) {
   return error;
 }
 
-async function researchServerReady(id, paths) {
-  if (id === 'zotero') return access(paths.zotero).then(() => true, () => false);
-  if (id === 'paper-search') return access(paths.paperSearch).then(() => true, () => false);
-  if (id === 'nodus') {
-    const checks = await Promise.all([
-      access(paths.nodus).then(() => true, () => false),
-      access(paths.nodusTokenFile).then(() => true, () => false),
-    ]);
-    return checks.every(Boolean);
+/** Nearest package.json's dependencies are installed where Node would look for them; no server is started. */
+async function nodeDependenciesResolve(entry) {
+  for (let dir = dirname(entry); ; dir = dirname(dir)) {
+    const pkg = await readFile(join(dir, 'package.json'), 'utf8').then(JSON.parse, () => null);
+    if (pkg) {
+      const lookup = createRequire(entry).resolve.paths;
+      const found = await Promise.all(Object.keys(pkg.dependencies || {}).map((dep) => Promise.any(
+        (lookup(dep) || []).map((base) => access(join(base, dep, 'package.json'))),
+      ).then(() => true, () => false)));
+      return found.every(Boolean);
+    }
+    if (dirname(dir) === dir) return true;
   }
-  return false;
+}
+
+async function researchServerFailure(id, paths) {
+  const files = { zotero: [paths.zotero], 'paper-search': [paths.paperSearch], nodus: [paths.nodus, paths.nodusTokenFile] }[id] || [];
+  const checks = await Promise.all(files.map((path) => access(path).then(() => true, () => false)));
+  if (!files.length || !checks.every(Boolean)) return 'health_check_failed';
+  if (id !== 'paper-search' && !await nodeDependenciesResolve(files[0])) return 'dependencies_missing';
+  return '';
 }
 
 async function writeClaudeConfig(sessionId, mcpServers, configPath = mcpClientConfigPath('claude', sessionId)) {
@@ -516,8 +527,9 @@ export async function prepareMcpCapabilityLaunch({
           preflight[id] = { state: 'degraded', reasonCode: 'dependency_unavailable' };
           continue;
         }
-        if (!await researchServerReady(id, paths)) {
-          preflight[id] = { state: 'degraded', reasonCode: 'health_check_failed' };
+        const failure = await researchServerFailure(id, paths);
+        if (failure) {
+          preflight[id] = { state: 'degraded', reasonCode: failure };
           continue;
         }
         const serverEnv = id === 'paper-search'
