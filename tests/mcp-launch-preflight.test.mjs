@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -419,6 +419,25 @@ describe('MCP launch preflight', () => {
       nodus: { state: 'degraded', reasonCode: 'dependency_unavailable' },
     });
     assert.equal(result.prepared.codexArgs.some((arg) => arg.includes('mcp_servers.nodus.')), false);
+  });
+
+  it('reports a Node research server unavailable when its package dependencies are not installed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dueno-zotero-deps-'));
+    tempDirs.push(root);
+    const configured = sourceConfig();
+    configured.researchWorkbench.zoteroMcpPath = join(root, 'dist', 'index.js');
+    await mkdir(join(root, 'dist'));
+    await writeFile(configured.researchWorkbench.zoteroMcpPath, '');
+    await writeFile(join(root, 'package.json'), JSON.stringify({ dependencies: { '@scope/server': '1' } }));
+    const launch = () => prepareMcpCapabilityLaunch({
+      resolved: resolved(['zotero']), backendType: 'claude', sessionId: 'zotero-deps',
+      sourceConfig: configured, credentialStore: credentialStore(),
+    });
+
+    assert.deepEqual((await launch()).preflight, { zotero: { state: 'degraded', reasonCode: 'dependencies_missing' } });
+    await mkdir(join(root, 'node_modules', '@scope', 'server'), { recursive: true });
+    await writeFile(join(root, 'node_modules', '@scope', 'server', 'package.json'), '{}');
+    assert.deepEqual((await launch()).preflight, { zotero: { state: 'ready' } });
   });
 
   it('returns a denylist-safe persisted snapshot', () => {
