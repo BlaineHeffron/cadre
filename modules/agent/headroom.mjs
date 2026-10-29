@@ -49,7 +49,8 @@ export async function prepareHeadroomLaunch(provider, {
   // Smoke/test servers never connect their agents to the production proxy.
   if (shouldSuppressSideEffectLoops({ env })) return { env: {}, args: [] };
   const prefs = preferences || await getAgentProviderPreferences();
-  if (prefs.headroomEnabled === false) return { env: {}, args: [] };
+  // The local Antigravity proxy is not routed through Headroom.
+  if (prefs.headroomEnabled === false || provider === 'antigravity') return { env: {}, args: [] };
   const launch = headroomLaunchOverrides(provider, baseUrl);
   try {
     const response = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(2000) });

@@ -15,6 +15,7 @@ export const PI_PROVIDER_DEFINITIONS = Object.freeze({
   google: Object.freeze({ id: 'google', label: 'Google', defaultModel: 'gemini-3.5-flash' }),
   'opencode-go': Object.freeze({ id: 'opencode-go', label: 'OpenCode Go', defaultModel: 'glm-5.3' }),
   openrouter: Object.freeze({ id: 'openrouter', label: 'OpenRouter', defaultModel: 'z-ai/glm-5.3-flash' }),
+  antigravity: Object.freeze({ id: 'antigravity', label: 'Antigravity', defaultModel: 'gemini-4-argon-high' }),
 });
 
 export const PI_FALLBACK_MODELS = Object.freeze({
@@ -48,6 +49,7 @@ export const PI_FALLBACK_MODELS = Object.freeze({
     { id: 'hy3', label: 'HY3' },
   ]),
   openrouter: Object.freeze([{ id: 'z-ai/glm-5.3-flash', label: 'Z.ai GLM 5.3 Flash' }]),
+  antigravity: Object.freeze([{ id: 'gemini-4-argon-high', label: 'Gemini 4 Argon High' }]),
 });
 
 export async function listPiModels(options = {}) {
@@ -86,7 +88,7 @@ export async function assertPiProviderModel(provider, model = '', options = {}) 
   if (!normalizedProvider) {
     throw piCatalogError(
       'pi_provider_unsupported',
-      `Unsupported Pi provider "${normalizeText(provider)}". Allowed providers: xai, google, opencode-go, openrouter`,
+      `Unsupported Pi provider "${normalizeText(provider)}". Allowed providers: xai, google, opencode-go, openrouter, antigravity`,
       400,
     );
   }

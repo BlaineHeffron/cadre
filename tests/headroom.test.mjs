@@ -54,6 +54,7 @@ test('launch preflight verifies the local service; off and smoke modes bypass it
   const count = requests;
   assert.deepEqual(await prepareHeadroomLaunch('claude', { ...options, preferences: { headroomEnabled: false } }), { env: {}, args: [] });
   assert.deepEqual(await prepareHeadroomLaunch('claude', { ...options, env: { DUENO_DISABLE_SIDE_EFFECTS: '1' } }), { env: {}, args: [] });
+  assert.deepEqual(await prepareHeadroomLaunch('antigravity', options), { env: {}, args: [] });
   assert.equal(requests, count);
   assert.throws(() => headroomLaunchOverrides('claude', 'https://example.com'), /loopback/);
 });

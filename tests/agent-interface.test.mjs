@@ -309,7 +309,7 @@ describe('agent interface', () => {
         model: 'gpt-5.5',
         prompt: 'Alias check',
       }),
-      /provider must be claude, codex, codex-app-server, deepseek, xai, google, opencode-go, or openrouter/,
+      /provider must be claude, codex, codex-app-server, deepseek, xai, google, opencode-go, openrouter, or antigravity/,
     );
   });
 

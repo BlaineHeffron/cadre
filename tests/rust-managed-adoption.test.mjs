@@ -50,6 +50,10 @@ describe('Rust-managed tmux adoption', () => {
       classifyExecutableArgs('pi --provider openrouter --model z-ai/glm-5.3-flash'),
       { cli: 'pi', provider: 'openrouter', runtime: 'pi' }
     );
+    assert.deepEqual(
+      classifyExecutableArgs('pi --provider antigravity --model gemini-4-argon-high'),
+      { cli: 'pi', provider: 'antigravity', runtime: 'pi' }
+    );
   });
 
   it('classifies many tmux process trees from one process snapshot', async () => {
