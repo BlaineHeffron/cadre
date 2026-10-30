@@ -22,7 +22,7 @@ function piProviderFromArgs(tokens = []) {
     const inline = token.match(/^--provider=(.+)$/);
     const value = inline?.[1] || (token === '--provider' ? stripQuotes(tokens[index + 1]) : '');
     const provider = String(value || '').trim().toLowerCase();
-    if (['xai', 'google', 'opencode-go', 'openrouter'].includes(provider)) return provider;
+    if (['xai', 'google', 'opencode-go', 'openrouter', 'antigravity'].includes(provider)) return provider;
   }
   return '';
 }

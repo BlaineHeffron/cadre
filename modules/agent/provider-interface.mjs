@@ -149,6 +149,15 @@ const PROVIDER_DEFINITIONS = Object.freeze({
     defaultModel: PI_PROVIDER_DEFINITIONS.openrouter.defaultModel,
     get transportCapabilities() { return tmuxTransportCapabilities(); },
   }),
+  antigravity: Object.freeze({
+    id: 'antigravity',
+    label: PI_PROVIDER_DEFINITIONS.antigravity.label,
+    backendType: 'pi',
+    runtime: 'pi',
+    backendProvider: 'antigravity',
+    defaultModel: PI_PROVIDER_DEFINITIONS.antigravity.defaultModel,
+    get transportCapabilities() { return tmuxTransportCapabilities(); },
+  }),
 });
 
 export function normalizeAgentProvider(value = '') {
@@ -173,6 +182,8 @@ export function inferAgentProviderFromModel(model = '') {
     || normalized.includes('codex')
   ) return 'codex';
   if (normalized.startsWith('grok')) return 'xai';
+  // Gemini 4 is served only through the local Antigravity proxy.
+  if (normalized.startsWith('gemini-4')) return 'antigravity';
   if (normalized.startsWith('gemini')) return 'google';
   // DSH owns model selection in its profile configuration. DeepSeek model IDs
   // exposed by Pi remain OpenCode Go models rather than implying this harness.
@@ -229,7 +240,7 @@ export function resolveAgentProviderSelection({
 
   const definition = getAgentProviderDefinition(resolvedProvider);
   if (!definition) {
-    const error = new Error('provider must be claude, codex, codex-app-server, deepseek, xai, google, opencode-go, or openrouter');
+    const error = new Error('provider must be claude, codex, codex-app-server, deepseek, xai, google, opencode-go, openrouter, or antigravity');
     error.statusCode = 400;
     throw error;
   }

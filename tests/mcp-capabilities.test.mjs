@@ -181,6 +181,10 @@ describe('MCP capability resolver', () => {
       resolve({}, { provider: 'xai', runtime: 'pi' }).serverIds,
       []
     );
+    assert.deepEqual(
+      resolve({}, { provider: 'antigravity', runtime: 'pi', require: ['dueno'] }).serverIds,
+      ['dueno']
+    );
     assert.throws(
       () => resolve({ mcpProfile: 'dueno' }, { provider: 'ollama', runtime: 'pi' }),
       (error) => error.code === 'mcp_provider_unsupported' && error.details.provider === 'ollama'

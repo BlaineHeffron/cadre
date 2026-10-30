@@ -376,7 +376,7 @@ const PROVIDER_CONFIGS = {
       const requestedProvider = String(provider || '').trim().toLowerCase();
       const normalizedProvider = normalizePiProvider(requestedProvider === 'pi' ? 'xai' : requestedProvider);
       if (!normalizedProvider || (normalizedRuntime && normalizedRuntime !== 'pi')) {
-        const error = new Error('Pi provider must be xai, google, opencode-go, or openrouter and runtime must be pi');
+        const error = new Error('Pi provider must be xai, google, opencode-go, openrouter, or antigravity and runtime must be pi');
         error.statusCode = 400;
         error.code = 'pi_provider_unsupported';
         throw error;

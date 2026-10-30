@@ -794,7 +794,7 @@ describe('multi-machine slice 5', () => {
 });
 
 describe('multi-machine slice 6', () => {
-  const REMOTE_PROVIDERS = ['codex', 'claude', 'xai', 'google', 'opencode-go', 'openrouter'];
+  const REMOTE_PROVIDERS = ['codex', 'claude', 'xai', 'google', 'opencode-go', 'openrouter', 'antigravity'];
   const machines = async (app = hub.app, headers = hub.authHeaders) => { const res = await app.inject({ url: '/api/machines', headers }); responses.push(res.body); return res.json(); };
   const w8 = async () => (await machines()).machines.find((machine) => machine.id === 'w8');
 
