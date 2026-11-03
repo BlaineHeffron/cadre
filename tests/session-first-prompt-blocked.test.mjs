@@ -10,7 +10,7 @@ import { buildHookSessionPaths } from '../modules/agent/hook-events.mjs';
 
 const execFileAsync = promisify(execFile);
 
-test('a spawned Claude session blocked on a prompt before its first turn reports it to its spawner', async (t) => {
+test('a spawned Claude session blocked on a prompt before its first turn reports it to its spawner, and Codex does not', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'cadre-first-prompt-'));
   const socket = `cadre_first_prompt_${process.pid}_${Date.now()}`;
   const binDir = join(dir, 'bin');
@@ -35,6 +35,13 @@ test('a spawned Claude session blocked on a prompt before its first turn reports
     await execFileAsync('/usr/bin/tmux', ['-L', socket, 'new-session', '-d', '-x', '120', '-y', '40',
       '-s', `claude-${session.id}`, `cat '${pane}'; exec cat`]);
   }
+  // Codex logs no UserPromptSubmit, so a long-running child's first selection must not read as an unstarted prompt.
+  const codexPane = resolve('tests/fixtures/session-state/panes/codex-selection-model-switch.pane');
+  await mkdir(join(dir, 'codex-child'));
+  await execFileAsync('/usr/bin/tmux', ['-L', socket, 'new-session', '-d', '-x', '120', '-y', '40',
+    '-s', 'codex-codex-child', `cat '${codexPane}'; exec cat`]);
+  await writeFile(join(stateDir, 'codex_sessions.json'), JSON.stringify([{ id: 'codex-child', tmuxSession: 'codex-codex-child',
+    source: 'dashboard', workDir: join(dir, 'codex-child'), created: Date.now(), metadata: { spawnedBy: spawner } }]));
   const { eventsPath } = await buildHookSessionPaths({ workDir: join(dir, 'started'), provider: 'claude', sessionId: 'started' });
   await mkdir(dirname(eventsPath), { recursive: true });
   await writeFile(eventsPath, `${JSON.stringify({ eventName: 'UserPromptSubmit', loggedAt: new Date().toISOString() })}\n`);
@@ -54,9 +61,11 @@ test('a spawned Claude session blocked on a prompt before its first turn reports
     app.decorate('agentBusLifecycle', {
       directMessage: async (message) => { console.log('DM ' + JSON.stringify(message)); return { statusCode: 200 }; },
     });
-    await app.register(createAgentSessionsProvider('claude').plugin, {
-      wsManager: { channels: new Map(), broadcast() {}, onChannel() {} },
-    });
+    for (const provider of ['claude', 'codex']) {
+      await app.register(createAgentSessionsProvider(provider).plugin, {
+        wsManager: { channels: new Map(), broadcast() {}, onChannel() {} },
+      });
+    }
     await app.ready();
     await new Promise((resolve) => setTimeout(resolve, 3000));
     await app.close();
@@ -90,5 +99,5 @@ test('a spawned Claude session blocked on a prompt before its first turn reports
   assert.deepEqual(dms[0].from, { kind: 'claude', sessionId: 'blocked' });
   assert.deepEqual(dms[0].target, spawner);
   assert.equal(dms[0].type, 'result');
-  assert.match(dms[0].body, /first message to blocked was not delivered.*Allow external CLAUDE\.md file imports\?/);
+  assert.match(dms[0].body, /blocked has not started your first message yet.*Allow external CLAUDE\.md file imports\?/);
 });

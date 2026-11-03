@@ -2327,12 +2327,13 @@ async function sessionsPlugin(app, {
   // A spawned child blocked on a prompt before its first turn never starts; tell the spawner instead of staying silent.
   async function reportBlockedFirstPrompt(id, interaction) {
     const meta = sessions.get(id);
-    if (!meta?.metadata?.spawnedBy || !['permission', 'confirmation', 'selection', 'unknown_blocking'].includes(interaction?.kind)) return;
+    // Only Claude logs UserPromptSubmit; Codex reports its own first-prompt failure from createSession.
+    if (config.id !== 'claude' || !meta?.metadata?.spawnedBy || !['permission', 'confirmation', 'selection', 'unknown_blocking'].includes(interaction?.kind)) return;
     const { events } = await readHookEventsSince({ workDir: meta.workDir, provider: config.id, sessionId: id });
     if (events.some((event) => event.eventName === 'UserPromptSubmit')) return;
     await app.agentBusLifecycle?.directMessage?.({ from: { kind: config.id, sessionId: id }, target: meta.metadata.spawnedBy,
       type: 'result', idempotencyKey: `first-prompt-blocked:${config.id}:${id}`,
-      body: `Cadre: your first message to ${id} was not delivered; it is blocked on "${interaction.detail}". Answer it in the dashboard or Telegram.` });
+      body: `Cadre: ${id} has not started your first message yet; it is blocked on "${interaction.detail}". Answer it in the dashboard or Telegram.` });
   }
 
   async function persistScheduledSends() {
