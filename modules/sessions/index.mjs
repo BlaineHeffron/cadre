@@ -13,7 +13,7 @@ import { notifyPush } from '../platform/push.mjs';
 import { saveImageToWorkspace, buildAgentImagePrompt, buildImageAttachmentResult } from './image-handoff.mjs';
 import { AttachmentStore } from '../agent/attachment-store.mjs';
 import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
-import { recordRuntimeHookEvent, registerHookSessionRegistry, removeSessionHookFiles } from '../agent/hook-events.mjs';
+import { readHookEventsSince, recordRuntimeHookEvent, registerHookSessionRegistry, removeSessionHookFiles } from '../agent/hook-events.mjs';
 import { readHookDerivedState, readHookSessionMetadata } from '../session-state/providers/hook.mjs';
 import { canonicalSessionStateId, projectCompatibility } from '../session-state/contract.mjs';
 import { isFinishedWorkEdge, nextRememberedStatus } from '../session-state/attention-edge.mjs';
@@ -2324,6 +2324,17 @@ async function sessionsPlugin(app, {
   }
   _ensureDialogPolicy = ensureDialogPolicy;
 
+  // A spawned child blocked on a prompt before its first turn never starts; tell the spawner instead of staying silent.
+  async function reportBlockedFirstPrompt(id, interaction) {
+    const meta = sessions.get(id);
+    if (!meta?.metadata?.spawnedBy || !['permission', 'confirmation', 'selection', 'unknown_blocking'].includes(interaction?.kind)) return;
+    const { events } = await readHookEventsSince({ workDir: meta.workDir, provider: config.id, sessionId: id });
+    if (events.some((event) => event.eventName === 'UserPromptSubmit')) return;
+    await app.agentBusLifecycle?.directMessage?.({ from: { kind: config.id, sessionId: id }, target: meta.metadata.spawnedBy,
+      type: 'result', idempotencyKey: `first-prompt-blocked:${config.id}:${id}`,
+      body: `Cadre: your first message to ${id} was not delivered; it is blocked on "${interaction.detail}". Answer it in the dashboard or Telegram.` });
+  }
+
   async function persistScheduledSends() {
     const data = [];
     for (const [sendId, entry] of scheduledSends) {
@@ -3464,6 +3475,8 @@ async function sessionsPlugin(app, {
           const previousAttentionKey = lastBroadcastAttentionKey.get(s.id) || null;
 
           if (attention?.active && previousAttentionKey !== attention.key) {
+            void reportBlockedFirstPrompt(s.id, canonicalState.interaction)
+              .catch((error) => app.log.warn({ id: s.id, err: error.message }, 'Blocked first prompt report failed'));
             const lastAlert = lastAlertTime.get(s.id) || 0;
             if (now - lastAlert > 30000) {
               const alert = {

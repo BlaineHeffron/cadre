@@ -210,4 +210,57 @@ describe('MCP seed', () => {
       assert.equal(projects[aliased].hasTrustDialogAccepted, true);
     });
   });
+
+  it('approves external CLAUDE.md imports under $HOME/projects, keyed by the main checkout of a worktree', async () => {
+    const previousRoots = process.env.CADRE_CLAUDE_IMPORTS_ALLOWED_ROOTS;
+    delete process.env.CADRE_CLAUDE_IMPORTS_ALLOWED_ROOTS;
+    try {
+      await withTempHome(async (home) => {
+        const repo = join(home, 'projects', 'app');
+        const worktree = join(home, 'projects', 'app-wt');
+        const git = (...args) => execFileAsync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args]);
+        await mkdir(repo, { recursive: true });
+        await git('init', '-q', repo);
+        await git('-C', repo, 'commit', '-q', '--allow-empty', '-m', 'init');
+        await git('-C', repo, 'worktree', 'add', '-q', worktree);
+        const workDir = join(worktree, 'deploy');
+        await mkdir(workDir);
+        const outside = await tempWorkDir();
+
+        await seedClaudeWorkspaceTrust(workDir);
+        await seedClaudeWorkspaceTrust(outside);
+
+        const projects = JSON.parse(await readFile(join(home, '.claude.json'), 'utf8')).projects;
+        const approved = { hasClaudeMdExternalIncludesApproved: true, hasClaudeMdExternalIncludesWarningShown: true };
+        assert.deepEqual(projects[workDir], { hasTrustDialogAccepted: true, ...approved });
+        assert.deepEqual(projects[repo], approved);
+        assert.deepEqual(projects[outside], { hasTrustDialogAccepted: true });
+      });
+    } finally {
+      if (previousRoots === undefined) delete process.env.CADRE_CLAUDE_IMPORTS_ALLOWED_ROOTS;
+      else process.env.CADRE_CLAUDE_IMPORTS_ALLOWED_ROOTS = previousRoots;
+    }
+  });
+
+  it('takes the import allow roots from CADRE_CLAUDE_IMPORTS_ALLOWED_ROOTS', async () => {
+    const previousRoots = process.env.CADRE_CLAUDE_IMPORTS_ALLOWED_ROOTS;
+    try {
+      await withTempHome(async (home) => {
+        const allowed = await tempWorkDir();
+        const inProjects = join(home, 'projects', 'app');
+        await mkdir(inProjects, { recursive: true });
+        process.env.CADRE_CLAUDE_IMPORTS_ALLOWED_ROOTS = `/nonexistent-root:${allowed}`;
+
+        await seedClaudeWorkspaceTrust(allowed);
+        await seedClaudeWorkspaceTrust(inProjects);
+
+        const projects = JSON.parse(await readFile(join(home, '.claude.json'), 'utf8')).projects;
+        assert.equal(projects[allowed].hasClaudeMdExternalIncludesApproved, true);
+        assert.deepEqual(projects[inProjects], { hasTrustDialogAccepted: true });
+      });
+    } finally {
+      if (previousRoots === undefined) delete process.env.CADRE_CLAUDE_IMPORTS_ALLOWED_ROOTS;
+      else process.env.CADRE_CLAUDE_IMPORTS_ALLOWED_ROOTS = previousRoots;
+    }
+  });
 });

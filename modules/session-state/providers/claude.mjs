@@ -10,12 +10,23 @@ export function detectClaudeTrust(content) {
   return { kind: 'trust', detail: 'Workspace trust confirmation required', options: [] };
 }
 
+// Claude hides this dialog's option numbers and lists "No" first, focused.
+export function detectClaudeExternalImports(content) {
+  const text = String(content || '').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
+  if (!/Allow external CLAUDE\.md file imports\?[\s\S]*Yes, allow external imports/.test(text)) return null;
+  return {
+    kind: 'selection',
+    detail: 'Allow external CLAUDE.md file imports?',
+    options: [{ key: '1', label: 'No, disable external imports' }, { key: '2', label: 'Yes, allow external imports' }],
+  };
+}
+
 export function observeClaudePane(content, options = {}) {
   return detectPaneObservations({
     provider: 'claude',
     content,
     ...options,
-    interactionOverride: detectClaudeTrust(content),
+    interactionOverride: detectClaudeTrust(content) || detectClaudeExternalImports(content),
   });
 }
 

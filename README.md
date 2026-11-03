@@ -93,6 +93,7 @@ Cadre at it:
 | `MCP_CAPABILITY_PROFILES_JSON` | Extra MCP capability profiles |
 | `CADRE_MCP_SERVER_OVERRIDES_JSON` | Per-server MCP catalog overrides |
 | `CADRE_DEFAULT_AGENT_WORKDIR` | Working directory for sessions started without one (default `~/projects/cadre`) |
+| `CADRE_CLAUDE_IMPORTS_ALLOWED_ROOTS` | Path-delimited roots where Claude sessions launched by Cadre pre-approve external CLAUDE.md imports (default `~/projects`) |
 
 ### Optional integrations
 

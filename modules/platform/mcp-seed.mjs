@@ -1,8 +1,11 @@
+import { execFile } from 'node:child_process';
 import { access, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { config } from '../../config.mjs';
+import { readEnv } from './cadre-env.mjs';
 
 export function buildAgentBusMcpUrl(sourceConfig = config) {
   const mcp = sourceConfig.agentBusMcpHttp || {};
@@ -99,11 +102,25 @@ async function withDirectoryLock(lockPath, fn) {
   }
 }
 
-function acceptTrust(projects, key) {
+function acceptProject(projects, key, fields) {
   const existing = projects[key] && typeof projects[key] === 'object' && !Array.isArray(projects[key])
     ? projects[key]
     : {};
-  return { ...existing, hasTrustDialogAccepted: true };
+  return { ...existing, ...fields };
+}
+
+// Claude keys the external CLAUDE.md import approval by the main checkout of the cwd's repository.
+async function claudeImportKeys(keys) {
+  const roots = (readEnv('CADRE_CLAUDE_IMPORTS_ALLOWED_ROOTS') ?? join(homedir(), 'projects')).split(delimiter).filter(Boolean);
+  const allowed = keys.some((key) => roots.some((root) => {
+    const rel = relative(resolve(root), key);
+    return !isAbsolute(rel) && !/^\.\.(?:[\\/]|$)/.test(rel);
+  }));
+  if (!allowed) return [];
+  const { stdout } = await promisify(execFile)('git', ['-C', keys[0], 'rev-parse', '--path-format=absolute', '--git-common-dir'])
+    .catch(() => ({ stdout: '' }));
+  const commonDir = stdout.trim();
+  return [...new Set([...keys, ...(basename(commonDir) === '.git' ? [dirname(commonDir)] : [])])];
 }
 
 export async function seedClaudeWorkspaceTrust(workDir, { logger = console, configPath = join(process.env.HOME || homedir(), '.claude.json') } = {}) {
@@ -111,6 +128,7 @@ export async function seedClaudeWorkspaceTrust(workDir, { logger = console, conf
   if (!trimmed) return;
   const resolvedWorkDir = await realpath(trimmed).catch(() => resolve(trimmed));
   const keys = [...new Set([resolvedWorkDir, trimmed].filter(Boolean))];
+  const importKeys = await claudeImportKeys(keys);
   const lockPath = `${configPath}.lock`;
 
   const writeTrust = async () => {
@@ -125,7 +143,13 @@ export async function seedClaudeWorkspaceTrust(workDir, { logger = console, conf
         ? config.projects
         : {};
       const nextProjects = { ...projects };
-      for (const key of keys) nextProjects[key] = acceptTrust(nextProjects, key);
+      for (const key of keys) nextProjects[key] = acceptProject(nextProjects, key, { hasTrustDialogAccepted: true });
+      for (const key of importKeys) {
+        nextProjects[key] = acceptProject(nextProjects, key, {
+          hasClaudeMdExternalIncludesApproved: true,
+          hasClaudeMdExternalIncludesWarningShown: true,
+        });
+      }
 
       await writeJsonFileAtomic(configPath, {
         ...config,
