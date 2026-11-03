@@ -149,7 +149,7 @@ function pendingPermission(s) {
   return p?.request_id && p.tool_name ? p : null;
 }
 
-async function describe(o, s) {
+async function describe(o, s, wantPr = () => true) {
   const { state, reason } = cloudSessionState(s);
   const summary = summaryOf(s);
   const branches = branchesOf(s);
@@ -163,7 +163,7 @@ async function describe(o, s) {
     needs_action: text(summary?.needs_action),
     permission: permission && { request_id: permission.request_id, name: permission.tool_name, tool: permission.display_tool_name || permission.tool_name, action: text(permission.action_description), input: permission.input ?? null },
     branches,
-    pr: repo && branches.length ? await findPr(o, repo, branches) : null,
+    pr: repo && branches.length && wantPr(branches) ? await findPr(o, repo, branches) : null,
     url: s.session_url || null,
     cost_usd: s.external_metadata?.usage?.cost_usd ?? null,
   };
@@ -186,10 +186,13 @@ async function listSessions(o) {
   return { rows, truncated: true };
 }
 
-/** List anthropic_cloud sessions with the account usage summary, or get one session. */
-export async function cloudStatus({ id } = {}, opts = {}) {
+/**
+ * List anthropic_cloud sessions with the account usage summary, or get one session.
+ * `wantPr(branches)` false skips that session's `gh` PR lookup.
+ */
+export async function cloudStatus({ id, wantPr } = {}, opts = {}) {
   const o = defaults(opts);
-  const get = async (sid) => describe(o, await getSession(o, sid));
+  const get = async (sid) => describe(o, await getSession(o, sid), wantPr);
   if (id) return get(id);
   const [list, usage] = await Promise.all([
     listSessions(o),
