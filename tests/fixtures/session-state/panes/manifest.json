@@ -766,6 +766,22 @@
       "currentExecution": "unknown",
       "currentInteraction": "none",
       "knownDefect": false
+    },
+    {
+      "id": "claude-2-1-317-external-imports",
+      "file": "claude-2-1-317-external-imports.pane",
+      "provider": "claude",
+      "source": "live-derived",
+      "capturedFrom": "claude-2.1.317 started in a subfolder of a repo whose CLAUDE.md imports @AGENTS.md",
+      "intendedState": "selection-menu",
+      "intendedLegacyState": "waiting_for_input",
+      "intendedExecution": "idle",
+      "intendedInteraction": "selection",
+      "notes": "Allow external CLAUDE.md file imports? dialog. Option numbers are hidden and No is listed first, so the focused row once read as a composer draft. Only the import path was anonymized.",
+      "currentLegacyState": "waiting_for_input",
+      "currentExecution": "idle",
+      "currentInteraction": "selection",
+      "knownDefect": false
     }
   ],
   "reconstructedOnlyStates": [
