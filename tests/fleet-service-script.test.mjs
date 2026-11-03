@@ -128,7 +128,7 @@ describe('Node runtime contract', () => {
       readFile(resolve('scripts/resolve-node-bin.sh'), 'utf8'),
     ]);
 
-    assert.equal(versionFile.trim(), '22.19.0');
+    assert.equal(versionFile.trim(), '22.23.4');
     assert.equal(packageJson.engines.node, '>=22.19.0');
     assert.equal(lockfile.packages[''].engines.node, '>=22.19.0');
     assert.match(checker, /REQUIRED_NODE_VERSION = '22\.19\.0'/);

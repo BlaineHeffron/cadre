@@ -6,9 +6,13 @@
 set -euo pipefail
 
 REQUIRED_NODE_VERSION="22.19.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PREFERRED_NODE_VERSION="$(head -n 1 "$SCRIPT_DIR/../.node-version" 2>/dev/null | tr -d '[:space:]' || true)"
+PREFERRED_NODE_VERSION="${PREFERRED_NODE_VERSION#v}"
+PREFERRED_NODE_VERSION="${PREFERRED_NODE_VERSION:-22.23.4}"
 NVM_ROOT="${NVM_DIR:-${HOME}/.nvm}"
 CANDIDATES=(
-  "$NVM_ROOT/versions/node/v$REQUIRED_NODE_VERSION/bin/node"
+  "$NVM_ROOT/versions/node/v$PREFERRED_NODE_VERSION/bin/node"
   "$(command -v node 2>/dev/null || true)"
 )
 
