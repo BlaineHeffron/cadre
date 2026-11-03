@@ -131,7 +131,9 @@ export async function cloudSessionsPlugin(app, {
   async function step() {
     for (const [id, seen] of Object.entries(state.sessions)) {
       try {
-        const view = await cloudStatus({ id }, cloudOpts);
+        // `gh` only while an active session has no PR yet, or when its branches change; watchPr follows a known PR.
+        const active = !['done', 'failed'].includes(seen.state) && !seen.prs.length;
+        const view = await cloudStatus({ id, wantPr: (branches) => active || branches.join(' ') !== seen.branches }, cloudOpts);
         const lines = cloudNotices(seen, view);
         if (!lines.length || await notify(id, seen.owner, `Cloud session ${id} (${view.title}) ${lines.join('\n')}\n${view.url || ''}`.trim())) {
           // A merged or closed PR is recorded unannounced, so it never surfaces later.
@@ -140,7 +142,7 @@ export async function cloudSessionsPlugin(app, {
             const repo = /github\.com\/([^/]+\/[^/]+)\/pull\//.exec(view.pr.url || '')?.[1];
             if (view.pr.state === 'OPEN') await watchPr({ repo, number: view.pr.number }, seen.owner).catch((err) => app.log.warn({ id, repo, err: err.message }, 'Cloud session PR watch not registered'));
           }
-          Object.assign(seen, { state: view.state, needs_action: view.needs_action });
+          Object.assign(seen, { state: view.state, needs_action: view.needs_action, branches: view.branches.join(' ') });
         }
         await permissionPass(id, seen, view);
         if (seen.threadId) await relay(id, seen);

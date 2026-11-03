@@ -413,3 +413,39 @@ test('the watcher announces each open PR once and never a merged or already-seen
   assert.equal(w.dms.length, 1);
   assert.deepEqual(w.watches.map((x) => x.watch.number), [9]);
 });
+
+test('a watcher pass runs no gh for finished sessions with known PRs, yet still reads every session', async (t) => {
+  const f = await fixture(t);
+  const ids = Array.from({ length: 20 }, (_, i) => `cse_${i}`);
+  const shapes = Object.fromEntries(ids.map((id) => [id, {}]));
+  shapes.cse_0 = { status_bucket: 'failed', external_metadata: { current_branches: { '': 'claude/none' } } };
+  for (const id of ids) f.routes[`GET /v1/code/sessions/${id}`] = () => [200, { response_shape: cloudSession(id, shapes[id]) }];
+  const w = await watcherApp(t, f, memoryStore(), { kind: 'claude', sessionId: 'claude-1' });
+  for (const id of ids) await w.app.inject({ method: 'POST', url: '/api/cloud/watch', payload: { id } });
+  const ghRuns = async () => (await readFile(f.ghLog, 'utf8').catch(() => '')).split('\n').filter(Boolean).length;
+  await w.step();
+  const before = await ghRuns();
+  const reads = f.requests.length;
+
+  await w.step();
+  await w.step();
+  assert.equal(await ghRuns(), before);
+  assert.equal(f.requests.length - reads, 2 * ids.length);
+
+  // A resumed session is still seen; while it works without a PR, gh runs each pass.
+  shapes.cse_0 = { worker_status: 'running', status_bucket: 'working', external_metadata: { current_branches: { '': 'claude/none' } } };
+  await w.step();
+  await w.step();
+  assert.equal(await ghRuns(), before + 1);
+  // A new question on a finished session is still noticed, without gh (the one run is the working cse_0).
+  shapes.cse_5 = { status_bucket: 'blocked', external_metadata: { current_branches: { '': 'claude/has-pr' }, post_turn_summary: { needs_action: 'Which DB?' } } };
+  await w.step();
+  assert.equal(await ghRuns(), before + 2);
+  assert.match(w.dms.at(-1).body, /cse_5 .*blocked: Which DB\?/);
+  // A new branch is looked up once, so a second PR is still announced (plus cse_0's two passes).
+  shapes.cse_6 = { external_metadata: { current_branches: { '': 'claude/new-pr' } } };
+  await w.step();
+  await w.step();
+  assert.equal(await ghRuns(), before + 5);
+  assert.match(w.dms.at(-1).body, /cse_6 .*PR opened #9/);
+});
