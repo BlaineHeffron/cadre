@@ -152,3 +152,26 @@ function applyGrCodes(state, codes) {
     j++;
   }
 }
+
+/**
+ * While the control bar shows an approval's choices, fold the same question and
+ * numbered menu out of the terminal so the prompt appears once. Lines after the
+ * menu are kept; without a matching question and menu the text is unchanged.
+ */
+export function foldAnsweredMenu(text, interaction) {
+  const question = interaction?.detail?.trim();
+  if (!question || !interaction.options?.length) return text;
+  const lines = text.split('\n');
+  const plain = lines.map((line) => line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ''));
+  const start = plain.findLastIndex((line) => line.trim() === question);
+  const choice = /^\s*(?:[❯›>]\s*)?\d+\.\s/;
+  let end = -1;
+  for (let i = start + 1; start >= 0 && i < plain.length; i++) {
+    // Indented lines after a choice are its wrapped text; a blank line after the menu, or unindented text, ends it.
+    if (choice.test(plain[i]) || (end >= 0 && /^\s+\S/.test(plain[i]))) end = i;
+    else if (plain[i].trim() ? !/^\s/.test(plain[i]) : end >= 0) break;
+  }
+  // Only the newest menu is live; if another follows (say its question wrapped and did not match), fold nothing.
+  if (end < 0 || plain.slice(end + 1).some((line) => choice.test(line))) return text;
+  return [...lines.slice(0, start), '\x1b[2m(choices shown below)\x1b[0m', ...lines.slice(end + 1)].join('\n');
+}

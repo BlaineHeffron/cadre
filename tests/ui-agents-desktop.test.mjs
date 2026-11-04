@@ -33,7 +33,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     { key: '2', label: "Yes, and don't ask again for npm run migrate commands in this project" },
     { key: '3', label: 'No, and tell Claude what to do differently (esc)' },
   ] } };
-  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: 'pane text', state: req.params.id === 'b2' ? blocked : { status: 'working' }, sessionName: `claude-${req.params.id}` }));
+  const menu = 'pane text\nDo you want to proceed?\n❯ 1. Yes\n  2. Yes, and don\'t ask again\n  3. No, and tell Claude what to do differently (esc)';
+  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: req.params.id === 'b2' ? menu : 'pane text', state: req.params.id === 'b2' ? blocked : { status: 'working' }, sessionName: `claude-${req.params.id}` }));
   app.post('/api/*', () => ({ ok: true }));
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
@@ -85,6 +86,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.ok(Math.max(...boxes.map((b) => b.top)) < Math.min(...boxes.map((b) => b.bottom)), 'answers share one row');
   assert.deepEqual(boxes.map((b) => b.clipped), [false, false, false], 'long answers wrap instead of truncating');
   assert.equal(await answers.nth(2).innerText(), 'No, and tell Claude what to do differently (esc)');
+  // The terminal no longer repeats the menu the bar is showing.
+  await page.locator('.terminal').getByText('(choices shown below)').waitFor();
+  assert.doesNotMatch(await page.locator('.terminal').innerText(), /Do you want to proceed|2\. Yes/);
   for (const name of ['Cycle mode', 'Interrupt']) assert.equal(await page.getByRole('button', { name, exact: true }).isVisible(), true, name);
   // Composer extras wait behind one menu.
   const delay = page.getByRole('combobox', { name: 'Send delay' });
