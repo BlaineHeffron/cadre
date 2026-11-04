@@ -535,6 +535,10 @@ export function AgentsPage() {
   const selectedKillableSessions = visibleKillableSessions.filter((session) =>
     selectedSessionKeys.value.includes(previewKey(session))
   );
+  // An emptied selection closes the bulk prompt, so it doesn't reappear with the next one.
+  useEffect(() => {
+    if (selectedKillableSessions.length === 0) showBulkPrompt.value = false;
+  }, [selectedKillableSessions.length]);
   const allVisibleKillableSelected = visibleKillableSessions.length > 0
     && selectedKillableSessions.length === visibleKillableSessions.length;
   const previewSessions = previewKeys.value
@@ -1090,7 +1094,9 @@ export function AgentsPage() {
         : loadError.value
           ? html`<${ErrorState} message=${`Agents failed to load: ${loadError.value}`} actionLabel="Retry" onAction=${() => loadAgentSessions(loading, loadError)} />`
         : visibleSessions.length === 0
-          ? html`<${EmptyState} message=${`No ${providerFilter.value === 'all' ? '' : providerLabel(providerFilter.value) + ' '}sessions match the current filters.`} />`
+          ? allSessions.length === 0
+            ? html`<${EmptyState} message="No agent sessions yet. Start one to see it here." actionLabel="New session" onAction=${() => openNewModal('codex')} />`
+            : html`<${EmptyState} message=${`No ${providerFilter.value === 'all' ? '' : providerLabel(providerFilter.value) + ' '}sessions match the current filters.`} />`
           : desktopLayout.value ? html`
             <div class="agents-desktop-shell">
               <aside class="agents-desktop-rail" aria-label="Agent sessions">
