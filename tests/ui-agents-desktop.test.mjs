@@ -190,5 +190,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.deepEqual(await single.locator('.terminal').evaluate(ring), ['1px', 'rgba(79, 195, 247, 0.6)', 'none', 'rgb(26, 26, 46)', blurredWidth]);
   const { x, width } = await single.boundingBox();
   assert.ok(width <= 1160 && Math.abs(x - (1440 - x - width)) <= 1, `session page at x=${x}, width=${width}`);
+  // The full-height page is one panel tone, so a short transcript leaves no bare page below the controls.
+  assert.equal(await single.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(26, 26, 46)');
   assert.deepEqual(errors, []);
 });
