@@ -59,7 +59,7 @@ const SOL_REASONING_LEVELS = Object.freeze([
   { id: 'ultra', label: 'Ultra', description: 'Maximum reasoning with automatic task delegation' },
 ]);
 const STATE_FILTERS = [
-  { id: 'needs-approval', label: 'Needs approval' },
+  { id: 'needs-approval', label: 'Needs attention' },
   { id: 'prompt-ready', label: 'Idle' },
   { id: 'done', label: 'Done' },
   { id: 'working', label: 'Working' },
@@ -705,7 +705,7 @@ export function AgentsPage() {
       ${desktopLayout.value ? html`
         <div class="agents-desktop-toolbar">
           <h1 class="page-title agents-desktop-toolbar-title">Agents</h1>
-          <button class="btn ${emptyStateShown ? '' : 'btn-primary'}" onclick=${() => openNewModal('codex')}>New session</button>
+          ${emptyStateShown ? null : html`<button class="btn btn-primary" onclick=${() => openNewModal('codex')}>New session</button>`}
           <input
             class="input agents-desktop-search"
             placeholder="Search agents"
@@ -790,7 +790,7 @@ export function AgentsPage() {
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px">
         <h1 class="page-title" style="margin-right:auto">Agents</h1>
         <button class="btn btn-icon" aria-label="Refresh" title="Refresh" onclick=${() => loadAgentSessions(loading, loadError)}>↻</button>
-        <button class="btn ${emptyStateShown ? '' : 'btn-primary'}" onclick=${() => openNewModal('codex')}>New session</button>
+        ${emptyStateShown ? null : html`<button class="btn btn-primary" onclick=${() => openNewModal('codex')}>New session</button>`}
       </div>
       <div style="display:flex; gap:8px; margin-bottom:10px">
         <input
