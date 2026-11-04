@@ -19,7 +19,7 @@ function esc(str) {
 
 /**
  * Convert ANSI-escaped text to HTML with CSS classes.
- * Supports: bold, dim, italic, underline, strikethrough, 8-color fg/bg, bright colors, reset.
+ * Supports: bold, dim, italic, underline, strikethrough, 8/16/256-color and truecolor fg/bg, reset.
  * @param {string} text - raw text with ANSI escape codes
  * @returns {string} HTML string
  */
@@ -34,11 +34,13 @@ export function ansiToHtml(text) {
   function flushBuf() {
     if (!buf) return;
     const classes = buildClasses(current);
-    if (classes) {
-      parts.push(`<span class="${classes}">${esc(buf)}</span>`);
-    } else {
-      parts.push(esc(buf));
-    }
+    // 256-colour and truecolor values have no class; they render inline.
+    const style = [['color', current.fg], ['background', current.bg]]
+      .filter(([, value]) => value?.startsWith('rgb('))
+      .map(([prop, value]) => `${prop}:${value}`)
+      .join(';');
+    const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;
+    parts.push(attrs ? `<span${attrs}>${esc(buf)}</span>` : esc(buf));
     buf = '';
   }
 
@@ -77,9 +79,20 @@ function buildClasses(state) {
   if (state.italic) cls.push('ansi-italic');
   if (state.underline) cls.push('ansi-underline');
   if (state.strike) cls.push('ansi-strike');
-  if (state.fg !== null) cls.push(`ansi-fg-${state.fg}`);
-  if (state.bg !== null) cls.push(`ansi-bg-${state.bg}`);
+  if (state.fg !== null && !state.fg.startsWith('rgb(')) cls.push(`ansi-fg-${state.fg}`);
+  if (state.bg !== null && !state.bg.startsWith('rgb(')) cls.push(`ansi-bg-${state.bg}`);
   return cls.join(' ');
+}
+
+// xterm 256-colour palette entries 16-255: a 6x6x6 cube, then a grey ramp.
+function xterm256(n) {
+  if (n >= 232) {
+    const v = 8 + (n - 232) * 10;
+    return `rgb(${v},${v},${v})`;
+  }
+  const level = (v) => (v ? 55 + v * 40 : 0);
+  const i = n - 16;
+  return `rgb(${level(Math.floor(i / 36))},${level(Math.floor(i / 6) % 6)},${level(i % 6)})`;
 }
 
 function applyGrCodes(state, codes) {
@@ -122,21 +135,16 @@ function applyGrCodes(state, codes) {
     } else if (c >= 100 && c <= 107) {
       state.bg = `bright-${COLOR_NAMES[c - 100]}`;
     } else if (c === 38 || c === 48) {
-      // 256-color or truecolor — skip params
-      const isFg = c === 38;
+      const key = c === 38 ? 'fg' : 'bg';
       if (codes[j + 1] === 5) {
         // 256-color: 38;5;n
         const n = codes[j + 2] || 0;
-        if (n < 8) {
-          if (isFg) state.fg = COLOR_NAMES[n]; else state.bg = COLOR_NAMES[n];
-        } else if (n < 16) {
-          const name = `bright-${COLOR_NAMES[n - 8]}`;
-          if (isFg) state.fg = name; else state.bg = name;
-        }
-        // 16-255: skip (no CSS class mapping)
+        state[key] = n < 8 ? COLOR_NAMES[n] : n < 16 ? `bright-${COLOR_NAMES[n - 8]}` : xterm256(Math.min(n, 255));
         j += 2;
       } else if (codes[j + 1] === 2) {
-        // Truecolor: 38;2;r;g;b — skip
+        // Truecolor: 38;2;r;g;b
+        const [r, g, b] = codes.slice(j + 2, j + 5).map((v) => Math.min(255, Math.max(0, v || 0)));
+        state[key] = `rgb(${r},${g},${b})`;
         j += 4;
       }
     }
