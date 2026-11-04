@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { captureFileDrop } from '../public/components/skill-prompt-composer.mjs';
-import { optionClass } from '../public/components/agent-control-bar.mjs';
+import { optionClass, answersIncludeRefusal } from '../public/components/agent-control-bar.mjs';
 
 describe('agent terminal controls', () => {
   it('styles only the first allow as primary and every refusal as danger', () => {
@@ -13,6 +13,12 @@ describe('agent terminal controls', () => {
       .map(([label, kind], index) => optionClass({ key: kind, label, kind }, index));
     assert.deepEqual(structured, ['ctrl-approve', 'ctrl-default', 'ctrl-reject']);
     assert.equal(optionClass('Nothing to deny', 0), 'ctrl-approve');
+  });
+
+  it('lets Interrupt step aside only when an answer already refuses', () => {
+    assert.equal(answersIncludeRefusal([{ label: 'Yes' }, { label: 'No, and tell Claude what to do differently (esc)' }]), true);
+    assert.equal(answersIncludeRefusal([{ label: 'Allow once', kind: 'allow_once' }, { label: 'Deny', kind: 'reject_once' }]), true);
+    assert.equal(answersIncludeRefusal([{ label: 'Option A' }, { label: 'Option B' }]), false);
   });
 
   it('renders mobile tmux keys on agent sessions, including Shift+Tab', async () => {
@@ -121,13 +127,11 @@ describe('agent terminal controls', () => {
   });
 
   it('keeps the gated escape and shift-tab actions on the bar', async () => {
-    const controlBar = await readFile('public/components/agent-control-bar.mjs', 'utf8');
     const agentDetail = await readFile('public/pages/agent-session-detail.mjs', 'utf8');
 
     // The terminal key row only sends raw keys; POST /escape is the route the
     // server may promote to an interrupt. tests/ui-agents-desktop.test.mjs
-    // clicks Interrupt and checks that request.
-    assert.match(controlBar, /descriptor\.hasShiftTab \? html`/);
+    // clicks Interrupt and checks that request, and that Cycle mode shows on a working session.
     assert.match(agentDetail, /sessions\/\$\{id\}\/escape/);
   });
 
