@@ -150,7 +150,8 @@ async function startServer(scratch) {
     PORT: String(port), AGENT_BUS_MCP_HTTP_PORT: String(mcpPort), DM_STATE_DIR: join(scratch, 'state'),
     AUTH_TOKEN: 'capture-auth', INTERNAL_BYPASS_TOKEN: 'capture-bypass', BROWSER_SESSION_SECRET: 'capture-session',
     TMUX_TMPDIR: join(scratch, 'tmux'), RESEARCH_WORKBENCH_FLEET_TOKEN_FILE: join(scratch, 'rw-token'),
-    CADRE_DISABLE_SIDE_EFFECTS: '1', CADRE_GITHUB_AGENT_POLLER_ENABLED: '0', CADRE_GITHUB_AGENTS_ENABLED: '0',
+    // dotenv never overrides set vars, so a checkout .env cannot re-allow side effects.
+    CADRE_ALLOW_SIDE_EFFECTS: '0', CADRE_DISABLE_SIDE_EFFECTS: '1', CADRE_GITHUB_AGENT_POLLER_ENABLED: '0', CADRE_GITHUB_AGENTS_ENABLED: '0',
     CADRE_SCHEDULED_AGENT_PUMP_ENABLED: '0', TELEGRAM_BRIDGE: '0',
   };
   const child = spawn(process.execPath, ['server.mjs'], { cwd: ROOT, env, stdio: ['ignore', 'ignore', 'pipe'] });
