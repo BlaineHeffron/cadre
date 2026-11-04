@@ -146,7 +146,10 @@ export function AgentControlBar({
         </div>
         <div class="control-row control-row-primary">
           ${interactionOptions.length > 0 ? interactionOptions.map((option, index) => html`
-            <button class="ctrl-btn ${optionClass(option, index)}" onclick=${() => handleDialogAnswer(option)}>
+            <button
+              class="ctrl-btn ${optionClass(option, index)}"
+              title=${typeof option === 'string' ? option : option.label || option.text || option.value || option.index}
+              onclick=${() => handleDialogAnswer(option)}>
               ${typeof option === 'string' ? option : option.label || option.text || option.value || option.index}
             </button>
           `) : policyControlled ? html`
@@ -177,12 +180,12 @@ export function AgentControlBar({
 
       <div class="control-row control-row-tools">
         ${descriptor.hasShiftTab ? html`
-          <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleApprove} title="Shift+Tab">
-            S-Tab
+          <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleApprove} title="Send Shift+Tab (cycle permission mode)">
+            Cycle mode
           </button>
         ` : null}
-        <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleReject} title="Escape / interrupt">
-          Esc
+        <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleReject} title="Send Escape (interrupt)">
+          Interrupt
         </button>
         <${LaunchSkillSelector} compact=${true} onInsert=${(id) => skillInsert.current?.(id)} />
         <button

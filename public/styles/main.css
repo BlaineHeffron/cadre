@@ -540,7 +540,7 @@ textarea.input:focus {
 
 /* Terminal */
 .terminal {
-  background: #000;
+  background: var(--bg-input);
   color: #e0e0e0;
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
@@ -575,8 +575,8 @@ textarea.input:focus {
 }
 
 .terminal-interactive:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: 2px solid rgba(79, 195, 247, 0.6);
+  outline-offset: -2px;
 }
 
 body:has(.tmux-pane-page) {
@@ -1953,13 +1953,35 @@ body:has(.tmux-pane-page) {
 }
 
 .control-row-primary {
+  flex-wrap: nowrap;
   justify-content: flex-start;
 }
 
+/* Answers share one row; long labels truncate (full text in the title). */
 .control-row-primary .ctrl-btn {
+  display: block;
   flex: 0 1 auto;
-  min-width: 120px;
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--fs-base);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-row-primary .ctrl-approve {
+  flex: 0 0 auto;
+  min-width: 120px;
+}
+
+/* The tools row is secondary to Send and the approval answers. */
+.control-row-tools .ctrl-btn,
+.control-row-tools .ctrl-inline-select {
+  min-height: 36px;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  font-weight: 500;
 }
 
 .approval-prompt-title {
@@ -3316,7 +3338,9 @@ body:has(.tmux-pane-page) {
     min-height: 34dvh;
   }
 
-  .ctrl-btn {
+  .ctrl-btn,
+  .control-row-tools .ctrl-btn,
+  .control-row-tools .ctrl-inline-select {
     min-height: 44px;
   }
 

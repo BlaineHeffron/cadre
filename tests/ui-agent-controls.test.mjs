@@ -125,8 +125,8 @@ describe('agent terminal controls', () => {
     const agentDetail = await readFile('public/pages/agent-session-detail.mjs', 'utf8');
 
     // The terminal key row only sends raw keys; POST /escape is the route the
-    // server may promote to an interrupt, so it must stay reachable here.
-    assert.match(controlBar, /title="Escape \/ interrupt"/);
+    // server may promote to an interrupt. tests/ui-agents-desktop.test.mjs
+    // clicks Interrupt and checks that request.
     assert.match(controlBar, /descriptor\.hasShiftTab \? html`/);
     assert.match(agentDetail, /sessions\/\$\{id\}\/escape/);
   });
