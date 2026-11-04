@@ -34,7 +34,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     isAuthenticated.value = true;
     render(h('main', { class: 'main' }, h(AgentSessionDetailPage, { id: 'a1', provider: 'claude' })), document.getElementById('app'));
   </script>`)));
-  app.get('/api/claude/sessions', () => ({ sessions }));
+  app.get('/api/claude/sessions', (_req, reply) => (sessions ? { sessions } : reply.code(500).send({ error: 'down' })));
   const blocked = { status: 'blocked', capabilities: { canAnswerInteraction: true }, interaction: { kind: 'permission', detail: 'Do you want to proceed?', fingerprint: 'q1', options: [
     { key: '1', label: 'Yes' },
     { key: '2', label: "Yes, and don't ask again for npm run migrate commands in this project" },
@@ -139,6 +139,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   ]);
 
   // With no sessions at all, the empty list offers the way to start one, and Create stays on screen.
+  // A failed load shows the error, and the header's New session stays the primary action.
+  sessions = null;
+  await page.reload();
+  await page.getByRole('button', { name: 'Retry' }).waitFor();
+  assert.equal(await page.locator('.agents-desktop-toolbar').getByRole('button', { name: 'New session' }).evaluate((el) => el.classList.contains('btn-primary')), true);
+
   sessions = [];
   await page.reload();
   // The empty state's New session leads; the toolbar's steps back to secondary.

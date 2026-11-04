@@ -1169,7 +1169,6 @@ body:has(.tmux-pane-page) {
 .badge-success { background: var(--success); color: #000; }
 .badge-info { background: var(--accent); color: #000; }
 
-/* Unseen marker: quieter than the status badge it sits beside. */
 /* Unread marker: a dot, so the status badge is the only label on the card. */
 .unread-dot {
   display: inline-block;
