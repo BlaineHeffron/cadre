@@ -40,8 +40,15 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     { key: '2', label: "Yes, and don't ask again for npm run migrate commands in this project" },
     { key: '3', label: 'No, and tell Claude what to do differently (esc)' },
   ] } };
+  // The CLI's divider rule spans the pane, whatever its column count, without horizontal overflow.
+  const ruleFits = (pg) => pg.locator('.terminal').evaluate((el) => {
+    const rule = el.querySelector('.ansi-rule');
+    const cs = getComputedStyle(el);
+    const content = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    return { rule: Math.round(rule.getBoundingClientRect().width), content: Math.round(content), overflow: el.scrollWidth - el.clientWidth };
+  });
   const menu = 'pane text\nDo you want to proceed?\n❯ 1. Yes\n  2. Yes, and don\'t ask again\n  3. No, and tell Claude what to do differently (esc)';
-  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: req.params.id === 'b2' ? menu : 'pane text', state: req.params.id === 'b2' ? blocked : { status: 'working' }, sessionName: `claude-${req.params.id}` }));
+  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: req.params.id === 'b2' ? menu : `pane text\n\x1b[38;5;244m${'─'.repeat(110)}\x1b[0m\n❯ `, state: req.params.id === 'b2' ? blocked : { status: 'working' }, sessionName: `claude-${req.params.id}` }));
   app.post('/api/*', () => ({ ok: true }));
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
@@ -174,6 +181,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   await phone.goto(`${origin}/session`);
   await phone.locator('.terminal-keys').waitFor();
+  const phoneRule = await ruleFits(phone);
+  assert.ok(phoneRule.rule === phoneRule.content && phoneRule.overflow === 0, `phone rule ${JSON.stringify(phoneRule)}`);
   const [phoneKeys, phoneBar] = await Promise.all(['.terminal-keys', '.claude-control-bar'].map((sel) => phone.locator(sel).boundingBox()));
   assert.ok((await phone.locator('.terminal-keys > summary').boundingBox()).height >= 36, 'phone Terminal keys toggle is a full control-height target');
   assert.ok(phoneKeys.y + phoneKeys.height <= phoneBar.y + 1, `phone keys end at ${phoneKeys.y + phoneKeys.height}, bar starts at ${phoneBar.y}`);
@@ -182,12 +191,16 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   await page.goto(`${origin}/session`);
   const single = page.locator('.claude-session-page');
   await single.locator('.terminal').waitFor();
+  const deskRule = await ruleFits(page);
+  assert.ok(deskRule.rule === deskRule.content && deskRule.overflow === 0, `desktop rule ${JSON.stringify(deskRule)}`);
   // The focused transcript keeps a thin visible ring (at least 3:1 against its panel tone). It is a
   // border, which the scroll fade cannot paint over, and it does not shift the layout on focus.
   const ring = (el) => { const cs = getComputedStyle(el); return [cs.borderTopWidth, cs.borderTopColor, cs.outlineStyle, cs.backgroundColor, el.getBoundingClientRect().width]; };
   const [, , , , blurredWidth] = await single.locator('.terminal').evaluate(ring);
   await single.locator('.terminal').focus();
   assert.deepEqual(await single.locator('.terminal').evaluate(ring), ['1px', 'rgba(79, 195, 247, 0.6)', 'none', 'rgb(26, 26, 46)', blurredWidth]);
+  // The ring is the transcript's only frame: the header and control bar drop their lines beside it.
+  assert.deepEqual(await single.evaluate((el) => [getComputedStyle(el.querySelector('.claude-session-header')).borderBottomColor, getComputedStyle(el.querySelector('.claude-control-bar')).borderTopColor]), ['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)']);
   const { x, width } = await single.boundingBox();
   assert.ok(width <= 1160 && Math.abs(x - (1440 - x - width)) <= 1, `session page at x=${x}, width=${width}`);
   // The full-height page is one panel tone, so a short transcript leaves no bare page below the controls.

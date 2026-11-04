@@ -640,6 +640,16 @@ textarea.input:focus {
   border-color: rgba(79, 195, 247, 0.6);
 }
 
+/* The focused ring is the transcript's only frame: the header and control bar drop their own
+   lines beside it instead of doubling them. */
+.claude-session-page:has(.terminal-interactive:focus) .claude-session-header {
+  border-bottom-color: transparent;
+}
+
+.claude-session-page:has(.terminal-interactive:focus) .claude-control-bar {
+  border-top-color: transparent;
+}
+
 body:has(.tmux-pane-page) {
   overflow: hidden;
 }
@@ -1141,6 +1151,13 @@ body:has(.tmux-pane-page) {
 /* ANSI Color Classes */
 .ansi-bold { font-weight: 700; }
 .ansi-dim { opacity: 0.85; }
+.ansi-rule {
+  display: inline-block;
+  width: 100%;
+  vertical-align: middle;
+  border-top: 1px solid currentColor;
+  font-size: 0;
+}
 .ansi-italic { font-style: italic; }
 .ansi-underline { text-decoration: underline; }
 .ansi-strike { text-decoration: line-through; }
