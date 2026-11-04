@@ -55,8 +55,8 @@ test('settings uses labelled switches that reflect and change their state', { sk
   assert.ok((await page.locator('.settings-shell').boundingBox()).width <= 960, 'settings rows keep a readable width');
   // Switch hints are read, so they use the 13px step in secondary grey.
   const hint = await page.locator('.setting-switch-hint').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
-  assert.deepEqual(hint, ['13px', 'rgb(180, 180, 198)']);
+  assert.deepEqual(hint, ['13px', 'rgb(196, 196, 212)']);
   // Card notes read at the same 13px secondary as the switch hints.
-  assert.deepEqual(await page.locator('.note').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]), ['13px', 'rgb(180, 180, 198)']);
+  assert.deepEqual(await page.locator('.note').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]), ['13px', 'rgb(196, 196, 212)']);
   assert.deepEqual(errors, []);
 });

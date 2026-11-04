@@ -35,10 +35,11 @@ export function ansiToHtml(text) {
     if (!buf) return;
     const classes = buildClasses(current);
     // 256-colour and truecolor values have no class; they render inline.
-    // Backgrounds are blended toward the terminal so diff rows tint rather than glare.
+    // Backgrounds are blended toward the terminal so diff rows tint rather than glare; mid-grey
+    // text (the CLI's dim hints and rules) is lifted toward the body text so it stays readable.
     const style = [['color', current.fg], ['background', current.bg]]
       .filter(([, value]) => value?.startsWith('rgb('))
-      .map(([prop, value]) => `${prop}:${prop === 'color' ? value : `color-mix(in srgb,${value} 60%,transparent)`}`)
+      .map(([prop, value]) => `${prop}:${prop === 'color' ? liftGrey(value) : `color-mix(in srgb,${value} 60%,transparent)`}`)
       .join(';');
     const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;
     parts.push(attrs ? `<span${attrs}>${esc(buf)}</span>` : esc(buf));
@@ -83,6 +84,14 @@ function buildClasses(state) {
   if (state.fg !== null && !state.fg.startsWith('rgb(')) cls.push(`ansi-fg-${state.fg}`);
   if (state.bg !== null && !state.bg.startsWith('rgb(')) cls.push(`ansi-bg-${state.bg}`);
   return cls.join(' ');
+}
+
+function liftGrey(color) {
+  return color.replace(/^rgb\((\d+),\1,\1\)$/, (match, v) => {
+    if (v < 96 || v >= 224) return match;
+    const g = Math.round(+v + (224 - v) / 4);
+    return `rgb(${g},${g},${g})`;
+  });
 }
 
 // xterm 256-colour palette entries 16-255: a 6x6x6 cube, then a grey ramp.
