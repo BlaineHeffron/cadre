@@ -233,9 +233,14 @@ try {
     await page.getByRole('button', { name: 'New', exact: true }).first().click();
     await catalog;
     await page.waitForLoadState('networkidle');
-    // Advanced opens on an MCP warning that can land before or after the form reset.
-    // Nothing closes it later, so pinning it open is stable.
-    await page.locator('form details').first().evaluate((details) => { details.open = true; });
+    // Shoot the form's default state; wait out a brief late repaint so runs match.
+    let last;
+    for (let i = 0; i < 20; i += 1) {
+      const next = await page.screenshot({ animations: 'disabled', caret: 'hide' });
+      if (last?.equals(next)) break;
+      last = next;
+      await page.waitForTimeout(250);
+    }
   });
   await shoot(desktop, origin, '/settings', out('06-settings.png'));
   await shoot(await newPage(browser, origin, [], DESKTOP), origin, '/agents', out('07-empty.png'));
