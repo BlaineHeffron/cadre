@@ -12,7 +12,7 @@ const sessions = [
   { id: 'b2', displayName: 'second task', workDir: '/home/me/repo', tmuxSession: 'claude-b2', state: { status: 'ready' } },
 ];
 
-test('phone Agents page leads with sessions and keeps bulk actions folded until used', { skip: !process.env.CHROMIUM_BIN, timeout: 30000 }, async (t) => {
+test('phone Agents page leads with sessions, keeps bulk actions folded until used, and opens a basics-first new-session form', { skip: !process.env.CHROMIUM_BIN, timeout: 30000 }, async (t) => {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const app = Fastify();
   t.after(() => app.close());
@@ -27,6 +27,8 @@ test('phone Agents page leads with sessions and keeps bulk actions folded until 
     render(h(AgentsPage, {}), document.getElementById('app'));
   </script>`)));
   app.get('/api/claude/sessions', () => ({ sessions }));
+  const any = ['claude', 'codex', 'pi'];
+  app.get('/api/agents/mcp-servers', () => ({ profiles: [{ id: 'default', serverIds: ['dueno'] }], servers: [{ id: 'dueno', providers: any, runtimes: any, availability: { state: 'configured' } }] }));
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
@@ -73,5 +75,19 @@ test('phone Agents page leads with sessions and keeps bulk actions folded until 
   await select.check();
   await select.uncheck();
   assert.equal(await isOpen(), true);
+
+  // The new-session form leads with the basics; name and coordinator wait under Advanced.
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  const fields = page.locator('.new-agent-setup-grid .new-agent-field');
+  assert.deepEqual(await fields.locator('> span').allInnerTexts(), ['Provider', 'Model', 'Thinking level']);
+  const [provider, model] = await Promise.all([0, 1].map((i) => fields.nth(i).boundingBox()));
+  assert.equal(provider.y, model.y, 'provider and model share a row');
+  assert.ok(provider.x + provider.width <= model.x);
+  assert.equal(await page.getByRole('checkbox', { name: /Isolated git worktree/ }).isVisible(), true);
+  assert.equal(await page.getByPlaceholder('Optional label').isVisible(), false);
+  assert.equal(await page.getByRole('checkbox', { name: /Coordinator/ }).isVisible(), false);
+  await page.locator('.new-agent-advanced > summary').click();
+  assert.equal(await page.getByPlaceholder('Optional label').isVisible(), true);
+  assert.equal(await page.getByRole('checkbox', { name: /Coordinator/ }).isVisible(), true);
   assert.deepEqual(errors, []);
 });

@@ -3711,7 +3711,8 @@ body:has(.tmux-pane-page) {
 /* New agent session form (prompt-first layout) */
 .new-agent-form {
   max-width: 860px;
-  margin-bottom: 12px;
+  width: 100%;
+  margin: 0 auto 12px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -3742,7 +3743,7 @@ p.new-agent-hint {
 
 .new-agent-setup-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 
@@ -3780,15 +3781,26 @@ p.new-agent-hint {
 
 .new-agent-check {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-top: 10px;
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
 }
 
 .new-agent-check input {
-  align-self: center;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+}
+
+.new-agent-advanced-body .new-agent-check {
+  margin-top: 0;
+}
+
+.new-agent-check small {
+  display: block;
+  margin-top: 2px;
 }
 
 .new-agent-advanced {
@@ -3938,10 +3950,6 @@ p.new-agent-hint {
 }
 
 @media (max-width: 720px) {
-  .new-agent-setup-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .mcp-selector-controls {
     grid-template-columns: 1fr;
   }
