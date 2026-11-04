@@ -2109,10 +2109,12 @@ input[type="checkbox"]:not(.switch) {
 }
 
 /* Answers read as one menu, like the CLI's: equal full-width rows, one line each where it fits. */
+/* A compact answer card: one line per answer, never a full-width slab. */
 .control-row-primary {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
+  max-width: 560px;
 }
 
 .control-row-primary .ctrl-btn {
@@ -2283,29 +2285,29 @@ input[type="checkbox"]:not(.switch) {
   font-size: var(--fs-xs);
 }
 
+/* Answers stay quiet: Yes is a tinted primary, No a red outline with light-red text; neither is a slab. */
 .ctrl-approve {
   flex: 1;
-  background: var(--success);
-  color: #000;
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
   border-color: var(--success);
   font-size: var(--fs-md);
 }
 
 .ctrl-approve:active {
-  background: #4caf50;
+  background: color-mix(in srgb, var(--success) 32%, transparent);
 }
 
 .ctrl-reject {
   flex: 1;
-  background: rgba(239, 83, 80, 0.16);
-  color: var(--danger);
+  background: var(--bg-card);
+  color: #ff8a80;
   border-color: var(--danger);
   font-size: var(--fs-md);
 }
 
 .ctrl-reject:active {
-  background: var(--danger);
-  color: #fff;
+  background: color-mix(in srgb, var(--danger) 24%, var(--bg-card));
 }
 
 .ctrl-default {

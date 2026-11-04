@@ -102,6 +102,11 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     return { top, width: Math.round(width), height, clipped: el.scrollWidth > el.clientWidth };
   }));
   assert.equal(new Set(boxes.map((b) => b.width)).size, 1, `answer widths ${boxes.map((b) => b.width)}`);
+  // A compact card, not a full-width slab: Yes is tinted green text, No a red outline with light-red text.
+  assert.ok(boxes[0].width <= 560, `answers ${boxes[0].width}px wide`);
+  const colour = (i, prop) => answers.nth(i).evaluate((el, p) => getComputedStyle(el)[p], prop);
+  assert.equal(await colour(0, 'color'), 'rgb(102, 187, 106)');
+  assert.deepEqual([await colour(2, 'color'), await colour(2, 'backgroundColor')], ['rgb(255, 138, 128)', 'rgb(22, 33, 62)']);
   assert.ok(boxes.every((b, i) => i === 0 || b.top > boxes[i - 1].top), 'answers stack in order');
   // One line each at the shared 44px answer height, the same as the phone tap target.
   assert.ok(boxes.every((b) => Math.round(b.height) === 44 && !b.clipped), `answer heights ${boxes.map((b) => b.height)}`);
