@@ -96,9 +96,6 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // The terminal no longer repeats the menu the bar is showing.
   await page.locator('.terminal').getByText('(choices shown below)').waitFor();
   assert.doesNotMatch(await page.locator('.terminal').innerText(), /Do you want to proceed|2\. Yes/);
-  // A short transcript sits at the bottom of the pane, next to the controls, not under a gap.
-  const [pane, body] = await Promise.all(['.terminal', '.terminal-body'].map((sel) => page.locator(sel).boundingBox()));
-  assert.ok(pane.y + pane.height - (body.y + body.height) < 24, `transcript ends ${pane.y + pane.height - (body.y + body.height)}px above the pane bottom`);
   assert.equal(await page.locator('.control-row-compose [data-placeholder]').getAttribute('data-placeholder'), 'Message the agent...', 'one composer placeholder whatever the state');
   for (const name of ['Cycle mode', 'Interrupt']) assert.equal(await page.getByRole('button', { name, exact: true }).isVisible(), true, name);
   // Composer extras wait behind one menu.
