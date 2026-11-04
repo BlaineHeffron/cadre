@@ -147,7 +147,7 @@ async function startServer(scratch) {
   await mkdir(join(scratch, 'home'), { recursive: true });
   const env = {
     PATH: process.env.PATH, HOME: join(scratch, 'home'), TZ: 'UTC', LANG: 'C.UTF-8',
-    PORT: String(port), AGENT_BUS_MCP_HTTP_PORT: String(mcpPort), DM_STATE_DIR: join(scratch, 'state'),
+    PORT: String(port), AGENT_BUS_MCP_HTTP_PORT: String(mcpPort), CADRE_STATE_DIR: join(scratch, 'state'),
     AUTH_TOKEN: 'capture-auth', INTERNAL_BYPASS_TOKEN: 'capture-bypass', BROWSER_SESSION_SECRET: 'capture-session',
     TMUX_TMPDIR: join(scratch, 'tmux'), RESEARCH_WORKBENCH_FLEET_TOKEN_FILE: join(scratch, 'rw-token'),
     // dotenv never overrides set vars, so a checkout .env cannot re-allow side effects.
