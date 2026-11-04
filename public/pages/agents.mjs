@@ -365,6 +365,7 @@ export function AgentsPage() {
   const bulkKillProgress = useMemo(() => signal(null), []);
   const bulkPrompt = useMemo(() => signal(''), []);
   const showBulkPrompt = useMemo(() => signal(false), []);
+  const bulkPanelOpen = useMemo(() => signal(false), []);
   const showNewModal = useMemo(() => signal(false), []);
   const showFolderPicker = useMemo(() => signal(false), []);
   const desktopLayout = useMemo(() => signal(isDesktopAgentsLayout()), []);
@@ -1028,7 +1029,11 @@ export function AgentsPage() {
         </div>
       ` : null}
 
-      ${!desktopLayout.value ? html`<details class="card agents-bulk" style="margin-bottom:12px" open=${selectedKillableSessions.length > 0}>
+      ${!desktopLayout.value ? html`<details
+        class="card agents-bulk"
+        style="margin-bottom:12px"
+        open=${bulkPanelOpen.value || selectedKillableSessions.length > 0}
+        onToggle=${e => { if (selectedKillableSessions.length === 0) bulkPanelOpen.value = e.target.open; }}>
         <summary class="card-title">
           Bulk actions
           <span style="margin-left:8px; font-weight:400; font-size:var(--fs-xs); color:var(--text-muted)">${visibleSessions.length} shown of ${allSessions.length}</span>

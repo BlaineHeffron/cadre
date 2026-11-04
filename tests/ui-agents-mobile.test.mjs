@@ -1,0 +1,67 @@
+// The real Agents page at phone width in headless Chromium against a stubbed API.
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { test } from 'node:test';
+import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
+import { chromium } from 'playwright-core';
+
+const sessions = [
+  { id: 'a1', displayName: 'first task', workDir: '/home/me/repo', tmuxSession: 'claude-a1', state: { status: 'working' } },
+  { id: 'b2', displayName: 'second task', workDir: '/home/me/repo', tmuxSession: 'claude-b2', state: { status: 'ready' } },
+];
+
+test('phone Agents page leads with sessions and keeps bulk actions folded until used', { skip: !process.env.CHROMIUM_BIN, timeout: 30000 }, async (t) => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const app = Fastify();
+  t.after(() => app.close());
+  await app.register(fastifyStatic, { root: `${root}public`, prefix: '/' });
+  await app.register(fastifyStatic, { root: `${root}node_modules`, prefix: '/vendor/npm/', decorateReply: false });
+  const index = await readFile(`${root}public/index.html`, 'utf8');
+  app.get('/fixture', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
+    import { h, render } from 'preact';
+    import { isAuthenticated } from '/app/state.mjs';
+    import { AgentsPage } from '/pages/agents.mjs';
+    isAuthenticated.value = true;
+    render(h(AgentsPage, {}), document.getElementById('app'));
+  </script>`)));
+  app.get('/api/claude/sessions', () => ({ sessions }));
+  app.get('/api/*', () => ({ sessions: [] }));
+  const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.setDefaultTimeout(5000);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto(`${origin}/fixture`);
+
+  const cards = page.locator('.session-card');
+  await cards.first().waitFor();
+  assert.equal(await cards.count(), 2);
+  assert.equal(await page.locator('.agents-card-provider').first().innerText(), 'Claude');
+  assert.equal(await page.getByRole('textbox', { name: 'Search agents' }).isVisible(), true);
+  assert.equal(await page.getByRole('combobox', { name: 'Filter by provider' }).isVisible(), true);
+
+  const bulk = page.locator('details.agents-bulk');
+  const isOpen = () => bulk.evaluate((el) => el.open);
+  assert.equal(await isOpen(), false);
+  assert.equal(await page.getByRole('button', { name: /^Kill Selected/ }).isVisible(), false);
+  // The first card sits above the fold.
+  assert.ok((await cards.first().boundingBox()).y < 844 / 2);
+
+  const select = cards.first().getByRole('checkbox');
+  await select.check();
+  assert.equal(await isOpen(), true);
+  assert.equal(await page.getByRole('button', { name: 'Kill Selected (1)' }).isVisible(), true);
+  await select.uncheck();
+  assert.equal(await isOpen(), false);
+
+  // Opened by hand, the panel stays open when a selection comes and goes.
+  await bulk.locator('summary').click();
+  await select.check();
+  await select.uncheck();
+  assert.equal(await isOpen(), true);
+  assert.deepEqual(errors, []);
+});
