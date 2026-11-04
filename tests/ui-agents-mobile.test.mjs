@@ -44,6 +44,16 @@ test('phone Agents page leads with sessions and keeps bulk actions folded until 
   assert.equal(await page.getByRole('textbox', { name: 'Search agents' }).isVisible(), true);
   assert.equal(await page.getByRole('combobox', { name: 'Filter by provider' }).isVisible(), true);
 
+  // Each card leads with one primary action; the rest wait behind its ⋯ menu.
+  const first = cards.first();
+  assert.equal(await first.getByRole('button', { name: 'Open', exact: true }).isVisible(), true);
+  assert.equal(await first.getByText('New', { exact: true }).isVisible(), true);
+  assert.equal(await first.getByRole('button', { name: 'Kill' }).isVisible(), false);
+  await first.getByLabel('More actions for first task').click();
+  for (const name of ['Copy ID', 'Start loop', 'Shift+Tab', 'Esc', 'Kill']) assert.equal(await first.getByRole('button', { name, exact: true }).isVisible(), true, name);
+  await first.getByRole('button', { name: 'Copy ID', exact: true }).click();
+  assert.equal(await first.getByRole('button', { name: 'Kill' }).isVisible(), false, 'choosing an item closes the menu');
+
   const bulk = page.locator('details.agents-bulk');
   const isOpen = () => bulk.evaluate((el) => el.open);
   assert.equal(await isOpen(), false);
