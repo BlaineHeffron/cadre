@@ -50,5 +50,7 @@ test('settings uses labelled switches that reflect and change their state', { sk
   await headroom.click();
   await page.waitForResponse((response) => response.url().endsWith('/api/agent-provider-preferences'));
   await page.locator('.setting-switch', { hasText: 'Headroom' }).locator('input:checked').waitFor();
+  // Page titles share one style across pages.
+  assert.equal(await page.locator('h1').first().evaluate((el) => getComputedStyle(el).fontSize), '18px');
   assert.deepEqual(errors, []);
 });

@@ -211,7 +211,7 @@ export function SettingsPage({ section }) {
       <div class="settings-shell">
         <div class="settings-shell-head">
           <div>
-            <h1 class="card-title" style="font-size:var(--fs-lg); margin-bottom:4px">Settings</h1>
+            <h1 class="page-title" style="margin-bottom:4px">Settings</h1>
             <p style="color:var(--text-secondary)">System controls, auth, providers, notifications, and network behavior.</p>
           </div>
         </div>

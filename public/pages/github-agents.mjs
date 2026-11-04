@@ -307,7 +307,7 @@ export function GitHubAgentsPage() {
     <div class="page fleet-page">
       <div class="card-header">
         <div>
-          <h1 class="card-title" style="font-size:var(--fs-lg)">GitHub</h1>
+          <h1 class="page-title">GitHub</h1>
           <div class="fleet-meta">${repos.value.length} watched repos</div>
         </div>
         <div class="fleet-incident-actions">

@@ -424,6 +424,13 @@ html, body {
   font-weight: 600;
 }
 
+/* Every page names itself the same way. */
+.page-title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
 /* Session card with pulse for attention states */
 .session-card {
   cursor: pointer;
@@ -1721,8 +1728,6 @@ body:has(.tmux-pane-page) {
 
 .agents-desktop-toolbar-title {
   margin: 0 4px 0 0;
-  font-size: var(--fs-md);
-  line-height: 1;
 }
 
 .agents-desktop-search {
@@ -2425,12 +2430,6 @@ body:has(.tmux-pane-page) {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent);
-}
-
-.goals-title {
-  font-size: var(--fs-xl);
-  line-height: 1.1;
-  margin: 8px 0 10px;
 }
 
 .goals-subtitle,
