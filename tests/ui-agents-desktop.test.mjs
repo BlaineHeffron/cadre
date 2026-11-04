@@ -27,6 +27,13 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     isAuthenticated.value = true;
     render(h(AgentsPage, {}), document.getElementById('app'));
   </script>`)));
+  app.get('/session', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
+    import { h, render } from 'preact';
+    import { isAuthenticated } from '/app/state.mjs';
+    import { AgentSessionDetailPage } from '/pages/agent-session-detail.mjs';
+    isAuthenticated.value = true;
+    render(h('main', { class: 'main' }, h(AgentSessionDetailPage, { id: 'a1', provider: 'claude' })), document.getElementById('app'));
+  </script>`)));
   app.get('/api/claude/sessions', () => ({ sessions }));
   const blocked = { status: 'blocked', capabilities: { canAnswerInteraction: true }, interaction: { kind: 'permission', detail: 'Do you want to proceed?', fingerprint: 'q1', options: [
     { key: '1', label: 'Yes' },
@@ -134,5 +141,11 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.ok(box.y >= 0 && box.y + box.height <= 900, `Create Session at y=${box.y}`);
   // Page titles share one style across pages.
   assert.equal(await page.locator('h1').first().evaluate((el) => getComputedStyle(el).fontSize), '18px');
+  // A single session reads at a comfortable width on a wide screen, centred.
+  await page.goto(`${origin}/session`);
+  const single = page.locator('.claude-session-page');
+  await single.locator('.terminal').waitFor();
+  const { x, width } = await single.boundingBox();
+  assert.ok(width <= 1160 && Math.abs(x - (1440 - x - width)) <= 1, `session page at x=${x}, width=${width}`);
   assert.deepEqual(errors, []);
 });
