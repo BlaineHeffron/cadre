@@ -27,8 +27,9 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
     render(h(AgentsPage, {}), document.getElementById('app'));
   </script>`)));
   app.get('/api/claude/sessions', () => ({ sessions }));
+  // The built-in default profile selects no servers, so nothing has been removed and Advanced stays shut.
   const any = ['claude', 'codex', 'pi'];
-  app.get('/api/agents/mcp-servers', () => ({ profiles: [{ id: 'default', serverIds: ['dueno'] }], servers: [{ id: 'dueno', providers: any, runtimes: any, availability: { state: 'configured' } }] }));
+  app.get('/api/agents/mcp-servers', () => ({ defaultProfileId: 'default', profiles: [{ id: 'default', serverIds: [] }, { id: 'cadre', serverIds: ['dueno'] }], servers: [{ id: 'dueno', providers: any, runtimes: any, availability: { state: 'configured' } }] }));
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
@@ -89,5 +90,10 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   await page.locator('.new-agent-advanced > summary').click();
   assert.equal(await page.getByPlaceholder('Optional label').isVisible(), true);
   assert.equal(await page.getByRole('checkbox', { name: /Coordinator/ }).isVisible(), true);
+  assert.equal(await page.getByRole('alert').count(), 0, 'no dueno warning on the empty default profile');
+  // Unchecking dueno from a profile that has it still warns.
+  await page.locator('.mcp-selector-control select').selectOption('cadre');
+  await page.getByRole('checkbox', { name: /dueno/ }).uncheck();
+  assert.match(await page.getByRole('alert').innerText(), /Cadre MCP \(dueno\) removed/);
   assert.deepEqual(errors, []);
 });
