@@ -43,7 +43,14 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   const cards = page.locator('.session-card');
   await cards.first().waitFor();
   assert.equal(await cards.count(), 2);
-  assert.equal(await page.locator('.agents-card-provider').first().innerText(), 'Claude');
+  // One provider heading per run of cards, not one per card.
+  assert.deepEqual(await page.locator('.agents-card-provider').allInnerTexts(), ['Claude']);
+  assert.equal(await cards.first().locator('.badge-new').innerText(), 'New');
+  // At two columns the heading spans the row, so cards side by side line up.
+  await page.setViewportSize({ width: 960, height: 844 });
+  const [left, right] = await Promise.all([0, 1].map((i) => cards.nth(i).boundingBox()));
+  assert.ok(right.x > left.x && right.y === left.y, `cards at y=${left.y} and y=${right.y}`);
+  await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.getByRole('textbox', { name: 'Search agents' }).isVisible(), true);
   assert.equal(await page.getByRole('combobox', { name: 'Filter by provider' }).isVisible(), true);
 

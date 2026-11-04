@@ -21,10 +21,10 @@ import {
 } from '../app/notification-prefs.mjs';
 
 const PRIMARY_NAV = [
-  { label: 'Command Center', path: '/' },
+  { label: 'Alerts', path: '/' },
   { label: 'Agents', path: '/agents', mobileDefault: true },
   { label: 'Queue', path: '/queue', mobileDefault: true },
-  { label: 'Collab', path: '/collab' },
+  { label: 'Rooms', path: '/collab' },
   { label: 'Capture', path: '/capture', mobileDefault: true },
 ];
 

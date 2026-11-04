@@ -326,7 +326,7 @@ export function DashboardPage() {
   if (error.value && !opsSummary.value) {
     return html`
       <div class="page">
-        <${ErrorState} message=${`Command Center failed to load: ${error.value}`} actionLabel="Retry" onAction=${() => loadDashboard(state)} />
+        <${ErrorState} message=${`Alerts failed to load: ${error.value}`} actionLabel="Retry" onAction=${() => loadDashboard(state)} />
       </div>
     `;
   }
@@ -339,7 +339,6 @@ export function DashboardPage() {
     <div class="page goals-page">
       <div class="goals-hero">
         <div>
-          <div class="goals-kicker">Command Center</div>
           <h1 class="goals-title">Alerts and briefs</h1>
         </div>
         <div class="goals-hero-actions">
