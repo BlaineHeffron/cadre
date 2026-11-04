@@ -3921,7 +3921,9 @@ p.new-agent-hint {
   color: var(--text-primary);
 }
 
+/* The box keeps its 18px in a narrow dialog; the label text wraps instead. */
 .new-agent-check input {
+  flex: none;
   margin: 2px 0 0;
 }
 
@@ -3979,6 +3981,32 @@ p.new-agent-hint {
 /* There .main scrolls, and its bottom padding would hold the footer off the edge. */
 .main:has(.agents-desktop-shell) .new-agent-footer {
   bottom: -16px;
+}
+
+/* New session opens as a modal over a dimmed page, so the list underneath stays put. */
+.new-agent-dialog {
+  width: min(860px, calc(100% - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 72px);
+  margin: 56px auto auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  overflow: auto;
+}
+
+.new-agent-dialog::backdrop {
+  background: rgba(5, 5, 12, 0.62);
+}
+
+.new-agent-dialog .new-agent-form {
+  margin: 0;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
+.main .new-agent-dialog .new-agent-footer {
+  bottom: 0;
 }
 
 .empty-state {

@@ -27,18 +27,6 @@ describe('new agent pane (prompt-first layout)', () => {
     assert.match(agents, /\$\{codexThinkingHelp \? html`\s*<p class="new-agent-hint">\$\{codexThinkingHelp\}<\/p>/);
   });
 
-  it('escapes progressively instead of discarding a typed prompt', () => {
-    const start = agents.indexOf("if (e.key !== 'Escape') return;");
-    assert.ok(start > 0, 'the form must guard on Escape');
-    const handler = agents.slice(start, agents.indexOf('<span class="card-title">New Agent Session</span>'));
-    assert.match(handler, /if \(showFolderPicker\.value\) \{ showFolderPicker\.value = false; return; \}/);
-    assert.match(handler, /if \(newPrompt\.value\.trim\(\)\) return;/);
-    assert.ok(
-      handler.indexOf('newPrompt.value.trim()') < handler.indexOf('showNewModal.value = false'),
-      'the draft guard must run before the close'
-    );
-  });
-
   it('opens Advanced when the MCP selection needs attention and lets the user close it', () => {
     assert.match(agents, /const advancedNeedsAttention = newMcpWarning\.value/);
     assert.match(agents, /if \(advancedNeedsAttention\) newAdvancedOpen\.value = true;/);

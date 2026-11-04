@@ -100,7 +100,17 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   assert.ok(provider.x + provider.width <= model.x);
   const worktree = page.getByRole('checkbox', { name: /Isolated git worktree/ });
   assert.equal(await worktree.isVisible(), true);
-  assert.equal(Math.round((await worktree.boundingBox()).width), 18, 'form checkboxes use the shared 18px size');
+  // The rendered box, not just the CSS value: a long label (or CI's wider font, which made it 17px)
+  // must wrap rather than squeeze the box in the phone-width dialog.
+  const squeezed = await worktree.evaluate((el) => {
+    const title = el.closest('label').querySelector('span');
+    const before = title.firstChild.textContent;
+    title.firstChild.textContent = before.repeat(4);
+    const width = el.getBoundingClientRect().width;
+    title.firstChild.textContent = before;
+    return width;
+  });
+  assert.equal(squeezed, 18, 'form checkboxes keep the shared 18px size beside a long label');
   assert.equal(await page.getByPlaceholder('Optional label').isVisible(), false);
   assert.equal(await page.getByRole('checkbox', { name: /Coordinator/ }).isVisible(), false);
   await page.locator('.new-agent-advanced > summary').click();
@@ -111,5 +121,35 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   await page.locator('.mcp-selector-control select').selectOption('cadre');
   await page.getByRole('checkbox', { name: /dueno/ }).uncheck();
   assert.match(await page.getByRole('alert').innerText(), /Cadre MCP \(dueno\) removed/);
+  // The form is a named modal dialog over a dimmed page. Escape and a backdrop click close an empty
+  // form, never a typed draft, and focus returns to the button that opened it.
+  const dialog = page.getByRole('dialog', { name: 'New Agent Session' });
+  const prompt = page.getByRole('textbox', { name: 'Initial prompt' });
+  assert.equal(await dialog.isVisible(), true);
+  await prompt.fill('draft');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await page.mouse.click(10, 20);
+  assert.equal(await dialog.isVisible(), true, 'a typed prompt survives repeated Escape and a backdrop click');
+  // Escape first closes an open folder picker, then still keeps the draft.
+  await page.getByRole('button', { name: 'Browse', exact: true }).click();
+  await page.locator('.new-agent-folder-picker').waitFor();
+  await prompt.focus();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.new-agent-folder-picker').count(), 0, 'Escape closes the folder picker first');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  assert.equal(await dialog.isVisible(), true, 'the draft survives picker, Escape, Escape');
+  assert.equal(await prompt.innerText(), 'draft');
+  await prompt.fill('');
+  await page.mouse.click(10, 20);
+  assert.equal(await dialog.count(), 0, 'an empty form closes from the backdrop');
+  const opener = page.getByRole('button', { name: 'New session', exact: true });
+  await opener.click();
+  await dialog.waitFor();
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Initial prompt', 'focus moves into the form');
+  await page.keyboard.press('Escape');
+  assert.equal(await dialog.count(), 0, 'Escape closes an empty form right after opening');
+  assert.equal(await opener.evaluate((el) => el === document.activeElement), true, 'focus returns to New session');
   assert.deepEqual(errors, []);
 });

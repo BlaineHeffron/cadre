@@ -2,7 +2,7 @@ import { h } from 'preact';
 import { html } from 'htm/preact';
 import { route } from 'preact-router';
 import { signal } from '@preact/signals';
-import { useEffect, useMemo } from 'preact/hooks';
+import { useEffect, useMemo, useRef } from 'preact/hooks';
 import { api } from '../app/api.mjs';
 import {
   buildUnifiedAgentSessions,
@@ -368,6 +368,14 @@ export function AgentsPage() {
   const showFolderPicker = useMemo(() => signal(false), []);
   const desktopLayout = useMemo(() => signal(isDesktopAgentsLayout()), []);
   const desktopSessionKey = useMemo(() => signal(''), []);
+  // The new-session form is a native modal dialog: focus moves in, Tab stays in, and it returns on close.
+  const newDialog = useRef(null);
+  useEffect(() => {
+    const dialog = newDialog.current;
+    if (!showNewModal.value || !dialog || dialog.open) return;
+    dialog.showModal();
+    dialog.querySelector('[aria-label="Initial prompt"]')?.focus();
+  }, [showNewModal.value]);
   const newProvider = useMemo(() => signal('codex'), []);
   const newModel = useMemo(() => signal(defaultModelForProvider('codex')), []);
   const newThinkingLevel = useMemo(() => signal(DEFAULT_THINKING_LEVEL), []);
@@ -814,18 +822,29 @@ export function AgentsPage() {
       `}
 
       ${showNewModal.value ? html`
+        <dialog
+          ref=${newDialog}
+          class="new-agent-dialog"
+          aria-labelledby="new-agent-title"
+          onKeyDown=${e => {
+            // Escape steps back out of the folder picker first, and never discards a typed prompt.
+            // Blocking it here, before the dialog's cancel event, matters: Chromium closes on a
+            // repeated Escape even when cancel is prevented.
+            if (e.key !== 'Escape') return;
+            if (showFolderPicker.value) { e.preventDefault(); showFolderPicker.value = false; return; }
+            if (newPrompt.value.trim()) e.preventDefault();
+          }}
+          onClose=${() => { showNewModal.value = false; showFolderPicker.value = false; }}
+          onClick=${e => {
+            // A click on the dimmed page (the dialog itself, outside the form) closes an empty form.
+            if (e.target === e.currentTarget && !newPrompt.value.trim()) e.currentTarget.close();
+          }}>
         <form
           class="card new-agent-form"
-          onSubmit=${createSession}
-          onKeyDown=${e => {
-            if (e.key !== 'Escape') return;
-            if (showFolderPicker.value) { showFolderPicker.value = false; return; }
-            if (newPrompt.value.trim()) return;
-            showNewModal.value = false;
-          }}>
+          onSubmit=${createSession}>
           <div class="card-header">
-            <span class="card-title">New Agent Session</span>
-            <button class="btn" type="button" onclick=${() => { showNewModal.value = false; showFolderPicker.value = false; }}>Cancel</button>
+            <span class="card-title" id="new-agent-title">New Agent Session</span>
+            <button class="btn" type="button" onclick=${() => newDialog.current?.close()}>Cancel</button>
           </div>
 
           <div class="new-agent-section new-agent-prompt">
@@ -996,6 +1015,7 @@ export function AgentsPage() {
             ` : null}
           </div>
         </form>
+        </dialog>
       ` : null}
 
       ${!desktopLayout.value ? html`<div style="display:flex; gap:6px; flex-wrap:wrap; margin:0 0 12px 0">
