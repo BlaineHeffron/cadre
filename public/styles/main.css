@@ -2452,8 +2452,8 @@ input[type="checkbox"]:not(.switch) {
 }
 
 @keyframes pulseBorder {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(102, 187, 106, 0.5); }
-  50% { box-shadow: 0 0 0 4px rgba(102, 187, 106, 0.3); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(79, 195, 247, 0.5); }
+  50% { box-shadow: 0 0 0 4px rgba(79, 195, 247, 0.3); }
 }
 
 /* ── Floating Action Button ── */
