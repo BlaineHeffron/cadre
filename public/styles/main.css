@@ -2092,6 +2092,14 @@ input[type="checkbox"]:not(.switch) {
   z-index: 40;
 }
 
+/* On touch screens the sticky bar carries the home-indicator padding and rides above the
+   soft keyboard, so the raw-key tray stays above it there. */
+@media (max-width: 640px), (pointer: coarse) {
+  .claude-session-page > .claude-control-bar {
+    order: 1;
+  }
+}
+
 .control-row {
   display: flex;
   gap: 6px;

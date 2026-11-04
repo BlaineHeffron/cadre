@@ -144,6 +144,13 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.ok(box.y >= 0 && box.y + box.height <= 900, `Create Session at y=${box.y}`);
   // Page titles share one style across pages.
   assert.equal(await page.locator('h1').first().evaluate((el) => getComputedStyle(el).fontSize), '18px');
+  // On a phone the keys stay above the sticky, safe-area-padded control bar.
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  await phone.goto(`${origin}/session`);
+  await phone.locator('.terminal-keys').waitFor();
+  const [phoneKeys, phoneBar] = await Promise.all(['.terminal-keys', '.claude-control-bar'].map((sel) => phone.locator(sel).boundingBox()));
+  assert.ok(phoneKeys.y + phoneKeys.height <= phoneBar.y + 1, `phone keys end at ${phoneKeys.y + phoneKeys.height}, bar starts at ${phoneBar.y}`);
+  await phone.close();
   // A single session reads at a comfortable width on a wide screen, centred.
   await page.goto(`${origin}/session`);
   const single = page.locator('.claude-session-page');
