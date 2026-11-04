@@ -265,7 +265,7 @@ export function AgentControlBar({
           insertRef=${skillInsert}
           placeholder=${imageAttached
             ? 'Message to send with the image...'
-            : (sessionStatus === 'ready' ? 'Type a message...' : 'Send text to session...')}
+            : 'Message the agent...'}
           className="ctrl-input"
           onSubmit=${handleSubmit}
           onDropFiles=${onDropFiles}

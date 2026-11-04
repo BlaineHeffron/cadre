@@ -733,8 +733,8 @@ export function AgentsPage() {
               `)}
             </div>
           </details>
-          <button class="btn" onclick=${() => loadAgentSessions(loading, loadError)}>Refresh</button>
-          ${visibleKillableSessions.length > 0 ? html`
+          <button class="btn btn-icon" aria-label="Refresh" title="Refresh" onclick=${() => loadAgentSessions(loading, loadError)}>↻</button>
+          ${selectedKillableSessions.length > 0 ? html`
             <label class="agents-toolbar-select-all">
               <input
                 type="checkbox"
@@ -789,7 +789,7 @@ export function AgentsPage() {
       ` : html`
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px">
         <h1 class="card-title" style="font-size:var(--fs-lg); margin-right:auto">Agents</h1>
-        <button class="btn" onclick=${() => loadAgentSessions(loading, loadError)}>Refresh</button>
+        <button class="btn btn-icon" aria-label="Refresh" title="Refresh" onclick=${() => loadAgentSessions(loading, loadError)}>↻</button>
         <button class="btn btn-primary" onclick=${() => openNewModal('codex')}>New</button>
       </div>
       <div style="display:flex; gap:8px; margin-bottom:10px">
