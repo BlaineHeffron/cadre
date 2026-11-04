@@ -3440,6 +3440,7 @@ body:has(.tmux-pane-page) {
   }
 
   .ctrl-btn,
+  .ctrl-inline-select,
   .control-row-tools .ctrl-btn,
   .control-row-tools .ctrl-inline-select {
     min-height: 44px;
