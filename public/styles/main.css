@@ -3981,21 +3981,29 @@ p.new-agent-hint {
   bottom: -16px;
 }
 
-/* New session opens over a dimmed page, so the list underneath stays put. */
-.new-agent-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 150;
+/* New session opens as a modal over a dimmed page, so the list underneath stays put. */
+.new-agent-dialog {
+  width: min(860px, calc(100% - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 72px);
+  margin: 56px auto auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
   overflow: auto;
-  padding: 56px 16px 0;
+}
+
+.new-agent-dialog::backdrop {
   background: rgba(5, 5, 12, 0.62);
 }
 
-.new-agent-backdrop .new-agent-form {
+.new-agent-dialog .new-agent-form {
+  margin: 0;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
 }
 
-.main .new-agent-backdrop .new-agent-footer {
+.main .new-agent-dialog .new-agent-footer {
   bottom: 0;
 }
 

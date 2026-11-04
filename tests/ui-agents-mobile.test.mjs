@@ -111,15 +111,24 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   await page.locator('.mcp-selector-control select').selectOption('cadre');
   await page.getByRole('checkbox', { name: /dueno/ }).uncheck();
   assert.match(await page.getByRole('alert').innerText(), /Cadre MCP \(dueno\) removed/);
-  // The form sits over a dimmed page: a click on the backdrop closes it, but never discards a typed prompt.
-  const backdrop = page.locator('.new-agent-backdrop');
-  const cover = await backdrop.boundingBox();
-  assert.ok(cover.x === 0 && cover.y === 0 && cover.width === 390 && cover.height === 844, 'backdrop covers the screen');
-  await page.getByRole('textbox', { name: 'Initial prompt' }).fill('draft');
+  // The form is a named modal dialog over a dimmed page. Escape and a backdrop click close an empty
+  // form, never a typed draft, and focus returns to the button that opened it.
+  const dialog = page.getByRole('dialog', { name: 'New Agent Session' });
+  const prompt = page.getByRole('textbox', { name: 'Initial prompt' });
+  assert.equal(await dialog.isVisible(), true);
+  await prompt.fill('draft');
+  await page.keyboard.press('Escape');
   await page.mouse.click(10, 20);
-  assert.equal(await backdrop.count(), 1, 'a typed prompt keeps the form open');
-  await page.getByRole('textbox', { name: 'Initial prompt' }).fill('');
+  assert.equal(await dialog.isVisible(), true, 'a typed prompt survives Escape and a backdrop click');
+  await prompt.fill('');
   await page.mouse.click(10, 20);
-  assert.equal(await backdrop.count(), 0, 'an empty form closes from the backdrop');
+  assert.equal(await dialog.count(), 0, 'an empty form closes from the backdrop');
+  const opener = page.getByRole('button', { name: 'New session', exact: true });
+  await opener.click();
+  await dialog.waitFor();
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Initial prompt', 'focus moves into the form');
+  await page.keyboard.press('Escape');
+  assert.equal(await dialog.count(), 0, 'Escape closes an empty form right after opening');
+  assert.equal(await opener.evaluate((el) => el === document.activeElement), true, 'focus returns to New session');
   assert.deepEqual(errors, []);
 });
