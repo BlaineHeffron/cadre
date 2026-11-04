@@ -13,8 +13,6 @@
   --danger: #ef5350;
   /* Danger as readable text on dark surfaces. */
   --danger-text: #ff8a80;
-  /* Success as readable text on a green tint. */
-  --success-text: #b9e4bb;
   --warning: #ffa726;
   --success: #66bb6a;
   --border: #2a2a3e;
@@ -2334,24 +2332,24 @@ input[type="checkbox"]:not(.switch) {
   font-size: var(--fs-xs);
 }
 
-/* Answers stay quiet: Yes is a tinted primary, No a red outline with light-red text; neither is a slab. */
+/* Answers use the button system: Yes is the standard primary, No a secondary with red text. */
 .ctrl-approve {
   flex: 1;
-  background: color-mix(in srgb, var(--success) 18%, transparent);
-  color: var(--success-text);
-  border-color: var(--success);
+  background: var(--accent);
+  color: #000;
+  border-color: var(--accent);
   font-size: var(--fs-md);
+  font-weight: 600;
 }
 
 .ctrl-approve:active {
-  background: color-mix(in srgb, var(--success) 32%, transparent);
+  background: var(--accent-hover);
 }
 
 .ctrl-reject {
   flex: 1;
   background: var(--bg-card);
   color: var(--danger-text);
-  border-color: var(--danger);
   font-size: var(--fs-md);
 }
 

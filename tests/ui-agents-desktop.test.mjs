@@ -104,11 +104,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     return { top, width: Math.round(width), height, clipped: el.scrollWidth > el.clientWidth };
   }));
   assert.equal(new Set(boxes.map((b) => b.width)).size, 1, `answer widths ${boxes.map((b) => b.width)}`);
-  // A compact card, not a full-width slab: Yes is tinted green text, No a red outline with light-red text.
+  // A compact card, not a full-width slab, in the button system: Yes is the filled primary, No a
+  // secondary with light-red text and the neutral border, so it never outshouts Yes.
   assert.ok(boxes[0].width <= 560, `answers ${boxes[0].width}px wide`);
   const colour = (i, prop) => answers.nth(i).evaluate((el, p) => getComputedStyle(el)[p], prop);
-  assert.equal(await colour(0, 'color'), 'rgb(185, 228, 187)', 'Yes reads as light text on its green tint');
-  assert.deepEqual([await colour(2, 'color'), await colour(2, 'backgroundColor')], ['rgb(255, 138, 128)', 'rgb(22, 33, 62)']);
+  assert.deepEqual([await colour(0, 'color'), await colour(0, 'backgroundColor')], ['rgb(0, 0, 0)', 'rgb(79, 195, 247)']);
+  assert.deepEqual([await colour(2, 'color'), await colour(2, 'backgroundColor'), await colour(2, 'borderTopColor')], ['rgb(255, 138, 128)', 'rgb(22, 33, 62)', await colour(1, 'borderTopColor')]);
   assert.ok(boxes.every((b, i) => i === 0 || b.top > boxes[i - 1].top), 'answers stack in order');
   // At least the 44px tap target and never clipped. In the 560px card a long label may wrap
   // inside its row, depending on the font; the card cap matters more than one-line labels.
