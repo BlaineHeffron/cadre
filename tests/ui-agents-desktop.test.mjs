@@ -129,5 +129,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const create = page.getByRole('button', { name: 'Create Session' });
   const box = await create.boundingBox();
   assert.ok(box.y >= 0 && box.y + box.height <= 900, `Create Session at y=${box.y}`);
+  // Page titles share one style across pages.
+  assert.equal(await page.locator('h1').first().evaluate((el) => getComputedStyle(el).fontSize), '18px');
   assert.deepEqual(errors, []);
 });

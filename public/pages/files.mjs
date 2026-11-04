@@ -153,7 +153,7 @@ export function FilesPage() {
   return html`
     <div class="page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:var(--fs-lg)">File Browser</h1>
+        <h1 class="page-title">File Browser</h1>
         <div style="display:flex; gap:8px">
           <input id="files-upload-input" type="file" style="display:none" onChange=${uploadFile} />
           <button class="btn" disabled=${uploadBusy.value} onclick=${() => document.getElementById('files-upload-input')?.click()}>

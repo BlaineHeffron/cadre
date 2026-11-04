@@ -152,7 +152,7 @@ export function CapturePage() {
   return html`
     <div class="page capture-page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:var(--fs-lg)">Quick Capture</h1>
+        <h1 class="page-title">Quick Capture</h1>
         <a class="btn btn-subtle capture-touch" href="/capture/notes">Saved notes</a>
       </div>
 
@@ -233,7 +233,7 @@ export function CaptureNotesPage() {
   return html`
     <div class="page capture-notes-page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:var(--fs-lg)">Saved Notes</h1>
+        <h1 class="page-title">Saved Notes</h1>
         <div style="display:flex; gap:8px">
           <a class="btn btn-subtle capture-touch" href="/capture">Capture</a>
           <button class="btn btn-subtle capture-touch" onclick=${() => loadNotes(notes, loading)}>Refresh</button>

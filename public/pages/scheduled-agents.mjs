@@ -247,7 +247,7 @@ export function ScheduledAgentsPage() {
     <div class="page fleet-page">
       <div class="card-header">
         <div>
-          <h1 class="card-title" style="font-size:var(--fs-lg)">Scheduled Agents</h1>
+          <h1 class="page-title">Scheduled Agents</h1>
           <div class="fleet-meta">${tasks.value.length} registered tasks</div>
         </div>
         <div class="fleet-incident-actions">

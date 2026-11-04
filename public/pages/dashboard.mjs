@@ -339,7 +339,7 @@ export function DashboardPage() {
     <div class="page goals-page">
       <div class="goals-hero">
         <div>
-          <h1 class="goals-title">Alerts and briefs</h1>
+          <h1 class="page-title">Alerts and briefs</h1>
         </div>
         <div class="goals-hero-actions">
           ${ccStatus.value?.supervisor?.active && supervisorPath

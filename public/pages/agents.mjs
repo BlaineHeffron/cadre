@@ -702,7 +702,7 @@ export function AgentsPage() {
     <div class="page">
       ${desktopLayout.value ? html`
         <div class="agents-desktop-toolbar">
-          <h1 class="agents-desktop-toolbar-title">Agents</h1>
+          <h1 class="page-title agents-desktop-toolbar-title">Agents</h1>
           <button class="btn btn-primary" onclick=${() => openNewModal('codex')}>New</button>
           <input
             class="input agents-desktop-search"
@@ -786,7 +786,7 @@ export function AgentsPage() {
         ` : null}
       ` : html`
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px">
-        <h1 class="card-title" style="font-size:var(--fs-lg); margin-right:auto">Agents</h1>
+        <h1 class="page-title" style="margin-right:auto">Agents</h1>
         <button class="btn btn-icon" aria-label="Refresh" title="Refresh" onclick=${() => loadAgentSessions(loading, loadError)}>↻</button>
         <button class="btn btn-primary" onclick=${() => openNewModal('codex')}>New</button>
       </div>

@@ -290,7 +290,7 @@ export function FleetPage() {
     <div class="page fleet-page">
       <div class="card-header">
         <div>
-          <h1 class="card-title" style="font-size:var(--fs-lg)">Fleet</h1>
+          <h1 class="page-title">Fleet</h1>
           <div class="fleet-meta">${deployments.value.length} deployments · ${openCount} open incidents</div>
         </div>
         <div class="fleet-incident-actions">

@@ -215,7 +215,7 @@ export function ClaudeSessionsPage() {
   return html`
     <div class="page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:var(--fs-lg)">Claude Sessions</h1>
+        <h1 class="page-title">Claude Sessions</h1>
         <div style="display:flex; gap:8px">
           <button class="btn" onclick=${() => loadSessions(loading)}>Refresh</button>
           <button class="btn btn-primary" onclick=${openNewModal}>New Session</button>

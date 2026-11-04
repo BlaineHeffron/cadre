@@ -121,7 +121,7 @@ export function CommandQueuePage({ item: selectedItem } = {}) {
     <div class="page">
       <div class="card-header">
         <div>
-          <h1 class="card-title" style="font-size:var(--fs-lg)">Command Queue</h1>
+          <h1 class="page-title">Command Queue</h1>
           <p class="collab-helper" style="margin:4px 0 0">Human decisions requested by coordinators and the Fleet Supervisor.</p>
         </div>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">

@@ -1370,7 +1370,7 @@ export function AgentCollabPage({ id }) {
   return html`
     <div class="page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:var(--fs-lg)">Agent Rooms</h1>
+        <h1 class="page-title">Agent Rooms</h1>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
           <span class="badge ${mcpHealthBadgeClass(agentBusMcpHealth.value)}">${mcpHealthLabel(agentBusMcpHealth.value)}</span>
           <button type="button" class="btn ${showBootstrapPanel.value ? 'btn-primary' : ''}" onclick=${() => {
