@@ -2108,7 +2108,6 @@ input[type="checkbox"]:not(.switch) {
 
 .control-row-primary .ctrl-btn {
   flex: none;
-  min-height: 40px;
   justify-content: flex-start;
   font-size: var(--fs-base);
   line-height: 1.25;

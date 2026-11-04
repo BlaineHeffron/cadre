@@ -103,7 +103,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   }));
   assert.equal(new Set(boxes.map((b) => b.width)).size, 1, `answer widths ${boxes.map((b) => b.width)}`);
   assert.ok(boxes.every((b, i) => i === 0 || b.top > boxes[i - 1].top), 'answers stack in order');
-  assert.ok(boxes.every((b) => b.height < 48 && !b.clipped), `answer heights ${boxes.map((b) => b.height)}`);
+  // One line each at the shared 44px answer height, the same as the phone tap target.
+  assert.ok(boxes.every((b) => Math.round(b.height) === 44 && !b.clipped), `answer heights ${boxes.map((b) => b.height)}`);
   assert.equal(await answers.nth(2).innerText(), 'No, and tell Claude what to do differently (esc)');
   // The terminal no longer repeats the menu the bar is showing.
   await page.locator('.terminal').getByText('pane text').waitFor();
