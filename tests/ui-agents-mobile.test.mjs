@@ -54,6 +54,8 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.getByRole('textbox', { name: 'Search agents' }).isVisible(), true);
   assert.equal(await page.getByRole('combobox', { name: 'Filter by provider' }).isVisible(), true);
+  // One status vocabulary: the filter chip uses the badge's own words.
+  assert.equal(await page.getByRole('button', { name: 'Needs attention', exact: true }).isVisible(), true);
 
   // Each card leads with one primary action; the rest wait behind its ⋯ menu.
   const first = cards.first();

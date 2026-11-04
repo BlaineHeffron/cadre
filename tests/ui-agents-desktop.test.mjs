@@ -156,9 +156,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
 
   sessions = [];
   await page.reload();
-  // The empty state's New session leads; the toolbar's steps back to secondary.
-  const toolbarNew = page.locator('.agents-desktop-toolbar').getByRole('button', { name: 'New session' });
-  assert.equal(await toolbarNew.evaluate((el) => el.classList.contains('btn-primary')), false);
+  // The empty state carries the one New session; the toolbar does not repeat it.
+  await page.locator('.empty-state').getByRole('button', { name: 'New session' }).waitFor();
+  assert.equal(await page.locator('.agents-desktop-toolbar').getByRole('button', { name: 'New session' }).count(), 0);
   await page.locator('.empty-state').getByRole('button', { name: 'New session' }).click();
   const create = page.getByRole('button', { name: 'Create Session' });
   const box = await create.boundingBox();

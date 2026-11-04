@@ -576,12 +576,15 @@ textarea.input:focus {
   color: #9cf;
 }
 
+/* The session transcript sits in its panel's tone rather than a black well. */
 .terminal-fullheight {
+  --terminal-bg: var(--bg-secondary);
   flex: 1;
   min-height: 0;
   border-radius: 0;
   font-size: var(--fs-base);
   line-height: 1.4;
+  background: var(--terminal-bg);
 }
 
 .terminal-load-more {
@@ -606,7 +609,7 @@ textarea.input:focus {
   display: block;
   height: 28px;
   margin: -8px -8px -20px;
-  background: linear-gradient(var(--bg-input) 40%, transparent);
+  background: linear-gradient(var(--terminal-bg) 40%, transparent);
   pointer-events: none;
   opacity: 0;
 }
@@ -619,9 +622,10 @@ textarea.input:focus {
   cursor: text;
 }
 
+/* Focus stays visible but quiet: the pane is focused most of the time. */
 .terminal-interactive:focus {
-  outline: 2px solid rgba(79, 195, 247, 0.6);
-  outline-offset: -2px;
+  outline: 1px solid rgba(79, 195, 247, 0.35);
+  outline-offset: -1px;
 }
 
 body:has(.tmux-pane-page) {
