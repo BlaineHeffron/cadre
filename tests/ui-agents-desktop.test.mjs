@@ -71,6 +71,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   for (const name of ['Prompt', 'Esc', 'Kill']) assert.equal(await toolbar.getByRole('button', { name, exact: true }).count(), 0, name);
   assert.equal(await toolbar.getByRole('checkbox', { name: 'Select all' }).count(), 0);
   assert.equal(await toolbar.getByRole('button', { name: 'Refresh' }).innerText(), '↻');
+  // Row meta reads in secondary grey, not muted.
+  assert.equal(await rows.first().locator('.agent-rail-row-meta').first().evaluate((el) => getComputedStyle(el).color), 'rgb(180, 180, 198)');
   await page.getByRole('checkbox', { name: 'Bulk select first task' }).check();
   assert.equal(await toolbar.getByText('1 selected').isVisible(), true);
   assert.equal(await toolbar.getByRole('checkbox', { name: 'Select all' }).isVisible(), true);
@@ -92,11 +94,11 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await header.getByRole('button', { name: 'Kill' }).isVisible(), false, 'choosing an item closes the menu');
 
 
-  // An approval keeps every answer on one row, full text in the title; composer tools are labelled.
+  // An approval lists every answer in one compact card; composer tools are labelled.
   await rows.nth(1).locator('.agent-rail-row-main').click();
   const answers = page.locator('.control-row-primary .ctrl-btn');
   await answers.first().waitFor();
-  // Answers read as one menu: equal full-width rows stacked in order, each on one line.
+  // Answers read as one menu: equal-width rows stacked in order; a long label may wrap inside its row.
   const boxes = await answers.evaluateAll((els) => els.map((el) => {
     const { top, width, height } = el.getBoundingClientRect();
     return { top, width: Math.round(width), height, clipped: el.scrollWidth > el.clientWidth };
