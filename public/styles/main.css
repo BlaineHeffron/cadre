@@ -6,8 +6,8 @@
   --bg-hover: #223054;
   --bg-input: #0a0a15;
   --text-primary: #e0e0e0;
-  --text-secondary: #a0a0b0;
-  --text-muted: #9090a6;
+  --text-secondary: #b4b4c6;
+  --text-muted: #a2a2b8;
   --accent: #4fc3f7;
   --accent-hover: #29b6f6;
   --danger: #ef5350;
@@ -1200,6 +1200,24 @@ body:has(.tmux-pane-page) {
   gap: 4px;
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+/* Only "Needs attention" is a solid fill; calmer states are tinted text, so the urgent one leads. */
+.status-badge.badge-medium { --tone: var(--warning); }
+.status-badge.badge-info { --tone: var(--accent); }
+.status-badge.badge-success { --tone: var(--success); }
+
+.status-badge:is(.badge-medium, .badge-info, .badge-success) {
+  background: color-mix(in srgb, var(--tone) 16%, transparent);
+  color: var(--tone);
+  border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
+}
+
+/* Plain checkboxes are a comfortable target; switches keep their own shape. */
+input[type="checkbox"]:not(.switch) {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
 }
 
 /* A full-width grid row, so cards side by side stay aligned. */

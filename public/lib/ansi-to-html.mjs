@@ -154,8 +154,8 @@ function applyGrCodes(state, codes) {
 }
 
 /**
- * While the control bar shows an approval's choices, fold the same question and
- * numbered menu out of the terminal so the prompt appears once. Lines after the
+ * While the control bar shows an approval's choices, drop the same question and
+ * numbered menu from the terminal so the prompt appears once. Lines after the
  * menu are kept; without a matching question and menu the text is unchanged.
  */
 export function foldAnsweredMenu(text, interaction) {
@@ -173,5 +173,5 @@ export function foldAnsweredMenu(text, interaction) {
   }
   // Only the newest menu is live; if another follows (say its question wrapped and did not match), fold nothing.
   if (end < 0 || plain.slice(end + 1).some((line) => choice.test(line))) return text;
-  return [...lines.slice(0, start), '\x1b[2m(choices shown below)\x1b[0m', ...lines.slice(end + 1)].join('\n');
+  return [...lines.slice(0, start), ...lines.slice(end + 1)].join('\n');
 }

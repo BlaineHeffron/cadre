@@ -52,6 +52,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // A row is its status, title and one checkbox; Start loop lives on the session itself.
   assert.equal(await rows.getByRole('button', { name: 'Start loop' }).count(), 0);
   assert.equal(await rows.first().locator('.status-badge').textContent(), '▶Working');
+  // Calm states are tinted text, not a solid fill; checkboxes are an 18px target.
+  assert.equal(await rows.first().locator('.status-badge').evaluate((el) => getComputedStyle(el).color), 'rgb(79, 195, 247)');
+  assert.equal(Math.round((await rows.first().getByRole('checkbox').boundingBox()).width), 18);
 
   const toolbar = page.locator('.agents-desktop-toolbar');
   // Buttons, the search box and the provider select share one control height.
@@ -94,7 +97,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.deepEqual(boxes.map((b) => b.clipped), [false, false, false], 'long answers wrap instead of truncating');
   assert.equal(await answers.nth(2).innerText(), 'No, and tell Claude what to do differently (esc)');
   // The terminal no longer repeats the menu the bar is showing.
-  await page.locator('.terminal').getByText('(choices shown below)').waitFor();
+  await page.locator('.terminal').getByText('pane text').waitFor();
   assert.doesNotMatch(await page.locator('.terminal').innerText(), /Do you want to proceed|2\. Yes/);
   assert.equal(await page.locator('.control-row-compose [data-placeholder]').getAttribute('data-placeholder'), 'Message the agent...', 'one composer placeholder whatever the state');
   // While answers are offered they are the only primary actions; Cycle mode and Interrupt step aside.

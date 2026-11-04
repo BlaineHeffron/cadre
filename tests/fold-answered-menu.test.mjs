@@ -15,10 +15,9 @@ const pane = [
   ' Esc to cancel',
 ].join('\n');
 
-test('an approval shown in the control bar folds out of the terminal once', () => {
+test('an approval shown in the control bar is removed from the terminal', () => {
   assert.deepEqual(foldAnsweredMenu(pane, approval).split('\n'), [
     '● Bash(npm run migrate)',
-    '\x1b[2m(choices shown below)\x1b[0m',
     '',
     ' Esc to cancel',
   ]);
