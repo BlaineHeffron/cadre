@@ -233,8 +233,9 @@ try {
     await page.getByRole('button', { name: 'New', exact: true }).first().click();
     await catalog;
     await page.waitForLoadState('networkidle');
-    // Advanced auto-opens on an MCP warning, racing the form reset; pin it closed.
-    await page.locator('form details').first().evaluate((details) => { details.open = false; });
+    // Advanced opens on an MCP warning that can land before or after the form reset.
+    // Nothing closes it later, so pinning it open is stable.
+    await page.locator('form details').first().evaluate((details) => { details.open = true; });
   });
   await shoot(desktop, origin, '/settings', out('06-settings.png'));
   await shoot(await newPage(browser, origin, [], DESKTOP), origin, '/agents', out('07-empty.png'));
