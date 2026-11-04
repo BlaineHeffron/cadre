@@ -627,15 +627,17 @@ textarea.input:focus {
   opacity: 1;
 }
 
+/* Focus is a border, not an outline: the scroll box clips its children to the padding box, so
+   the top fade can never paint over the ring. A thin quiet line (about 3.9:1 on the transcript),
+   since the pane is focused most of the time. */
 .terminal-interactive {
   cursor: text;
+  border: 1px solid transparent;
 }
 
-/* Focus stays visible but quiet: a thin line (about 3.6:1 on the transcript, above the 3:1 minimum),
-   since the pane is focused most of the time. */
 .terminal-interactive:focus {
-  outline: 1px solid rgba(79, 195, 247, 0.6);
-  outline-offset: -1px;
+  outline: none;
+  border-color: rgba(79, 195, 247, 0.6);
 }
 
 body:has(.tmux-pane-page) {
