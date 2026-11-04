@@ -769,7 +769,8 @@ export class GithubAgentPoller {
           await this.repoStore.updateWatch(repo.id, watch.number);
           continue;
         }
-        const url = `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${watch.number}`;
+        const repoUrl = `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}`;
+        const url = `${repoUrl}/pulls/${watch.number}`;
         const options = { token: resolveGithubAuthToken(repo, this.config.env || process.env), timeoutMs: this.timeoutMs };
         const pr = await fetchGithubJson(this.fetchImpl, url, options);
         const reviews = await fetchGithubList(this.fetchImpl, `${url}/reviews?per_page=100&page=${watch.reviewPage || 1}`, options);
@@ -787,9 +788,14 @@ export class GithubAgentPoller {
           await notify(pr.merged ? `merged (${String(pr.merge_commit_sha || pr.head?.sha || '').slice(0, 7)})` : 'closed without merge');
           await this.repoStore.updateWatch(repo.id, watch.number);
         } else {
+          // Actions report check runs, not commit statuses, so the combined status stays pending; derive the head's state from the runs.
+          const runs = pr.head?.sha ? (await fetchGithubJson(this.fetchImpl, `${repoUrl}/commits/${pr.head.sha}/check-runs?per_page=100`, options))?.check_runs || [] : [];
+          const ci = !runs.length ? null : runs.some((run) => run.status !== 'completed') ? 'pending'
+            : runs.every((run) => run.conclusion === 'success') ? 'success' : 'failure';
           if (pr.mergeable_state === 'dirty' && watch.mergeableState !== 'dirty') await notify('has merge conflict');
+          if (ci && ci !== 'pending' && watch.ciState === `${pr.head.sha}:pending`) await notify(`checks ${ci} on ${pr.head.sha.slice(0, 7)}`);
           if (repo.prEnabled && TRUSTED_AUTHOR_ASSOCIATIONS.has(pr.author_association) && watch.headSha && pr.head?.sha && pr.head.sha !== watch.headSha) moved.push({ ...normalizeGithubItem(pr), headSha: pr.head.sha });
-          await this.repoStore.updateWatch(repo.id, watch.number, { mergeableState: pr.mergeable_state, headSha: watch.headSha || pr.head?.sha });
+          await this.repoStore.updateWatch(repo.id, watch.number, { mergeableState: pr.mergeable_state, headSha: watch.headSha || pr.head?.sha, ciState: ci && `${pr.head.sha}:${ci}` });
         }
       } catch (error) {
         this.log?.warn?.({ repoId: repo.id, number: watch.number, code: sanitizedError(error) }, 'PR watch poll failed');
