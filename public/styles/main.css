@@ -597,7 +597,6 @@ textarea.input:focus {
 }
 
 /* Rows scrolled past the top fade out instead of showing a half-cut line. */
-
 .terminal-fullheight::before {
   content: '';
   position: sticky;

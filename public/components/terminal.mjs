@@ -36,6 +36,12 @@ function linkifyHtml(text = '') {
   );
 }
 
+// Earlier output was added when what used to be the first line now sits further down.
+function addsEarlierOutput(before, after) {
+  const anchor = String(before || '').split('\n').find((line) => line.trim());
+  return Boolean(anchor) && typeof after === 'string' && !after.startsWith(anchor) && after.includes(`\n${anchor}`);
+}
+
 export function Terminal({
   content,
   maxHeight = '500px',
@@ -53,6 +59,7 @@ export function Terminal({
   const userScrollIntent = useRef(false);
   const suppressLoadMoreUntil = useRef(0);
   const pendingPrepend = useRef(false);
+  const previousContent = useRef(content);
   const previousResetKey = useRef(resetKey);
   const scrollSnapshot = useRef({
     scrollTop: 0,
@@ -111,6 +118,8 @@ export function Terminal({
     const snapshot = scrollSnapshot.current;
     const resetChanged = previousResetKey.current !== resetKey;
     previousResetKey.current = resetKey;
+    const before = previousContent.current;
+    previousContent.current = content;
 
     if (resetChanged) {
       pendingPrepend.current = false;
@@ -118,21 +127,23 @@ export function Terminal({
       return scrollToBottomWithRetries();
     }
 
-    // A requested load of earlier output keeps the reader's rows in place, even when the
-    // whole history fit and the view counted as "at the bottom".
-    if (snapshot.atBottom && !pendingPrepend.current) {
+    // A tap's load lands on the render that puts earlier output above what was showing; it then
+    // shows what it loaded, with the join mid-view. Live output arriving first is handled as usual.
+    if (pendingPrepend.current === 'tap' && addsEarlierOutput(before, content)) {
+      pendingPrepend.current = false;
+      setScrollTop(el, Math.max(0, el.scrollHeight - snapshot.scrollHeight - el.clientHeight / 2));
+      return undefined;
+    }
+
+    if (snapshot.atBottom && pendingPrepend.current !== true) {
       return scrollToBottomWithRetries();
     }
 
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     suppressLoadMoreUntil.current = now + 250;
-    if (pendingPrepend.current) {
-      const added = el.scrollHeight - snapshot.scrollHeight;
-      // A scroll-triggered load keeps the reader's rows in place; a tap shows what it loaded,
-      // with the join between earlier and current output mid-view.
-      setScrollTop(el, pendingPrepend.current === 'tap'
-        ? Math.max(0, added - el.clientHeight / 2)
-        : snapshot.scrollTop + added);
+    if (pendingPrepend.current === true) {
+      // A scroll-triggered load keeps the reader's rows in place.
+      setScrollTop(el, snapshot.scrollTop + (el.scrollHeight - snapshot.scrollHeight));
       pendingPrepend.current = false;
     } else {
       // New output is appended below the viewport. Keep the same visible rows;

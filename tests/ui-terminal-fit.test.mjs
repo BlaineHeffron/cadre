@@ -70,9 +70,16 @@ test('full-height terminal fits a short history and keeps streaming output pinne
   // earlier and current output lands mid-view instead of the view jumping to the bottom.
   const current = Array.from({ length: 20 }, (_, i) => `now ${i}`).join('\n');
   await page.evaluate((text) => window.show(text, true), current);
-  await page.evaluate(([earlier, text]) => { window.onLoad = () => window.show(`${earlier}\n${text}`); }, [lines(100), current]);
   await terminal.getByText('Load earlier output').click();
   assert.equal(await page.evaluate(() => window.loads), 1);
+  // Live output lands before the history response: the reader stays pinned to the newest line.
+  const live = `${current}\n${Array.from({ length: 10 }, (_, i) => `live ${i}`).join('\n')}`;
+  await page.evaluate((text) => window.show(text, true), live);
+  await terminal.getByText('live 9').waitFor({ state: 'attached' });
+  await page.waitForTimeout(150);
+  assert.equal(await pinned(), true, 'live output before the load keeps the view on the newest line');
+  // Then the earlier history arrives and the view shows it.
+  await page.evaluate(([earlier, text]) => window.show(`${earlier}\n${text}`, true), [lines(100), live]);
   await terminal.getByText('line 99').waitFor({ state: 'attached' });
   await page.waitForTimeout(150);
   const join = await terminal.evaluate((el) => {
