@@ -177,6 +177,8 @@ export function Terminal({
     const el = ref.current;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const snapshot = rememberScrollPosition(el);
+    // The top fade only covers rows that have actually scrolled out of view.
+    el.classList.toggle('terminal-scrolled', el.scrollTop > 0);
     if (snapshot.atBottom) {
       userScrollIntent.current = false;
     }

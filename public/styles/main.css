@@ -582,6 +582,11 @@ textarea.input:focus {
   margin: -8px -8px -20px;
   background: linear-gradient(var(--bg-input) 40%, transparent);
   pointer-events: none;
+  opacity: 0;
+}
+
+.terminal-scrolled::before {
+  opacity: 1;
 }
 
 .terminal-interactive {

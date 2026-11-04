@@ -37,9 +37,12 @@ test('full-height terminal fits a short history and keeps streaming output pinne
   const [pane, body, controls] = await Promise.all([terminal, page.locator('.terminal-body'), page.locator('#controls')].map((l) => l.boundingBox()));
   assert.ok(body.y - pane.y < 24, `short history starts ${body.y - pane.y}px below the pane top`);
   assert.ok(controls.y - (body.y + body.height) < 24, `controls sit ${controls.y - (body.y + body.height)}px below the last line`);
+  // Nothing has scrolled, so the top fade is hidden and the first line reads at full strength.
+  const fade = () => terminal.evaluate((el) => getComputedStyle(el, '::before').opacity);
+  assert.equal(await fade(), '0');
 
   const pinned = () => terminal.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop < 2);
-  const lines = (n, from = 0) => Array.from({ length: n }, (_, i) => `line ${from + i}`).join('\n');
+  const lines = (n) => Array.from({ length: n }, (_, i) => `line ${i}`).join('\n');
   await page.evaluate((text) => window.show(text), lines(200));
   await terminal.getByText('line 199').waitFor();
   assert.equal(Math.round((await terminal.boundingBox()).height), 520, 'a long history fills the space above the controls');
@@ -51,5 +54,16 @@ test('full-height terminal fits a short history and keeps streaming output pinne
     await page.waitForTimeout(150);
     assert.equal(await pinned(), true, `pinned after growing to ${total} lines`);
   }
+  assert.equal(await fade(), '1', 'rows scrolled past the top fade');
+  // Once the reader scrolls up, new output no longer drags the view down.
+  await terminal.hover();
+  await page.mouse.wheel(0, -2000);
+  await page.waitForFunction(() => { const el = document.querySelector('.terminal'); return el.scrollHeight - el.clientHeight - el.scrollTop > 200; });
+  const readingAt = await terminal.evaluate((el) => el.scrollTop);
+  await page.evaluate((text) => window.show(text), lines(300));
+  await terminal.getByText('line 299').waitFor({ state: 'attached' });
+  await page.waitForTimeout(150);
+  assert.equal(await pinned(), false, 'not pulled to the bottom while reading history');
+  assert.equal(await terminal.evaluate((el) => el.scrollTop), readingAt, 'view stays where the reader left it');
   assert.deepEqual(errors, []);
 });
