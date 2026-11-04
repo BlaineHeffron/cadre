@@ -47,7 +47,8 @@ export function optionClass(option, index) {
 
 // A picked skill, quick insert or delay closes the tools menu; "Custom" stays open for its fields.
 function closeAfterPick(event) {
-  if (event.target.tagName === 'SELECT' && event.target.value !== 'custom') event.currentTarget.open = false;
+  // Custom delay keeps the menu open so the amount and unit can be set together.
+  if (event.target.tagName === 'SELECT' && event.target.value !== 'custom' && event.target.ariaLabel !== 'Delay unit') event.currentTarget.open = false;
 }
 
 export function AgentControlBar({
@@ -234,7 +235,7 @@ export function AgentControlBar({
               <input
                 type="number"
                 class="ctrl-input"
-                style="flex:0 1 76px; min-width:64px"
+                aria-label="Delay amount"
                 min="0"
                 step="any"
                 inputmode="decimal"
