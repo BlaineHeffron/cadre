@@ -1156,6 +1156,7 @@ body:has(.tmux-pane-page) {
   width: 100%;
   vertical-align: middle;
   border-top: 1px solid currentColor;
+  font-size: 0;
 }
 .ansi-italic { font-style: italic; }
 .ansi-underline { text-decoration: underline; }

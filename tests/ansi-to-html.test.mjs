@@ -31,9 +31,10 @@ test('named and inline colours combine, and reset clears both', () => {
 
 test('a line of only box-drawing dashes becomes a full-width rule in its colour', () => {
   const dashes = '─'.repeat(110);
-  assert.equal(ansiToHtml(`\x1b[38;5;244m${dashes}\x1b[0m\n❯ `), '<span style="color:rgb(152,152,152)"><span class="ansi-rule"></span></span>\n❯ ');
-  assert.equal(ansiToHtml(`above\n${dashes}\nbelow`), 'above\n<span class="ansi-rule"></span>\nbelow');
-  // Short runs and dashes inside a line of text stay text.
+  assert.equal(ansiToHtml(`\x1b[38;5;244m${dashes}\x1b[0m\n❯ `), `<span style="color:rgb(152,152,152)"><span class="ansi-rule">${dashes}</span></span>\n❯ `);
+  assert.equal(ansiToHtml(`above\n${dashes}\nbelow`), `above\n<span class="ansi-rule">${dashes}</span>\nbelow`);
+  // Short runs and dashes after text on the same line stay text, coloured or not.
   assert.equal(ansiToHtml('──── title ────'), '──── title ────');
   assert.equal(ansiToHtml(`x ${dashes}`), `x ${dashes}`);
+  assert.equal(ansiToHtml(`x \x1b[90m${'─'.repeat(30)}`), `x <span class="ansi-fg-bright-black">${'─'.repeat(30)}</span>`);
 });

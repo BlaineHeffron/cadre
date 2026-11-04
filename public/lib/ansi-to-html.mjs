@@ -25,6 +25,10 @@ function esc(str) {
  */
 export function ansiToHtml(text) {
   if (!text) return '';
+  // A whole line of only box-drawing dashes (colour codes aside) is the CLI's divider at its own
+  // column count. Its dashes are marked here and drawn as a full-width rule in their colour, so
+  // it never stops short of the pane edge; the dashes stay in the DOM for copying.
+  text = text.replace(/^((?:\x1b\[[0-9;]*m)*)(─{20,})((?:\x1b\[[0-9;]*m)*)$/gm, '$1\uE000$2\uE001$3');
 
   const parts = [];
   let current = { bold: false, dim: false, italic: false, underline: false, strike: false, fg: null, bg: null };
@@ -42,9 +46,7 @@ export function ansiToHtml(text) {
       .map(([prop, value]) => `${prop}:${prop === 'color' ? liftGrey(value) : `color-mix(in srgb,${value} 60%,transparent)`}`)
       .join(';');
     const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;
-    // A line of only box-drawing dashes is the CLI's divider at its own column count; it draws
-    // as a full-width rule in its colour, so it never stops short of the pane edge.
-    const html = esc(buf).replace(/^─{20,}$/gm, '<span class="ansi-rule"></span>');
+    const html = esc(buf).replace(/\uE000(─+)\uE001/g, '<span class="ansi-rule">$1</span>');
     parts.push(attrs ? `<span${attrs}>${html}</span>` : html);
     buf = '';
   }
