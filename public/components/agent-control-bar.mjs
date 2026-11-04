@@ -83,6 +83,8 @@ export function AgentControlBar({
   const interactionOptions = canAnswerInteraction && Array.isArray(state?.interaction?.options)
     ? state.interaction.options
     : [];
+  // While the bar offers answers, they are the only primary actions; No covers Escape.
+  const answering = sessionStatus === 'blocked' && interactionOptions.length > 0;
 
   function selectedScheduleDelay() {
     if (selectedDelay.value !== 'custom') return Number(selectedDelay.value) || 0;
@@ -184,14 +186,16 @@ export function AgentControlBar({
       ` : null}
 
       <div class="control-row control-row-tools">
-        ${descriptor.hasShiftTab ? html`
-          <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleApprove} title="Send Shift+Tab (cycle permission mode)">
-            Cycle mode
+        ${answering ? null : html`
+          ${descriptor.hasShiftTab ? html`
+            <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleApprove} title="Send Shift+Tab (cycle permission mode)">
+              Cycle mode
+            </button>
+          ` : null}
+          <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleReject} title="Send Escape (interrupt)">
+            Interrupt
           </button>
-        ` : null}
-        <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleReject} title="Send Escape (interrupt)">
-          Interrupt
-        </button>
+        `}
         <details class="more-menu composer-more" onClickCapture=${closeMenuOnChoice} onChange=${closeAfterPick}>
           <summary class="ctrl-btn ctrl-default ctrl-btn-compact" aria-label="More composer tools">
             More${selectedDelay.value ? ' · delayed' : ''}${imageAttached ? ' · image' : ''}
