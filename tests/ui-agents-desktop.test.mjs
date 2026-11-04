@@ -108,6 +108,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await answers.nth(2).innerText(), 'No, and tell Claude what to do differently (esc)');
   // The terminal no longer repeats the menu the bar is showing.
   await page.locator('.terminal').getByText('pane text').waitFor();
+  // The pending command runs straight into its question; raw terminal keys sit below the composer.
+  const [term, question, keys, compose] = await Promise.all(['.terminal', '.approval-prompt-title', '.terminal-keys', '.control-row-compose'].map((sel) => page.locator(sel).first().boundingBox()));
+  assert.ok(question.y - (term.y + term.height) < 16 && keys.y > compose.y, `question ${question.y - (term.y + term.height)}px below the terminal; keys at ${keys.y}, composer at ${compose.y}`);
   assert.doesNotMatch(await page.locator('.terminal').innerText(), /Do you want to proceed|2\. Yes/);
   assert.equal(await page.locator('.control-row-compose [data-placeholder]').getAttribute('data-placeholder'), 'Message the agent...', 'one composer placeholder whatever the state');
   // While answers are offered they are the only primary actions; Cycle mode and Interrupt step aside.
@@ -144,6 +147,13 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.ok(box.y >= 0 && box.y + box.height <= 900, `Create Session at y=${box.y}`);
   // Page titles share one style across pages.
   assert.equal(await page.locator('h1').first().evaluate((el) => getComputedStyle(el).fontSize), '18px');
+  // On a phone the keys stay above the sticky, safe-area-padded control bar.
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  await phone.goto(`${origin}/session`);
+  await phone.locator('.terminal-keys').waitFor();
+  const [phoneKeys, phoneBar] = await Promise.all(['.terminal-keys', '.claude-control-bar'].map((sel) => phone.locator(sel).boundingBox()));
+  assert.ok(phoneKeys.y + phoneKeys.height <= phoneBar.y + 1, `phone keys end at ${phoneKeys.y + phoneKeys.height}, bar starts at ${phoneBar.y}`);
+  await phone.close();
   // A single session reads at a comfortable width on a wide screen, centred.
   await page.goto(`${origin}/session`);
   const single = page.locator('.claude-session-page');
