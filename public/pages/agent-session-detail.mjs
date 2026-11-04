@@ -703,7 +703,6 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         onLoadMore: loadMoreHistory,
         resetKey: id,
       }),
-    !isRustManagedReadOnly ? h(TerminalKeys, { onKey: sendTerminalKey }) : null,
     isRustManagedReadOnly
       ? h('div', { class: 'claude-control-bar', style: 'border-top:1px solid rgba(255,255,255,0.08); color:var(--text-muted); font-size:var(--fs-xs)' }, 'Rust-managed session. View only from Cadre.')
       : null,
@@ -729,5 +728,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
       imageNote: `Attached. This compatibility transport will visibly disclose that it wrote a safe workspace reference for ${descriptor.label}.`,
       inputText,
     }) : null,
+    // Raw keys sit below the composer, so the pending command runs straight into its answers.
+    !isRustManagedReadOnly ? h(TerminalKeys, { onKey: sendTerminalKey }) : null,
   );
 }

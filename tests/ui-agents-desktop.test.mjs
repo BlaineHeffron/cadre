@@ -105,6 +105,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await answers.nth(2).innerText(), 'No, and tell Claude what to do differently (esc)');
   // The terminal no longer repeats the menu the bar is showing.
   await page.locator('.terminal').getByText('pane text').waitFor();
+  // The pending command runs straight into its question; raw terminal keys sit below the composer.
+  const [term, question, keys, compose] = await Promise.all(['.terminal', '.approval-prompt-title', '.terminal-keys', '.control-row-compose'].map((sel) => page.locator(sel).first().boundingBox()));
+  assert.ok(question.y - (term.y + term.height) < 16 && keys.y > compose.y, `question ${question.y - (term.y + term.height)}px below the terminal; keys at ${keys.y}, composer at ${compose.y}`);
   assert.doesNotMatch(await page.locator('.terminal').innerText(), /Do you want to proceed|2\. Yes/);
   assert.equal(await page.locator('.control-row-compose [data-placeholder]').getAttribute('data-placeholder'), 'Message the agent...', 'one composer placeholder whatever the state');
   // While answers are offered they are the only primary actions; Cycle mode and Interrupt step aside.
