@@ -118,8 +118,19 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   assert.equal(await dialog.isVisible(), true);
   await prompt.fill('draft');
   await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
   await page.mouse.click(10, 20);
-  assert.equal(await dialog.isVisible(), true, 'a typed prompt survives Escape and a backdrop click');
+  assert.equal(await dialog.isVisible(), true, 'a typed prompt survives repeated Escape and a backdrop click');
+  // Escape first closes an open folder picker, then still keeps the draft.
+  await page.getByRole('button', { name: 'Browse', exact: true }).click();
+  await page.locator('.new-agent-folder-picker').waitFor();
+  await prompt.focus();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.new-agent-folder-picker').count(), 0, 'Escape closes the folder picker first');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  assert.equal(await dialog.isVisible(), true, 'the draft survives picker, Escape, Escape');
+  assert.equal(await prompt.innerText(), 'draft');
   await prompt.fill('');
   await page.mouse.click(10, 20);
   assert.equal(await dialog.count(), 0, 'an empty form closes from the backdrop');

@@ -826,8 +826,11 @@ export function AgentsPage() {
           ref=${newDialog}
           class="new-agent-dialog"
           aria-labelledby="new-agent-title"
-          onCancel=${e => {
+          onKeyDown=${e => {
             // Escape steps back out of the folder picker first, and never discards a typed prompt.
+            // Blocking it here, before the dialog's cancel event, matters: Chromium closes on a
+            // repeated Escape even when cancel is prevented.
+            if (e.key !== 'Escape') return;
             if (showFolderPicker.value) { e.preventDefault(); showFolderPicker.value = false; return; }
             if (newPrompt.value.trim()) e.preventDefault();
           }}
