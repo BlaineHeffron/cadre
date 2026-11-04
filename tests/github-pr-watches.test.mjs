@@ -16,6 +16,7 @@ async function setup(t) {
   const calls = [];
   let pr = { state: 'open', merged: false, mergeable_state: 'clean', head: { sha: 'abcdef123' } };
   let reviews = [];
+  let checks = { total_count: 0, check_runs: [] };
   const h = await createAgentBusHarness({ pollMs: 60000, beforeReady: async (app, dir) => {
     const { buildGithubAgentRepoStore } = await import('../modules/integrations/github-agents.mjs');
     const { githubAgentsPlugin } = await import('../modules/integrations/github-agents-plugin.mjs');
@@ -39,12 +40,13 @@ async function setup(t) {
   poller.now = () => now;
   poller.fetchImpl = async (url) => {
     calls.push(url);
-    return new Response(JSON.stringify(new URL(url).pathname.endsWith('/reviews') ? reviews : pr), { status: 200 });
+    const path = new URL(url).pathname;
+    return new Response(JSON.stringify(path.endsWith('/reviews') ? reviews : path.endsWith('/check-runs') ? checks : pr), { status: 200 });
   };
   const thread = await h.store.createThread({ title: 'PR room', participants, createdBy: creator });
   const watch = (number = 1, thread_id = thread.id) => call('watch_pr', { repo: 'octo/demo', number, ...(thread_id ? { thread_id } : {}) });
   return { h, store, call, requestImpl, poller, thread, watch, calls, commands,
-    setPr: (patch) => { pr = { ...pr, ...patch }; }, setReviews: (value) => { reviews = value; }, advance: (ms) => { now += ms; } };
+    setPr: (patch) => { pr = { ...pr, ...patch }; }, setReviews: (value) => { reviews = value; }, setChecks: (value) => { checks = value; }, advance: (ms) => { now += ms; } };
 }
 
 test('authenticated MCP/REST create, persist, update and remove watches', async (t) => {
@@ -195,7 +197,7 @@ test('reviews and conflicts notify once, re-arm, ignore comments, and follow roo
   await s.watch();
   await s.poller.pollOnce();
   assert.equal(s.commands.length, 0);
-  assert.equal(s.calls.length, 2);
+  assert.equal(s.calls.length, 3);
   s.setPr({ comments: 4, mergeable_state: 'dirty' });
   s.setReviews([{ id: 11, user: { login: 'reviewer' }, state: 'CHANGES_REQUESTED', body: 'intro\nVERDICT: BLOCKING 6 | NON-BLOCKING 1\n' + Array.from({ length: 7 }, (_, n) => `- [B] finding ${n}`).join('\n') }]);
   await s.poller.pollOnce();
@@ -217,6 +219,35 @@ test('reviews and conflicts notify once, re-arm, ignore comments, and follow roo
   s.setPr({ comments: 9 });
   await s.poller.pollOnce();
   assert.equal(s.commands.length, 4);
+});
+
+// Check-run payload shape recorded from GitHub for an Actions-only repo (the combined status endpoint reports pending with zero statuses there).
+const checkRuns = (sha, ...runs) => ({ total_count: runs.length, check_runs: runs.map(([status, conclusion]) => ({ name: 'check-and-test', head_sha: sha, status, conclusion })) });
+
+test('head check state notifies once on pending to success or failure, never on an unchanged state', async (t) => {
+  const s = await setup(t);
+  await s.watch();
+  const texts = () => s.commands.map((item) => item.text);
+  s.setChecks(checkRuns('abcdef123', ['in_progress', null]));
+  await s.poller.pollOnce();
+  await s.poller.pollOnce();
+  assert.deepEqual(texts(), []);
+  s.setChecks(checkRuns('abcdef123', ['completed', 'success'], ['completed', 'success']));
+  await s.poller.pollOnce();
+  await s.poller.pollOnce();
+  assert.deepEqual(texts(), ['[PR_WATCH] PR octo/demo#1 checks success on abcdef1']);
+  s.setPr({ head: { sha: 'bbb222' } });
+  s.setChecks(checkRuns('bbb222', ['completed', 'failure']));
+  await s.poller.pollOnce();
+  assert.equal(texts().length, 1);
+  s.setPr({ head: { sha: 'ccc333' } });
+  s.setChecks(checkRuns('ccc333', ['queued', null], ['completed', 'success']));
+  await s.poller.pollOnce();
+  s.setChecks(checkRuns('ccc333', ['completed', 'failure'], ['completed', 'success']));
+  await s.poller.pollOnce();
+  await s.poller.pollOnce();
+  assert.deepEqual(texts().slice(1), ['[PR_WATCH] PR octo/demo#1 checks failure on ccc333']);
+  assert.ok(s.calls.includes('https://api.github.com/repos/octo/demo/commits/ccc333/check-runs?per_page=100'));
 });
 
 test('merge notifies the room owner, leaves the room open and removes the watch', async (t) => {
@@ -323,7 +354,7 @@ test('reviews advance one page per tick so reviews beyond the first 100 are seen
   await s.poller.pollOnce();
   assert.equal(s.commands.length, 101);
   assert.match(s.commands[100].text, /Review 101$/);
-  assert.equal(s.calls.length, 6);
+  assert.equal(s.calls.length, 9);
 });
 
 
