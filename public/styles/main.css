@@ -1164,8 +1164,10 @@ body:has(.tmux-pane-page) {
   white-space: nowrap;
 }
 
+/* A full-width grid row, so cards side by side stay aligned. */
 .agents-card-provider {
-  margin-bottom: 6px;
+  grid-column: 1 / -1;
+  margin-bottom: -6px;
   color: var(--text-secondary);
   font-size: var(--fs-xs);
   font-weight: 600;
