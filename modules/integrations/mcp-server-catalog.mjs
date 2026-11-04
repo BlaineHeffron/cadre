@@ -509,6 +509,12 @@ const BUILTIN_PROFILES = Object.freeze({
     description: 'Cadre control-plane tools only.',
     serverIds: ['dueno'],
   }),
+  'dueno-full': profile({
+    id: 'dueno-full',
+    label: 'Cadre (all tools)',
+    description: 'Cadre control-plane tools, including monitor, cloud and audio tools that spawned agents do not get by default.',
+    serverIds: ['dueno'],
+  }),
   research: profile({
     id: 'research',
     label: 'Research',

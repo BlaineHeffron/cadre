@@ -53,6 +53,8 @@ import { resolveMcpCapabilities } from '../integrations/mcp-capability-resolver.
 import { buildMcpCapabilityCatalog } from '../integrations/mcp-server-catalog.mjs';
 import {
   cleanupMcpCapabilityLaunch,
+  launchMcpToolScope,
+  mcpToolScopesFor,
   prepareMcpCapabilityLaunch,
   preIssuedCredentialStore,
   sanitizedMcpSnapshot,
@@ -1072,7 +1074,7 @@ async function launchTmuxSession({ sessionName, workDir = '', sessionBinary = ''
   await verifyLaunchedSession(sessionName, launchLogPath, Math.max(Number(config.launchVerifyMs || 0), sandboxed ? 1000 : 0));
 }
 
-async function createSession({ sessionId, initialPrompt = '', workDir, args, model = '', provider = config.id, runtime = '', thinkingLevel = '', source = 'external', displayName = '', autoCloseMode = 'never', autoCloseAfterMs = 0, metadata = {}, coordinatorPolicy = null, loopRegistrationPolicy = null, mcpProfile, mcpServers, mcpCredentialProfile = 'agent', codexPlugins, promptProfile, skills, sandbox, githubToken = '', busCredential = null, duenoUrl = '' } = {}) {
+async function createSession({ sessionId, initialPrompt = '', workDir, args, model = '', provider = config.id, runtime = '', thinkingLevel = '', source = 'external', displayName = '', autoCloseMode = 'never', autoCloseAfterMs = 0, metadata = {}, coordinatorPolicy = null, loopRegistrationPolicy = null, mcpProfile, mcpServers, mcpCredentialProfile = 'agent', codexPlugins, promptProfile, skills, sandbox, githubToken = '', busCredential = null, duenoUrl = '', mcpToolScope = launchMcpToolScope({ promptProfile, mcpProfile, coordinatorPolicy }) } = {}) {
   const storeOptions = credentialStoreOptions(busCredential);
   const sessionRuntime = config.normalizeRuntime(provider, runtime);
   const sandboxMode = resolveSandbox(sandbox);
@@ -1126,6 +1128,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     coordinatorPolicy,
     loopRegistrationPolicy,
     credentialProfile: mcpCredentialProfile,
+    toolScopes: mcpCredentialProfile === 'agent' ? mcpToolScopesFor(mcpToolScope) : undefined,
     duenoUrl,
     ...storeOptions,
   });
@@ -1216,6 +1219,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     metadata: metadata && typeof metadata === 'object' ? { ...metadata } : {},
     mcpCapabilities: sanitizedMcpSnapshot(resolvedMcp, mcpPreparation.preflight),
     mcpCredentialProfile,
+    ...(mcpToolScope === 'bus' ? { mcpToolScope } : {}),
     ...(selectedCodexPlugins ? { codexPlugins: selectedCodexPlugins } : {}),
     promptProfile: sanitizedPromptSnapshot(promptPreparation.resolved),
     skills: selectedSkills,
@@ -1392,6 +1396,7 @@ async function resumeSession(id, { loopRegistrationPolicy = null, busCredential 
     coordinatorPolicy: storedCoordinatorPolicy(refreshed.metadata),
     loopRegistrationPolicy,
     credentialProfile: refreshed.mcpCredentialProfile || 'agent',
+    toolScopes: (refreshed.mcpCredentialProfile || 'agent') === 'agent' ? mcpToolScopesFor(refreshed.mcpToolScope) : undefined,
     rotation: true,
     duenoUrl,
     ...credentialStoreOptions(busCredential),
@@ -2673,6 +2678,7 @@ async function sessionsPlugin(app, {
         promptProfile,
         skills,
         sandbox,
+        mcpToolScope: launchMcpToolScope({ auth: req.duenoAuth, promptProfile, mcpProfile, coordinatorPolicy: trust.coordinatorPolicy }),
       });
       const injection = { injected: Boolean(launchSourcePrompt) && !result.initialPromptError, error: result.initialPromptError || null,
         resolution: { ...skillDeliveryResolution(launchSourcePrompt, resolveHarnessUserText(launchSourcePrompt)), channel: 'launch' } };

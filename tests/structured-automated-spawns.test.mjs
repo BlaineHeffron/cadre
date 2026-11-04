@@ -154,7 +154,7 @@ async function buildApp({ agentBus = false, queue = false, sessionRoot = join(ro
   });
   // The real MCP tools, calling routes in process as an agent principal.
   const mcp = buildMonitorMcpServer({ requestImpl: buildInProcessFastifyRequest({ app, buildHeaders: () => ({}) }) });
-  return { app, ws, transports, request, mcp };
+  return { app, ws, transports, request, mcp, credentialStore };
 }
 
 describe('structured automated spawns', () => {
@@ -429,6 +429,37 @@ describe('structured automated spawns', () => {
     } finally {
       await app.close();
       delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('gives spawned agents only the agent-bus tools unless the operator, a coordinator profile or dueno-full launches them', async () => {
+    const scopes = (store, id) => Object.values(store.state.credentials)
+      .find((record) => record.status === 'active' && record.principal.sessionId === id)?.toolScopes || [];
+    const full = (store, id) => scopes(store, id).includes('*');
+    for (const structured of [true, false]) {
+      if (structured) process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+      else delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+      const { app, request, mcp, credentialStore } = await buildApp();
+      try {
+        // The tmux path needs a live dueno handshake, so its spawns attach no MCP server; scopes are issued regardless.
+        const spawn = async (args) => (await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, ...(structured ? {} : { mcpProfile: 'default' }), ...args })).participants[0].session_id;
+        const worker = await spawn({});
+        assert.equal(full(credentialStore, worker), false);
+        assert.ok(scopes(credentialStore, worker).includes('room_send') && !scopes(credentialStore, worker).includes('monitor_terminate_session'));
+        if (structured) assert.equal(full(credentialStore, await spawn({ mcpProfile: 'dueno-full' })), true);
+        assert.equal(full(credentialStore, await spawn({ promptProfile: 'coordinator' })), true);
+        const operator = (await request('POST', '/api/claude/sessions', { principal: 'ui', payload: { workDir } })).json().id;
+        assert.equal(full(credentialStore, operator), true);
+        if (!structured) {
+          // A resume re-issues the credential with the scope stored at launch.
+          const stored = JSON.parse(readFileSync(join(root, 'state', 'claude_sessions.json'), 'utf8'));
+          assert.equal(stored.find((entry) => entry.id === worker).mcpToolScope, 'bus');
+          assert.equal(stored.find((entry) => entry.id === operator).mcpToolScope, undefined);
+        }
+      } finally {
+        await app.close();
+        delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+      }
     }
   });
 

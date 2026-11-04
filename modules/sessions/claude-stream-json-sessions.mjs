@@ -11,6 +11,8 @@ import { buildCodexPluginConfigArgs } from '../agent/runtime-args.mjs';
 import { resolveMcpCapabilities } from '../integrations/mcp-capability-resolver.mjs';
 import {
   cleanupMcpCapabilityLaunch,
+  launchMcpToolScope,
+  mcpToolScopesFor,
   prepareMcpCapabilityLaunch,
   preIssuedCredentialStore,
   sanitizedMcpSnapshot,
@@ -144,12 +146,12 @@ export async function claudeStreamJsonSessionsPlugin(app, {
 
   // Scoped credential, MCP config, and launch args for one attempt. A resumed attempt reuses the
   // persisted MCP selection; the provider replays the system prompt it recorded at first launch.
-  async function prepareAttempt({ id, workDir, body = {}, generation = 1, resolvedMcp, permissionMode, codexPlugins, hub = null }) {
+  async function prepareAttempt({ id, workDir, body = {}, generation = 1, resolvedMcp, permissionMode, codexPlugins, hub = null, mcpToolScope = 'full' }) {
     // Validate plugins before issuing a credential; tmux's default plugin removals apply here too.
     const pluginArgs = claude ? [] : buildCodexPluginConfigArgs(codexPlugins ?? undefined);
     const mcpPreparation = await prepareMcpCapabilityLaunch({
       resolved: resolvedMcp, backendType: kind, sessionId: id, workDir,
-      sourceConfig, attemptGeneration: generation, rotation: generation > 1,
+      sourceConfig, attemptGeneration: generation, rotation: generation > 1, toolScopes: mcpToolScopesFor(mcpToolScope),
       serverAllowlist: resolvedMcp.serverIds,
       ...(claude ? { claudeConfigPath: claudeStreamJsonMcpConfigPath(sessionRoot, id, generation) } : {}),
       duenoCredentialEnvVar: CLAUDE_STREAM_JSON_MCP_TOKEN_ENV_VAR,
@@ -282,8 +284,12 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       if (!workDir) return reply.code(400).send({ error: `workDir is required for ${label} sessions` });
       // As on tmux, the spawner comes from the credential, and the observer returns its turns from the hook log.
       const hub = fromHub(req);
-      const metadata = hub ? stripReservedCoordinatorMetadata(req.body?.metadata)
-        : { ...req.body?.metadata, ...spawnerMetadata(req.duenoAuth?.principal, req.body?.metadata) };
+      const metadata = {
+        ...(hub ? stripReservedCoordinatorMetadata(req.body?.metadata)
+          : { ...req.body?.metadata, ...spawnerMetadata(req.duenoAuth?.principal, req.body?.metadata) }),
+        mcpToolScope: launchMcpToolScope({ auth: req.duenoAuth, promptProfile: req.body?.promptProfile,
+          mcpProfile: req.body?.mcpProfile, coordinatorPolicy: req.duenoAuth?.coordinatorPolicy }),
+      };
       // Resolve launch skills before starting so an unknown skill cannot orphan a process.
       const initialPrompt = composeLaunchUserPrompt({ skillIds: req.body?.skills,
         initialPrompt: metadata.spawnedBy && req.body?.initialPrompt ? `${req.body.initialPrompt}\n\n${SPAWN_RESULT_NOTE}` : req.body?.initialPrompt });
@@ -310,7 +316,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
       selectedMcpServerIds = resolvedMcp.serverIds;
       const thinkingLevel = text(req.body?.thinkingLevel);
       const codexPlugins = claude ? null : req.body?.codexPlugins;
-      const { preflight, ...launch } = await prepareAttempt({ id, workDir, body: req.body || {}, resolvedMcp, permissionMode, codexPlugins, hub });
+      const { preflight, ...launch } = await prepareAttempt({ id, workDir, body: req.body || {}, resolvedMcp, permissionMode, codexPlugins, hub, mcpToolScope: metadata.mcpToolScope });
       let session = await service.start({
         ...launch, metadata, sessionId: id, displayName: text(req.body?.displayName), workDir, model, thinkingLevel, codexPlugins, permissionMode,
         mcpCapabilities: sanitizedMcpSnapshot(resolvedMcp, preflight),
@@ -346,6 +352,7 @@ export async function claudeStreamJsonSessionsPlugin(app, {
           try {
             const { preflight: _preflight, ...launch } = await prepareAttempt({
               id: current.id, workDir: current.workDir, generation, resolvedMcp: { serverIds }, permissionMode: current.permissionMode, codexPlugins: current.codexPlugins, hub,
+              mcpToolScope: current.metadata?.mcpToolScope,
             });
             return launch;
           } catch (error) {

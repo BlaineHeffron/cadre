@@ -120,7 +120,7 @@ export async function meterStatic() {
   const { buildMonitorMcpServer } = await import('../modules/platform/monitor-mcp.mjs');
   const { buildInProcessAgentBusMcpServer } = await import('../modules/agent-bus/in-process-mcp.mjs');
   const { AGENT_BUS_AGENT_TOOL_SCOPES } = await import('../modules/agent-bus/mcp-auth.mjs');
-  const { FLEET_SUPERVISOR_MCP_TOOL_SCOPES } = await import('../modules/integrations/mcp-launch-preflight.mjs');
+  const { FLEET_SUPERVISOR_MCP_TOOL_SCOPES, launchMcpToolScope, mcpToolScopesFor } = await import('../modules/integrations/mcp-launch-preflight.mjs');
   const { renderCollabStartupPrompt } = await import('../modules/agent-bus/protocol.mjs');
   const { BUILTIN_PROFILES } = await import('../modules/integrations/prompt-profile-catalog.mjs');
   const { discoverLaunchSkills } = await import('../modules/integrations/launch-skills.mjs');
@@ -135,9 +135,11 @@ export async function meterStatic() {
     { jsonrpc: '2.0', id: 1, method: 'tools/list' },
     { authContext: { authenticated: true, toolScopes } },
   )).result.tools;
-  // Default agent credential is ['*', ...agent scopes] (mcp-launch-preflight credentialProfileDefaults).
+  // The full agent credential is ['*', ...agent scopes]; a spawn gets what launchMcpToolScope decides for an agent caller.
+  const fullAgentScopes = ['*', ...AGENT_BUS_AGENT_TOOL_SCOPES];
   const profiles = {
-    'agent (default)': await listTools(['*', ...AGENT_BUS_AGENT_TOOL_SCOPES]),
+    'spawned agent (default)': await listTools(mcpToolScopesFor(launchMcpToolScope({ auth: { principal: { type: 'agent' } } })) || fullAgentScopes),
+    'operator / coordinator': await listTools(fullAgentScopes),
     'fleet-supervisor': await listTools([...FLEET_SUPERVISOR_MCP_TOOL_SCOPES]),
     'agent-bus scopes only': await listTools([...AGENT_BUS_AGENT_TOOL_SCOPES]),
   };
@@ -146,7 +148,7 @@ export async function meterStatic() {
     nameTokens: tokens(tools.map((tool) => `${DUENO}${tool.name}`).join('\n')),
     schemaTokens: tokens(tools),
   }]));
-  const largestTools = profiles['agent (default)']
+  const largestTools = profiles['operator / coordinator']
     .map((tool) => ({ name: tool.name, tokens: tokens(tool) }))
     .sort((a, b) => b.tokens - a.tokens).slice(0, 10);
 

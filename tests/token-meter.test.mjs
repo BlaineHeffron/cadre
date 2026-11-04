@@ -39,9 +39,10 @@ test('meterTranscript attributes the startup prefix and carries coordination tra
 
 test('meterStatic lists the dueno tools each credential profile can discover', async () => {
   const result = await meterStatic();
-  const agent = result.mcp['agent (default)'];
+  const agent = result.mcp['operator / coordinator'];
   const busOnly = result.mcp['agent-bus scopes only'];
   assert.ok(agent.tools > busOnly.tools && busOnly.tools > 0);
+  assert.deepEqual(result.mcp['spawned agent (default)'], busOnly);
   assert.ok(agent.schemaTokens > agent.nameTokens * 10);
   assert.ok(result.largestTools.length === 10 && result.largestTools[0].tokens >= result.largestTools[9].tokens);
   assert.ok(result.collabWrapperTokens > 0 && result.launchSkills.count > 0);
