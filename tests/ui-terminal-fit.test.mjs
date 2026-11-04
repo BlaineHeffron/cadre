@@ -20,7 +20,7 @@ test('full-height terminal fits a short history and keeps streaming output pinne
     import { Terminal } from '/components/terminal.mjs';
     window.loads = 0;
     window.show = (content, hasMore = false) => render(h('div', { style: 'display:flex; flex-direction:column; height:600px' },
-      h(Terminal, { content, fullHeight: true, ansiColors: true, resetKey: 's1', hasMore, onLoadMore: () => { window.loads += 1; } }),
+      h(Terminal, { content, fullHeight: true, ansiColors: true, resetKey: 's1', hasMore, onLoadMore: () => { window.loads += 1; window.onLoad?.(); } }),
       h('div', { id: 'controls', style: 'height:80px; flex:none' }, 'controls')), document.getElementById('app'));
     window.show('❯ run the migration\\n● Bash(npm run migrate)\\n  Waiting…');
   </script>`)));
@@ -66,9 +66,28 @@ test('full-height terminal fits a short history and keeps streaming output pinne
   await page.waitForTimeout(150);
   assert.equal(await pinned(), false, 'not pulled to the bottom while reading history');
   assert.equal(await terminal.evaluate((el) => el.scrollTop), readingAt, 'view stays where the reader left it');
-  // Earlier history is one tap on a labelled pill at the top.
-  await page.evaluate(() => window.show('❯ short history', true));
+  // Earlier history is one tap on a labelled pill. A tap shows what it loaded: the join between
+  // earlier and current output lands mid-view instead of the view jumping to the bottom.
+  const current = Array.from({ length: 20 }, (_, i) => `now ${i}`).join('\n');
+  await page.evaluate((text) => window.show(text, true), current);
+  await page.evaluate(([earlier, text]) => { window.onLoad = () => window.show(`${earlier}\n${text}`); }, [lines(100), current]);
   await terminal.getByText('Load earlier output').click();
   assert.equal(await page.evaluate(() => window.loads), 1);
+  await terminal.getByText('line 99').waitFor({ state: 'attached' });
+  await page.waitForTimeout(150);
+  const join = await terminal.evaluate((el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const at = walker.currentNode.data.indexOf('now 0');
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(walker.currentNode, at);
+      range.setEnd(walker.currentNode, at + 5);
+      const box = el.getBoundingClientRect();
+      return (range.getBoundingClientRect().top - box.top) / box.height;
+    }
+    return null;
+  });
+  assert.ok(join > 0.3 && join < 0.7, `join sits at ${join} of the pane height`);
   assert.deepEqual(errors, []);
 });

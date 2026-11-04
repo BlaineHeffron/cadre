@@ -582,7 +582,6 @@ textarea.input:focus {
   line-height: 1.4;
 }
 
-/* Rows scrolled past the top fade out instead of showing a half-cut line. */
 .terminal-load-more {
   width: fit-content;
   margin: 2px auto 10px;
@@ -596,6 +595,8 @@ textarea.input:focus {
   cursor: pointer;
   user-select: none;
 }
+
+/* Rows scrolled past the top fade out instead of showing a half-cut line. */
 
 .terminal-fullheight::before {
   content: '';

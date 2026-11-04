@@ -118,15 +118,21 @@ export function Terminal({
       return scrollToBottomWithRetries();
     }
 
-    if (snapshot.atBottom) {
-      pendingPrepend.current = false;
+    // A requested load of earlier output keeps the reader's rows in place, even when the
+    // whole history fit and the view counted as "at the bottom".
+    if (snapshot.atBottom && !pendingPrepend.current) {
       return scrollToBottomWithRetries();
     }
 
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     suppressLoadMoreUntil.current = now + 250;
     if (pendingPrepend.current) {
-      setScrollTop(el, snapshot.scrollTop + (el.scrollHeight - snapshot.scrollHeight));
+      const added = el.scrollHeight - snapshot.scrollHeight;
+      // A scroll-triggered load keeps the reader's rows in place; a tap shows what it loaded,
+      // with the join between earlier and current output mid-view.
+      setScrollTop(el, pendingPrepend.current === 'tap'
+        ? Math.max(0, added - el.clientHeight / 2)
+        : snapshot.scrollTop + added);
       pendingPrepend.current = false;
     } else {
       // New output is appended below the viewport. Keep the same visible rows;
@@ -220,7 +226,7 @@ export function Terminal({
   }
 
   function loadMoreFromClick() {
-    pendingPrepend.current = true;
+    pendingPrepend.current = 'tap';
     rememberScrollPosition();
     onLoadMore?.();
   }
