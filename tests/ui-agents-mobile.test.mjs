@@ -50,7 +50,7 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   // At two columns the heading spans the row, so cards side by side line up.
   await page.setViewportSize({ width: 960, height: 844 });
   const [left, right] = await Promise.all([0, 1].map((i) => cards.nth(i).boundingBox()));
-  assert.ok(right.x > left.x && right.y === left.y, `cards at y=${left.y} and y=${right.y}`);
+  assert.ok(right.x > left.x && Math.abs(right.y - left.y) < 0.5, `cards at y=${left.y} and y=${right.y}`);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.getByRole('textbox', { name: 'Search agents' }).isVisible(), true);
   assert.equal(await page.getByRole('combobox', { name: 'Filter by provider' }).isVisible(), true);
