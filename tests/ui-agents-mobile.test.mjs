@@ -30,6 +30,7 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   // The built-in default profile selects no servers, so nothing has been removed and Advanced stays shut.
   const any = ['claude', 'codex', 'pi'];
   app.get('/api/agents/mcp-servers', () => ({ defaultProfileId: 'default', profiles: [{ id: 'default', serverIds: [] }, { id: 'cadre', serverIds: ['dueno'] }], servers: [{ id: 'dueno', providers: any, runtimes: any, availability: { state: 'configured' } }] }));
+  app.get('/api/agents/skills', () => ({ skills: [{ id: 'review', name: 'Review' }] }));
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
@@ -86,6 +87,9 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
 
   // The new-session form leads with the basics; name and coordinator wait under Advanced.
   await page.getByRole('button', { name: 'New', exact: true }).click();
+  // Phone touch targets stay 44px tall, including the inline skill picker.
+  const skillPicker = page.locator('.new-agent-prompt-tools .ctrl-inline-select');
+  assert.ok((await skillPicker.boundingBox()).height >= 44, 'skill picker keeps a 44px touch target');
   const fields = page.locator('.new-agent-setup-grid .new-agent-field');
   assert.deepEqual(await fields.locator('> span').allInnerTexts(), ['Provider', 'Model', 'Thinking level']);
   const [provider, model] = await Promise.all([0, 1].map((i) => fields.nth(i).boundingBox()));

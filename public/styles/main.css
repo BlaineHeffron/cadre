@@ -15,6 +15,8 @@
   --success: #66bb6a;
   --border: #2a2a3e;
   --radius: 8px;
+  /* One height for buttons, inputs and selects that sit side by side. */
+  --control-h: 36px;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --keyboard-inset: 0px;
@@ -454,13 +456,16 @@ html, body {
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 6px 14px;
+  min-height: var(--control-h);
+  padding: 0 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-secondary);
   color: var(--text-primary);
   font-size: var(--fs-sm);
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
   text-decoration: none;
@@ -475,6 +480,7 @@ html, body {
   background: var(--accent);
   color: #000;
   border-color: var(--accent);
+  font-weight: 600;
 }
 
 .btn-primary:hover {
@@ -493,8 +499,9 @@ html, body {
 }
 
 .btn-icon {
-  padding: 4px 10px;
-  font-size: var(--fs-lg);
+  min-width: var(--control-h);
+  padding: 0 8px;
+  font-size: var(--fs-md);
   line-height: 1;
 }
 
@@ -516,6 +523,12 @@ textarea.input {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-primary);
+}
+
+input.input,
+select.input {
+  height: var(--control-h);
+  padding-block: 0;
 }
 
 .input:focus,
@@ -1711,12 +1724,6 @@ body:has(.tmux-pane-page) {
   min-width: 110px;
 }
 
-.agents-desktop-toolbar .btn,
-.agents-filter-menu > summary {
-  padding: 6px 9px;
-  font-size: var(--fs-xs);
-}
-
 .agents-toolbar-selected {
   color: var(--text-secondary);
   font-size: var(--fs-xs);
@@ -2068,12 +2075,13 @@ body:has(.tmux-pane-page) {
 }
 
 /* The tools row is secondary to Send and the approval answers. */
+/* Composer tools look like every other secondary .btn. */
 .control-row-tools .ctrl-btn,
 .control-row-tools .ctrl-inline-select {
-  min-height: 36px;
+  min-height: var(--control-h);
   border-color: var(--border);
-  background: transparent;
-  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   font-size: var(--fs-sm);
   font-weight: 500;
 }
@@ -2199,7 +2207,7 @@ body:has(.tmux-pane-page) {
 }
 
 .ctrl-inline-select {
-  min-height: 44px;
+  min-height: var(--control-h);
   min-width: 170px;
   flex: 1 1 200px;
   padding: 0 12px;
@@ -3432,6 +3440,7 @@ body:has(.tmux-pane-page) {
   }
 
   .ctrl-btn,
+  .ctrl-inline-select,
   .control-row-tools .ctrl-btn,
   .control-row-tools .ctrl-inline-select {
     min-height: 44px;
