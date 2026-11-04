@@ -1072,6 +1072,8 @@ body:has(.tmux-pane-page) {
 .ansi-strike { text-decoration: line-through; }
 
 .ansi-fg-black { color: #555; }
+/* On a coloured background (e.g. a PASS badge) black text stays black. */
+[class*='ansi-bg-'].ansi-fg-black, .ansi-fg-black[style*='background'] { color: #000; }
 .ansi-fg-red { color: #f44; }
 .ansi-fg-green { color: #4e4; }
 .ansi-fg-yellow { color: #fe4; }
