@@ -11,7 +11,7 @@ import { buildHookSessionPaths, readHookEventsSince, registerHookSessionRegistry
 import { buildInternalBypassHeaders, HUB_OPERATOR_HEADER, permissionAuthorityForRequest } from '../platform/auth.mjs';
 import { queueSessionInteraction } from '../platform/push.mjs';
 import { resolveBinding } from '../telegram/binding.mjs';
-import { cleanupAgentBusCredentialLaunch, prepareAgentBusCredentialLaunch } from '../integrations/mcp-launch-preflight.mjs';
+import { cleanupAgentBusCredentialLaunch, launchMcpToolScope, mcpToolScopesFor, prepareAgentBusCredentialLaunch } from '../integrations/mcp-launch-preflight.mjs';
 import { cleanupManagedWorktree, createManagedWorktree, managedWorktreeBase } from '../agent-bus/managed-worktrees.mjs';
 import { createAgentSessionWorktree } from '../fleet/git-worktree.mjs';
 import { expandHomePath } from '../sessions/workdir.mjs';
@@ -582,9 +582,12 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
       || (await app.inject({ url: `/api/${kind}/sessions`, headers: buildInternalBypassHeaders() })).json().sessions?.some((row) => row.id === requested))) {
       return reply.code(400).send({ error: 'Invalid or duplicate sessionId', code: 'session_id_invalid' });
     }
-    const issued = await prepareAgentBusCredentialLaunch({ backendType: kind, sessionId, credentialStore,
+    const mcpToolScope = launchMcpToolScope({ auth: req.duenoAuth, promptProfile: body.promptProfile,
+      mcpProfile: body.mcpProfile, coordinatorPolicy: trust.coordinatorPolicy });
+    const issued = await prepareAgentBusCredentialLaunch({ backendType: kind, sessionId, credentialStore, toolScopes: mcpToolScopesFor(mcpToolScope),
       coordinatorPolicy: trust.coordinatorPolicy, loopRegistrationPolicy: trust.loopRegistrationPolicy });
-    const entry = { machine, kind, sessionId, workDir: String(body.workDir || ''), displayName: String(body.displayName || ''), created: now(), status: 'pending', metadata: trust.metadata };
+    const entry = { machine, kind, sessionId, workDir: String(body.workDir || ''), displayName: String(body.displayName || ''), created: now(), status: 'pending', metadata: trust.metadata,
+      ...(mcpToolScope === 'bus' ? { mcpToolScope } : {}) };
     store.update((state) => { (state.sessions ||= {})[key] = entry; });
     // spawnedBy stays on the hub, which returns the child's results; the worker gets only the note it would have added.
     const { spawnedBy, ...metadata } = trust.metadata;
@@ -633,6 +636,7 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
       const current = await send(row, 'GET', `/api/${kind}/sessions/${req.params.id}`).catch(() => null);
       if (!current || !parse(current.text).sessionEnded) return reply.code(409).send({ error: 'Session is running or unreachable', code: 'session_already_running' });
       rotated = (await prepareAgentBusCredentialLaunch({ backendType: kind, sessionId: req.params.id, credentialStore, rotation: true,
+        toolScopes: mcpToolScopesFor(entry.mcpToolScope),
         coordinatorPolicy: storedCoordinatorPolicy(entry.metadata),
         loopRegistrationPolicy: operatorResumeLoopRegistrationPolicy(req.duenoAuth?.principal, entry.metadata) }))?.token || '';
       body = { busCredential: rotated };

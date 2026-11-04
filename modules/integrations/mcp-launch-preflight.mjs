@@ -52,6 +52,19 @@ export const FLEET_SUPERVISOR_MCP_TOOL_SCOPES = Object.freeze([
   'monitor_list_human_queue',
 ]);
 
+// Spawned agents get only the agent-bus tools. The operator's own launches, coordinators, and a launch that
+// selects the dueno-full MCP profile keep every tool. A session launched before this rule has no stored
+// mcpToolScope and keeps every tool on resume.
+const FULL_TOOL_PROMPT_PROFILES = new Set(['coordinator', 'command-center', 'fleet-supervisor']);
+export function launchMcpToolScope({ auth = null, promptProfile = '', mcpProfile = '', coordinatorPolicy = null } = {}) {
+  const full = auth?.principal?.type === 'ui' || Boolean(coordinatorPolicy)
+    || FULL_TOOL_PROMPT_PROFILES.has(String(promptProfile || '')) || mcpProfile === 'dueno-full';
+  return full ? 'full' : 'bus';
+}
+export function mcpToolScopesFor(scope) {
+  return scope === 'bus' ? AGENT_BUS_AGENT_TOOL_SCOPES : undefined;
+}
+
 function credentialProfileDefaults(profile, { backendType, sessionId } = {}) {
   if (profile === FLEET_SUPERVISOR_MCP_CREDENTIAL_PROFILE) {
     return {

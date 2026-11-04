@@ -10,6 +10,7 @@ import {
   FLEET_SUPERVISOR_MCP_TOOL_SCOPES,
   prepareMcpCapabilityLaunch,
   sanitizedMcpSnapshot,
+  launchMcpToolScope,
 } from '../modules/integrations/mcp-launch-preflight.mjs';
 import { resolveMcpCapabilities } from '../modules/integrations/mcp-capability-resolver.mjs';
 import { buildMcpCapabilityCatalog } from '../modules/integrations/mcp-server-catalog.mjs';
@@ -138,6 +139,18 @@ describe('MCP launch preflight', () => {
         credentialStore: credentials,
       });
     }
+  });
+
+  it('keeps every dueno tool for the operator, coordinator profiles and dueno-full, and the bus tools for other spawns', () => {
+    const agent = { principal: { type: 'agent' } };
+    assert.equal(launchMcpToolScope({ auth: agent }), 'bus');
+    assert.equal(launchMcpToolScope({ auth: agent, mcpProfile: 'dueno', promptProfile: 'caveman' }), 'bus');
+    for (const promptProfile of ['coordinator', 'command-center', 'fleet-supervisor']) {
+      assert.equal(launchMcpToolScope({ auth: agent, promptProfile }), 'full');
+    }
+    assert.equal(launchMcpToolScope({ auth: agent, coordinatorPolicy: { version: 'coordinator-v1' } }), 'full');
+    assert.equal(launchMcpToolScope({ auth: agent, mcpProfile: 'dueno-full' }), 'full');
+    assert.equal(launchMcpToolScope({ auth: { principal: { type: 'ui' } } }), 'full');
   });
 
   it('gives only the trusted Fleet Supervisor its expanded Dueno inventory', async () => {
