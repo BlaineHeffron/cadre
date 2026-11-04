@@ -168,6 +168,19 @@ html, body {
   display: none;
 }
 
+.nav-more-group {
+  padding: 10px 12px 4px;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.nav-settings-link {
+  padding: 8px 10px;
+}
+
 .nav-more-item .badge {
   margin-left: 8px;
 }
@@ -3030,7 +3043,7 @@ body:has(.tmux-pane-page) {
 
   .nav-link {
     min-height: 44px;
-    padding: 6px 10px;
+    padding: 6px 7px;
     font-size: var(--fs-xs);
     white-space: nowrap;
     flex-shrink: 1;
@@ -3083,12 +3096,6 @@ body:has(.tmux-pane-page) {
 
   .nav-more-item-mobile {
     display: block;
-  }
-
-  .nav-more-item-mobile + .nav-more-item:not(.nav-more-item-mobile) {
-    border-top: 1px solid var(--border);
-    margin-top: 6px;
-    padding-top: 12px;
   }
 
   .main {
