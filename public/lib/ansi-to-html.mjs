@@ -42,7 +42,10 @@ export function ansiToHtml(text) {
       .map(([prop, value]) => `${prop}:${prop === 'color' ? liftGrey(value) : `color-mix(in srgb,${value} 60%,transparent)`}`)
       .join(';');
     const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;
-    parts.push(attrs ? `<span${attrs}>${esc(buf)}</span>` : esc(buf));
+    // A line of only box-drawing dashes is the CLI's divider at its own column count; it draws
+    // as a full-width rule in its colour, so it never stops short of the pane edge.
+    const html = esc(buf).replace(/^─{20,}$/gm, '<span class="ansi-rule"></span>');
+    parts.push(attrs ? `<span${attrs}>${html}</span>` : html);
     buf = '';
   }
 

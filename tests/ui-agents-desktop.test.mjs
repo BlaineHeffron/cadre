@@ -188,6 +188,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const [, , , , blurredWidth] = await single.locator('.terminal').evaluate(ring);
   await single.locator('.terminal').focus();
   assert.deepEqual(await single.locator('.terminal').evaluate(ring), ['1px', 'rgba(79, 195, 247, 0.6)', 'none', 'rgb(26, 26, 46)', blurredWidth]);
+  // The ring is the transcript's only frame: the header and control bar drop their lines beside it.
+  assert.deepEqual(await single.evaluate((el) => [getComputedStyle(el.querySelector('.claude-session-header')).borderBottomColor, getComputedStyle(el.querySelector('.claude-control-bar')).borderTopColor]), ['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)']);
   const { x, width } = await single.boundingBox();
   assert.ok(width <= 1160 && Math.abs(x - (1440 - x - width)) <= 1, `session page at x=${x}, width=${width}`);
   // The full-height page is one panel tone, so a short transcript leaves no bare page below the controls.
