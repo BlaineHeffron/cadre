@@ -13,6 +13,8 @@
   --danger: #ef5350;
   /* Danger as readable text on dark surfaces. */
   --danger-text: #ff8a80;
+  /* Success as readable text on a green tint. */
+  --success-text: #b9e4bb;
   --warning: #ffa726;
   --success: #66bb6a;
   --border: #2a2a3e;
@@ -1136,7 +1138,7 @@ body:has(.tmux-pane-page) {
 
 /* ANSI Color Classes */
 .ansi-bold { font-weight: 700; }
-.ansi-dim { opacity: 0.6; }
+.ansi-dim { opacity: 0.75; }
 .ansi-italic { font-style: italic; }
 .ansi-underline { text-decoration: underline; }
 .ansi-strike { text-decoration: line-through; }
@@ -2105,7 +2107,7 @@ input[type="checkbox"]:not(.switch) {
   width: fit-content;
   padding: 0 8px;
   line-height: var(--control-h);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: var(--fs-sm);
   cursor: pointer;
 }
@@ -2328,7 +2330,7 @@ input[type="checkbox"]:not(.switch) {
 .ctrl-approve {
   flex: 1;
   background: color-mix(in srgb, var(--success) 18%, transparent);
-  color: var(--success);
+  color: var(--success-text);
   border-color: var(--success);
   font-size: var(--fs-md);
 }
@@ -4009,8 +4011,9 @@ p.new-agent-hint {
   bottom: 0;
 }
 
+/* An empty page reads as a deliberate, centred invitation rather than a thin strip. */
 .empty-state {
-  padding: 40px 16px;
+  padding: 96px 16px;
   text-align: center;
 }
 

@@ -107,7 +107,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // A compact card, not a full-width slab: Yes is tinted green text, No a red outline with light-red text.
   assert.ok(boxes[0].width <= 560, `answers ${boxes[0].width}px wide`);
   const colour = (i, prop) => answers.nth(i).evaluate((el, p) => getComputedStyle(el)[p], prop);
-  assert.equal(await colour(0, 'color'), 'rgb(102, 187, 106)');
+  assert.equal(await colour(0, 'color'), 'rgb(185, 228, 187)', 'Yes reads as light text on its green tint');
   assert.deepEqual([await colour(2, 'color'), await colour(2, 'backgroundColor')], ['rgb(255, 138, 128)', 'rgb(22, 33, 62)']);
   assert.ok(boxes.every((b, i) => i === 0 || b.top > boxes[i - 1].top), 'answers stack in order');
   // At least the 44px tap target and never clipped. In the 560px card a long label may wrap
@@ -155,10 +155,15 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await page.locator('.agents-desktop-toolbar').getByRole('button', { name: 'New session' }).evaluate((el) => el.classList.contains('btn-primary')), true);
 
   sessions = [];
-  await page.reload();
-  // The empty state carries the one New session; the toolbar does not repeat it.
+  // The empty state carries the one New session; the toolbar does not repeat it. Wait for the
+  // settled state: the first render (before the load starts) already shows the empty state, then
+  // loading briefly brings the toolbar button back, so a single read can race.
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith('/api/claude/sessions')),
+    page.reload(),
+  ]);
   await page.locator('.empty-state').getByRole('button', { name: 'New session' }).waitFor();
-  assert.equal(await page.locator('.agents-desktop-toolbar').getByRole('button', { name: 'New session' }).count(), 0);
+  await page.waitForFunction(() => ![...document.querySelectorAll('.agents-desktop-toolbar button')].some((b) => b.textContent.trim() === 'New session'));
   await page.locator('.empty-state').getByRole('button', { name: 'New session' }).click();
   const create = page.getByRole('button', { name: 'Create Session' });
   const box = await create.boundingBox();
