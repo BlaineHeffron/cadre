@@ -1511,6 +1511,46 @@ body:has(.tmux-pane-page) {
   justify-content: flex-end;
 }
 
+.session-header-more {
+  position: relative;
+}
+
+.session-header-more > summary {
+  list-style: none;
+}
+
+.session-header-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.session-header-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.session-header-menu .btn {
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+}
+
+.session-header-menu .btn-danger {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
 .session-collab-panel {
   display: flex;
   flex-direction: column;
@@ -1584,6 +1624,11 @@ body:has(.tmux-pane-page) {
 .agents-desktop-toolbar .btn,
 .agents-filter-menu > summary {
   padding: 6px 9px;
+  font-size: var(--fs-xs);
+}
+
+.agents-toolbar-selected {
+  color: var(--text-secondary);
   font-size: var(--fs-xs);
 }
 
@@ -1734,16 +1779,8 @@ body:has(.tmux-pane-page) {
   cursor: pointer;
 }
 
-.agent-rail-row-has-loop .agent-rail-row-main {
-  padding-right: 86px;
-}
-
-.agent-rail-loop {
-  position: absolute;
-  top: 7px;
-  right: 9px;
-  padding: 3px 7px;
-  font-size: var(--fs-xs);
+.agent-rail-row-selectable .agent-rail-row-main {
+  padding-right: 40px;
 }
 
 .agent-rail-row-main:focus-visible {
@@ -1813,11 +1850,14 @@ body:has(.tmux-pane-page) {
 }
 
 .agent-rail-select {
+  position: absolute;
+  top: 4px;
+  right: 4px;
   display: flex;
   align-items: center;
-  gap: 5px;
-  align-self: flex-end;
-  padding: 0 12px 9px;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
   cursor: pointer;
 }
 
@@ -3240,13 +3280,6 @@ body:has(.tmux-pane-page) {
     width: auto;
     flex-wrap: nowrap;
     justify-content: flex-end;
-    overflow-x: auto;
-    max-width: 45vw;
-    scrollbar-width: none;
-  }
-
-  .session-header-actions::-webkit-scrollbar {
-    display: none;
   }
 
   .session-header-actions .btn {

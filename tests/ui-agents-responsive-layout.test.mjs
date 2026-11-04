@@ -70,7 +70,6 @@ describe('responsive agents layout', () => {
 
     assert.match(agents, /class="agents-desktop-toolbar"/);
     assert.match(agents, /<details class="agents-filter-menu">/);
-    assert.match(agents, /showBulkPrompt\.value \? html`/);
     assert.match(styles, /\.agents-desktop-toolbar\s*\{[\s\S]*display: flex;[\s\S]*white-space: nowrap/);
     assert.match(styles, /\.agents-bulk-prompt-bar\s*\{/);
   });

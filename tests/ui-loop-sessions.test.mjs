@@ -29,7 +29,7 @@ describe('loop sessions UI', () => {
     ]);
     assert.match(app, /LoopSessionsPage.*path="\/loop-sessions"/s);
     assert.match(nav, /Loop Sessions/);
-    assert.equal([agents, detail, card].reduce((count, source) => count + (source.match(/Start loop/g) || []).length, 0), 3);
+    assert.equal([agents, detail, card].reduce((count, source) => count + (source.match(/Start loop/g) || []).length, 0), 2);
     assert.doesNotMatch(agents, />Message<|messageSession/);
     assert.match(agents, /session_id=/);
     assert.match(page, /Tick log/);

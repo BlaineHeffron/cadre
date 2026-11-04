@@ -168,7 +168,7 @@ function railProjectLabel(workDir = '') {
 // The row body is a real button so Enter/Space, focus, and the disabled state
 // come from the platform. The bulk-select checkbox stays outside it: a button
 // must not contain another interactive control.
-function AgentRailRow({ session, active, selected, onSelect, onToggleSelected, onStartLoop }) {
+function AgentRailRow({ session, active, selected, onSelect, onToggleSelected }) {
   const status = sessionDisplayStatus(session._kind, session);
   const rustManaged = session.readOnly === true && session.externalOwner === 'rust-monitor';
   const mutable = !rustManaged;
@@ -176,7 +176,7 @@ function AgentRailRow({ session, active, selected, onSelect, onToggleSelected, o
   const detail = session.state?.interaction?.detail || session.state?.reason || '';
 
   return html`
-    <div class="agent-rail-row ${active ? 'agent-rail-row-active' : ''} ${status !== 'ended' ? 'agent-rail-row-has-loop' : ''}">
+    <div class="agent-rail-row ${active ? 'agent-rail-row-active' : ''} ${mutable && onToggleSelected ? 'agent-rail-row-selectable' : ''}">
       <button
         type="button"
         class="agent-rail-row-main"
@@ -197,7 +197,6 @@ function AgentRailRow({ session, active, selected, onSelect, onToggleSelected, o
         ` : null}
         ${detail ? html`<span class="agent-rail-row-detail">${detail}</span>` : null}
       </button>
-      ${status !== 'ended' ? html`<button class="btn agent-rail-loop" type="button" onclick=${() => onStartLoop(session)}>Start loop</button>` : null}
       ${mutable && onToggleSelected ? html`
         <label class="agent-rail-select">
           <input
@@ -205,7 +204,6 @@ function AgentRailRow({ session, active, selected, onSelect, onToggleSelected, o
             checked=${selected}
             aria-label=${`Bulk select ${title}`}
             onInput=${() => onToggleSelected(session)} />
-          Bulk select
         </label>
       ` : null}
     </div>
@@ -738,36 +736,35 @@ export function AgentsPage() {
                 type="checkbox"
                 checked=${allVisibleKillableSelected}
                 onInput=${toggleSelectAllVisible} />
-              All
+              Select all
             </label>
           ` : null}
-          <button
-            class="btn"
-            type="button"
-            disabled=${selectedKillableSessions.length === 0}
-            title="Send Escape to selected sessions"
-            onclick=${escapeSelectedSessions}>
-            Esc${selectedKillableSessions.length > 0 ? ` ${selectedKillableSessions.length}` : ''}
-          </button>
-          <button
-            class="btn btn-danger"
-            type="button"
-            disabled=${selectedKillableSessions.length === 0 || Boolean(bulkKillProgress.value)}
-            onclick=${killSelectedSessions}>
-            ${bulkKillProgress.value
-              ? `Killing ${bulkKillProgress.value.completed}/${bulkKillProgress.value.total}`
-              : `Kill${selectedKillableSessions.length > 0 ? ` ${selectedKillableSessions.length}` : ''}`}
-          </button>
-          <button
-            class="btn"
-            type="button"
-            disabled=${selectedKillableSessions.length === 0}
-            aria-expanded=${showBulkPrompt.value ? 'true' : 'false'}
-            onclick=${() => { showBulkPrompt.value = !showBulkPrompt.value; }}>
-            Prompt
-          </button>
+          ${selectedKillableSessions.length > 0 ? html`
+            <span class="agents-toolbar-selected">${selectedKillableSessions.length} selected</span>
+            <button
+              class="btn"
+              type="button"
+              aria-expanded=${showBulkPrompt.value ? 'true' : 'false'}
+              onclick=${() => { showBulkPrompt.value = !showBulkPrompt.value; }}>
+              Prompt
+            </button>
+            <button
+              class="btn"
+              type="button"
+              title="Send Escape to selected sessions"
+              onclick=${escapeSelectedSessions}>
+              Esc
+            </button>
+            <button
+              class="btn btn-danger"
+              type="button"
+              disabled=${Boolean(bulkKillProgress.value)}
+              onclick=${killSelectedSessions}>
+              ${bulkKillProgress.value ? `Killing ${bulkKillProgress.value.completed}/${bulkKillProgress.value.total}` : 'Kill'}
+            </button>
+          ` : null}
         </div>
-        ${showBulkPrompt.value ? html`
+        ${showBulkPrompt.value && selectedKillableSessions.length > 0 ? html`
           <div class="agents-bulk-prompt-bar">
             <input
               class="input"
@@ -1110,7 +1107,6 @@ export function AgentsPage() {
                       selected=${selectedSessionKeys.value.includes(previewKey(session))}
                       onSelect=${selected => { desktopSessionKey.value = previewKey(selected); }}
                       onToggleSelected=${toggleSelected}
-                      onStartLoop=${startLoop}
                     />
                   `)}
                 </div>
