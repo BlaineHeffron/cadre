@@ -300,6 +300,9 @@ html, body {
 .settings-shell {
   display: grid;
   gap: 12px;
+  /* Setting rows read as label-and-switch pairs, not across a 1400px line. */
+  max-width: 960px;
+  margin: 0 auto;
 }
 
 .settings-shell-head {
@@ -1599,6 +1602,14 @@ input[type="checkbox"]:not(.switch) {
   min-height: calc(100vh - 48px);
   margin: -16px; /* cancel .main padding to go full-width */
   animation: fadeIn 0.2s ease;
+}
+
+/* On wide screens a single session reads at a comfortable width instead of edge to edge. */
+@media (min-width: 1240px) {
+  .claude-session-page:not(.agent-session-page-embedded) {
+    max-width: 1160px;
+    margin: -16px auto;
+  }
 }
 
 .claude-session-header {
@@ -3869,8 +3880,6 @@ p.new-agent-hint {
 }
 
 .new-agent-check input {
-  width: 16px;
-  height: 16px;
   margin: 2px 0 0;
 }
 
