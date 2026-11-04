@@ -170,6 +170,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   await phone.goto(`${origin}/session`);
   await phone.locator('.terminal-keys').waitFor();
   const [phoneKeys, phoneBar] = await Promise.all(['.terminal-keys', '.claude-control-bar'].map((sel) => phone.locator(sel).boundingBox()));
+  assert.ok((await phone.locator('.terminal-keys > summary').boundingBox()).height >= 36, 'phone Terminal keys toggle is a full control-height target');
   assert.ok(phoneKeys.y + phoneKeys.height <= phoneBar.y + 1, `phone keys end at ${phoneKeys.y + phoneKeys.height}, bar starts at ${phoneBar.y}`);
   await phone.close();
   // A single session reads at a comfortable width on a wide screen, centred.

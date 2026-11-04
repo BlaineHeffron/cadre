@@ -267,7 +267,7 @@ export function SettingsPage({ section }) {
             ${agentProviders.value.availableSpawnTypes?.join(', ') || 'none'}
           </span>
         </div>
-        <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:8px">
+        <p class="note" style="margin-bottom:8px">
           Toggle which agent backends are available for generated tasks and review workflows. Disabled providers are removed from the UI and the server falls back automatically.
         </p>
         <div style="display:grid">
@@ -276,7 +276,7 @@ export function SettingsPage({ section }) {
           <${SettingSwitch} label="Enable DeepSeek Harness (ACP)" checked=${agentProviders.value.deepseekEnabled} disabled=${agentProviders.value.loading} onChange=${(deepseekEnabled) => saveAgentProviderPreferences({ deepseekEnabled })} />
           <${SettingSwitch} label="Enable Pi-backed providers" checked=${agentProviders.value.piEnabled} disabled=${agentProviders.value.loading} onChange=${(piEnabled) => saveAgentProviderPreferences({ piEnabled })} />
           <${SettingSwitch} label="Enable Headroom context compression" checked=${agentProviders.value.headroomEnabled !== false} disabled=${agentProviders.value.loading} onChange=${(headroomEnabled) => saveAgentProviderPreferences({ headroomEnabled })} />
-          <div style="font-size:var(--fs-xs); color:var(--text-muted)">
+          <div class="note">
             Uses the local Headroom proxy for all providers. Applies to new sessions and resumed processes;
             running sessions keep their current connection. Turn off to connect directly.
           </div>
@@ -296,7 +296,7 @@ export function SettingsPage({ section }) {
             ${notifPermitted.value && browserOn.value ? 'Enabled' : 'Disabled'}
           </span>
         </div>
-        <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:8px">
+        <p class="note" style="margin-bottom:8px">
           Get notified when agent sessions need your input.
         </p>
         ${!notifPermitted.value ? html`
@@ -316,7 +316,7 @@ export function SettingsPage({ section }) {
             ${lowDataMode.value ? 'Low Data On' : (connectionSaver.value ? 'Network Saver' : 'Normal')}
           </span>
         </div>
-        <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:8px">
+        <p class="note" style="margin-bottom:8px">
           Low data mode slows background refreshes and pauses live WebSocket updates when the tab is hidden. This is most useful on mobile data.
         </p>
         <${SettingSwitch}
@@ -333,7 +333,7 @@ export function SettingsPage({ section }) {
         <p style="font-size:var(--fs-sm); color:var(--text-secondary)">
           Cadre — Self-hosted control plane for running, coordinating and monitoring coding-agent sessions.
         </p>
-        <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">
+        <p class="note" style="margin-top:4px">
           Preact + HTM • Fastify • WebSocket
         </p>
       </div>

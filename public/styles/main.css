@@ -429,6 +429,13 @@ html, body {
   font-weight: 600;
 }
 
+/* Explanatory text people actually read: one size and tone for card notes and form hints. */
+.note,
+.new-agent-hint {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
 /* Every page names itself the same way. */
 .page-title {
   font-size: var(--fs-lg);
@@ -1998,11 +2005,16 @@ input[type="checkbox"]:not(.switch) {
   font-size: var(--fs-xs);
 }
 
-/* Row meta and preview are read, not just glanced at: secondary text, not muted. */
+/* Row meta and preview are read, not just glanced at: secondary text, not muted;
+   the preview line is the 13px step. */
 .agent-rail-row-meta,
 .agent-rail-row-detail {
   color: var(--text-secondary);
   font-size: var(--fs-xs);
+}
+
+.agent-rail-row-detail {
+  font-size: var(--fs-sm);
 }
 
 .agent-rail-row-detail {
@@ -3857,10 +3869,6 @@ input[type="checkbox"]:not(.switch) {
   margin-top: 6px;
 }
 
-.new-agent-hint {
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-}
 
 p.new-agent-hint {
   margin: 0;
