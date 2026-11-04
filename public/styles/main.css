@@ -2099,24 +2099,20 @@ input[type="checkbox"]:not(.switch) {
   flex-wrap: wrap;
 }
 
+/* Answers read as one menu, like the CLI's: equal full-width rows, one line each where it fits. */
 .control-row-primary {
-  flex-wrap: nowrap;
-  justify-content: flex-start;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
 }
 
-/* Answers share one row; a long label wraps inside its button, never truncates. */
 .control-row-primary .ctrl-btn {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: none;
+  justify-content: flex-start;
   font-size: var(--fs-base);
   line-height: 1.25;
-  text-align: center;
+  text-align: left;
   white-space: normal;
-}
-
-.control-row-primary .ctrl-approve {
-  flex: 0 0 auto;
-  min-width: 120px;
 }
 
 /* The tools row is secondary to Send and the approval answers. */
