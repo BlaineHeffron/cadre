@@ -28,7 +28,13 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     render(h(AgentsPage, {}), document.getElementById('app'));
   </script>`)));
   app.get('/api/claude/sessions', () => ({ sessions }));
-  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: 'pane text', state: { status: 'working' }, sessionName: `claude-${req.params.id}` }));
+  const blocked = { status: 'blocked', capabilities: { canAnswerInteraction: true }, interaction: { kind: 'permission', detail: 'Do you want to proceed?', fingerprint: 'q1', options: [
+    { key: '1', label: 'Yes' },
+    { key: '2', label: "Yes, and don't ask again for npm run migrate commands in this project" },
+    { key: '3', label: 'No, and tell Claude what to do differently (esc)' },
+  ] } };
+  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: 'pane text', state: req.params.id === 'b2' ? blocked : { status: 'working' }, sessionName: `claude-${req.params.id}` }));
+  app.post('/api/*', () => ({ ok: true }));
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
@@ -66,6 +72,21 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   for (const name of ['Copy ID', 'Refresh', 'Kill']) assert.equal(await header.getByRole('button', { name, exact: true }).isVisible(), true, name);
   await header.getByRole('button', { name: 'Refresh', exact: true }).click();
   assert.equal(await header.getByRole('button', { name: 'Kill' }).isVisible(), false, 'choosing an item closes the menu');
+
+
+  // An approval keeps every answer on one row, full text in the title; composer tools are labelled.
+  await rows.nth(1).locator('.agent-rail-row-main').click();
+  const answers = page.locator('.control-row-primary .ctrl-btn');
+  await answers.first().waitFor();
+  const tops = await answers.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
+  assert.equal(new Set(tops).size, 1, `answers on one row: ${tops}`);
+  assert.equal(await answers.nth(2).getAttribute('title'), 'No, and tell Claude what to do differently (esc)');
+  for (const name of ['Cycle mode', 'Interrupt']) assert.equal(await page.getByRole('button', { name, exact: true }).isVisible(), true, name);
+  // Interrupt goes through POST /escape, which the server may promote to an interrupt.
+  await Promise.all([
+    page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/claude/sessions/b2/escape')),
+    page.getByRole('button', { name: 'Interrupt', exact: true }).click(),
+  ]);
 
   // With no sessions at all, the empty list offers the way to start one, and Create stays on screen.
   sessions = [];
