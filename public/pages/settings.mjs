@@ -48,6 +48,23 @@ async function logout() {
   addToast('Logged out', 'info');
 }
 
+// One on/off row: the label says what it controls, the switch shows its state.
+function SettingSwitch({ label, hint = '', checked, disabled = false, onChange }) {
+  return html`
+    <label class="setting-switch">
+      <span class="setting-switch-text">
+        <span>${label}</span>
+        ${hint ? html`<span class="setting-switch-hint">${hint}</span>` : null}
+      </span>
+      <input type="checkbox" role="switch" class="switch" checked=${checked} disabled=${disabled} onInput=${async (e) => {
+        // Flips at once; a change that reports failure (false) flips back.
+        const input = e.currentTarget;
+        if (await onChange(input.checked) === false) input.checked = !input.checked;
+      }} />
+    </label>
+  `;
+}
+
 export function SettingsPage({ section }) {
   const inputToken = useMemo(() => signal(''), []);
   const pairing = useMemo(() => signal(null), []);
@@ -97,6 +114,7 @@ export function SettingsPage({ section }) {
       addToast('Agent provider settings updated', 'success');
     } catch (error) {
       addToast(`Agent provider settings error: ${error.message}`, 'error');
+      return false;
     }
   }
 
@@ -146,6 +164,7 @@ export function SettingsPage({ section }) {
       addToast(pushOn.value ? 'Phone notifications enabled' : 'Phone notifications disabled', 'success');
     } catch (error) {
       addToast(`Phone notifications: ${error.message}`, 'error');
+      return false;
     }
   }
 
@@ -251,52 +270,12 @@ export function SettingsPage({ section }) {
         <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:8px">
           Toggle which agent backends are available for generated tasks and review workflows. Disabled providers are removed from the UI and the server falls back automatically.
         </p>
-        <div style="display:grid; gap:12px">
-          <label style="display:flex; align-items:center; gap:10px">
-            <input
-              type="checkbox"
-              checked=${agentProviders.value.claudeEnabled}
-              onInput=${(e) => saveAgentProviderPreferences({ claudeEnabled: e.currentTarget.checked })}
-              disabled=${agentProviders.value.loading}
-            />
-            <span>Enable Claude-backed workflows</span>
-          </label>
-          <label style="display:flex; align-items:center; gap:10px">
-            <input
-              type="checkbox"
-              checked=${agentProviders.value.codexEnabled}
-              onInput=${(e) => saveAgentProviderPreferences({ codexEnabled: e.currentTarget.checked })}
-              disabled=${agentProviders.value.loading}
-            />
-            <span>Enable Codex-backed workflows</span>
-          </label>
-          <label style="display:flex; align-items:center; gap:10px">
-            <input
-              type="checkbox"
-              checked=${agentProviders.value.deepseekEnabled}
-              onInput=${(e) => saveAgentProviderPreferences({ deepseekEnabled: e.currentTarget.checked })}
-              disabled=${agentProviders.value.loading}
-            />
-            <span>Enable DeepSeek Harness (ACP)</span>
-          </label>
-          <label style="display:flex; align-items:center; gap:10px">
-            <input
-              type="checkbox"
-              checked=${agentProviders.value.piEnabled}
-              onInput=${(e) => saveAgentProviderPreferences({ piEnabled: e.currentTarget.checked })}
-              disabled=${agentProviders.value.loading}
-            />
-            <span>Enable Pi-backed providers</span>
-          </label>
-          <label style="display:flex; align-items:center; gap:10px">
-            <input
-              type="checkbox"
-              checked=${agentProviders.value.headroomEnabled !== false}
-              onInput=${(e) => saveAgentProviderPreferences({ headroomEnabled: e.currentTarget.checked })}
-              disabled=${agentProviders.value.loading}
-            />
-            <span>Enable Headroom context compression</span>
-          </label>
+        <div style="display:grid">
+          <${SettingSwitch} label="Enable Claude-backed workflows" checked=${agentProviders.value.claudeEnabled} disabled=${agentProviders.value.loading} onChange=${(claudeEnabled) => saveAgentProviderPreferences({ claudeEnabled })} />
+          <${SettingSwitch} label="Enable Codex-backed workflows" checked=${agentProviders.value.codexEnabled} disabled=${agentProviders.value.loading} onChange=${(codexEnabled) => saveAgentProviderPreferences({ codexEnabled })} />
+          <${SettingSwitch} label="Enable DeepSeek Harness (ACP)" checked=${agentProviders.value.deepseekEnabled} disabled=${agentProviders.value.loading} onChange=${(deepseekEnabled) => saveAgentProviderPreferences({ deepseekEnabled })} />
+          <${SettingSwitch} label="Enable Pi-backed providers" checked=${agentProviders.value.piEnabled} disabled=${agentProviders.value.loading} onChange=${(piEnabled) => saveAgentProviderPreferences({ piEnabled })} />
+          <${SettingSwitch} label="Enable Headroom context compression" checked=${agentProviders.value.headroomEnabled !== false} disabled=${agentProviders.value.loading} onChange=${(headroomEnabled) => saveAgentProviderPreferences({ headroomEnabled })} />
           <div style="font-size:var(--fs-xs); color:var(--text-muted)">
             Uses the local Headroom proxy for all providers. Applies to new sessions and resumed processes;
             running sessions keep their current connection. Turn off to connect directly.
@@ -320,24 +299,14 @@ export function SettingsPage({ section }) {
         <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:8px">
           Get notified when agent sessions need your input.
         </p>
-        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
-          ${!notifPermitted.value ? html`
-            <button class="btn btn-primary" onclick=${enableNotifications}>Enable Notifications</button>
-          ` : html`
-            <button class="btn ${browserOn.value ? 'btn-primary' : ''}" onclick=${toggleBrowser}>
-              Browser notifications: ${browserOn.value ? 'On' : 'Off'}
-            </button>
-          `}
-          <button class="btn ${pushOn.value ? 'btn-primary' : ''}" onclick=${togglePush}>
-            Phone notifications: ${pushOn.value ? 'On' : 'Off'}
-          </button>
-          <button class="btn ${soundOn.value ? '' : 'btn-danger'}" onclick=${toggleSound}>
-            Sound: ${soundOn.value ? 'On' : 'Off'}
-          </button>
-          <button class="btn ${approvalOnly.value ? 'btn-primary' : ''}" onclick=${toggleApprovalOnly}>
-            Approval only: ${approvalOnly.value ? 'On' : 'Off'}
-          </button>
-        </div>
+        ${!notifPermitted.value ? html`
+          <button class="btn btn-primary" style="margin-bottom:8px" onclick=${enableNotifications}>Enable Notifications</button>
+        ` : html`
+          <${SettingSwitch} label="Browser notifications" hint="Alert in this browser when a session needs you." checked=${browserOn.value} onChange=${toggleBrowser} />
+        `}
+        <${SettingSwitch} label="Phone notifications" hint="Push to paired phones." checked=${pushOn.value} onChange=${togglePush} />
+        <${SettingSwitch} label="Sound" hint="Play a sound with each alert." checked=${soundOn.value} onChange=${toggleSound} />
+        <${SettingSwitch} label="Approval prompts only" hint="Skip alerts for sessions that are just idle." checked=${approvalOnly.value} onChange=${toggleApprovalOnly} />
       </div>
 
       <div class="card">
@@ -350,16 +319,11 @@ export function SettingsPage({ section }) {
         <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:8px">
           Low data mode slows background refreshes and pauses live WebSocket updates when the tab is hidden. This is most useful on mobile data.
         </p>
-        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
-          <button class="btn ${lowDataMode.value ? 'btn-danger' : 'btn-primary'}" onclick=${toggleLowDataMode}>
-            Low Data Mode: ${lowDataMode.value ? 'On' : 'Off'}
-          </button>
-          ${connectionSaver.value ? html`
-            <span style="font-size:var(--fs-xs); color:var(--text-secondary)">
-              Browser connection saver is also active.
-            </span>
-          ` : null}
-        </div>
+        <${SettingSwitch}
+          label="Low data mode"
+          hint=${connectionSaver.value ? 'Browser connection saver is also active.' : ''}
+          checked=${lowDataMode.value}
+          onChange=${toggleLowDataMode} />
       </div>
 
       <div class="card">

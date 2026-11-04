@@ -1163,6 +1163,68 @@ body:has(.tmux-pane-page) {
   cursor: pointer;
 }
 
+.setting-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.setting-switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.setting-switch-hint {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+.switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 22px;
+  border: 1px solid var(--text-muted);
+  border-radius: 11px;
+  background: var(--bg-input);
+  appearance: none;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.switch::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: transform 0.15s;
+}
+
+.switch:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.switch:checked::before {
+  background: #000;
+  transform: translateX(18px);
+}
+
+.switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Grid */
 .grid {
   display: grid;
