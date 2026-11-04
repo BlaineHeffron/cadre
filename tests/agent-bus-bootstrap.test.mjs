@@ -125,8 +125,7 @@ test('bootstrap injects simplified room prompts without loop startup metadata', 
     assert.doesNotMatch(prompt, /Other participants post type=result and stop/);
     assert.match(prompt, /<merged\|ready\|blocked\|needs-decision> · PR #n · <one line>/);
     assert.match(prompt, /The room owner already receives it; do not also DM it to the owner or coordinator\. agent_dm is for things not posted in the room\./);
-    assert.match(prompt, /any agent may read, post, close or reopen without subscribing/);
-    assert.match(prompt, /Action tools return ids and status only/);
+    assert.match(prompt, /its tool descriptions cover rooms, DMs, paging and ownership/);
     assert.match(prompt, /Reply only if this is new work\. Do not reply to delayed copies or courtesy acks\./);
   }
   assert.match(h.injected.codex[0], /your assigned role is implementer/);

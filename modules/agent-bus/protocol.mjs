@@ -24,19 +24,12 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
     'Wait on background jobs by exact PID (`wait <pid>`, `kill -0 <pid>`) or your harness\'s background-task tool; wait on a long command with one call and a long timeout, not repeated sleeps; never find or kill processes by matching their full command line with `pgrep`/`pkill`, since that can hit other agents.',
     'For your own bounded reading, searching, and checks, use built-in subagents when available: Haiku (model: "haiku") on Claude, GPT-6 Luna (gpt-6-luna) on Codex; reserve Cadre sessions for cross-provider work, isolation, persistence, or interaction.',
     'To wait on a teammate, end your turn; Cadre delivers room messages when you are idle. Do not sleep or poll room_context for replies.',
-    'Use the `dueno` MCP server for room communication.',
+    'Use the `dueno` MCP server for room communication; its tool descriptions cover rooms, DMs, paging and ownership.',
     `Context: room_context(thread_id="${threadId}")`,
     `Send: room_send(thread_id="${threadId}", body="...", reply_to="<message id of the claim you address>")`,
     'Reply only if this is new work. Do not reply to delayed copies or courtesy acks.',
-    'Non-DM rooms are open: any agent may read, post, close or reopen without subscribing. DMs remain member-only. Participants receive pushes; owners also receive results.',
     'Handoff: in implement/review collabs, the implementer sends PR, head SHA, and checks to the reviewer with type="message". Only the reviewer posts type="result", starting with "DIRECTOR REPORT": PR number, Head: <sha>, changes, test results, and open items. Without a reviewer or in a single-role room, participants post the same report as type="result" and stop. Set summary to "<merged|ready|blocked|needs-decision> · PR #n · <one line>". The room owner already receives it; do not also DM it to the owner or coordinator. agent_dm is for things not posted in the room.',
-    'Action tools return ids and status only. Text is read with room_context or monitor_get_session_output. Lists default to a page; pass offset for more.',
-    'room_context defaults to recent truncated messages; pass since/after, bodies=false, or summary_only=true (summaries, no bodies) to save context; continue a truncated body with message_id and body_offset=nextOffset (ignores since/after).',
-    'Rooms: room_list() (owned/subscribed) or room_list(scope="all") (all open non-DM) · Archive: room_close(thread_id="<room id>")',
-    'Owners may room_end(thread_id="<room id>") or room_transfer(thread_id="<room id>", to={kind, session_id}). Claim a room for yourself when its owner is gone.',
-    'Direct message: agent_dm(kind="<target provider>", session_id="<session id>", body="...")',
     'After opening a PR, the room owner may call watch_pr({repo, number, thread_id}) to be notified of reviews, conflicts, merge or close; Cadre never merges. The owner ends the room with room_end after the work lands; Cadre cleans a managed worktree at room end when all its commits are on the remote.',
-    'Directory: agent_directory()',
   ].join('\n');
 }
 
