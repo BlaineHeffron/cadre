@@ -1887,7 +1887,34 @@ body:has(.tmux-pane-page) {
 }
 
 .control-row-primary {
+  justify-content: flex-start;
+}
+
+.control-row-primary .ctrl-btn {
+  flex: 0 1 auto;
+  min-width: 120px;
+  font-size: var(--fs-base);
+}
+
+.approval-prompt-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.approval-prompt-title > span {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #c62828;
+  color: #fff;
+  font-size: var(--fs-xs);
 }
 
 .control-row-tools {
@@ -2039,22 +2066,6 @@ body:has(.tmux-pane-page) {
 .ctrl-reject:active {
   background: var(--danger);
   color: #fff;
-}
-
-.ctrl-yes {
-  flex: 1;
-  background: var(--success);
-  color: #000;
-  border-color: var(--success);
-  font-size: var(--fs-md);
-}
-
-.ctrl-no {
-  flex: 1;
-  background: var(--bg-card);
-  color: var(--danger);
-  border-color: var(--danger);
-  font-size: var(--fs-md);
 }
 
 .ctrl-default {

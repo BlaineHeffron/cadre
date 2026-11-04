@@ -2,8 +2,19 @@ import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { captureFileDrop } from '../public/components/skill-prompt-composer.mjs';
+import { optionClass } from '../public/components/agent-control-bar.mjs';
 
 describe('agent terminal controls', () => {
+  it('styles only the first allow as primary and every refusal as danger', () => {
+    const pane = ['Yes', "Yes, and don't ask again for npm run migrate commands", 'No, and tell Claude what to do differently (esc)']
+      .map((label, index) => optionClass({ key: String(index + 1), label }, index));
+    assert.deepEqual(pane, ['ctrl-approve', 'ctrl-default', 'ctrl-reject']);
+    const structured = [['Allow once', 'allow_once'], ['Allow for session', 'allow_always'], ['Deny', 'reject_once']]
+      .map(([label, kind], index) => optionClass({ key: kind, label, kind }, index));
+    assert.deepEqual(structured, ['ctrl-approve', 'ctrl-default', 'ctrl-reject']);
+    assert.equal(optionClass('Nothing to deny', 0), 'ctrl-approve');
+  });
+
   it('renders mobile tmux keys on agent sessions, including Shift+Tab', async () => {
     const terminalKeys = await readFile('public/components/terminal-keys.mjs', 'utf8');
     const agentDetail = await readFile('public/pages/agent-session-detail.mjs', 'utf8');
