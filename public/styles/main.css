@@ -555,6 +555,8 @@ textarea.input:focus {
   flex: 1;
   min-height: 0;
   border-radius: 0;
+  font-size: var(--fs-base);
+  line-height: 1.4;
 }
 
 .terminal-interactive {
@@ -1092,8 +1094,8 @@ body:has(.tmux-pane-page) {
 .ansi-fg-bright-white { color: #fff; }
 
 .ansi-bg-black { background: #000; }
-.ansi-bg-red { background: #c00; }
-.ansi-bg-green { background: #0a0; }
+.ansi-bg-red { background: #8a2a2a; }
+.ansi-bg-green { background: #2a6a2a; }
 .ansi-bg-yellow { background: #aa0; }
 .ansi-bg-blue { background: #00a; }
 .ansi-bg-magenta { background: #a0a; }
