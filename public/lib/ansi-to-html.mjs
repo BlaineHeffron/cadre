@@ -35,9 +35,10 @@ export function ansiToHtml(text) {
     if (!buf) return;
     const classes = buildClasses(current);
     // 256-colour and truecolor values have no class; they render inline.
+    // Backgrounds are blended toward the terminal so diff rows tint rather than glare.
     const style = [['color', current.fg], ['background', current.bg]]
       .filter(([, value]) => value?.startsWith('rgb('))
-      .map(([prop, value]) => `${prop}:${value}`)
+      .map(([prop, value]) => `${prop}:${prop === 'color' ? value : `color-mix(in srgb,${value} 60%,transparent)`}`)
       .join(';');
     const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;
     parts.push(attrs ? `<span${attrs}>${esc(buf)}</span>` : esc(buf));
