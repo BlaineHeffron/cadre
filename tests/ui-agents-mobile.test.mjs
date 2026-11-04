@@ -46,7 +46,7 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   assert.equal(await cards.count(), 2);
   // One provider heading per run of cards, not one per card.
   assert.deepEqual(await page.locator('.agents-card-provider').allInnerTexts(), ['Claude']);
-  assert.equal(await cards.first().locator('.badge-new').innerText(), 'New');
+  assert.equal(await cards.first().getByRole('img', { name: 'Unread' }).isVisible(), true);
   // At two columns the heading spans the row, so cards side by side line up.
   await page.setViewportSize({ width: 960, height: 844 });
   const [left, right] = await Promise.all([0, 1].map((i) => cards.nth(i).boundingBox()));
@@ -58,7 +58,8 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   // Each card leads with one primary action; the rest wait behind its ⋯ menu.
   const first = cards.first();
   assert.equal(await first.getByRole('button', { name: 'Open', exact: true }).isVisible(), true);
-  assert.equal(await first.getByText('New', { exact: true }).isVisible(), true);
+  // Unread is a dot, so the status badge is the only label on the card.
+  assert.equal(await first.getByText('New', { exact: true }).count(), 0);
   assert.equal(await first.getByRole('button', { name: 'Kill' }).isVisible(), false);
   await first.getByLabel('More actions for first task').click();
   for (const name of ['Copy ID', 'Start loop', 'Shift+Tab', 'Esc', 'Kill']) assert.equal(await first.getByRole('button', { name, exact: true }).isVisible(), true, name);
@@ -86,7 +87,7 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   assert.equal(await isOpen(), true);
 
   // The new-session form leads with the basics; name and coordinator wait under Advanced.
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('button', { name: 'New session', exact: true }).click();
   // Phone touch targets stay 44px tall, including the inline skill picker.
   const skillPicker = page.locator('.new-agent-prompt-tools .ctrl-inline-select');
   assert.ok((await skillPicker.boundingBox()).height >= 44, 'skill picker keeps a 44px touch target');

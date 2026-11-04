@@ -703,7 +703,7 @@ export function AgentsPage() {
       ${desktopLayout.value ? html`
         <div class="agents-desktop-toolbar">
           <h1 class="page-title agents-desktop-toolbar-title">Agents</h1>
-          <button class="btn btn-primary" onclick=${() => openNewModal('codex')}>New</button>
+          <button class="btn ${allSessions.length ? 'btn-primary' : ''}" onclick=${() => openNewModal('codex')}>New session</button>
           <input
             class="input agents-desktop-search"
             placeholder="Search agents"
@@ -788,7 +788,7 @@ export function AgentsPage() {
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px">
         <h1 class="page-title" style="margin-right:auto">Agents</h1>
         <button class="btn btn-icon" aria-label="Refresh" title="Refresh" onclick=${() => loadAgentSessions(loading, loadError)}>↻</button>
-        <button class="btn btn-primary" onclick=${() => openNewModal('codex')}>New</button>
+        <button class="btn ${allSessions.length ? 'btn-primary' : ''}" onclick=${() => openNewModal('codex')}>New session</button>
       </div>
       <div style="display:flex; gap:8px; margin-bottom:10px">
         <input

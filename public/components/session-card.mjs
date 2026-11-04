@@ -106,7 +106,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
           class="card-title"
           title=${primaryName}
           style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
-          ${isUnseen ? html`<span class="badge badge-new">New</span>` : null}${primaryName}
+          ${isUnseen ? html`<span class="unread-dot" role="img" aria-label="Unread" title="Unread"></span>` : null}${primaryName}
         </span>
         ${isMutable && onToggleSelected ? html`
           <label style="display:flex; align-items:center; gap:6px; font-size:var(--fs-xs); color:var(--text-muted)" onclick=${e => e.stopPropagation()}>
