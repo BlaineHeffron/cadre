@@ -205,7 +205,7 @@ subscribe('agent-bus:alerts', (type, data) => {
   const alert = { id: `${type}:${data.deliveryId || data.messageId || Date.now()}`, type, ...data };
   agentBusAlerts.value = [alert, ...agentBusAlerts.value].slice(0, 25);
   if (document.hidden) {
-    showNotification('Agent Collab', data.error || type, {
+    showNotification('Agent Rooms', data.error || type, {
       tag: alert.id,
       url: data.threadId ? `/collab/${data.threadId}` : '/collab',
     });

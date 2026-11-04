@@ -1130,9 +1130,9 @@ export function AgentsPage() {
             </div>
           ` : html`
             <div class="grid grid-2 agents-card-grid">
-              ${visibleSessions.map((session) => html`
+              ${visibleSessions.map((session, index) => html`
                 <div>
-                  <div class="agents-card-provider">${providerLabel(session._provider)}</div>
+                  ${session._provider !== visibleSessions[index - 1]?._provider ? html`<div class="agents-card-provider">${providerLabel(session._provider)}</div>` : null}
                   <${SessionCard}
                     session=${session}
                     provider=${session._kind}

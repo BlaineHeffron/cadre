@@ -1129,6 +1129,16 @@ body:has(.tmux-pane-page) {
 .badge-success { background: var(--success); color: #000; }
 .badge-info { background: var(--accent); color: #000; }
 
+/* Unseen marker: quieter than the status badge it sits beside. */
+.badge-new {
+  margin-right: 6px;
+  padding: 0 6px;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid currentColor;
+  font-size: var(--fs-xs);
+}
+
 .nav-connection-badge {
   justify-content: center;
   flex: 0 0 auto;
@@ -1935,6 +1945,11 @@ body:has(.tmux-pane-page) {
 /* Long session titles must not widen the single-column mobile card grid. */
 .agents-card-grid > * {
   min-width: 0;
+}
+
+/* The grid gap spaces the cards; their own margin would double it. */
+.agents-card-grid .card {
+  margin-bottom: 0;
 }
 
 .agents-desktop-detail {

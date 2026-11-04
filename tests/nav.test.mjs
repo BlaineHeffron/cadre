@@ -52,7 +52,7 @@ test('phone navigation keeps frequent routes visible and overflow reachable; des
       assert.equal(new URL(page.url()).pathname, (await link.getAttribute('href')));
     }
     assert.equal(await bell.isVisible(), false);
-    assert.equal(await nav.getByRole('link', { name: 'Command Center', exact: true }).isVisible(), false);
+    assert.equal(await nav.getByRole('link', { name: 'Alerts', exact: true }).isVisible(), false);
     const settings = nav.getByRole('link', { name: 'Settings', exact: true });
     const gear = await settings.boundingBox();
     assert.ok(gear.height >= 44 && gear.x + gear.width <= width, `Settings at ${width}px`);
@@ -64,12 +64,12 @@ test('phone navigation keeps frequent routes visible and overflow reachable; des
   for (const group of ['Automation', 'Machines', 'Library', 'Security']) {
     assert.equal(await nav.getByText(group, { exact: true }).isVisible(), true, group);
   }
-  for (const name of ['Command Center', 'Collab', 'Fleet', 'GitHub', 'Schedules', 'Loop Sessions', 'Tmux', 'Saved Notes', 'Skills', 'Recordings', 'Threats', 'Files']) {
+  for (const name of ['Alerts', 'Rooms', 'Fleet', 'GitHub', 'Schedules', 'Loop Sessions', 'Tmux', 'Saved Notes', 'Skills', 'Recordings', 'Threats', 'Files']) {
     const item = nav.getByRole('menuitem', { name: new RegExp(`^${name}(?:$|\\s)`) });
     assert.equal(await item.isVisible(), true, name);
     await item.click();
     assert.equal(await more.getAttribute('aria-expanded'), 'false');
-    assert.equal(new URL(page.url()).pathname, ({ 'Command Center': '/', GitHub: '/github-agents', Schedules: '/scheduled-agents', 'Loop Sessions': '/loop-sessions', 'Saved Notes': '/capture/notes' })[name] || `/${name.toLowerCase()}`);
+    assert.equal(new URL(page.url()).pathname, ({ Alerts: '/', Rooms: '/collab', GitHub: '/github-agents', Schedules: '/scheduled-agents', 'Loop Sessions': '/loop-sessions', 'Saved Notes': '/capture/notes' })[name] || `/${name.toLowerCase()}`);
     await more.click();
   }
   await bell.click();
@@ -88,10 +88,10 @@ test('phone navigation keeps frequent routes visible and overflow reachable; des
   await page.mouse.click(2, 800);
   assert.equal(await more.getAttribute('aria-expanded'), 'false');
   await page.setViewportSize({ width: 1440, height: 900 });
-  for (const name of ['Command Center', 'Agents', 'Queue', 'Collab', 'Capture']) {
+  for (const name of ['Alerts', 'Agents', 'Queue', 'Rooms', 'Capture']) {
     assert.equal(await nav.getByRole('link', { name: new RegExp(`^${name}`) }).isVisible(), true);
   }
-  await nav.getByRole('link', { name: 'Collab', exact: true }).click();
+  await nav.getByRole('link', { name: 'Rooms', exact: true }).click();
   assert.equal(await more.evaluate((el) => el.classList.contains('active')), false);
   await more.click();
   await nav.getByRole('menuitem', { name: 'Fleet', exact: true }).click();
