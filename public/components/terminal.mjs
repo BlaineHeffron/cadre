@@ -241,11 +241,11 @@ export function Terminal({
 
   const children = [];
   if (hasMore && onLoadMore) {
+    // A pill, not a focusable button: keys typed in the terminal must keep going to the session.
     children.push(h('div', {
       class: 'terminal-load-more',
-      style: 'text-align:center; padding:6px; color:var(--text-muted); font-size:var(--fs-xs); cursor:pointer; user-select:none',
       onClick: !loadingMore ? loadMoreFromClick : undefined,
-    }, loadingMore ? 'Loading...' : 'Scroll up or tap to load more history'));
+    }, loadingMore ? 'Loading…' : 'Load earlier output'));
   }
   children.push(h('div', { class: 'terminal-body', dangerouslySetInnerHTML: { __html: htmlBody } }));
 
