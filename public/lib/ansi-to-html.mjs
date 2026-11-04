@@ -151,3 +151,24 @@ function applyGrCodes(state, codes) {
     j++;
   }
 }
+
+/**
+ * While the control bar shows an approval's choices, fold the same question and
+ * numbered menu out of the terminal so the prompt appears once. Lines after the
+ * menu are kept; without a matching question and menu the text is unchanged.
+ */
+export function foldAnsweredMenu(text, interaction) {
+  const question = interaction?.detail?.trim();
+  if (!question || !interaction.options?.length) return text;
+  const lines = text.split('\n');
+  const plain = lines.map((line) => line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ''));
+  const start = plain.findLastIndex((line) => line.trim() === question);
+  let end = -1;
+  for (let i = start + 1; start >= 0 && i < plain.length; i++) {
+    if (/^\s*(?:[❯›>]\s*)?\d+\.\s/.test(plain[i])) end = i;
+    // A blank line after the menu, or unindented text, ends it; indented lines are wrapped choices.
+    else if (plain[i].trim() ? !/^\s/.test(plain[i]) : end >= 0) break;
+  }
+  if (end < 0) return text;
+  return [...lines.slice(0, start), '\x1b[2m(choices shown below)\x1b[0m', ...lines.slice(end + 1)].join('\n');
+}

@@ -22,6 +22,7 @@ import { createRevisionGuard } from '../app/revision-guard.mjs';
 import { addToast, agentThreads, markSessionSeenForKind, markSessionAttentionSeen, markSessionTurnSeen, removeSessionForKind } from '../app/state.mjs';
 import { isEditableTarget, mapKeyboardEventToTmux } from '../app/terminal-input.mjs';
 import { Terminal, stripAnsi } from '../components/terminal.mjs';
+import { foldAnsweredMenu } from '../lib/ansi-to-html.mjs';
 import { AgentControlBar } from '../components/agent-control-bar.mjs';
 import { TerminalKeys } from '../components/terminal-keys.mjs';
 import { RenderedTranscript } from '../components/rendered-transcript.mjs';
@@ -686,7 +687,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
           onLoadEarlier: () => loadEarlierTranscript(id),
         }))
       : h(Terminal, {
-        content: content.value,
+        content: sessionState.value.capabilities?.canAnswerInteraction ? foldAnsweredMenu(content.value, sessionState.value.interaction) : content.value,
         fullHeight: true,
         ansiColors: true,
         captureKeyboard: !isRustManagedReadOnly,
