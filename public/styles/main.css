@@ -2015,8 +2015,6 @@ input[type="checkbox"]:not(.switch) {
   font-size: var(--fs-xs);
 }
 
-/* Row meta and preview are read, not just glanced at: secondary text, not muted;
-   the preview line is the 13px step. */
 /* Provider and path are secondary; the latest status line reads as body text. */
 .agent-rail-row-meta {
   color: var(--text-secondary);
