@@ -78,10 +78,21 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   await rows.nth(1).locator('.agent-rail-row-main').click();
   const answers = page.locator('.control-row-primary .ctrl-btn');
   await answers.first().waitFor();
-  const tops = await answers.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
-  assert.equal(new Set(tops).size, 1, `answers on one row: ${tops}`);
-  assert.equal(await answers.nth(2).getAttribute('title'), 'No, and tell Claude what to do differently (esc)');
+  const boxes = await answers.evaluateAll((els) => els.map((el) => {
+    const { top, bottom } = el.getBoundingClientRect();
+    return { top, bottom, clipped: el.scrollWidth > el.clientWidth };
+  }));
+  assert.ok(Math.max(...boxes.map((b) => b.top)) < Math.min(...boxes.map((b) => b.bottom)), 'answers share one row');
+  assert.deepEqual(boxes.map((b) => b.clipped), [false, false, false], 'long answers wrap instead of truncating');
+  assert.equal(await answers.nth(2).innerText(), 'No, and tell Claude what to do differently (esc)');
   for (const name of ['Cycle mode', 'Interrupt']) assert.equal(await page.getByRole('button', { name, exact: true }).isVisible(), true, name);
+  // Composer extras wait behind one menu.
+  const insertSkill = page.locator('.claude-control-bar').getByRole('combobox').first();
+  assert.equal(await insertSkill.isVisible(), false);
+  await page.getByLabel('More composer tools').click();
+  assert.equal(await insertSkill.isVisible(), true);
+  assert.equal(await page.getByRole('button', { name: 'Save as skill' }).isVisible(), true);
+  await page.getByLabel('More composer tools').click();
   // Interrupt goes through POST /escape, which the server may promote to an interrupt.
   await Promise.all([
     page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/claude/sessions/b2/escape')),

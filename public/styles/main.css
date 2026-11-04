@@ -1595,6 +1595,20 @@ body:has(.tmux-pane-page) {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
+/* The composer sits at the bottom, so its menu opens upward. */
+.composer-more .more-menu-list {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+}
+
+.composer-more .more-menu-list > * {
+  width: 100%;
+  max-width: none;
+}
+
 .more-menu-list .btn {
   justify-content: flex-start;
   border-color: transparent;
@@ -1643,7 +1657,6 @@ body:has(.tmux-pane-page) {
 .session-title {
   font-weight: 600;
   font-size: var(--fs-base);
-  font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2013,15 +2026,14 @@ body:has(.tmux-pane-page) {
   justify-content: flex-start;
 }
 
-/* Answers share one row; long labels truncate (full text in the title). */
+/* Answers share one row; a long label wraps inside its button, never truncates. */
 .control-row-primary .ctrl-btn {
-  display: block;
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
   font-size: var(--fs-base);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  text-align: center;
+  white-space: normal;
 }
 
 .control-row-primary .ctrl-approve {

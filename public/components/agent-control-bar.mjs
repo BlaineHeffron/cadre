@@ -1,6 +1,7 @@
 import { html } from 'htm/preact';
 import { useRef } from 'preact/hooks';
 import { providerDescriptor } from '../app/providers.mjs';
+import { closeMenuOnChoice } from './session-card.mjs';
 import { useSignal } from '../app/use-signal.mjs';
 import { openSkillWriterWithDraft } from '../app/skill-drafts.mjs';
 import { LaunchSkillSelector } from './launch-skill-selector.mjs';
@@ -42,6 +43,11 @@ export function optionClass(option, index) {
   const label = typeof option === 'string' ? option : String(option?.label || '');
   if (String(option?.kind || '').startsWith('reject') || /^no\b/i.test(label)) return 'ctrl-reject';
   return index === 0 ? 'ctrl-approve' : 'ctrl-default';
+}
+
+// A picked skill, quick insert or delay closes the tools menu; "Custom" stays open for its fields.
+function closeAfterPick(event) {
+  if (event.target.tagName === 'SELECT' && event.target.value !== 'custom') event.currentTarget.open = false;
 }
 
 export function AgentControlBar({
@@ -148,7 +154,7 @@ export function AgentControlBar({
           ${interactionOptions.length > 0 ? interactionOptions.map((option, index) => {
             const label = typeof option === 'string' ? option : option.label || option.text || option.value || option.index;
             return html`
-              <button class="ctrl-btn ${optionClass(option, index)}" title=${label} onclick=${() => handleDialogAnswer(option)}>${label}</button>
+              <button class="ctrl-btn ${optionClass(option, index)}" onclick=${() => handleDialogAnswer(option)}>${label}</button>
             `;
           }) : policyControlled ? html`
             <span style="font-size:var(--fs-xs); color:var(--text-muted)">Applying automatic safety policy…</span>
@@ -185,61 +191,68 @@ export function AgentControlBar({
         <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleReject} title="Send Escape (interrupt)">
           Interrupt
         </button>
-        <${LaunchSkillSelector} compact=${true} onInsert=${(id) => skillInsert.current?.(id)} />
-        <button
-          type="button"
-          class="ctrl-btn ctrl-default ctrl-btn-compact"
-          title="Open the skill writer with this prompt text"
-          disabled=${!inputText.value.trim()}
-          onclick=${() => openSkillWriterWithDraft(inputText.value)}>
-          Save as skill
-        </button>
-        ${quickInsertOptions.length > 0 ? html`
-          <select class="ctrl-inline-select ctrl-inline-select-compact" aria-label="Quick insert" onInput=${handleQuickInsert}>
-            <option value="">Quick insert</option>
-            ${quickInsertOptions.map((option) => html`
-              <option value=${option.key} title=${option.label}>${option.label}</option>
-            `)}
-          </select>
-        ` : null}
-        ${onAttachImage ? html`
-          <label class="ctrl-btn ctrl-default ctrl-btn-compact session-image-picker" style="cursor:pointer" title="Attach an image to the next message">
-            ${imageAttached ? 'Image ✓' : 'Image'}
-            <input type="file" accept="image/*" capture="environment" style="display:none" onChange=${onAttachImage} />
-          </label>
-        ` : null}
-        <select
-          class="ctrl-inline-select ctrl-inline-select-tiny"
-          aria-label="Send delay"
-          disabled=${imageAttached}
-          title=${imageAttached ? 'Images send immediately' : 'Send delay'}
-          value=${String(selectedDelay.value)}
-          onInput=${e => { selectedDelay.value = e.target.value === 'custom' ? 'custom' : Number(e.target.value); }}
-        >
-          ${DELAY_OPTIONS.map(o => html`<option value=${String(o.value)}>${o.label}</option>`)}
-          <option value="custom">Custom</option>
-        </select>
-        ${selectedDelay.value === 'custom' ? html`
-          <input
-            type="number"
-            class="ctrl-input"
-            style="flex:0 1 76px; min-width:64px"
-            min="0"
-            step="any"
-            inputmode="decimal"
-            placeholder="Amount"
-            value=${customDelayAmount.value}
-            onInput=${e => { customDelayAmount.value = e.target.value; }}
-          />
-          <select
-            class="ctrl-inline-select ctrl-inline-select-tiny"
-            aria-label="Delay unit"
-            value=${String(customDelayUnit.value)}
-            onInput=${e => { customDelayUnit.value = Number(e.target.value); }}
-          >
-            ${DELAY_UNITS.map(o => html`<option value=${String(o.value)}>${o.label}</option>`)}
-          </select>
-        ` : null}
+        <details class="more-menu composer-more" onClickCapture=${closeMenuOnChoice} onChange=${closeAfterPick}>
+          <summary class="ctrl-btn ctrl-default ctrl-btn-compact" aria-label="More composer tools">
+            More${selectedDelay.value ? ' · delayed' : ''}${imageAttached ? ' · image' : ''}
+          </summary>
+          <div class="more-menu-list">
+            <${LaunchSkillSelector} compact=${true} onInsert=${(id) => skillInsert.current?.(id)} />
+            <button
+              type="button"
+              class="ctrl-btn ctrl-default ctrl-btn-compact"
+              title="Open the skill writer with this prompt text"
+              disabled=${!inputText.value.trim()}
+              onclick=${() => openSkillWriterWithDraft(inputText.value)}>
+              Save as skill
+            </button>
+            ${quickInsertOptions.length > 0 ? html`
+              <select class="ctrl-inline-select ctrl-inline-select-compact" aria-label="Quick insert" onInput=${handleQuickInsert}>
+                <option value="">Quick insert</option>
+                ${quickInsertOptions.map((option) => html`
+                  <option value=${option.key} title=${option.label}>${option.label}</option>
+                `)}
+              </select>
+            ` : null}
+            ${onAttachImage ? html`
+              <label class="ctrl-btn ctrl-default ctrl-btn-compact session-image-picker" style="cursor:pointer" title="Attach an image to the next message">
+                ${imageAttached ? 'Image ✓' : 'Image'}
+                <input type="file" accept="image/*" capture="environment" style="display:none" onChange=${onAttachImage} />
+              </label>
+            ` : null}
+            <select
+              class="ctrl-inline-select ctrl-inline-select-tiny"
+              aria-label="Send delay"
+              disabled=${imageAttached}
+              title=${imageAttached ? 'Images send immediately' : 'Send delay'}
+              value=${String(selectedDelay.value)}
+              onInput=${e => { selectedDelay.value = e.target.value === 'custom' ? 'custom' : Number(e.target.value); }}
+            >
+              ${DELAY_OPTIONS.map(o => html`<option value=${String(o.value)}>${o.label}</option>`)}
+              <option value="custom">Custom</option>
+            </select>
+            ${selectedDelay.value === 'custom' ? html`
+              <input
+                type="number"
+                class="ctrl-input"
+                style="flex:0 1 76px; min-width:64px"
+                min="0"
+                step="any"
+                inputmode="decimal"
+                placeholder="Amount"
+                value=${customDelayAmount.value}
+                onInput=${e => { customDelayAmount.value = e.target.value; }}
+              />
+              <select
+                class="ctrl-inline-select ctrl-inline-select-tiny"
+                aria-label="Delay unit"
+                value=${String(customDelayUnit.value)}
+                onInput=${e => { customDelayUnit.value = Number(e.target.value); }}
+              >
+                ${DELAY_UNITS.map(o => html`<option value=${String(o.value)}>${o.label}</option>`)}
+              </select>
+            ` : null}
+          </div>
+        </details>
         ${descriptor.hasSlash ? html`
           <button type="button" class="ctrl-btn ctrl-slash ctrl-btn-compact" onclick=${() => { showSlash.value = !showSlash.value; }}>/</button>
         ` : null}
