@@ -650,7 +650,11 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         // Routine and destructive extras live behind one menu so the header has one clear action.
         h('details', { class: 'session-header-more' },
           h('summary', { class: 'btn', 'aria-label': 'More session actions', title: 'More session actions' }, '\u22EF'),
-          h('div', { class: 'session-header-menu' },
+          h('div', {
+            class: 'session-header-menu',
+            // Choosing an item closes the menu, like any other menu.
+            onClick: (event) => { if (event.target.closest('button, a')) event.currentTarget.closest('details').open = false; },
+          },
             h('button', { class: 'btn', onClick: copySessionId }, 'Copy ID'),
             (!machine && sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process')
               ? h('button', { class: 'btn mobile-hidden', onClick: copyAttachCommand }, 'Copy Attach')

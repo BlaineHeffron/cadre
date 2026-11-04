@@ -3730,6 +3730,25 @@ p.new-agent-hint {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+  /* Create stays reachable while the long form scrolls. */
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin: 0 -16px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--bg-card);
+}
+
+/* There .main scrolls, and its bottom padding would hold the footer off the edge. */
+.main:has(.agents-desktop-shell) .new-agent-footer {
+  bottom: -16px;
+}
+
+.empty-state {
+  padding: 40px 16px;
+  text-align: center;
 }
 
 /* MCP capability selector */

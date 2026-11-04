@@ -7,12 +7,13 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { chromium } from 'playwright-core';
 
-const sessions = [
+const demo = [
   { id: 'a1', displayName: 'first task', workDir: '/home/me/repo', tmuxSession: 'claude-a1', state: { status: 'working' } },
   { id: 'b2', displayName: 'second task', workDir: '/home/me/repo', tmuxSession: 'claude-b2', state: { status: 'ready' } },
 ];
 
-test('desktop Agents page shows bulk actions only for a selection and folds session extras into one menu', { skip: !process.env.CHROMIUM_BIN, timeout: 30000 }, async (t) => {
+test('desktop Agents page shows bulk actions only for a selection, folds session extras into one menu, and starts empty with a New action', { skip: !process.env.CHROMIUM_BIN, timeout: 30000 }, async (t) => {
+  let sessions = demo;
   const root = fileURLToPath(new URL('../', import.meta.url));
   const app = Fastify();
   t.after(() => app.close());
@@ -50,11 +51,28 @@ test('desktop Agents page shows bulk actions only for a selection and folds sess
   await page.getByRole('checkbox', { name: 'Bulk select first task' }).check();
   assert.equal(await toolbar.getByText('1 selected').isVisible(), true);
   for (const name of ['Prompt', 'Esc', 'Kill']) assert.equal(await toolbar.getByRole('button', { name, exact: true }).isVisible(), true, name);
+  // The bulk prompt closes with the selection and stays closed for the next one.
+  const bulkPrompt = page.getByRole('textbox', { name: 'Bulk prompt to selected sessions' });
+  await toolbar.getByRole('button', { name: 'Prompt', exact: true }).click();
+  assert.equal(await bulkPrompt.isVisible(), true);
+  await page.getByRole('checkbox', { name: 'Bulk select first task' }).uncheck();
+  await page.getByRole('checkbox', { name: 'Bulk select first task' }).check();
+  assert.equal(await bulkPrompt.count(), 0);
 
   const header = page.locator('.claude-session-header');
   await header.getByRole('button', { name: 'Rendered Transcript' }).waitFor();
   assert.equal(await header.getByRole('button', { name: 'Kill' }).isVisible(), false);
   await header.getByLabel('More session actions').click();
   for (const name of ['Copy ID', 'Refresh', 'Kill']) assert.equal(await header.getByRole('button', { name, exact: true }).isVisible(), true, name);
+  await header.getByRole('button', { name: 'Refresh', exact: true }).click();
+  assert.equal(await header.getByRole('button', { name: 'Kill' }).isVisible(), false, 'choosing an item closes the menu');
+
+  // With no sessions at all, the empty list offers the way to start one, and Create stays on screen.
+  sessions = [];
+  await page.reload();
+  await page.getByRole('button', { name: 'New session' }).click();
+  const create = page.getByRole('button', { name: 'Create Session' });
+  const box = await create.boundingBox();
+  assert.ok(box.y >= 0 && box.y + box.height <= 900, `Create Session at y=${box.y}`);
   assert.deepEqual(errors, []);
 });
