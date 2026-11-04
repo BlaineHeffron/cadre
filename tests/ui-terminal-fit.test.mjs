@@ -18,8 +18,9 @@ test('full-height terminal fits a short history and keeps streaming output pinne
   app.get('/fixture', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
     import { h, render } from 'preact';
     import { Terminal } from '/components/terminal.mjs';
-    window.show = (content) => render(h('div', { style: 'display:flex; flex-direction:column; height:600px' },
-      h(Terminal, { content, fullHeight: true, ansiColors: true, resetKey: 's1' }),
+    window.loads = 0;
+    window.show = (content, hasMore = false) => render(h('div', { style: 'display:flex; flex-direction:column; height:600px' },
+      h(Terminal, { content, fullHeight: true, ansiColors: true, resetKey: 's1', hasMore, onLoadMore: () => { window.loads += 1; } }),
       h('div', { id: 'controls', style: 'height:80px; flex:none' }, 'controls')), document.getElementById('app'));
     window.show('❯ run the migration\\n● Bash(npm run migrate)\\n  Waiting…');
   </script>`)));
@@ -65,5 +66,9 @@ test('full-height terminal fits a short history and keeps streaming output pinne
   await page.waitForTimeout(150);
   assert.equal(await pinned(), false, 'not pulled to the bottom while reading history');
   assert.equal(await terminal.evaluate((el) => el.scrollTop), readingAt, 'view stays where the reader left it');
+  // Earlier history is one tap on a labelled pill at the top.
+  await page.evaluate(() => window.show('❯ short history', true));
+  await terminal.getByText('Load earlier output').click();
+  assert.equal(await page.evaluate(() => window.loads), 1);
   assert.deepEqual(errors, []);
 });

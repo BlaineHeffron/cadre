@@ -583,6 +583,20 @@ textarea.input:focus {
 }
 
 /* Rows scrolled past the top fade out instead of showing a half-cut line. */
+.terminal-load-more {
+  width: fit-content;
+  margin: 2px auto 10px;
+  padding: 2px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  user-select: none;
+}
+
 .terminal-fullheight::before {
   content: '';
   position: sticky;
