@@ -163,12 +163,14 @@ export function foldAnsweredMenu(text, interaction) {
   const lines = text.split('\n');
   const plain = lines.map((line) => line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ''));
   const start = plain.findLastIndex((line) => line.trim() === question);
+  const choice = /^\s*(?:[❯›>]\s*)?\d+\.\s/;
   let end = -1;
   for (let i = start + 1; start >= 0 && i < plain.length; i++) {
-    if (/^\s*(?:[❯›>]\s*)?\d+\.\s/.test(plain[i])) end = i;
+    if (choice.test(plain[i])) end = i;
     // A blank line after the menu, or unindented text, ends it; indented lines are wrapped choices.
     else if (plain[i].trim() ? !/^\s/.test(plain[i]) : end >= 0) break;
   }
-  if (end < 0) return text;
+  // Only the newest menu is live; if another follows (say its question wrapped and did not match), fold nothing.
+  if (end < 0 || plain.slice(end + 1).some((line) => choice.test(line))) return text;
   return [...lines.slice(0, start), '\x1b[2m(choices shown below)\x1b[0m', ...lines.slice(end + 1)].join('\n');
 }

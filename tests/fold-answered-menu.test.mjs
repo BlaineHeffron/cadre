@@ -28,4 +28,7 @@ test('text without that question and a numbered menu is left alone', () => {
   assert.equal(foldAnsweredMenu(pane, { ...approval, detail: 'Overwrite the file?' }), pane);
   assert.equal(foldAnsweredMenu('Do you want to proceed?\nthinking…', approval), 'Do you want to proceed?\nthinking…');
   assert.equal(foldAnsweredMenu(pane, { ...approval, options: [] }), pane);
+  // An older menu with the same question stays when a newer menu follows it.
+  const older = `${pane}\n Do you want to proceed with the very long\n wrapped question?\n ❯ 1. Yes\n   2. No`;
+  assert.equal(foldAnsweredMenu(older, approval), older);
 });
