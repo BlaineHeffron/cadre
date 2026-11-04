@@ -365,6 +365,7 @@ export function AgentsPage() {
   const bulkKillProgress = useMemo(() => signal(null), []);
   const bulkPrompt = useMemo(() => signal(''), []);
   const showBulkPrompt = useMemo(() => signal(false), []);
+  const bulkPanelOpen = useMemo(() => signal(false), []);
   const showNewModal = useMemo(() => signal(false), []);
   const showFolderPicker = useMemo(() => signal(false), []);
   const desktopLayout = useMemo(() => signal(isDesktopAgentsLayout()), []);
@@ -785,27 +786,29 @@ export function AgentsPage() {
           </div>
         ` : null}
       ` : html`
-      <div class="card-header">
-        <h1 class="card-title" style="font-size:var(--fs-lg)">Agents</h1>
-        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
-          <button class="btn" onclick=${() => loadAgentSessions(loading, loadError)}>Refresh</button>
-          <button class="btn btn-primary" onclick=${() => openNewModal('codex')}>New</button>
-          <select
-            class="input"
-            style="min-width:160px"
-            value=${providerFilter.value}
-            onInput=${e => { providerFilter.value = e.target.value; }}>
-            ${[{ id: 'all', label: 'All providers' }, ...providerChoices].map((option) => html`
-              <option value=${option.id}>${option.label}</option>
-            `)}
-          </select>
-          <input
-            class="input"
-            style="min-width:220px"
-            placeholder="Search agents"
-            value=${textFilter.value}
-            onInput=${e => { textFilter.value = e.target.value; }} />
-        </div>
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px">
+        <h1 class="card-title" style="font-size:var(--fs-lg); margin-right:auto">Agents</h1>
+        <button class="btn" onclick=${() => loadAgentSessions(loading, loadError)}>Refresh</button>
+        <button class="btn btn-primary" onclick=${() => openNewModal('codex')}>New</button>
+      </div>
+      <div style="display:flex; gap:8px; margin-bottom:10px">
+        <input
+          class="input"
+          style="flex:1 1 auto; min-width:0"
+          placeholder="Search agents"
+          aria-label="Search agents"
+          value=${textFilter.value}
+          onInput=${e => { textFilter.value = e.target.value; }} />
+        <select
+          class="input"
+          style="flex:0 0 auto; width:auto"
+          aria-label="Filter by provider"
+          value=${providerFilter.value}
+          onInput=${e => { providerFilter.value = e.target.value; }}>
+          ${[{ id: 'all', label: 'All providers' }, ...providerChoices].map((option) => html`
+            <option value=${option.id}>${option.label}</option>
+          `)}
+        </select>
       </div>
       `}
 
@@ -1026,13 +1029,17 @@ export function AgentsPage() {
         </div>
       ` : null}
 
-      ${!desktopLayout.value ? html`<div class="card" style="margin-bottom:12px">
-        <div class="card-header" style="margin-bottom:0">
-          <span class="card-title">Fleet</span>
-          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
-            <span style="font-size:var(--fs-xs); color:var(--text-muted)">
-              ${visibleSessions.length} shown of ${allSessions.length}
-            </span>
+      ${!desktopLayout.value ? html`<details
+        class="card agents-bulk"
+        style="margin-bottom:12px"
+        open=${bulkPanelOpen.value || selectedKillableSessions.length > 0}
+        onToggle=${e => { if (selectedKillableSessions.length === 0) bulkPanelOpen.value = e.target.open; }}>
+        <summary class="card-title">
+          Bulk actions
+          <span style="margin-left:8px; font-weight:400; font-size:var(--fs-xs); color:var(--text-muted)">${visibleSessions.length} shown of ${allSessions.length}</span>
+        </summary>
+        <div>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px">
             ${visibleKillableSessions.length > 0 ? html`
               <label style="display:flex; align-items:center; gap:6px; font-size:var(--fs-xs); color:var(--text-secondary)">
                 <input
@@ -1079,7 +1086,7 @@ export function AgentsPage() {
             Send Selected${selectedKillableSessions.length > 0 ? ` (${selectedKillableSessions.length})` : ''}
           </button>
         </div>
-      </div>` : null}
+      </details>` : null}
 
       ${loading.value
         ? html`<${LoadingState} message="Loading agents..." />`
@@ -1125,16 +1132,7 @@ export function AgentsPage() {
             <div class="grid grid-2 agents-card-grid">
               ${visibleSessions.map((session) => html`
                 <div>
-                  <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px; flex-wrap:wrap">
-                    <span class="badge badge-info">${providerLabel(session._provider)}</span>
-                    <span class="badge">${session._kind}</span>
-                    ${session.readOnly === true && session.externalOwner === 'rust-monitor' ? html`
-                      <span class="badge badge-low">rust-managed</span>
-                      <span class="badge badge-low">read-only</span>
-                    ` : html`
-                      <span class="badge badge-success">interactive</span>
-                    `}
-                  </div>
+                  <div class="agents-card-provider">${providerLabel(session._provider)}</div>
                   <${SessionCard}
                     session=${session}
                     provider=${session._kind}

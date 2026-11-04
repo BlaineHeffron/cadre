@@ -1165,6 +1165,17 @@ body:has(.tmux-pane-page) {
   white-space: nowrap;
 }
 
+.agents-card-provider {
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.agents-bulk > summary {
+  cursor: pointer;
+}
+
 /* Grid */
 .grid {
   display: grid;
