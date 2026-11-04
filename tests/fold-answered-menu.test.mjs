@@ -9,7 +9,8 @@ const pane = [
   ' \x1b[36m❯ 1. Yes\x1b[0m',
   '   2. Yes, and don\'t ask again for npm run migrate commands in',
   '      this project',
-  '   3. No, and tell Claude what to do differently (esc)',
+  '   3. No, and tell Claude what to do',
+  '      differently (esc)',
   '',
   ' Esc to cancel',
 ].join('\n');

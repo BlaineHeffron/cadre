@@ -166,8 +166,8 @@ export function foldAnsweredMenu(text, interaction) {
   const choice = /^\s*(?:[❯›>]\s*)?\d+\.\s/;
   let end = -1;
   for (let i = start + 1; start >= 0 && i < plain.length; i++) {
-    if (choice.test(plain[i])) end = i;
-    // A blank line after the menu, or unindented text, ends it; indented lines are wrapped choices.
+    // Indented lines after a choice are its wrapped text; a blank line after the menu, or unindented text, ends it.
+    if (choice.test(plain[i]) || (end >= 0 && /^\s+\S/.test(plain[i]))) end = i;
     else if (plain[i].trim() ? !/^\s/.test(plain[i]) : end >= 0) break;
   }
   // Only the newest menu is live; if another follows (say its question wrapped and did not match), fold nothing.

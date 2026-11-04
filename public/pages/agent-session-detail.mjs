@@ -687,7 +687,10 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
           onLoadEarlier: () => loadEarlierTranscript(id),
         }))
       : h(Terminal, {
-        content: sessionState.value.capabilities?.canAnswerInteraction ? foldAnsweredMenu(content.value, sessionState.value.interaction) : content.value,
+        // Fold only when the control bar below is showing these choices.
+        content: !isRustManagedReadOnly && sessionState.value.status === 'blocked' && sessionState.value.capabilities?.canAnswerInteraction
+          ? foldAnsweredMenu(content.value, sessionState.value.interaction)
+          : content.value,
         fullHeight: true,
         ansiColors: true,
         captureKeyboard: !isRustManagedReadOnly,
