@@ -8,7 +8,7 @@ import fastifyStatic from '@fastify/static';
 import { chromium } from 'playwright-core';
 
 const demo = [
-  { id: 'a1', displayName: 'first task', workDir: '/home/me/repo', tmuxSession: 'claude-a1', state: { status: 'working' } },
+  { id: 'a1', displayName: 'first task', workDir: '/home/me/repo', tmuxSession: 'claude-a1', state: { status: 'working', reason: 'Provider reports working' } },
   { id: 'b2', displayName: 'second task', workDir: '/home/me/repo', tmuxSession: 'claude-b2', state: { status: 'ready' } },
 ];
 
@@ -71,8 +71,10 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   for (const name of ['Prompt', 'Esc', 'Kill']) assert.equal(await toolbar.getByRole('button', { name, exact: true }).count(), 0, name);
   assert.equal(await toolbar.getByRole('checkbox', { name: 'Select all' }).count(), 0);
   assert.equal(await toolbar.getByRole('button', { name: 'Refresh' }).innerText(), '↻');
-  // Row meta reads in secondary grey, not muted.
-  assert.equal(await rows.first().locator('.agent-rail-row-meta').first().evaluate((el) => getComputedStyle(el).color), 'rgb(196, 196, 212)');
+  // Row meta (provider, path) is 13px secondary grey; the status line reads as body text.
+  const textStyle = (sel) => rows.first().locator(sel).evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
+  assert.deepEqual(await textStyle('.agent-rail-row-meta'), ['13px', 'rgb(196, 196, 212)']);
+  assert.deepEqual(await textStyle('.agent-rail-row-detail'), ['13px', 'rgb(224, 224, 224)']);
   await page.getByRole('checkbox', { name: 'Bulk select first task' }).check();
   assert.equal(await toolbar.getByText('1 selected').isVisible(), true);
   assert.equal(await toolbar.getByRole('checkbox', { name: 'Select all' }).isVisible(), true);
