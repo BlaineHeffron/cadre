@@ -22,25 +22,31 @@ import {
 
 const PRIMARY_NAV = [
   { label: 'Command Center', path: '/' },
-  { label: 'Queue', path: '/queue', mobileDefault: true },
-  { label: 'Capture', path: '/capture', mobileDefault: true },
-  { label: 'Fleet', path: '/fleet' },
-  { label: 'GitHub', path: '/github-agents' },
   { label: 'Agents', path: '/agents', mobileDefault: true },
+  { label: 'Queue', path: '/queue', mobileDefault: true },
   { label: 'Collab', path: '/collab' },
-  { label: 'Schedules', path: '/scheduled-agents' },
-  { label: 'Loop Sessions', path: '/loop-sessions' },
-  { label: 'Tmux', path: '/tmux' },
+  { label: 'Capture', path: '/capture', mobileDefault: true },
 ];
 
-const MORE_NAV = [
-  { label: 'Saved Notes', path: '/capture/notes' },
-  { label: 'Skills', path: '/skills' },
-  { label: 'Recordings', path: '/recordings' },
-  { label: 'Threats', path: '/threats' },
-  { label: 'Files', path: '/files' },
-  { label: 'Settings', path: '/settings' },
+const MORE_GROUPS = [
+  { label: 'Automation', items: [
+    { label: 'Schedules', path: '/scheduled-agents' },
+    { label: 'Loop Sessions', path: '/loop-sessions' },
+    { label: 'GitHub', path: '/github-agents' },
+  ] },
+  { label: 'Machines', items: [
+    { label: 'Fleet', path: '/fleet' },
+    { label: 'Tmux', path: '/tmux' },
+    { label: 'Files', path: '/files' },
+  ] },
+  { label: 'Library', items: [
+    { label: 'Saved Notes', path: '/capture/notes' },
+    { label: 'Skills', path: '/skills' },
+    { label: 'Recordings', path: '/recordings' },
+  ] },
+  { label: 'Security', items: [{ label: 'Threats', path: '/threats' }] },
 ];
+const MORE_NAV = MORE_GROUPS.flatMap((group) => group.items);
 
 function isPathActive(path, pathname) {
   if (!path || !pathname) return false;
@@ -203,15 +209,31 @@ export function Nav() {
                   ${navBadge(item.path)}
                 </button>
               `)}
-              ${MORE_NAV.map((item) => html`
-                <button class="nav-more-item ${isPathActive(item.path, pathname) ? 'active' : ''}" type="button" onclick=${() => navigateTo(item.path)} role="menuitem">
-                  ${item.label}
-                  ${navBadge(item.path)}
-                </button>
+              ${MORE_GROUPS.map((group) => html`
+                <div class="nav-more-group" role="presentation">${group.label}</div>
+                ${group.items.map((item) => html`
+                  <button class="nav-more-item ${isPathActive(item.path, pathname) ? 'active' : ''}" type="button" onclick=${() => navigateTo(item.path)} role="menuitem">
+                    ${item.label}
+                    ${navBadge(item.path)}
+                  </button>
+                `)}
               `)}
             </div>
           ` : null}
         </div>
+        <a
+          href="/settings"
+          class="nav-link nav-settings-link ${isPathActive('/settings', pathname) ? 'active' : ''}"
+          onclick=${(event) => onNavClick(event, '/settings')}
+          aria-current=${isPathActive('/settings', pathname) ? 'page' : undefined}
+          aria-label="Settings"
+          title="Settings"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="nav-bell-icon">
+            <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+          </svg>
+        </a>
       </div>
     </nav>
   `;
