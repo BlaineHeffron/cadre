@@ -95,7 +95,9 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   const [provider, model] = await Promise.all([0, 1].map((i) => fields.nth(i).boundingBox()));
   assert.equal(provider.y, model.y, 'provider and model share a row');
   assert.ok(provider.x + provider.width <= model.x);
-  assert.equal(await page.getByRole('checkbox', { name: /Isolated git worktree/ }).isVisible(), true);
+  const worktree = page.getByRole('checkbox', { name: /Isolated git worktree/ });
+  assert.equal(await worktree.isVisible(), true);
+  assert.equal(Math.round((await worktree.boundingBox()).width), 18, 'form checkboxes use the shared 18px size');
   assert.equal(await page.getByPlaceholder('Optional label').isVisible(), false);
   assert.equal(await page.getByRole('checkbox', { name: /Coordinator/ }).isVisible(), false);
   await page.locator('.new-agent-advanced > summary').click();
