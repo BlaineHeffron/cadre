@@ -143,7 +143,8 @@ export function McpCapabilitySelector({
     return [server.id, server.label, server.description, server.category]
       .map((item) => text(item).toLowerCase()).join(' ').includes(needle);
   });
-  const duenoRemoved = !selectedIds.value.has('dueno');
+  // Only a profile that includes dueno can lose it; the default profile starts empty by design.
+  const duenoRemoved = (currentProfile.serverIds || []).includes('dueno') && !selectedIds.value.has('dueno');
   const hasWarning = Boolean(catalog.value) && (
     duenoRemoved
     || effectiveServers.some((server) => !isCompatible(server, provider, runtime)
