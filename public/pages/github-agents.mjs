@@ -183,7 +183,7 @@ function GitHubRepoCard({ repo, state }) {
     <article class="card fleet-card" data-github-repo=${repo.id}>
       <div class="card-header">
         <div>
-          <h2 class="card-title" style="font-size:16px">${repoLabel(repo)}</h2>
+          <h2 class="card-title" style="font-size:var(--fs-md)">${repoLabel(repo)}</h2>
           <div class="fleet-meta">auth ref ${repo.authRef || 'none'} · last poll ${formatTime(repo.lastPollMs)}</div>
         </div>
         <span class="badge ${repo.enabled ? 'badge-success' : 'badge-low'}">${repo.enabled ? 'enabled' : 'disabled'}</span>
@@ -258,7 +258,7 @@ function AddRepoForm({ state }) {
     <form class="card" onsubmit=${(event) => addRepo(state, event)}>
       <div class="card-header">
         <div>
-          <h2 class="card-title" style="font-size:16px">Add watched repo</h2>
+          <h2 class="card-title" style="font-size:var(--fs-md)">Add watched repo</h2>
           <div class="fleet-meta">authRef is an env var name. No tokens here.</div>
         </div>
         <button class="btn" disabled=${state.formBusy.value}>
@@ -307,7 +307,7 @@ export function GitHubAgentsPage() {
     <div class="page fleet-page">
       <div class="card-header">
         <div>
-          <h1 class="card-title" style="font-size:18px">GitHub</h1>
+          <h1 class="card-title" style="font-size:var(--fs-lg)">GitHub</h1>
           <div class="fleet-meta">${repos.value.length} watched repos</div>
         </div>
         <div class="fleet-incident-actions">

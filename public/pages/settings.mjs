@@ -192,7 +192,7 @@ export function SettingsPage({ section }) {
       <div class="settings-shell">
         <div class="settings-shell-head">
           <div>
-            <h1 class="card-title" style="font-size:18px; margin-bottom:4px">Settings</h1>
+            <h1 class="card-title" style="font-size:var(--fs-lg); margin-bottom:4px">Settings</h1>
             <div class="goals-inline-note">System controls, auth, providers, notifications, and network behavior.</div>
           </div>
         </div>
@@ -248,7 +248,7 @@ export function SettingsPage({ section }) {
             ${agentProviders.value.availableSpawnTypes?.join(', ') || 'none'}
           </span>
         </div>
-        <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px">
+        <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:8px">
           Toggle which agent backends are available for generated tasks and review workflows. Disabled providers are removed from the UI and the server falls back automatically.
         </p>
         <div style="display:grid; gap:12px">
@@ -297,12 +297,12 @@ export function SettingsPage({ section }) {
             />
             <span>Enable Headroom context compression</span>
           </label>
-          <div style="font-size:12px; color:var(--text-muted)">
+          <div style="font-size:var(--fs-xs); color:var(--text-muted)">
             Uses the local Headroom proxy for all providers. Applies to new sessions and resumed processes;
             running sessions keep their current connection. Turn off to connect directly.
           </div>
         </div>
-        <div style="font-size:12px; color:var(--text-secondary); margin-top:10px">
+        <div style="font-size:var(--fs-xs); color:var(--text-secondary); margin-top:10px">
           Preferred single-agent fallback: ${agentProviders.value.preferredSingleAgent || 'unknown'}<br />
           Collaboration available: ${agentProviders.value.collabEnabled ? 'yes' : 'no'}
         </div>
@@ -317,7 +317,7 @@ export function SettingsPage({ section }) {
             ${notifPermitted.value && browserOn.value ? 'Enabled' : 'Disabled'}
           </span>
         </div>
-        <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px">
+        <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:8px">
           Get notified when agent sessions need your input.
         </p>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
@@ -347,7 +347,7 @@ export function SettingsPage({ section }) {
             ${lowDataMode.value ? 'Low Data On' : (connectionSaver.value ? 'Network Saver' : 'Normal')}
           </span>
         </div>
-        <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px">
+        <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:8px">
           Low data mode slows background refreshes and pauses live WebSocket updates when the tab is hidden. This is most useful on mobile data.
         </p>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
@@ -355,7 +355,7 @@ export function SettingsPage({ section }) {
             Low Data Mode: ${lowDataMode.value ? 'On' : 'Off'}
           </button>
           ${connectionSaver.value ? html`
-            <span style="font-size:12px; color:var(--text-secondary)">
+            <span style="font-size:var(--fs-xs); color:var(--text-secondary)">
               Browser connection saver is also active.
             </span>
           ` : null}
@@ -366,10 +366,10 @@ export function SettingsPage({ section }) {
         <div class="card-header">
           <span class="card-title">About</span>
         </div>
-        <p style="font-size:13px; color:var(--text-secondary)">
+        <p style="font-size:var(--fs-sm); color:var(--text-secondary)">
           Cadre — Self-hosted control plane for running, coordinating and monitoring coding-agent sessions.
         </p>
-        <p style="font-size:12px; color:var(--text-muted); margin-top:4px">
+        <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">
           Preact + HTM • Fastify • WebSocket
         </p>
       </div>

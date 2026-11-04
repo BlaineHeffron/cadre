@@ -150,7 +150,7 @@ function TaskCard({ task, state }) {
     <article class="card fleet-card">
       <div class="card-header">
         <div>
-          <h2 class="card-title" style="font-size:16px">${task.id}</h2>
+          <h2 class="card-title" style="font-size:var(--fs-md)">${task.id}</h2>
           <div class="fleet-meta">${task.provider || 'codex'}${task.model ? ` / ${task.model}` : ''} · every ${formatInterval(task.intervalSeconds)}</div>
         </div>
         <span class="badge ${statusBadge(task.status)}">${task.status}</span>
@@ -178,7 +178,7 @@ function AddTaskForm({ state }) {
     <form class="card" onsubmit=${(event) => saveTask(state, event)}>
       <div class="card-header">
         <div>
-          <h2 class="card-title" style="font-size:16px">Add scheduled agent</h2>
+          <h2 class="card-title" style="font-size:var(--fs-md)">Add scheduled agent</h2>
           <div class="fleet-meta">Fresh session each run. No external sends unless the prompt explicitly asks and you approve inside the session.</div>
         </div>
         <button class="btn" disabled=${state.formBusy.value}>
@@ -247,7 +247,7 @@ export function ScheduledAgentsPage() {
     <div class="page fleet-page">
       <div class="card-header">
         <div>
-          <h1 class="card-title" style="font-size:18px">Scheduled Agents</h1>
+          <h1 class="card-title" style="font-size:var(--fs-lg)">Scheduled Agents</h1>
           <div class="fleet-meta">${tasks.value.length} registered tasks</div>
         </div>
         <div class="fleet-incident-actions">

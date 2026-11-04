@@ -167,7 +167,7 @@ export function SkillsPage() {
     <div class="page skills-page">
       <div class="card-header skills-head">
         <div>
-          <h1 class="card-title" style="font-size:18px">Skill Writer</h1>
+          <h1 class="card-title" style="font-size:var(--fs-lg)">Skill Writer</h1>
           <div class="fleet-meta">
             ${skills.value.length} fleet skills - reusable prompt text inserted at launch or mid-session
           </div>

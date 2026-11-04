@@ -153,7 +153,7 @@ export function FilesPage() {
   return html`
     <div class="page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:18px">File Browser</h1>
+        <h1 class="card-title" style="font-size:var(--fs-lg)">File Browser</h1>
         <div style="display:flex; gap:8px">
           <input id="files-upload-input" type="file" style="display:none" onChange=${uploadFile} />
           <button class="btn" disabled=${uploadBusy.value} onclick=${() => document.getElementById('files-upload-input')?.click()}>
@@ -176,7 +176,7 @@ export function FilesPage() {
             <button class="btn" disabled=${documentForm.value.busy} onclick=${() => { documentForm.value = { open: false, name: '', content: '', busy: false }; }}>Close</button>
           </div>
           <div style="display:grid; gap:10px">
-            <label style="display:grid; gap:4px; font-size:12px; color:var(--text-muted)">
+            <label style="display:grid; gap:4px; font-size:var(--fs-xs); color:var(--text-muted)">
               Filename
               <input
                 class="input"
@@ -186,7 +186,7 @@ export function FilesPage() {
                 onInput=${e => { documentForm.value = { ...documentForm.value, name: e.currentTarget.value }; }}
               />
             </label>
-            <label style="display:grid; gap:4px; font-size:12px; color:var(--text-muted)">
+            <label style="display:grid; gap:4px; font-size:var(--fs-xs); color:var(--text-muted)">
               Content
               <textarea
                 class="input"
@@ -211,7 +211,7 @@ export function FilesPage() {
           <div class="card-header">
             <span class="card-title">${selectedFile.value.name}</span>
             <div style="display:flex; align-items:center; gap:12px">
-              <span style="font-size:11px; color:var(--text-muted)">${selectedFile.value.sizeFormatted}</span>
+              <span style="font-size:var(--fs-xs); color:var(--text-muted)">${selectedFile.value.sizeFormatted}</span>
               <button class="btn" onclick=${closePreview}>Close</button>
             </div>
           </div>

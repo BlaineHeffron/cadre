@@ -341,7 +341,7 @@ export function RecordingsPage() {
     <div class="page recordings-page">
       <div class="card-header recordings-head">
         <div>
-          <h1 class="card-title" style="font-size:18px">Recordings</h1>
+          <h1 class="card-title" style="font-size:var(--fs-lg)">Recordings</h1>
           <div class="fleet-meta">${total.value || recordings.value.length} imported transcript recordings</div>
         </div>
         <div class="recordings-toolbar">

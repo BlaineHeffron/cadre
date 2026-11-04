@@ -77,13 +77,13 @@ export function LiveSessionPreview({ session, title = '', onRemove = null }) {
     <div class="card" style="display:flex; flex-direction:column; min-height:340px">
       <div class="card-header" style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px">
         <div style="min-width:0">
-          <div class="card-title" style="font-size:14px; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title=${title || session?.displayName || session?.id}>
+          <div class="card-title" style="font-size:var(--fs-base); line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title=${title || session?.displayName || session?.id}>
             ${title || session?.displayName || session?.id}
           </div>
-          <div style="font-size:11px; color:var(--text-muted); margin-top:4px">
+          <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">
             ${(session?._provider || session?._kind || 'agent').toUpperCase()} · ${stateLabel} · revision ${sessionState.value?.revision ?? 0}
           </div>
-          ${detail ? html`<div style="font-size:11px; color:var(--text-secondary); margin-top:4px">${detail}</div>` : null}
+          ${detail ? html`<div style="font-size:var(--fs-xs); color:var(--text-secondary); margin-top:4px">${detail}</div>` : null}
         </div>
         <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end">
           <button class="btn" type="button" onclick=${openSession}>Open</button>

@@ -11,17 +11,17 @@ export function ThreatCard({ alert, onAck }) {
           <span class="badge badge-${alert.severity}">${alert.severity}</span>
           <span class="badge badge-low">${alert.category}</span>
         </div>
-        <span style="font-size:11px; color:var(--text-muted)">${timeAgo}</span>
+        <span style="font-size:var(--fs-xs); color:var(--text-muted)">${timeAgo}</span>
       </div>
-      <p style="margin:8px 0; font-size:13px">${alert.message}</p>
+      <p style="margin:8px 0; font-size:var(--fs-sm)">${alert.message}</p>
       ${alert.details ? html`
         <details style="margin-top:4px">
-          <summary style="cursor:pointer; font-size:12px; color:var(--text-muted)">Details</summary>
-          <pre style="font-size:11px; margin-top:4px; padding:8px; background:var(--bg-primary); border-radius:var(--radius); overflow-x:auto">${JSON.stringify(alert.details, null, 2)}</pre>
+          <summary style="cursor:pointer; font-size:var(--fs-xs); color:var(--text-muted)">Details</summary>
+          <pre style="font-size:var(--fs-xs); margin-top:4px; padding:8px; background:var(--bg-primary); border-radius:var(--radius); overflow-x:auto">${JSON.stringify(alert.details, null, 2)}</pre>
         </details>
       ` : null}
       ${!alert.acknowledged ? html`
-        <button class="btn" style="margin-top:8px; font-size:12px" onclick=${() => onAck(alert.id)}>Acknowledge</button>
+        <button class="btn" style="margin-top:8px; font-size:var(--fs-xs)" onclick=${() => onAck(alert.id)}>Acknowledge</button>
       ` : null}
     </div>
   `;

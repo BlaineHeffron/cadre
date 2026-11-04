@@ -89,7 +89,7 @@ function CreateForm({ state }) {
   return html`
     <form class="card" onsubmit=${(event) => createLoop(state, event)}>
       <div class="card-header">
-        <div><h2 class="card-title" style="font-size:16px">Start a loop</h2><div class="fleet-meta">Inject the same prompt into one existing session on a bounded cadence.</div></div>
+        <div><h2 class="card-title" style="font-size:var(--fs-md)">Start a loop</h2><div class="fleet-meta">Inject the same prompt into one existing session on a bounded cadence.</div></div>
         <button class="btn btn-primary" disabled=${state.formBusy.value}>${state.formBusy.value ? 'Starting…' : 'Start loop'}</button>
       </div>
       <div class="grid grid-3" style="gap:12px">
@@ -138,7 +138,7 @@ export function LoopSessionsPage() {
 
   return html`
     <div class="page fleet-page">
-      <div class="card-header"><div><h1 class="card-title" style="font-size:18px">Loop Sessions</h1><div class="fleet-meta">${loops.value.length} loops</div></div><button class="btn" onclick=${() => loadLoops(state)}>Refresh</button></div>
+      <div class="card-header"><div><h1 class="card-title" style="font-size:var(--fs-lg)">Loop Sessions</h1><div class="fleet-meta">${loops.value.length} loops</div></div><button class="btn" onclick=${() => loadLoops(state)}>Refresh</button></div>
       <${CreateForm} state=${state} />
       ${loading.value ? html`<${LoadingState} message="Loading loop sessions…" />` : null}
       ${error.value ? html`<${ErrorState} message=${error.value} onAction=${() => loadLoops(state)} />` : null}

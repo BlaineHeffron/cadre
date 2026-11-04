@@ -185,7 +185,7 @@ function FleetDeploymentCard({ deployment, dismissedDebugGroups, onDismissDebugG
     <article class="card fleet-card" data-fleet-deployment=${deployment.deploymentId}>
       <div class="card-header">
         <div>
-          <h2 class="card-title" style="font-size:16px">${deployment.displayName || deployment.deploymentId}</h2>
+          <h2 class="card-title" style="font-size:var(--fs-md)">${deployment.displayName || deployment.deploymentId}</h2>
           <div class="fleet-meta">${deployment.deploymentId} · ${deployment.environment || 'unknown'}</div>
         </div>
         <span class="badge ${badgeForStatus(status)}">${status}</span>
@@ -290,7 +290,7 @@ export function FleetPage() {
     <div class="page fleet-page">
       <div class="card-header">
         <div>
-          <h1 class="card-title" style="font-size:18px">Fleet</h1>
+          <h1 class="card-title" style="font-size:var(--fs-lg)">Fleet</h1>
           <div class="fleet-meta">${deployments.value.length} deployments · ${openCount} open incidents</div>
         </div>
         <div class="fleet-incident-actions">

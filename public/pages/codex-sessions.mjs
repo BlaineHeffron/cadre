@@ -129,7 +129,7 @@ export function CodexSessionsPage() {
   return html`
     <div class="page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:18px">Codex Sessions</h1>
+        <h1 class="card-title" style="font-size:var(--fs-lg)">Codex Sessions</h1>
         <div style="display:flex; gap:8px">
           <button class="btn" onclick=${() => loadSessions(loading)}>Refresh</button>
           <button class="btn btn-primary" onclick=${() => { showNewModal.value = true; }}>New Session</button>
@@ -142,13 +142,13 @@ export function CodexSessionsPage() {
             <span class="card-title">New Codex Session</span>
             <button class="btn" onclick=${() => { showNewModal.value = false; }}>Cancel</button>
           </div>
-          <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px">
+          <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:8px">
             Creates a new tmux session running Codex CLI with approval and sandbox bypass enabled.
           </p>
           ${getLastBootstrapLabel() ? html`
             <button
               class="btn"
-              style="margin-bottom:8px; font-size:11px; padding:4px 10px"
+              style="margin-bottom:8px; font-size:var(--fs-xs); padding:4px 10px"
               onclick=${prefillLastBootstrap}
               title="Prefill with last session config"
             >Repeat last: ${getLastBootstrapLabel()}</button>

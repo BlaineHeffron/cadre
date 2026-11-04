@@ -140,7 +140,7 @@ export function AgentControlBar({
               ${typeof option === 'string' ? option : option.label || option.text || option.value || option.index}
             </button>
           `) : policyControlled ? html`
-            <span style="font-size:12px; color:var(--text-muted)">Applying automatic safety policy…</span>
+            <span style="font-size:var(--fs-xs); color:var(--text-muted)">Applying automatic safety policy…</span>
           ` : canAnswerInteraction && state?.interaction?.kind === 'permission' && onApprove ? html`
             <button class="ctrl-btn ctrl-approve pulse-border" onclick=${handleApprove}>Approve</button>
             <button class="ctrl-btn ctrl-reject" onclick=${handleReject}>Reject</button>
@@ -149,7 +149,7 @@ export function AgentControlBar({
             <button class="ctrl-btn ctrl-no" onclick=${() => handleDialogAnswer('n')}>No</button>
           ` : onEscape ? html`
             <button class="ctrl-btn ctrl-reject" onclick=${handleReject}>Escape</button>
-          ` : html`<span style="font-size:12px; color:var(--text-muted)">No canonical response options available.</span>`}
+          ` : html`<span style="font-size:var(--fs-xs); color:var(--text-muted)">No canonical response options available.</span>`}
         </div>
       ` : null}
 

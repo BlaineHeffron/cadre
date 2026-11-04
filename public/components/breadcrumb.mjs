@@ -13,7 +13,7 @@ export function Breadcrumb({ path, onNavigate }) {
   }
 
   return html`
-    <div style="display:flex; align-items:center; gap:4px; font-size:13px; font-family:var(--font-mono); flex-wrap:wrap">
+    <div style="display:flex; align-items:center; gap:4px; font-size:var(--fs-sm); font-family:var(--font-mono); flex-wrap:wrap">
       <span
         style="cursor:pointer; color:var(--accent); padding:2px 4px; border-radius:4px"
         onclick=${() => navigateTo(-1)}

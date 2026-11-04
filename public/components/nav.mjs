@@ -120,7 +120,7 @@ export function Nav() {
     <nav class="nav" aria-label="Main navigation">
       <div class="nav-brand">
         <span style="margin-right:8px">Cadre</span>
-        <span class="badge nav-connection-badge ${connectionClass}" style="font-size:10px">
+        <span class="badge nav-connection-badge ${connectionClass}" style="font-size:var(--fs-xs)">
           ${connectionLabel}
         </span>
       </div>
@@ -173,7 +173,7 @@ export function Nav() {
                   </svg>
                   Notifications
                   ${visibleSessionPromptNotificationCount.value > 0 ? html`
-                    <span class="badge badge-critical badge-pulse" style="margin-left:6px; font-size:10px">
+                    <span class="badge badge-critical badge-pulse" style="margin-left:6px; font-size:var(--fs-xs)">
                       ${visibleSessionPromptNotificationCount.value}
                     </span>
                   ` : null}

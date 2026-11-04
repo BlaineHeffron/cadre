@@ -7,7 +7,7 @@
   --bg-input: #0a0a15;
   --text-primary: #e0e0e0;
   --text-secondary: #a0a0b0;
-  --text-muted: #606070;
+  --text-muted: #9090a6;
   --accent: #4fc3f7;
   --accent-hover: #29b6f6;
   --danger: #ef5350;
@@ -18,6 +18,13 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --keyboard-inset: 0px;
+  /* Type scale: every font-size uses one of these steps. */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 16px;
+  --fs-lg: 18px;
+  --fs-xl: 28px;
 }
 
 * {
@@ -26,12 +33,25 @@
   box-sizing: border-box;
 }
 
+/* Form controls default to the browser's own fonts; use the page's. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 html, body {
   height: 100%;
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: var(--fs-base);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
@@ -61,7 +81,7 @@ html, body {
 
 .nav-brand {
   font-weight: 700;
-  font-size: 16px;
+  font-size: var(--fs-md);
   color: var(--accent);
 }
 
@@ -79,7 +99,7 @@ html, body {
   text-decoration: none;
   padding: 8px 12px;
   border-radius: var(--radius);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   transition: all 0.15s;
   position: relative;
 }
@@ -92,7 +112,7 @@ html, body {
 
 .nav-link-badge {
   margin-left: 4px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 .nav-link-desktop {
@@ -213,7 +233,7 @@ html, body {
 .nav-bell-empty {
   padding: 12px 14px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .nav-bell-item {
@@ -239,13 +259,13 @@ html, body {
 }
 
 .nav-bell-item-title {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 600;
 }
 
 .nav-bell-item-meta,
 .nav-bell-item-detail {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
@@ -294,7 +314,7 @@ html, body {
 
 .calendar-month-dow {
   padding: 8px 10px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -319,7 +339,7 @@ html, body {
 }
 
 .calendar-month-date {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   color: var(--text-secondary);
   margin-bottom: 8px;
@@ -341,13 +361,13 @@ html, body {
 }
 
 .calendar-event-time {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   color: var(--calendar-accent, var(--accent));
 }
 
 .calendar-event-title {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.35;
   color: var(--text-primary);
   white-space: nowrap;
@@ -356,7 +376,7 @@ html, body {
 }
 
 .calendar-event-more {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   padding: 2px 4px;
 }
@@ -385,7 +405,7 @@ html, body {
 }
 
 .card-title {
-  font-size: 14px;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
@@ -421,7 +441,7 @@ html, body {
 .session-new-banner {
   background: var(--accent);
   color: #000;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 1px;
   text-align: center;
@@ -440,7 +460,7 @@ html, body {
   border-radius: var(--radius);
   background: var(--bg-secondary);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   cursor: pointer;
   transition: all 0.15s;
   text-decoration: none;
@@ -490,28 +510,13 @@ textarea.input {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-family: var(--font-mono);
 }
 
 .input:focus,
 textarea.input:focus {
-  outline: 2px solid rgba(79, 195, 247, 0.25);
-  border-color: var(--accent);
-}
-
-.btn:focus-visible,
-.ctrl-btn:focus-visible,
-.control-attachment-remove:focus-visible,
-.tmux-pane-row:focus-visible,
-.nav-link:focus-visible,
-.nav-bell-btn:focus-visible,
-.nav-more-item:focus-visible,
-.input:focus-visible,
-textarea.input:focus-visible,
-select.input:focus-visible,
-a:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: 0;
+  border-color: var(--accent);
 }
 
 /* Terminal */
@@ -519,7 +524,7 @@ a:focus-visible {
   background: #000;
   color: #e0e0e0;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   line-height: 1.3;
   padding: 8px;
   border-radius: var(--radius);
@@ -606,13 +611,13 @@ body:has(.tmux-pane-page) {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   line-height: 1.2;
 }
 
 .tmux-pane-back {
   text-decoration: none;
-  font-size: 18px;
+  font-size: var(--fs-lg);
   line-height: 1;
 }
 
@@ -681,7 +686,7 @@ body:has(.tmux-pane-page) {
   border: 1px dashed var(--border);
   border-radius: var(--radius);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   white-space: nowrap;
 }
 
@@ -752,7 +757,7 @@ body:has(.tmux-pane-page) {
 .collab-status-list {
   display: grid;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
@@ -768,7 +773,7 @@ body:has(.tmux-pane-page) {
 }
 
 .collab-section-title {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -780,18 +785,18 @@ body:has(.tmux-pane-page) {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
 .collab-helper {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   margin-bottom: 12px;
 }
 
 .collab-inline-note {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   border: 1px dashed var(--border);
   border-radius: var(--radius);
@@ -812,7 +817,7 @@ body:has(.tmux-pane-page) {
   gap: 10px;
   flex-wrap: wrap;
   margin: -4px 0 12px 0;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
@@ -820,7 +825,7 @@ body:has(.tmux-pane-page) {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .collab-detail-shortcuts {
@@ -941,7 +946,7 @@ body:has(.tmux-pane-page) {
 .collab-message-view-toggle {
   min-height: 0;
   padding: 2px 7px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 .rendered-transcript {
@@ -964,7 +969,7 @@ body:has(.tmux-pane-page) {
 .transcript-speaker {
   margin-bottom: 8px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1102,7 +1107,7 @@ body:has(.tmux-pane-page) {
   align-items: center;
   padding: 2px 8px;
   border-radius: 12px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
 }
 
@@ -1156,7 +1161,7 @@ body:has(.tmux-pane-page) {
 }
 
 .fleet-section-title {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -1170,7 +1175,7 @@ body:has(.tmux-pane-page) {
 
 .fleet-meta {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .fleet-status-row,
@@ -1205,7 +1210,7 @@ body:has(.tmux-pane-page) {
 .fleet-debug-groups summary {
   cursor: pointer;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1240,7 +1245,7 @@ body:has(.tmux-pane-page) {
 
 .fleet-debug-dismiss {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: 4px 8px;
 }
 
@@ -1305,7 +1310,7 @@ body:has(.tmux-pane-page) {
 .recording-evidence-head p,
 .recording-evidence-ref {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .recording-chip-row {
@@ -1331,7 +1336,7 @@ body:has(.tmux-pane-page) {
   display: grid;
   gap: 5px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .recording-action-settings textarea,
@@ -1362,13 +1367,13 @@ body:has(.tmux-pane-page) {
 }
 
 .recording-evidence h3 {
-  font-size: 14px;
+  font-size: var(--fs-base);
 }
 
 .recording-evidence h4 {
   margin-top: 12px;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
@@ -1387,7 +1392,7 @@ body:has(.tmux-pane-page) {
   background: var(--bg-input);
   color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -1413,7 +1418,7 @@ body:has(.tmux-pane-page) {
   border-radius: var(--radius);
   background: var(--bg-card);
   border: 1px solid var(--border);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   animation: slideIn 0.2s ease;
   max-width: 360px;
 }
@@ -1486,7 +1491,7 @@ body:has(.tmux-pane-page) {
 }
 
 .session-collab-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1497,13 +1502,13 @@ body:has(.tmux-pane-page) {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
 .session-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-base);
   font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1524,7 +1529,7 @@ body:has(.tmux-pane-page) {
 
 .agents-desktop-toolbar-title {
   margin: 0 4px 0 0;
-  font-size: 17px;
+  font-size: var(--fs-md);
   line-height: 1;
 }
 
@@ -1541,7 +1546,7 @@ body:has(.tmux-pane-page) {
 .agents-desktop-toolbar .btn,
 .agents-filter-menu > summary {
   padding: 6px 9px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .agents-toolbar-select-all {
@@ -1549,7 +1554,7 @@ body:has(.tmux-pane-page) {
   align-items: center;
   gap: 4px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .agents-filter-menu {
@@ -1585,7 +1590,7 @@ body:has(.tmux-pane-page) {
   align-items: center;
   gap: 8px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .agents-bulk-prompt-bar {
@@ -1657,7 +1662,7 @@ body:has(.tmux-pane-page) {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .agents-desktop-rail-list {
@@ -1700,7 +1705,7 @@ body:has(.tmux-pane-page) {
   top: 7px;
   right: 9px;
   padding: 3px 7px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 .agent-rail-row-main:focus-visible {
@@ -1744,7 +1749,7 @@ body:has(.tmux-pane-page) {
 
 .agent-rail-row-title {
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 650;
 }
 
@@ -1753,7 +1758,7 @@ body:has(.tmux-pane-page) {
 .agent-rail-row-flag,
 .agent-rail-select {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 .agent-rail-row-detail {
@@ -1776,11 +1781,6 @@ body:has(.tmux-pane-page) {
   align-self: flex-end;
   padding: 0 12px 9px;
   cursor: pointer;
-}
-
-.agent-rail-select input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 /* Long session titles must not widen the single-column mobile card grid. */
@@ -1826,7 +1826,7 @@ body:has(.tmux-pane-page) {
 .agent-session-page-embedded .session-header-actions .ctrl-btn {
   flex: 0 0 auto;
   padding: 4px 8px !important;
-  font-size: 11px !important;
+  font-size: var(--fs-xs) !important;
   white-space: nowrap;
 }
 
@@ -1918,7 +1918,7 @@ body:has(.tmux-pane-page) {
   border-radius: 0 12px 0 8px;
   background: rgba(0, 0, 0, 0.65);
   color: #fff;
-  font-size: 16px;
+  font-size: var(--fs-md);
   line-height: 1;
   cursor: pointer;
   display: inline-flex;
@@ -1947,7 +1947,7 @@ body:has(.tmux-pane-page) {
   border-radius: var(--radius);
   background: var(--bg-card);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--fs-base);
   font-weight: 600;
   cursor: pointer;
   touch-action: manipulation;
@@ -1973,7 +1973,7 @@ body:has(.tmux-pane-page) {
   border-radius: var(--radius);
   background: var(--bg-card);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 /* Inline pickers sit beside each other in the tools row; they must not eat the
@@ -1988,7 +1988,7 @@ body:has(.tmux-pane-page) {
   flex: 0 0 auto;
   min-width: 84px;
   max-width: 110px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .ctrl-approve {
@@ -1996,7 +1996,7 @@ body:has(.tmux-pane-page) {
   background: var(--success);
   color: #000;
   border-color: var(--success);
-  font-size: 16px;
+  font-size: var(--fs-md);
 }
 
 .ctrl-approve:active {
@@ -2008,7 +2008,7 @@ body:has(.tmux-pane-page) {
   background: var(--bg-card);
   color: var(--danger);
   border-color: var(--danger);
-  font-size: 16px;
+  font-size: var(--fs-md);
 }
 
 .ctrl-reject:active {
@@ -2021,7 +2021,7 @@ body:has(.tmux-pane-page) {
   background: var(--success);
   color: #000;
   border-color: var(--success);
-  font-size: 16px;
+  font-size: var(--fs-md);
 }
 
 .ctrl-no {
@@ -2029,7 +2029,7 @@ body:has(.tmux-pane-page) {
   background: var(--bg-card);
   color: var(--danger);
   border-color: var(--danger);
-  font-size: 16px;
+  font-size: var(--fs-md);
 }
 
 .ctrl-default {
@@ -2056,13 +2056,13 @@ body:has(.tmux-pane-page) {
   border-color: var(--accent);
   padding: 8px 12px;
   font-family: var(--font-mono);
-  font-size: 16px;
+  font-size: var(--fs-md);
 }
 
 .ctrl-slash-cmd {
   min-height: 36px;
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-family: var(--font-mono);
 }
 
@@ -2074,12 +2074,12 @@ body:has(.tmux-pane-page) {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: var(--fs-base);
 }
 
 .ctrl-input:focus {
-  outline: none;
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
   border-color: var(--accent);
 }
 
@@ -2143,7 +2143,7 @@ body:has(.tmux-pane-page) {
   background: var(--accent);
   color: #000;
   border: none;
-  font-size: 28px;
+  font-size: var(--fs-xl);
   font-weight: 300;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
@@ -2184,7 +2184,7 @@ body:has(.tmux-pane-page) {
 .goals-kicker,
 .goals-section-eyebrow,
 .goals-command-kicker {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -2192,7 +2192,7 @@ body:has(.tmux-pane-page) {
 }
 
 .goals-title {
-  font-size: 28px;
+  font-size: var(--fs-xl);
   line-height: 1.1;
   margin: 8px 0 10px;
 }
@@ -2229,13 +2229,13 @@ body:has(.tmux-pane-page) {
 }
 
 .goals-progress-label {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
 .goals-progress-value,
 .goals-score-value {
-  font-size: 28px;
+  font-size: var(--fs-xl);
   font-weight: 700;
   margin: 6px 0;
 }
@@ -2303,13 +2303,13 @@ body:has(.tmux-pane-page) {
 }
 
 .goals-command-focus {
-  font-size: 16px;
+  font-size: var(--fs-md);
   font-weight: 600;
   margin: 8px 0 12px;
 }
 
 .goals-inline-note {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   border: 1px dashed var(--border);
   border-radius: 12px;
@@ -2344,7 +2344,7 @@ body:has(.tmux-pane-page) {
 .goals-timeline-date,
 .goals-week-area,
 .goals-week-detail {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
 }
 
@@ -2383,7 +2383,7 @@ body:has(.tmux-pane-page) {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 10px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
@@ -2399,7 +2399,7 @@ body:has(.tmux-pane-page) {
 }
 
 .goals-task-group-title {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -2427,7 +2427,7 @@ body:has(.tmux-pane-page) {
 }
 
 .goals-task-title {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 600;
   margin-bottom: 8px;
 }
@@ -2443,7 +2443,7 @@ body:has(.tmux-pane-page) {
 .goals-task-report,
 .goals-task-error {
   margin-top: 10px;
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .goals-task-description,
@@ -2531,14 +2531,14 @@ body:has(.tmux-pane-page) {
 .email-ops-queue-meta,
 .email-ops-queue-foot,
 .email-ops-thread-participants {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
 .email-ops-stat strong,
 .email-ops-section-title,
 .email-ops-status-title {
-  font-size: 18px;
+  font-size: var(--fs-lg);
   font-weight: 600;
 }
 
@@ -2608,7 +2608,7 @@ body:has(.tmux-pane-page) {
 }
 
 .email-ops-queue-subject {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -2616,7 +2616,7 @@ body:has(.tmux-pane-page) {
 .email-ops-queue-snippet,
 .email-ops-message-snippet,
 .email-ops-approved-body {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   line-height: 1.55;
   color: var(--text-primary);
   white-space: pre-wrap;
@@ -2624,7 +2624,7 @@ body:has(.tmux-pane-page) {
 }
 
 .email-ops-thread-preview {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   line-height: 1.55;
   color: var(--text-primary);
   white-space: pre-wrap;
@@ -2673,7 +2673,7 @@ body:has(.tmux-pane-page) {
 }
 
 .email-ops-next-meta strong {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -2695,7 +2695,7 @@ body:has(.tmux-pane-page) {
 
 .email-ops-message-meta strong,
 .email-ops-action-summary strong {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -2748,13 +2748,13 @@ body:has(.tmux-pane-page) {
 }
 
 .email-ops-empty-title {
-  font-size: 16px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 
 .email-ops-tool-title {
   list-style: none;
-  font-size: 14px;
+  font-size: var(--fs-base);
   font-weight: 600;
   cursor: pointer;
 }
@@ -2774,7 +2774,7 @@ body:has(.tmux-pane-page) {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.02);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .email-ops-sync-filter {
@@ -2818,12 +2818,12 @@ body:has(.tmux-pane-page) {
 }
 
 .dashboard-metric span {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
 .dashboard-metric strong {
-  font-size: 24px;
+  font-size: var(--fs-xl);
   font-weight: 700;
 }
 
@@ -2846,7 +2846,7 @@ body:has(.tmux-pane-page) {
 }
 
 .dashboard-action-title {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -2857,13 +2857,13 @@ body:has(.tmux-pane-page) {
   flex-wrap: wrap;
   gap: 8px 12px;
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
 .dashboard-action-detail {
   margin-top: 8px;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
@@ -2889,7 +2889,7 @@ body:has(.tmux-pane-page) {
 }
 
 .dashboard-shortcut span {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
@@ -2902,7 +2902,7 @@ body:has(.tmux-pane-page) {
 }
 
 .dashboard-mini-link span {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
@@ -2930,7 +2930,7 @@ body:has(.tmux-pane-page) {
 }
 
 .marketing-brand-stats {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
@@ -2993,7 +2993,7 @@ body:has(.tmux-pane-page) {
   .nav-link {
     min-height: 44px;
     padding: 6px 10px;
-    font-size: 12px;
+    font-size: var(--fs-xs);
     white-space: nowrap;
     flex-shrink: 1;
   }
@@ -3142,7 +3142,7 @@ body:has(.tmux-pane-page) {
   }
 
   .tmux-pane-title {
-    font-size: 12px;
+    font-size: var(--fs-xs);
   }
 
   .tmux-pane-page .terminal {
@@ -3198,11 +3198,11 @@ body:has(.tmux-pane-page) {
     min-width: 0;
     min-height: 34px;
     padding: 4px 8px !important;
-    font-size: 11px !important;
+    font-size: var(--fs-xs) !important;
   }
 
   .session-title {
-    font-size: 12px;
+    font-size: var(--fs-xs);
   }
 
   .session-header-primary .badge {
@@ -3220,7 +3220,7 @@ body:has(.tmux-pane-page) {
   }
 
   .terminal {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     line-height: 1.2;
   }
 
@@ -3234,14 +3234,14 @@ body:has(.tmux-pane-page) {
 
   .session-image-picker {
     padding: 6px 10px;
-    font-size: 12px;
+    font-size: var(--fs-xs);
     white-space: nowrap;
   }
 
   .ctrl-inline-select-compact {
     min-width: 108px;
     max-width: 150px;
-    font-size: 12px;
+    font-size: var(--fs-xs);
   }
 
   .ctrl-inline-select-tiny {
@@ -3308,13 +3308,14 @@ body:has(.tmux-pane-page) {
   background: var(--bg-input);
   color: var(--text-primary, #fff);
   /* 16px avoids iOS auto-zoom on focus. */
-  font-size: 16px;
+  font-size: var(--fs-md);
   line-height: 1.5;
   font-family: inherit;
 }
 
 .capture-textarea:focus {
-  outline: none;
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
   border-color: var(--accent, #4f8cff);
 }
 
@@ -3349,7 +3350,7 @@ body:has(.tmux-pane-page) {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-primary, #fff);
-  font-size: 15px;
+  font-size: var(--fs-base);
   line-height: 1.5;
 }
 
@@ -3363,7 +3364,7 @@ body:has(.tmux-pane-page) {
 
 .capture-note-time {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .capture-savebar {
@@ -3399,7 +3400,7 @@ body:has(.tmux-pane-page) {
 .capture-save-btn {
   width: 100%;
   min-height: 52px;
-  font-size: 16px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 
@@ -3420,7 +3421,7 @@ body:has(.tmux-pane-page) {
   flex: 0 0 104px;
   min-height: 44px;
   padding: 6px 4px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -3433,7 +3434,7 @@ body:has(.tmux-pane-page) {
   border-color: var(--danger);
 }
 
-.voice-timer { font-size: 13px; font-variant-numeric: tabular-nums; }
+.voice-timer { font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 .voice-meter {
   display: inline-flex;
   align-items: center;
@@ -3494,7 +3495,7 @@ body:has(.tmux-pane-page) {
   border: 1px solid var(--border);
   background: var(--bg-surface);
   color: var(--text-primary, #fff);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-family: var(--font-mono);
   cursor: pointer;
   white-space: nowrap;
@@ -3520,7 +3521,7 @@ body:has(.tmux-pane-page) {
 .capture-dir-current {
   margin-top: 8px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3551,7 +3552,7 @@ body:has(.tmux-pane-page) {
 }
 
 .new-agent-hint {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
 }
 
@@ -3570,14 +3571,14 @@ p.new-agent-hint {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   min-width: 0;
 }
 
 .new-agent-field-label {
   display: block;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   margin-bottom: 6px;
 }
@@ -3602,7 +3603,7 @@ p.new-agent-hint {
   align-items: baseline;
   gap: 8px;
   margin-top: 10px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
@@ -3618,7 +3619,7 @@ p.new-agent-hint {
 .new-agent-advanced > summary {
   cursor: pointer;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--text-secondary);
   display: flex;
@@ -3649,7 +3650,7 @@ p.new-agent-hint {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   margin-bottom: 8px;
 }
 
@@ -3664,7 +3665,7 @@ p.new-agent-hint {
 }
 
 .mcp-selector-profile-note {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   margin: 6px 0 0;
 }
@@ -3685,7 +3686,7 @@ p.new-agent-hint {
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .mcp-selector-row-disabled {
@@ -3706,7 +3707,7 @@ p.new-agent-hint {
 .mcp-selector-row-desc {
   display: block;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3716,17 +3717,17 @@ p.new-agent-hint {
 .mcp-selector-row-perms {
   display: block;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   margin-top: 3px;
 }
 
 .mcp-selector-connect {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: 2px 8px;
 }
 
 .mcp-selector-effective {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   margin: 10px 0 0;
 }
@@ -3734,7 +3735,7 @@ p.new-agent-hint {
 .mcp-selector-alert {
   margin-top: 8px;
   color: var(--warning, #a66b00);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 @media (max-width: 720px) {
@@ -3755,7 +3756,7 @@ p.new-agent-hint {
 
 .new-agent-advanced > summary::before {
   content: '\25B8';
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   align-self: center;
 }
@@ -3796,13 +3797,13 @@ p.new-agent-hint {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
 .skill-editor-body {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
   resize: vertical;
   min-height: 220px;
@@ -3819,12 +3820,12 @@ p.new-agent-hint {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
 .skill-editor-error {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--danger);
 }
 
@@ -3852,7 +3853,7 @@ p.new-agent-hint {
   padding: 1px 6px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
@@ -3860,13 +3861,13 @@ p.new-agent-hint {
 }
 
 .skill-row-desc {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   margin: 4px 0 2px;
 }
 
 .skill-row-preview {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   font-family: var(--font-mono);
   white-space: pre-wrap;
@@ -3887,7 +3888,7 @@ p.new-agent-hint {
 .loop-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .loop-table th,

@@ -65,14 +65,14 @@ export function MachinesCard() {
     <div class="card">
       <div class="card-header"><span class="card-title">Machines</span></div>
       ${data.role === 'worker' ? html`
-        <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px">
+        <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:8px">
           Pair this worker with its hub: paste the link into the hub's Machines settings within 5 minutes. Single use; treat it like a password.
         </p>
         <button class="btn btn-primary" onclick=${pair}>Pair with hub</button>
         ${link.value ? html`<input readonly class="input" style="width:100%; margin-top:8px" value=${link.value} onFocus=${(e) => e.target.select()} aria-label="Machine pairing link" />` : null}
       ` : html`
         ${data.machines.map((machine) => html`
-          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:13px; margin-bottom:6px">
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:var(--fs-sm); margin-bottom:6px">
             <span class="badge badge-low">${machine.id}</span>
             <span>${machine.label}</span>
             <span style="color:var(--text-muted)">${machine.os || 'unknown OS'}</span>

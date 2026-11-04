@@ -2,7 +2,7 @@ import { html } from 'htm/preact';
 
 const btnStyle = `
   padding:8px 12px; min-width:40px; text-align:center;
-  font-size:13px; font-weight:600; font-family:var(--font-mono);
+  font-size:var(--fs-sm); font-weight:600; font-family:var(--font-mono);
   background:var(--bg-card); color:var(--text-primary);
   border:1px solid var(--border); border-radius:var(--radius);
   cursor:pointer; user-select:none; -webkit-user-select:none;
