@@ -36,12 +36,6 @@ function linkifyHtml(text = '') {
   );
 }
 
-// Earlier output was added when what used to be the first line now sits further down.
-function addsEarlierOutput(before, after) {
-  const anchor = String(before || '').split('\n').find((line) => line.trim());
-  return Boolean(anchor) && typeof after === 'string' && !after.startsWith(anchor) && after.includes(`\n${anchor}`);
-}
-
 export function Terminal({
   content,
   maxHeight = '500px',
@@ -59,7 +53,7 @@ export function Terminal({
   const userScrollIntent = useRef(false);
   const suppressLoadMoreUntil = useRef(0);
   const pendingPrepend = useRef(false);
-  const previousContent = useRef(content);
+  const wasLoadingMore = useRef(loadingMore);
   const previousResetKey = useRef(resetKey);
   const scrollSnapshot = useRef({
     scrollTop: 0,
@@ -118,8 +112,8 @@ export function Terminal({
     const snapshot = scrollSnapshot.current;
     const resetChanged = previousResetKey.current !== resetKey;
     previousResetKey.current = resetKey;
-    const before = previousContent.current;
-    previousContent.current = content;
+    const loadEnded = wasLoadingMore.current && !loadingMore;
+    wasLoadingMore.current = loadingMore;
 
     if (resetChanged) {
       pendingPrepend.current = false;
@@ -127,12 +121,15 @@ export function Terminal({
       return scrollToBottomWithRetries();
     }
 
-    // A tap's load lands on the render that puts earlier output above what was showing; it then
-    // shows what it loaded, with the join mid-view. Live output arriving first is handled as usual.
-    if (pendingPrepend.current === 'tap' && addsEarlierOutput(before, content)) {
+    // A tap's request ends on the render where loadingMore drops; if it added output, show it
+    // with the join mid-view. Live output during the request is handled as usual.
+    if (pendingPrepend.current === 'tap' && loadEnded) {
       pendingPrepend.current = false;
-      setScrollTop(el, Math.max(0, el.scrollHeight - snapshot.scrollHeight - el.clientHeight / 2));
-      return undefined;
+      const added = el.scrollHeight - snapshot.scrollHeight;
+      if (added > 0) {
+        setScrollTop(el, Math.max(0, added - el.clientHeight / 2));
+        return undefined;
+      }
     }
 
     if (snapshot.atBottom && pendingPrepend.current !== true) {
@@ -151,7 +148,7 @@ export function Terminal({
       setScrollTop(el, snapshot.scrollTop);
     }
     return undefined;
-  }, [content, resetKey]);
+  }, [content, resetKey, loadingMore]);
 
   useLayoutEffect(() => {
     const el = ref.current;

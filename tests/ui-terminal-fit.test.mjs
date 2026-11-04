@@ -19,8 +19,8 @@ test('full-height terminal fits a short history and keeps streaming output pinne
     import { h, render } from 'preact';
     import { Terminal } from '/components/terminal.mjs';
     window.loads = 0;
-    window.show = (content, hasMore = false) => render(h('div', { style: 'display:flex; flex-direction:column; height:600px' },
-      h(Terminal, { content, fullHeight: true, ansiColors: true, resetKey: 's1', hasMore, onLoadMore: () => { window.loads += 1; window.onLoad?.(); } }),
+    window.show = (content, hasMore = false, loadingMore = false) => render(h('div', { style: 'display:flex; flex-direction:column; height:600px' },
+      h(Terminal, { content, fullHeight: true, ansiColors: true, resetKey: 's1', hasMore, loadingMore, onLoadMore: () => { window.loads += 1; } }),
       h('div', { id: 'controls', style: 'height:80px; flex:none' }, 'controls')), document.getElementById('app'));
     window.show('❯ run the migration\\n● Bash(npm run migrate)\\n  Waiting…');
   </script>`)));
@@ -66,26 +66,28 @@ test('full-height terminal fits a short history and keeps streaming output pinne
   await page.waitForTimeout(150);
   assert.equal(await pinned(), false, 'not pulled to the bottom while reading history');
   assert.equal(await terminal.evaluate((el) => el.scrollTop), readingAt, 'view stays where the reader left it');
-  // Earlier history is one tap on a labelled pill. A tap shows what it loaded: the join between
-  // earlier and current output lands mid-view instead of the view jumping to the bottom.
-  const current = Array.from({ length: 20 }, (_, i) => `now ${i}`).join('\n');
-  await page.evaluate((text) => window.show(text, true), current);
+  // Earlier history is one tap on a labelled pill. While the request runs, live polls (which trim
+  // from the top and repeat lines like separators) keep a bottom reader pinned; when the request
+  // ends with more output, the join between earlier and current output lands mid-view.
+  const show = (text, loading) => page.evaluate(([t, l]) => window.show(t, true, l), [text, loading]);
+  const block = (name, n) => Array.from({ length: n }, (_, i) => `${name} ${i}`).join('\n');
+  const current = `────\n${block('now', 20)}\n────`;
+  await show(current, false);
   await terminal.getByText('Load earlier output').click();
   assert.equal(await page.evaluate(() => window.loads), 1);
-  // Live output lands before the history response: the reader stays pinned to the newest line.
-  const live = `${current}\n${Array.from({ length: 10 }, (_, i) => `live ${i}`).join('\n')}`;
-  await page.evaluate((text) => window.show(text, true), live);
+  await show(current, true);
+  const trimmed = `${block('now', 20).split('\n').slice(1).join('\n')}\n────\n${block('live', 10)}`;
+  await show(trimmed, true);
   await terminal.getByText('live 9').waitFor({ state: 'attached' });
   await page.waitForTimeout(150);
-  assert.equal(await pinned(), true, 'live output before the load keeps the view on the newest line');
-  // Then the earlier history arrives and the view shows it.
-  await page.evaluate(([earlier, text]) => window.show(`${earlier}\n${text}`, true), [lines(100), live]);
+  assert.equal(await pinned(), true, 'live polls during the load keep the view on the newest line');
+  await show(`${lines(100)}\n${trimmed}`, false);
   await terminal.getByText('line 99').waitFor({ state: 'attached' });
   await page.waitForTimeout(150);
   const join = await terminal.evaluate((el) => {
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
-      const at = walker.currentNode.data.indexOf('now 0');
+      const at = walker.currentNode.data.indexOf('now 1');
       if (at < 0) continue;
       const range = document.createRange();
       range.setStart(walker.currentNode, at);
@@ -96,5 +98,18 @@ test('full-height terminal fits a short history and keeps streaming output pinne
     return null;
   });
   assert.ok(join > 0.3 && join < 0.7, `join sits at ${join} of the pane height`);
+  // A load that ends with nothing new (empty or failed) clears the tap and moves nothing:
+  // tapping scrolled the pill into view, and the reader stays there through the next live poll.
+  const settled = `${lines(100)}\n${trimmed}`;
+  await terminal.getByText('Load earlier output').click();
+  const reading = await terminal.evaluate((el) => el.scrollTop);
+  await show(settled, true);
+  await show(settled, false);
+  await page.waitForTimeout(150);
+  assert.equal(await terminal.evaluate((el) => el.scrollTop), reading, 'an empty load does not move the view');
+  await show(`${settled}\n${block('after', 5)}`, false);
+  await terminal.getByText('after 4').waitFor({ state: 'attached' });
+  await page.waitForTimeout(150);
+  assert.equal(await terminal.evaluate((el) => el.scrollTop), reading, 'the next live poll keeps the reader where they were');
   assert.deepEqual(errors, []);
 });
