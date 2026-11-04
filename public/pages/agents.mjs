@@ -814,6 +814,14 @@ export function AgentsPage() {
       `}
 
       ${showNewModal.value ? html`
+        <div
+          class="new-agent-backdrop"
+          onClick=${e => {
+            // A click on the dimmed page closes the form, unless that would discard a typed prompt.
+            if (e.target !== e.currentTarget || newPrompt.value.trim()) return;
+            showNewModal.value = false;
+            showFolderPicker.value = false;
+          }}>
         <form
           class="card new-agent-form"
           onSubmit=${createSession}
@@ -996,6 +1004,7 @@ export function AgentsPage() {
             ` : null}
           </div>
         </form>
+        </div>
       ` : null}
 
       ${!desktopLayout.value ? html`<div style="display:flex; gap:6px; flex-wrap:wrap; margin:0 0 12px 0">

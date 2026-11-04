@@ -111,5 +111,15 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   await page.locator('.mcp-selector-control select').selectOption('cadre');
   await page.getByRole('checkbox', { name: /dueno/ }).uncheck();
   assert.match(await page.getByRole('alert').innerText(), /Cadre MCP \(dueno\) removed/);
+  // The form sits over a dimmed page: a click on the backdrop closes it, but never discards a typed prompt.
+  const backdrop = page.locator('.new-agent-backdrop');
+  const cover = await backdrop.boundingBox();
+  assert.ok(cover.x === 0 && cover.y === 0 && cover.width === 390 && cover.height === 844, 'backdrop covers the screen');
+  await page.getByRole('textbox', { name: 'Initial prompt' }).fill('draft');
+  await page.mouse.click(10, 20);
+  assert.equal(await backdrop.count(), 1, 'a typed prompt keeps the form open');
+  await page.getByRole('textbox', { name: 'Initial prompt' }).fill('');
+  await page.mouse.click(10, 20);
+  assert.equal(await backdrop.count(), 0, 'an empty form closes from the backdrop');
   assert.deepEqual(errors, []);
 });
