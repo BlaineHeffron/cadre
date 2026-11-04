@@ -7,17 +7,23 @@ import { isActiveThread } from '../pages/agent-collab/format.mjs';
 import { addToast, agentThreads, seenSessionStoreForKind, hasSeenPromptNotification, sessionDisplayStatus } from '../app/state.mjs';
 import { MachineChip } from './machines.mjs';
 
+// Every state pairs its colour with a glyph and a label, so it reads without colour.
 const STATE_CONFIG = {
-  starting: { label: 'Starting', cls: 'badge-info', pulse: false, idle: false },
-  blocked: { label: 'Needs Attention', cls: 'badge-critical', pulse: true, idle: true },
-  done: { label: 'Done', cls: 'badge-info', pulse: false, idle: false },
-  ready: { label: 'Idle', cls: 'badge-medium', pulse: true, idle: true },
-  thinking: { label: 'Thinking', cls: 'badge-info', pulse: false, idle: false },
-  working: { label: 'Working', cls: 'badge-success', pulse: false, idle: false },
-  awaiting_response: { label: 'Awaiting Response', cls: 'badge-info', pulse: false, idle: false },
-  ended: { label: 'Ended', cls: 'badge-low', pulse: false, idle: false },
-  unknown: { label: 'Unknown', cls: 'badge-critical', pulse: true, idle: true },
+  starting: { label: 'Starting', icon: '○', cls: 'badge-info', pulse: false, idle: false },
+  blocked: { label: 'Needs attention', icon: '!', cls: 'badge-critical', pulse: true, idle: true },
+  done: { label: 'Done', icon: '✓', cls: 'badge-success', pulse: false, idle: false },
+  ready: { label: 'Idle', icon: '●', cls: 'badge-medium', pulse: true, idle: true },
+  thinking: { label: 'Thinking', icon: '◔', cls: 'badge-info', pulse: false, idle: false },
+  working: { label: 'Working', icon: '▶', cls: 'badge-info', pulse: false, idle: false },
+  awaiting_response: { label: 'Awaiting response', icon: '⋯', cls: 'badge-info', pulse: false, idle: false },
+  ended: { label: 'Ended', icon: '■', cls: 'badge-low', pulse: false, idle: false },
+  unknown: { label: 'Unknown', icon: '?', cls: 'badge-low', pulse: true, idle: true },
 };
+
+export function StatusBadge({ status }) {
+  const { label, icon, cls } = STATE_CONFIG[status] || STATE_CONFIG.unknown;
+  return html`<span class="badge status-badge ${cls}"><span aria-hidden="true">${icon}</span><span>${label}</span></span>`;
+}
 
 /** Extract a short project label from a full path, e.g. "/home/user/projects/foo" → "projects/foo" */
 function projectLabel(workDir) {
@@ -34,7 +40,8 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
     ? new Date(session.created * 1000).toLocaleTimeString()
     : '';
 
-  const stateInfo = STATE_CONFIG[sessionDisplayStatus(descriptor.kind, session)] || STATE_CONFIG.unknown;
+  const status = sessionDisplayStatus(descriptor.kind, session);
+  const stateInfo = STATE_CONFIG[status] || STATE_CONFIG.unknown;
   const isRustManagedReadOnly = session.readOnly === true && session.externalOwner === 'rust-monitor';
   const isMutable = !isRustManagedReadOnly;
   const isEnded = session.state?.status === 'ended';
@@ -119,7 +126,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
         </div>
       ` : null}
       <div style="display:flex; gap:8px; font-size:var(--fs-xs); color:var(--text-muted); align-items:center">
-        ${stateInfo.label === 'Done' ? html`<span class="badge badge-info">Done</span>` : null}
+        <${StatusBadge} status=${status} />
         <${MachineChip} machine=${session.machine} />
         ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono); font-size:var(--fs-xs)" title=${session.workDir}>${session.workDir}</span>` : null}
       </div>

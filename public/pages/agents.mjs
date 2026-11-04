@@ -20,7 +20,7 @@ import {
   sessionDisplayStatus,
   wsConnected,
 } from '../app/state.mjs';
-import { SessionCard } from '../components/session-card.mjs';
+import { SessionCard, StatusBadge } from '../components/session-card.mjs';
 import { FolderPicker } from '../components/folder-picker.mjs';
 import { DirQuickSelect } from '../components/dir-quick-select.mjs';
 import { recentWorkDirs } from '../app/recent-dirs.mjs';
@@ -185,7 +185,7 @@ function AgentRailRow({ session, active, selected, onSelect, onToggleSelected, o
         onclick=${() => onSelect(session)}>
         <span class="agent-rail-row-topline">
           <span class="agent-rail-row-title">${title}</span>
-          ${status === 'done' ? html`<span class="badge badge-info">Done</span>` : null}
+          <${StatusBadge} status=${status} />
           <${MachineChip} machine=${session.machine} />
         </span>
         <span class="agent-rail-row-meta">

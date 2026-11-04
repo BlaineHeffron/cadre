@@ -1111,8 +1111,8 @@ body:has(.tmux-pane-page) {
   font-weight: 600;
 }
 
-.badge-critical { background: var(--danger); color: #fff; }
-.badge-high { background: #e65100; color: #fff; }
+.badge-critical { background: #c62828; color: #fff; }
+.badge-high { background: #bf360c; color: #fff; }
 .badge-medium { background: var(--warning); color: #000; }
 .badge-warning { background: var(--warning); color: #000; }
 .badge-low { background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border); }
@@ -1136,6 +1136,12 @@ body:has(.tmux-pane-page) {
 @keyframes badgePulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+.status-badge {
+  gap: 4px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* Grid */

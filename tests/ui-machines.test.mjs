@@ -100,7 +100,8 @@ describe('multi-machine dashboard', { skip }, () => {
   it('with no machines the spawn form, rows and settings are unchanged', async () => {
     const { tab, errors } = await open('agents', { sessions: [{ ...remoteRow, machine: undefined }], machines: { role: 'hub', canAdd: false, machines: [] } });
     await tab.locator('.agent-rail-row').getByText('remote child').waitFor();
-    assert.equal(await tab.locator('.agent-rail-row .badge').count(), 0);
+    assert.equal(await tab.locator('.agent-rail-row .badge:not(.status-badge)').count(), 0);
+    assert.equal(await tab.locator('.agent-rail-row .status-badge').textContent(), '▶Working');
     const form = await createSession(tab, { provider: 'claude' });
     assert.equal(await form.getByLabel('Run on').count(), 0);
     assert.equal('machine' in await waitForPost('/api/agents/sessions'), false);
