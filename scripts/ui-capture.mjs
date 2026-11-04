@@ -49,7 +49,7 @@ const CONVERSATION = [
   '  and an opaque `cursor`, and returns `nextCursor` when more notes remain. The three new',
   '  tests pass; the existing suite is unchanged.',
   '',
-  `${ansi('37', '✻')} ${ansi('37', 'Cooked for 41s')}`,
+  `${ansi('37', '✻')} ${ansi('37', 'Worked for 41s')}`,
   '',
   composer(),
 ].join('\n');
@@ -79,7 +79,7 @@ const DIFF = [
   `${ansi('37', '●')} Client errors now mark the batch failed instead of retrying; 5xx and network`,
   '  errors still back off and retry.',
   '',
-  `${ansi('37', '✻')} ${ansi('37', 'Cooked for 18s')}`,
+  `${ansi('37', '✻')} ${ansi('37', 'Worked for 18s')}`,
   '',
   composer(),
 ].join('\n');
