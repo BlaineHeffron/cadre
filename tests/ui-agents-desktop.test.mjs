@@ -182,9 +182,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   await page.goto(`${origin}/session`);
   const single = page.locator('.claude-session-page');
   await single.locator('.terminal').waitFor();
-  // The focused transcript keeps a thin but visible outline (at least 3:1 against its panel tone).
+  // The focused transcript keeps a thin visible ring (at least 3:1 against its panel tone). It is a
+  // border, which the scroll fade cannot paint over, and it does not shift the layout on focus.
+  const ring = (el) => { const cs = getComputedStyle(el); return [cs.borderTopWidth, cs.borderTopColor, cs.outlineStyle, cs.backgroundColor, el.getBoundingClientRect().width]; };
+  const [, , , , blurredWidth] = await single.locator('.terminal').evaluate(ring);
   await single.locator('.terminal').focus();
-  assert.deepEqual(await single.locator('.terminal').evaluate((el) => [getComputedStyle(el).outlineWidth, getComputedStyle(el).outlineColor, getComputedStyle(el).backgroundColor]), ['1px', 'rgba(79, 195, 247, 0.6)', 'rgb(26, 26, 46)']);
+  assert.deepEqual(await single.locator('.terminal').evaluate(ring), ['1px', 'rgba(79, 195, 247, 0.6)', 'none', 'rgb(26, 26, 46)', blurredWidth]);
   const { x, width } = await single.boundingBox();
   assert.ok(width <= 1160 && Math.abs(x - (1440 - x - width)) <= 1, `session page at x=${x}, width=${width}`);
   assert.deepEqual(errors, []);
