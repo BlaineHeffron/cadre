@@ -742,8 +742,6 @@ export function AgentsPage() {
                 onInput=${toggleSelectAllVisible} />
               Select all
             </label>
-          ` : null}
-          ${selectedKillableSessions.length > 0 ? html`
             <span class="agents-toolbar-selected">${selectedKillableSessions.length} selected</span>
             <button
               class="btn"

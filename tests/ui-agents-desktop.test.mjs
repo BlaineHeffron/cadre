@@ -54,6 +54,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await rows.first().locator('.status-badge').textContent(), '▶Working');
 
   const toolbar = page.locator('.agents-desktop-toolbar');
+  // Buttons, the search box and the provider select share one control height.
+  const heights = await toolbar.locator('.btn, input.input, select.input').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
+  assert.ok(heights.length >= 4 && new Set(heights).size === 1, `toolbar control heights ${heights}`);
   // Until something is selected the toolbar is search, provider, Filters and an icon Refresh.
   for (const name of ['Prompt', 'Esc', 'Kill']) assert.equal(await toolbar.getByRole('button', { name, exact: true }).count(), 0, name);
   assert.equal(await toolbar.getByRole('checkbox', { name: 'Select all' }).count(), 0);
