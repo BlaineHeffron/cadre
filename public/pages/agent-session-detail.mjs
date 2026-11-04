@@ -630,24 +630,13 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         h(MachineChip, { machine: sessionInfo.value.machine }),
       ),
       h('div', { class: 'session-header-actions' },
-        h('button', { class: 'btn', onClick: copySessionId }, 'Copy ID'),
         // A remote session's pane lives on its worker; its own UI (and AUTH_TOKEN) attaches there.
         machine?.url
           ? h('a', { class: 'btn', href: `${machine.url}/${descriptor.kind}/${id}`, target: '_blank', rel: 'noopener noreferrer' }, `Open on ${machine.id}`)
           : null,
-        (!machine && sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process')
-          ? h('button', { class: 'btn mobile-hidden', onClick: copyAttachCommand }, 'Copy Attach')
-          : null,
-        (!machine && sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process' && !isRustManagedReadOnly && tmuxCapabilities.value.canOpenTerminal)
-          ? h('button', { class: 'btn mobile-hidden', onClick: openInTerminal }, 'Open In Terminator')
-          : null,
         sessionState.value.status === 'ended' && !isRustManagedReadOnly
           ? h('button', { class: 'btn btn-primary', onClick: resumeSession }, 'Resume')
           : null,
-        sessionState.value.status === 'ended' && !sessionInfo.value.canResume && !isRustManagedReadOnly
-          ? h('button', { class: 'btn', onClick: () => startFreshSession() }, 'Start Fresh')
-          : null,
-        h('button', { class: 'btn', onClick: () => loadContent(id, loadedLines.value) }, 'Refresh'),
         h('button', {
           class: `btn${renderedTranscript.value ? ' btn-subtle' : ''}`,
           'aria-pressed': String(renderedTranscript.value),
@@ -658,7 +647,24 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
           },
           title: 'Toggle a rendered Markdown and math view built from the model session log. Raw terminal content remains unchanged.',
         }, renderedTranscript.value ? 'Raw Terminal' : 'Rendered Transcript'),
-        !isRustManagedReadOnly ? h('button', { class: 'btn btn-danger', onClick: killSession }, 'Kill') : null,
+        // Routine and destructive extras live behind one menu so the header has one clear action.
+        h('details', { class: 'session-header-more' },
+          h('summary', { class: 'btn', 'aria-label': 'More session actions', title: 'More session actions' }, '\u22EF'),
+          h('div', { class: 'session-header-menu' },
+            h('button', { class: 'btn', onClick: copySessionId }, 'Copy ID'),
+            (!machine && sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process')
+              ? h('button', { class: 'btn mobile-hidden', onClick: copyAttachCommand }, 'Copy Attach')
+              : null,
+            (!machine && sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process' && !isRustManagedReadOnly && tmuxCapabilities.value.canOpenTerminal)
+              ? h('button', { class: 'btn mobile-hidden', onClick: openInTerminal }, 'Open In Terminator')
+              : null,
+            sessionState.value.status === 'ended' && !sessionInfo.value.canResume && !isRustManagedReadOnly
+              ? h('button', { class: 'btn', onClick: () => startFreshSession() }, 'Start Fresh')
+              : null,
+            h('button', { class: 'btn', onClick: () => loadContent(id, loadedLines.value) }, 'Refresh'),
+            !isRustManagedReadOnly ? h('button', { class: 'btn btn-danger', onClick: killSession }, 'Kill') : null,
+          ),
+        ),
       ),
     ),
     renderedTranscript.value
