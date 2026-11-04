@@ -37,6 +37,13 @@ const DELAY_UNITS = [
   { label: 'day', value: 86400000 },
 ];
 
+// Only the first allow is primary; refusals read as danger, other allows stay neutral.
+export function optionClass(option, index) {
+  const label = typeof option === 'string' ? option : String(option?.label || '');
+  if (String(option?.kind || '').startsWith('reject') || /^no\b/i.test(label)) return 'ctrl-reject';
+  return index === 0 ? 'ctrl-approve' : 'ctrl-default';
+}
+
 export function AgentControlBar({
   provider = 'claude',
   state,
@@ -134,9 +141,12 @@ export function AgentControlBar({
   return html`
     <div class="claude-control-bar">
       ${sessionStatus === 'blocked' ? html`
+        <div class="approval-prompt-title">
+          <span aria-hidden="true">!</span>${state?.interaction?.detail || 'Needs your answer'}
+        </div>
         <div class="control-row control-row-primary">
-          ${interactionOptions.length > 0 ? interactionOptions.map((option) => html`
-            <button class="ctrl-btn ctrl-approve" onclick=${() => handleDialogAnswer(option)}>
+          ${interactionOptions.length > 0 ? interactionOptions.map((option, index) => html`
+            <button class="ctrl-btn ${optionClass(option, index)}" onclick=${() => handleDialogAnswer(option)}>
               ${typeof option === 'string' ? option : option.label || option.text || option.value || option.index}
             </button>
           `) : policyControlled ? html`
@@ -145,8 +155,8 @@ export function AgentControlBar({
             <button class="ctrl-btn ctrl-approve pulse-border" onclick=${handleApprove}>Approve</button>
             <button class="ctrl-btn ctrl-reject" onclick=${handleReject}>Reject</button>
           ` : canAnswerInteraction && state?.interaction?.kind === 'confirmation' ? html`
-            <button class="ctrl-btn ctrl-yes" onclick=${() => handleDialogAnswer('y')}>Yes</button>
-            <button class="ctrl-btn ctrl-no" onclick=${() => handleDialogAnswer('n')}>No</button>
+            <button class="ctrl-btn ctrl-approve" onclick=${() => handleDialogAnswer('y')}>Yes</button>
+            <button class="ctrl-btn ctrl-reject" onclick=${() => handleDialogAnswer('n')}>No</button>
           ` : onEscape ? html`
             <button class="ctrl-btn ctrl-reject" onclick=${handleReject}>Escape</button>
           ` : html`<span style="font-size:var(--fs-xs); color:var(--text-muted)">No canonical response options available.</span>`}
