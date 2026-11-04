@@ -1269,8 +1269,8 @@ input[type="checkbox"]:not(.switch) {
 }
 
 .setting-switch-hint {
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
 }
 
 .switch {
@@ -1985,11 +1985,16 @@ input[type="checkbox"]:not(.switch) {
   font-weight: 650;
 }
 
-.agent-rail-row-meta,
-.agent-rail-row-detail,
 .agent-rail-row-flag,
 .agent-rail-select {
   color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+/* Row meta and preview are read, not just glanced at: secondary text, not muted. */
+.agent-rail-row-meta,
+.agent-rail-row-detail {
+  color: var(--text-secondary);
   font-size: var(--fs-xs);
 }
 
@@ -2078,9 +2083,9 @@ input[type="checkbox"]:not(.switch) {
 
 .terminal-keys > summary {
   width: fit-content;
-  padding: 6px 4px;
+  padding: 7px 8px;
   color: var(--text-secondary);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 

@@ -53,5 +53,7 @@ test('settings uses labelled switches that reflect and change their state', { sk
   // Page titles share one style across pages.
   assert.equal(await page.locator('h1').first().evaluate((el) => getComputedStyle(el).fontSize), '18px');
   assert.ok((await page.locator('.settings-shell').boundingBox()).width <= 960, 'settings rows keep a readable width');
+  // Switch hints are read, so they use the 13px step in secondary grey.
+  assert.equal(await page.locator('.setting-switch-hint').first().evaluate((el) => getComputedStyle(el).fontSize), '13px');
   assert.deepEqual(errors, []);
 });
