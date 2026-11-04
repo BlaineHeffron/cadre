@@ -54,9 +54,13 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await rows.first().locator('.status-badge').textContent(), '▶Working');
 
   const toolbar = page.locator('.agents-desktop-toolbar');
+  // Until something is selected the toolbar is search, provider, Filters and an icon Refresh.
   for (const name of ['Prompt', 'Esc', 'Kill']) assert.equal(await toolbar.getByRole('button', { name, exact: true }).count(), 0, name);
+  assert.equal(await toolbar.getByRole('checkbox', { name: 'Select all' }).count(), 0);
+  assert.equal(await toolbar.getByRole('button', { name: 'Refresh' }).innerText(), '↻');
   await page.getByRole('checkbox', { name: 'Bulk select first task' }).check();
   assert.equal(await toolbar.getByText('1 selected').isVisible(), true);
+  assert.equal(await toolbar.getByRole('checkbox', { name: 'Select all' }).isVisible(), true);
   for (const name of ['Prompt', 'Esc', 'Kill']) assert.equal(await toolbar.getByRole('button', { name, exact: true }).isVisible(), true, name);
   // The bulk prompt closes with the selection and stays closed for the next one.
   const bulkPrompt = page.getByRole('textbox', { name: 'Bulk prompt to selected sessions' });
@@ -92,6 +96,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // A short transcript sits at the bottom of the pane, next to the controls, not under a gap.
   const [pane, body] = await Promise.all(['.terminal', '.terminal-body'].map((sel) => page.locator(sel).boundingBox()));
   assert.ok(pane.y + pane.height - (body.y + body.height) < 24, `transcript ends ${pane.y + pane.height - (body.y + body.height)}px above the pane bottom`);
+  assert.equal(await page.locator('.control-row-compose [data-placeholder]').getAttribute('data-placeholder'), 'Message the agent...', 'one composer placeholder whatever the state');
   for (const name of ['Cycle mode', 'Interrupt']) assert.equal(await page.getByRole('button', { name, exact: true }).isVisible(), true, name);
   // Composer extras wait behind one menu.
   const delay = page.getByRole('combobox', { name: 'Send delay' });
