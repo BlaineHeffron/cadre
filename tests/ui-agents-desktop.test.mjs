@@ -97,7 +97,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   await page.locator('.terminal').getByText('(choices shown below)').waitFor();
   assert.doesNotMatch(await page.locator('.terminal').innerText(), /Do you want to proceed|2\. Yes/);
   assert.equal(await page.locator('.control-row-compose [data-placeholder]').getAttribute('data-placeholder'), 'Message the agent...', 'one composer placeholder whatever the state');
-  for (const name of ['Cycle mode', 'Interrupt']) assert.equal(await page.getByRole('button', { name, exact: true }).isVisible(), true, name);
+  // While answers are offered they are the only primary actions; Cycle mode and Interrupt step aside.
+  for (const name of ['Cycle mode', 'Interrupt']) assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0, name);
   // Composer extras wait behind one menu.
   const delay = page.getByRole('combobox', { name: 'Send delay' });
   assert.equal(await delay.isVisible(), false);
@@ -112,9 +113,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.ok((await amount.boundingBox()).height < 48, 'amount box is not stretched');
   await delay.selectOption({ index: 0 });
   assert.equal(await delay.isVisible(), false, 'a preset delay closes the menu');
+  // A working session gets them back.
+  await rows.first().locator('.agent-rail-row-main').click();
+  for (const name of ['Cycle mode', 'Interrupt']) await page.getByRole('button', { name, exact: true }).waitFor();
   // Interrupt goes through POST /escape, which the server may promote to an interrupt.
   await Promise.all([
-    page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/claude/sessions/b2/escape')),
+    page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/claude/sessions/a1/escape')),
     page.getByRole('button', { name: 'Interrupt', exact: true }).click(),
   ]);
 

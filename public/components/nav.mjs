@@ -126,7 +126,7 @@ export function Nav() {
     <nav class="nav" aria-label="Main navigation">
       <div class="nav-brand">
         <span style="margin-right:8px">Cadre</span>
-        <span class="badge nav-connection-badge ${connectionClass}" style="font-size:var(--fs-xs)">
+        <span class="badge nav-connection-badge ${connectionClass}">
           ${connectionLabel}
         </span>
       </div>

@@ -58,6 +58,9 @@ test('phone navigation keeps frequent routes visible and overflow reachable; des
     assert.ok(gear.height >= 44 && gear.x + gear.width <= width, `Settings at ${width}px`);
   }
   await page.setViewportSize({ width: 390, height: 844 });
+  // A standard phone shows the brand at the left, so the bar does not read as scrolled.
+  const brand = await nav.getByText('Cadre', { exact: true }).boundingBox();
+  assert.ok(brand && brand.x >= 0 && brand.x + brand.width < (await nav.getByRole('link', { name: /^Agents/ }).boundingBox()).x);
   await more.click();
   assert.equal(await more.getAttribute('aria-expanded'), 'true');
   if (process.env.NAV_SCREENSHOT) await page.screenshot({ path: process.env.NAV_SCREENSHOT.replace('.png', '-overflow.png') });

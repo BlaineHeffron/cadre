@@ -45,6 +45,11 @@ export function optionClass(option, index) {
   return index === 0 ? 'ctrl-approve' : 'ctrl-default';
 }
 
+// Interrupt can step aside only when one of the answers is itself a refusal (which sends Escape).
+export function answersIncludeRefusal(options) {
+  return options.some((option, index) => optionClass(option, index) === 'ctrl-reject');
+}
+
 // A picked skill, quick insert or delay closes the tools menu; "Custom" stays open for its fields.
 function closeAfterPick(event) {
   // Custom delay keeps the menu open so the amount and unit can be set together.
@@ -83,6 +88,9 @@ export function AgentControlBar({
   const interactionOptions = canAnswerInteraction && Array.isArray(state?.interaction?.options)
     ? state.interaction.options
     : [];
+  // While the bar offers answers, they are the primary actions; Interrupt stays unless an answer refuses.
+  const answering = sessionStatus === 'blocked' && interactionOptions.length > 0;
+  const hideInterrupt = answering && answersIncludeRefusal(interactionOptions);
 
   function selectedScheduleDelay() {
     if (selectedDelay.value !== 'custom') return Number(selectedDelay.value) || 0;
@@ -184,14 +192,16 @@ export function AgentControlBar({
       ` : null}
 
       <div class="control-row control-row-tools">
-        ${descriptor.hasShiftTab ? html`
+        ${descriptor.hasShiftTab && !answering ? html`
           <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleApprove} title="Send Shift+Tab (cycle permission mode)">
             Cycle mode
           </button>
         ` : null}
-        <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleReject} title="Send Escape (interrupt)">
-          Interrupt
-        </button>
+        ${hideInterrupt ? null : html`
+          <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleReject} title="Send Escape (interrupt)">
+            Interrupt
+          </button>
+        `}
         <details class="more-menu composer-more" onClickCapture=${closeMenuOnChoice} onChange=${closeAfterPick}>
           <summary class="ctrl-btn ctrl-default ctrl-btn-compact" aria-label="More composer tools">
             More${selectedDelay.value ? ' · delayed' : ''}${imageAttached ? ' · image' : ''}

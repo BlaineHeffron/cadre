@@ -1170,6 +1170,7 @@ body:has(.tmux-pane-page) {
 }
 
 .nav-connection-badge {
+  font-size: var(--fs-xs);
   justify-content: center;
   flex: 0 0 auto;
   white-space: nowrap;
@@ -2257,7 +2258,7 @@ body:has(.tmux-pane-page) {
 
 .ctrl-reject {
   flex: 1;
-  background: var(--bg-card);
+  background: rgba(239, 83, 80, 0.16);
   color: var(--danger);
   border-color: var(--danger);
   font-size: var(--fs-md);
@@ -3233,8 +3234,19 @@ body:has(.tmux-pane-page) {
     flex-shrink: 1;
   }
 
+  /* Phones keep the brand; the connection badge shrinks to a coloured dot. */
   .nav-brand {
-    display: none;
+    display: flex;
+    align-items: center;
+    flex: none;
+    font-size: var(--fs-base);
+  }
+
+  .nav-connection-badge {
+    width: 8px;
+    height: 8px;
+    padding: 0;
+    font-size: 0;
   }
 
   .nav-link-primary {
@@ -3488,6 +3500,13 @@ body:has(.tmux-pane-page) {
 
   .toast {
     max-width: none;
+  }
+}
+
+/* The narrowest phones need the brand's width for Settings. */
+@media (max-width: 359px) {
+  .nav-brand {
+    display: none;
   }
 }
 
