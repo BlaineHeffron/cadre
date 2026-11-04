@@ -622,9 +622,10 @@ textarea.input:focus {
   cursor: text;
 }
 
-/* Focus stays visible but quiet: the pane is focused most of the time. */
+/* Focus stays visible but quiet: a thin line (about 3.6:1 on the transcript, above the 3:1 minimum),
+   since the pane is focused most of the time. */
 .terminal-interactive:focus {
-  outline: 1px solid rgba(79, 195, 247, 0.35);
+  outline: 1px solid rgba(79, 195, 247, 0.6);
   outline-offset: -1px;
 }
 
