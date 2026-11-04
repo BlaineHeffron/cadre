@@ -3921,7 +3921,9 @@ p.new-agent-hint {
   color: var(--text-primary);
 }
 
+/* The box keeps its 18px in a narrow dialog; the label text wraps instead. */
 .new-agent-check input {
+  flex: none;
   margin: 2px 0 0;
 }
 

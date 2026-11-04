@@ -100,7 +100,17 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   assert.ok(provider.x + provider.width <= model.x);
   const worktree = page.getByRole('checkbox', { name: /Isolated git worktree/ });
   assert.equal(await worktree.isVisible(), true);
-  assert.equal(Math.round((await worktree.boundingBox()).width), 18, 'form checkboxes use the shared 18px size');
+  // The rendered box, not just the CSS value: a long label (or CI's wider font, which made it 17px)
+  // must wrap rather than squeeze the box in the phone-width dialog.
+  const squeezed = await worktree.evaluate((el) => {
+    const title = el.closest('label').querySelector('span');
+    const before = title.firstChild.textContent;
+    title.firstChild.textContent = before.repeat(4);
+    const width = el.getBoundingClientRect().width;
+    title.firstChild.textContent = before;
+    return width;
+  });
+  assert.equal(squeezed, 18, 'form checkboxes keep the shared 18px size beside a long label');
   assert.equal(await page.getByPlaceholder('Optional label').isVisible(), false);
   assert.equal(await page.getByRole('checkbox', { name: /Coordinator/ }).isVisible(), false);
   await page.locator('.new-agent-advanced > summary').click();
