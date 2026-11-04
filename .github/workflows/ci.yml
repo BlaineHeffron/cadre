@@ -20,3 +20,5 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+        env:
+          CHROMIUM_BIN: /usr/bin/google-chrome  # preinstalled on ubuntu-latest

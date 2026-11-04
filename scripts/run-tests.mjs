@@ -33,7 +33,7 @@ for (let index = 0; index < forwardedArgs.length; index += 1) {
 // agent session vars and home-dir state never leak in. A test needing a var sets it itself.
 const testHome = mkdtempSync(join(tmpdir(), 'cadre-test-home-'));
 process.on('exit', () => rmSync(testHome, { recursive: true, force: true }));
-const allowedVar = /^(PATH|TMPDIR|TEMP|TMP|LANG|LC_\w+|TERM|SHELL|USER|LOGNAME|TZ|NODE_\w+|CI|GITHUB_ACTIONS)$/;
+const allowedVar = /^(PATH|TMPDIR|TEMP|TMP|LANG|LC_\w+|TERM|SHELL|USER|LOGNAME|TZ|NODE_\w+|CI|GITHUB_ACTIONS|CHROMIUM_BIN)$/;
 const testEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => allowedVar.test(key)));
 
 const testArgs = explicitTestTargets.length > 0 ? explicitTestTargets : listDefaultTests();
