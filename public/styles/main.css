@@ -492,6 +492,12 @@ html, body {
   border-color: rgba(79, 195, 247, 0.4);
 }
 
+.btn-icon {
+  padding: 4px 10px;
+  font-size: var(--fs-lg);
+  line-height: 1;
+}
+
 .btn-danger {
   border-color: var(--danger);
   color: var(--danger);
@@ -1829,10 +1835,8 @@ body:has(.tmux-pane-page) {
   flex-wrap: nowrap;
 }
 
-.agent-session-page-embedded .session-header-actions .ctrl-btn {
+.agent-session-page-embedded .session-header-actions .btn {
   flex: 0 0 auto;
-  padding: 4px 8px !important;
-  font-size: var(--fs-xs) !important;
   white-space: nowrap;
 }
 
@@ -1842,6 +1846,21 @@ body:has(.tmux-pane-page) {
   .agent-session-page-embedded .mobile-hidden {
     display: none !important;
   }
+}
+
+.terminal-keys > summary {
+  width: fit-content;
+  padding: 6px 4px;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.terminal-keys-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 0 4px;
 }
 
 /* ── Claude Control Bar ── */
@@ -3199,12 +3218,11 @@ body:has(.tmux-pane-page) {
     display: none;
   }
 
-  .session-header-actions .ctrl-btn {
+  .session-header-actions .btn {
     flex: 0 0 auto;
-    min-width: 0;
     min-height: 34px;
-    padding: 4px 8px !important;
-    font-size: var(--fs-xs) !important;
+    padding: 4px 8px;
+    font-size: var(--fs-xs);
   }
 
   .session-title {
@@ -3215,10 +3233,10 @@ body:has(.tmux-pane-page) {
     display: none;
   }
 
-  .session-header-primary .ctrl-btn {
+  .session-header-primary .btn {
     flex: 0 0 auto;
     min-height: 34px;
-    padding: 4px 8px !important;
+    padding: 4px 8px;
   }
 
   .mobile-hidden {

@@ -73,7 +73,7 @@ export function RenderedTranscript({ content = '', messages = null, start = 0, o
       'aria-label': 'Rendered session transcript',
     },
     start > 0
-      ? h('button', { class: 'ctrl-btn ctrl-default', onClick: onLoadEarlier, style: 'padding:4px 8px; font-size:var(--fs-xs)' }, 'Load earlier messages')
+      ? h('button', { class: 'btn', onClick: onLoadEarlier }, 'Load earlier messages')
       : null,
     ...messages.map((message, index) => {
       const speaker = message.role === 'user' ? 'user' : 'ai';
