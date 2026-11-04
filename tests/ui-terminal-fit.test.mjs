@@ -111,5 +111,13 @@ test('full-height terminal fits a short history and keeps streaming output pinne
   await terminal.getByText('after 4').waitFor({ state: 'attached' });
   await page.waitForTimeout(150);
   assert.equal(await terminal.evaluate((el) => el.scrollTop), reading, 'the next live poll keeps the reader where they were');
+  // The empty load cleared the tap: a later request that does add earlier output, started
+  // without a tap, keeps the reader's place instead of jumping to a mid-view join.
+  const grown = `${lines(150)}\n${trimmed}\n${block('after', 5)}`;
+  await show(`${settled}\n${block('after', 5)}`, true);
+  await show(grown, false);
+  await terminal.getByText('line 149').waitFor({ state: 'attached' });
+  await page.waitForTimeout(150);
+  assert.equal(await terminal.evaluate((el) => el.scrollTop), reading, 'no leftover tap after an empty load');
   assert.deepEqual(errors, []);
 });

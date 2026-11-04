@@ -2083,9 +2083,11 @@ input[type="checkbox"]:not(.switch) {
   }
 }
 
+/* The raw-key toggle shares the control height; line-height keeps the disclosure marker. */
 .terminal-keys > summary {
   width: fit-content;
-  padding: 7px 8px;
+  padding: 0 8px;
+  line-height: var(--control-h);
   color: var(--text-secondary);
   font-size: var(--fs-sm);
   cursor: pointer;

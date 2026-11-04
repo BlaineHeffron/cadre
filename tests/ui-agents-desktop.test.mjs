@@ -117,6 +117,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // The terminal no longer repeats the menu the bar is showing.
   await page.locator('.terminal').getByText('pane text').waitFor();
   // The pending command runs straight into its question; raw terminal keys sit below the composer.
+  assert.ok((await page.locator('.terminal-keys > summary').boundingBox()).height >= 36, 'Terminal keys toggle is a full control-height target');
   const [term, question, keys, compose] = await Promise.all(['.terminal', '.approval-prompt-title', '.terminal-keys', '.control-row-compose'].map((sel) => page.locator(sel).first().boundingBox()));
   assert.ok(question.y - (term.y + term.height) < 16 && keys.y > compose.y, `question ${question.y - (term.y + term.height)}px below the terminal; keys at ${keys.y}, composer at ${compose.y}`);
   assert.doesNotMatch(await page.locator('.terminal').innerText(), /Do you want to proceed|2\. Yes/);
