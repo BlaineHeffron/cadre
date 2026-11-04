@@ -26,6 +26,7 @@ import { AgentControlBar } from '../components/agent-control-bar.mjs';
 import { TerminalKeys } from '../components/terminal-keys.mjs';
 import { RenderedTranscript } from '../components/rendered-transcript.mjs';
 import { MachineChip } from '../components/machines.mjs';
+import { closeMenuOnChoice } from '../components/session-card.mjs';
 
 function isActiveThread(thread) {
   if (!thread) return false;
@@ -648,13 +649,9 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
           title: 'Toggle a rendered Markdown and math view built from the model session log. Raw terminal content remains unchanged.',
         }, renderedTranscript.value ? 'Raw Terminal' : 'Rendered Transcript'),
         // Routine and destructive extras live behind one menu so the header has one clear action.
-        h('details', { class: 'session-header-more' },
+        h('details', { class: 'more-menu' },
           h('summary', { class: 'btn', 'aria-label': 'More session actions', title: 'More session actions' }, '\u22EF'),
-          h('div', {
-            class: 'session-header-menu',
-            // Choosing an item closes the menu, like any other menu.
-            onClick: (event) => { if (event.target.closest('button, a')) event.currentTarget.closest('details').open = false; },
-          },
+          h('div', { class: 'more-menu-list', onClickCapture: closeMenuOnChoice },
             h('button', { class: 'btn', onClick: copySessionId }, 'Copy ID'),
             (!machine && sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process')
               ? h('button', { class: 'btn mobile-hidden', onClick: copyAttachCommand }, 'Copy Attach')

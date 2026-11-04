@@ -145,14 +145,12 @@ export function AgentControlBar({
           <span aria-hidden="true">!</span>${state?.interaction?.detail || 'Needs your answer'}
         </div>
         <div class="control-row control-row-primary">
-          ${interactionOptions.length > 0 ? interactionOptions.map((option, index) => html`
-            <button
-              class="ctrl-btn ${optionClass(option, index)}"
-              title=${typeof option === 'string' ? option : option.label || option.text || option.value || option.index}
-              onclick=${() => handleDialogAnswer(option)}>
-              ${typeof option === 'string' ? option : option.label || option.text || option.value || option.index}
-            </button>
-          `) : policyControlled ? html`
+          ${interactionOptions.length > 0 ? interactionOptions.map((option, index) => {
+            const label = typeof option === 'string' ? option : option.label || option.text || option.value || option.index;
+            return html`
+              <button class="ctrl-btn ${optionClass(option, index)}" title=${label} onclick=${() => handleDialogAnswer(option)}>${label}</button>
+            `;
+          }) : policyControlled ? html`
             <span style="font-size:var(--fs-xs); color:var(--text-muted)">Applying automatic safety policy…</span>
           ` : canAnswerInteraction && state?.interaction?.kind === 'permission' && onApprove ? html`
             <button class="ctrl-btn ctrl-approve pulse-border" onclick=${handleApprove}>Approve</button>

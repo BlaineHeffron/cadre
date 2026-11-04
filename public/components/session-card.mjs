@@ -34,6 +34,11 @@ function projectLabel(workDir) {
   return parts.slice(-2).join('/');
 }
 
+// Choosing an item closes its ⋯ menu, like any other menu.
+export function closeMenuOnChoice(event) {
+  if (event.target.closest('button, a')) event.currentTarget.closest('details').open = false;
+}
+
 export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape, onKill, onResume, onStartFresh, onStartLoop, extraActions = null, selected = false, onToggleSelected = null }) {
   const descriptor = providerDescriptor(provider);
   const timeAgo = session.created
@@ -96,13 +101,12 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
       tabIndex=${0}
       aria-label=${`Open ${descriptor.label} session ${primaryName}`}
     >
-      ${isUnseen ? html`<div class="session-new-banner">NEW</div>` : null}
       <div class="card-header" style="display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:8px; align-items:start">
         <span
           class="card-title"
           title=${primaryName}
           style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
-          ${primaryName}
+          ${isUnseen ? html`<span class="badge badge-info" style="margin-right:6px">New</span>` : null}${primaryName}
         </span>
         ${isMutable && onToggleSelected ? html`
           <label style="display:flex; align-items:center; gap:6px; font-size:var(--fs-xs); color:var(--text-muted)" onclick=${e => e.stopPropagation()}>
@@ -137,40 +141,31 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
         ${session.pid ? html`<span>PID ${session.pid}</span>` : null}
         ${timeAgo ? html`<span>${timeAgo}</span>` : null}
       </div>
-      ${!isEnded && onStartLoop ? html`
-        <div style="margin-top:4px" onclick=${e => e.stopPropagation()}>
-          <button class="btn" style="font-size:var(--fs-xs); padding:3px 8px" onclick=${() => onStartLoop(session)}>Start loop</button>
-        </div>
-      ` : null}
       ${detailText ? html`
         <div style="font-size:var(--fs-xs); color:var(--text-secondary); margin-top:4px">${detailText}</div>
       ` : null}
-      <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap" onclick=${e => e.stopPropagation()}>
-          <button class="btn" onclick=${copySessionId} title="Copy session ID">Copy ID</button>
-          ${extraActions}
-          ${isEnded && onResume ? html`
-            <button class="btn" onclick=${() => onResume(session)} title="Resume prior CLI conversation">Resume</button>
-          ` : null}
-          ${isEnded && !session.canResume && onStartFresh ? html`
-            <button class="btn" onclick=${() => onStartFresh(session)} title="Start a fresh session in this workdir">Start Fresh</button>
-          ` : null}
-          ${descriptor.kind === 'codex' ? html`
-            <button class="btn" onclick=${() => route(`${descriptor.routeBase}/${session.id}`)} title="Open session">Open</button>
-          ` : null}
-          ${isMutable && !isEnded ? html`
-            ${descriptor.hasShiftTab ? html`
-              <button
-                class="btn btn-primary"
-                onclick=${() => onShiftTab(session.id)}
-                title="Send Shift+Tab (interrupt/accept)"
-                style="font-weight:700"
-              >
-                Shift+Tab
-              </button>
+      <div class="session-card-actions" onclick=${e => e.stopPropagation()}>
+        ${isEnded && onResume
+          ? html`<button class="btn btn-primary" onclick=${() => onResume(session)} title="Resume prior CLI conversation">Resume</button>`
+          : html`<button class="btn btn-primary" onclick=${handleClick}>Open</button>`}
+        <details class="more-menu">
+          <summary class="btn" aria-label=${`More actions for ${primaryName}`} title="More actions">⋯</summary>
+          <div class="more-menu-list" onClickCapture=${closeMenuOnChoice}>
+            <button class="btn" onclick=${copySessionId} title="Copy session ID">Copy ID</button>
+            ${extraActions}
+            ${!isEnded && onStartLoop ? html`<button class="btn" onclick=${() => onStartLoop(session)}>Start loop</button>` : null}
+            ${isEnded && !session.canResume && onStartFresh ? html`
+              <button class="btn" onclick=${() => onStartFresh(session)} title="Start a fresh session in this workdir">Start Fresh</button>
             ` : null}
-            <button class="btn" onclick=${() => onEscape(session.id)} title="Send Escape key">Esc</button>
-            <button class="btn btn-danger" onclick=${() => onKill(session)} title="Kill this session">Kill</button>
-          ` : null}
+            ${isMutable && !isEnded ? html`
+              ${descriptor.hasShiftTab ? html`
+                <button class="btn" onclick=${() => onShiftTab(session.id)} title="Send Shift+Tab (interrupt/accept)">Shift+Tab</button>
+              ` : null}
+              <button class="btn" onclick=${() => onEscape(session.id)} title="Send Escape key">Esc</button>
+              <button class="btn btn-danger" onclick=${() => onKill(session)} title="Kill this session">Kill</button>
+            ` : null}
+          </div>
+        </details>
       </div>
     </div>
   `;

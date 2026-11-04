@@ -450,19 +450,6 @@ html, body {
   border-left: 3px solid var(--danger);
 }
 
-/* NEW session banner */
-.session-new-banner {
-  background: var(--accent);
-  color: #000;
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  letter-spacing: 1px;
-  text-align: center;
-  padding: 2px 0;
-  margin: -16px -16px 10px -16px;
-  border-radius: var(--radius) var(--radius) 0 0;
-}
-
 /* Buttons */
 .btn {
   display: inline-flex;
@@ -1511,19 +1498,26 @@ body:has(.tmux-pane-page) {
   justify-content: flex-end;
 }
 
-.session-header-more {
+.more-menu {
   position: relative;
 }
 
-.session-header-more > summary {
+.session-card-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.more-menu > summary {
   list-style: none;
 }
 
-.session-header-more > summary::-webkit-details-marker {
+.more-menu > summary::-webkit-details-marker {
   display: none;
 }
 
-.session-header-menu {
+.more-menu-list {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
@@ -1539,13 +1533,13 @@ body:has(.tmux-pane-page) {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
-.session-header-menu .btn {
+.more-menu-list .btn {
   justify-content: flex-start;
   border-color: transparent;
   background: transparent;
 }
 
-.session-header-menu .btn-danger {
+.more-menu-list .btn-danger {
   margin-top: 4px;
   border-top: 1px solid var(--border);
   border-radius: 0 0 var(--radius) var(--radius);
