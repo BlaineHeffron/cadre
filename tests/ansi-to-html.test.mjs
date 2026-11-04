@@ -11,7 +11,12 @@ test('truecolor diff backgrounds render, blended toward the terminal, instead of
 });
 
 test('256-colour codes map to the xterm cube, grey ramp and named colours', () => {
-  assert.equal(ansiToHtml('\x1b[38;5;246mdim'), '<span style="color:rgb(148,148,148)">dim</span>');
+  assert.equal(ansiToHtml('\x1b[38;5;246mdim'), '<span style="color:rgb(167,167,167)">dim</span>');
+  // Only mid-grey text is lifted: near-black, near-white and colours keep their values.
+  assert.equal(ansiToHtml('\x1b[38;2;153;153;153mhint'), '<span style="color:rgb(171,171,171)">hint</span>');
+  assert.equal(ansiToHtml('\x1b[38;2;40;40;40mx'), '<span style="color:rgb(40,40,40)">x</span>');
+  assert.equal(ansiToHtml('\x1b[38;2;240;240;240mx'), '<span style="color:rgb(240,240,240)">x</span>');
+  assert.equal(ansiToHtml('\x1b[38;2;148;148;150mx'), '<span style="color:rgb(148,148,150)">x</span>');
   assert.equal(ansiToHtml('\x1b[48;5;196mred'), '<span style="background:color-mix(in srgb,rgb(255,0,0) 60%,transparent)">red</span>');
   assert.equal(ansiToHtml('\x1b[38;5;9mx'), '<span class="ansi-fg-bright-red">x</span>');
 });
