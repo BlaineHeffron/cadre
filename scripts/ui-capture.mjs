@@ -230,7 +230,7 @@ try {
   await shoot(desktop, origin, '/agents', out('05-new-session.png'), async (page) => {
     await text('Sync worker retries')(page);
     const catalog = page.waitForResponse(/\/api\/agents\/mcp-servers/);
-    await page.getByRole('button', { name: 'New', exact: true }).first().click();
+    await page.getByRole('button', { name: 'New session', exact: true }).first().click();
     await catalog;
     await page.waitForLoadState('networkidle');
     // Shoot the form's default state; wait out a brief late repaint so runs match.

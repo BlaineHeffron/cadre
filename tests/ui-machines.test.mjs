@@ -58,7 +58,7 @@ async function open(page, scenario) {
 }
 
 async function createSession(tab, { provider }) {
-  await tab.getByRole('button', { name: 'New', exact: true }).first().click();
+  await tab.getByRole('button', { name: 'New session', exact: true }).first().click();
   const form = tab.locator('form.new-agent-form');
   await form.getByLabel('Provider').selectOption(provider);
   await form.locator('#agents-workdir-input').fill('/home/me/repo');
@@ -82,7 +82,7 @@ describe('multi-machine dashboard', { skip }, () => {
 
   it('offers a machine only while it is live and runs the provider, and sends the choice with the spawn', async () => {
     const { tab } = await open('agents', { sessions: [], machines: registered });
-    await tab.getByRole('button', { name: 'New', exact: true }).first().click();
+    await tab.getByRole('button', { name: 'New session', exact: true }).first().click();
     const select = tab.locator('form.new-agent-form').getByLabel('Run on');
     const options = async () => select.locator('option').evaluateAll((list) => list.map((option) => [option.value, option.textContent.trim(), option.disabled]));
     await select.waitFor();
