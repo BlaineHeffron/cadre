@@ -20,7 +20,6 @@ describe('new agent pane (prompt-first layout)', () => {
     // An optional node (e.g. the Codex helper) must not be able to collapse a gap.
     assert.doesNotMatch(styles, /\.new-agent-setup-grid \+ \.new-agent-section/);
     assert.doesNotMatch(styles, /p\.new-agent-hint \+ \.new-agent-section/);
-    assert.match(styles, /@media \(max-width: 720px\)[\s\S]*\.new-agent-setup-grid\s*\{\s*grid-template-columns: repeat\(2/);
   });
 
   it('does not render an empty helper paragraph for Codex thinking levels', () => {

@@ -907,14 +907,6 @@ export function AgentsPage() {
                   onInput=${e => { newThinkingLevel.value = e.target.value; }} />
               `}
             </label>
-            <label class="new-agent-field">
-              <span>Name</span>
-              <input
-                class="input"
-                placeholder="Optional label"
-                value=${newDisplayName.value}
-                onInput=${e => { newDisplayName.value = e.target.value; }} />
-            </label>
           </div>
           ${codexThinkingHelp ? html`
             <p class="new-agent-hint">${codexThinkingHelp}</p>
@@ -954,16 +946,7 @@ export function AgentsPage() {
                 type="checkbox"
                 checked=${newIsolatedWorktree.value}
                 onInput=${e => { newIsolatedWorktree.value = e.target.checked; }} />
-              <span>Isolated git worktree</span>
-              <span class="new-agent-hint">fresh branch from origin/main or origin/master</span>
-            </label>
-            <label class="new-agent-check">
-              <input
-                type="checkbox"
-                checked=${newPromptProfile.value === 'coordinator'}
-                onInput=${e => { newPromptProfile.value = e.target.checked ? 'coordinator' : 'none'; }} />
-              <span>Coordinator</span>
-              <span class="new-agent-hint">runs workers and sends your decisions to the Queue</span>
+              <span>Isolated git worktree<small class="new-agent-hint">Fresh branch from origin/main or origin/master</small></span>
             </label>
           </div>
 
@@ -973,9 +956,24 @@ export function AgentsPage() {
             onToggle=${e => { newAdvancedOpen.value = e.target.open; }}>
             <summary>
               Advanced
-              <span class="new-agent-hint">style prompt, MCP capabilities</span>
+              <span class="new-agent-hint">name, coordinator, style prompt, MCP</span>
             </summary>
             <div class="new-agent-advanced-body">
+              <label class="new-agent-field">
+                <span>Name</span>
+                <input
+                  class="input"
+                  placeholder="Optional label"
+                  value=${newDisplayName.value}
+                  onInput=${e => { newDisplayName.value = e.target.value; }} />
+              </label>
+              <label class="new-agent-check">
+                <input
+                  type="checkbox"
+                  checked=${newPromptProfile.value === 'coordinator'}
+                  onInput=${e => { newPromptProfile.value = e.target.checked ? 'coordinator' : 'none'; }} />
+                <span>Coordinator<small class="new-agent-hint">Runs workers and sends your decisions to the Queue</small></span>
+              </label>
               <${PromptProfileSelector}
                 value=${newPromptProfile.value}
                 onChange=${(profileId) => { newPromptProfile.value = profileId; }} />
