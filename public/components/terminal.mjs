@@ -53,6 +53,7 @@ export function Terminal({
   const userScrollIntent = useRef(false);
   const suppressLoadMoreUntil = useRef(0);
   const pendingPrepend = useRef(false);
+  const wasLoadingMore = useRef(loadingMore);
   const previousResetKey = useRef(resetKey);
   const scrollSnapshot = useRef({
     scrollTop: 0,
@@ -111,6 +112,8 @@ export function Terminal({
     const snapshot = scrollSnapshot.current;
     const resetChanged = previousResetKey.current !== resetKey;
     previousResetKey.current = resetKey;
+    const loadEnded = wasLoadingMore.current && !loadingMore;
+    wasLoadingMore.current = loadingMore;
 
     if (resetChanged) {
       pendingPrepend.current = false;
@@ -118,14 +121,25 @@ export function Terminal({
       return scrollToBottomWithRetries();
     }
 
-    if (snapshot.atBottom) {
+    // A tap's request ends on the render where loadingMore drops; if it added output, show it
+    // with the join mid-view. Live output during the request is handled as usual.
+    if (pendingPrepend.current === 'tap' && loadEnded) {
       pendingPrepend.current = false;
+      const added = el.scrollHeight - snapshot.scrollHeight;
+      if (added > 0) {
+        setScrollTop(el, Math.max(0, added - el.clientHeight / 2));
+        return undefined;
+      }
+    }
+
+    if (snapshot.atBottom && pendingPrepend.current !== true) {
       return scrollToBottomWithRetries();
     }
 
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     suppressLoadMoreUntil.current = now + 250;
-    if (pendingPrepend.current) {
+    if (pendingPrepend.current === true) {
+      // A scroll-triggered load keeps the reader's rows in place.
       setScrollTop(el, snapshot.scrollTop + (el.scrollHeight - snapshot.scrollHeight));
       pendingPrepend.current = false;
     } else {
@@ -134,7 +148,7 @@ export function Terminal({
       setScrollTop(el, snapshot.scrollTop);
     }
     return undefined;
-  }, [content, resetKey]);
+  }, [content, resetKey, loadingMore]);
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -220,7 +234,7 @@ export function Terminal({
   }
 
   function loadMoreFromClick() {
-    pendingPrepend.current = true;
+    pendingPrepend.current = 'tap';
     rememberScrollPosition();
     onLoadMore?.();
   }
