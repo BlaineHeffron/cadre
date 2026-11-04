@@ -41,12 +41,12 @@ export function FileList({ items, onNavigate, onSelectFile }) {
           onMouseOut=${e => { e.currentTarget.style.background = 'transparent'; }}
           onclick=${() => item.type === 'dir' ? onNavigate(item.name) : onSelectFile(item)}
         >
-          <span style="width:24px; text-align:center; margin-right:8px; font-size:16px">${getIcon(item)}</span>
-          <span style="flex:1; font-family:var(--font-mono); font-size:13px; ${item.type === 'dir' ? 'font-weight:600' : ''}">${item.name}</span>
-          <span style="width:80px; text-align:right; font-size:11px; color:var(--text-muted); font-family:var(--font-mono)">
+          <span style="width:24px; text-align:center; margin-right:8px; font-size:var(--fs-md)">${getIcon(item)}</span>
+          <span style="flex:1; font-family:var(--font-mono); font-size:var(--fs-sm); ${item.type === 'dir' ? 'font-weight:600' : ''}">${item.name}</span>
+          <span style="width:80px; text-align:right; font-size:var(--fs-xs); color:var(--text-muted); font-family:var(--font-mono)">
             ${item.type === 'file' ? (item.sizeFormatted || '') : ''}
           </span>
-          <span style="width:140px; text-align:right; font-size:11px; color:var(--text-muted)">
+          <span style="width:140px; text-align:right; font-size:var(--fs-xs); color:var(--text-muted)">
             ${formatDate(item.modified)}
           </span>
         </div>

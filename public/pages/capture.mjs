@@ -152,7 +152,7 @@ export function CapturePage() {
   return html`
     <div class="page capture-page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:18px">Quick Capture</h1>
+        <h1 class="card-title" style="font-size:var(--fs-lg)">Quick Capture</h1>
         <a class="btn btn-subtle capture-touch" href="/capture/notes">Saved notes</a>
       </div>
 
@@ -169,7 +169,7 @@ export function CapturePage() {
           onInput=${(e) => { draft.value = e.target.value; }}
         ></textarea>
         <div class="capture-compose-meta">
-          <span style="color:var(--text-muted); font-size:12px">${trimmedLen}/${MAX_TEXT_LENGTH}</span>
+          <span style="color:var(--text-muted); font-size:var(--fs-xs)">${trimmedLen}/${MAX_TEXT_LENGTH}</span>
           <div style="display:flex; gap:8px; align-items:center">
             <${VoiceInput} onResult=${onVoiceResult} />
             ${draft.value ? html`<button class="btn btn-subtle capture-touch" onclick=${() => { draft.value = ''; }}>Clear</button>` : null}
@@ -233,7 +233,7 @@ export function CaptureNotesPage() {
   return html`
     <div class="page capture-notes-page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:18px">Saved Notes</h1>
+        <h1 class="card-title" style="font-size:var(--fs-lg)">Saved Notes</h1>
         <div style="display:flex; gap:8px">
           <a class="btn btn-subtle capture-touch" href="/capture">Capture</a>
           <button class="btn btn-subtle capture-touch" onclick=${() => loadNotes(notes, loading)}>Refresh</button>
@@ -268,7 +268,7 @@ export function CaptureNotesPage() {
       <div class="card capture-list">
         <div class="card-header">
           <span class="card-title">Recent notes</span>
-          ${loading.value ? html`<span style="color:var(--text-muted); font-size:12px">Loading…</span>` : null}
+          ${loading.value ? html`<span style="color:var(--text-muted); font-size:var(--fs-xs)">Loading…</span>` : null}
         </div>
         ${notes.value.length === 0 && !loading.value ? html`
           <p style="color:var(--text-muted); margin:0">No notes yet.</p>

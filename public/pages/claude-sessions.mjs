@@ -80,19 +80,19 @@ function SkillPicker({ skills, selectedSkill }) {
 
   return html`
     <div style="margin-top:8px">
-      <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px">Prepopulate with skill (optional):</div>
+      <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:4px">Prepopulate with skill (optional):</div>
       <div style="display:flex; flex-wrap:wrap; gap:4px">
         ${selectedSkill.value ? html`
           <button
             class="btn"
-            style="padding:3px 8px; font-size:11px; background:var(--bg-card); color:var(--text-muted)"
+            style="padding:3px 8px; font-size:var(--fs-xs); background:var(--bg-card); color:var(--text-muted)"
             onclick=${() => { selectedSkill.value = null; }}
           >Clear</button>
         ` : null}
         ${skills.value.map(s => html`
           <button
             class="btn"
-            style="padding:3px 8px; font-size:11px; font-family:var(--font-mono); ${
+            style="padding:3px 8px; font-size:var(--fs-xs); font-family:var(--font-mono); ${
               selectedSkill.value?.name === s.name
                 ? 'background:var(--accent); color:var(--bg-primary); border-color:var(--accent)'
                 : ''
@@ -103,7 +103,7 @@ function SkillPicker({ skills, selectedSkill }) {
         `)}
       </div>
       ${selectedSkill.value ? html`
-        <div style="font-size:11px; color:var(--text-muted); margin-top:4px; font-style:italic">
+        <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px; font-style:italic">
           ${selectedSkill.value.description || `Will send /${selectedSkill.value.name} after session starts`}
         </div>
       ` : null}
@@ -215,7 +215,7 @@ export function ClaudeSessionsPage() {
   return html`
     <div class="page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:18px">Claude Sessions</h1>
+        <h1 class="card-title" style="font-size:var(--fs-lg)">Claude Sessions</h1>
         <div style="display:flex; gap:8px">
           <button class="btn" onclick=${() => loadSessions(loading)}>Refresh</button>
           <button class="btn btn-primary" onclick=${openNewModal}>New Session</button>
@@ -228,13 +228,13 @@ export function ClaudeSessionsPage() {
             <span class="card-title">New Claude Session</span>
             <button class="btn" onclick=${() => { showNewModal.value = false; }}>Cancel</button>
           </div>
-          <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px">
+          <p style="font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:8px">
             Creates a new tmux session running Claude Code CLI.
           </p>
           ${getLastBootstrapLabel() ? html`
             <button
               class="btn"
-              style="margin-bottom:8px; font-size:11px; padding:4px 10px"
+              style="margin-bottom:8px; font-size:var(--fs-xs); padding:4px 10px"
               onclick=${prefillLastBootstrap}
               title="Prefill with last session config"
             >Repeat last: ${getLastBootstrapLabel()}</button>

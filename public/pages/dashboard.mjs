@@ -394,7 +394,7 @@ export function DashboardPage() {
               <article class="card fleet-card">
                 <div class="card-header">
                   <div>
-                    <h3 class="card-title" style="font-size:16px">${reportTitle(task)}</h3>
+                    <h3 class="card-title" style="font-size:var(--fs-md)">${reportTitle(task)}</h3>
                     <div class="fleet-meta">every ${formatInterval(task.intervalSeconds)} · next ${formatTimestamp(task.nextRunAtEpochMs)}</div>
                   </div>
                   <span class="badge badge-${task.status === 'active' ? 'success' : task.status === 'canceled' ? 'low' : 'info'}">${task.status}</span>

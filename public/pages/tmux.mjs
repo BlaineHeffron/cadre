@@ -124,7 +124,7 @@ export function TmuxPage() {
   return html`
     <div class="page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:18px">Tmux Sessions</h1>
+        <h1 class="card-title" style="font-size:var(--fs-lg)">Tmux Sessions</h1>
         <div style="display:flex; gap:8px">
           <button class="btn" onclick=${() => loadTree(panes, loading, loadError)}>Refresh</button>
           <button class="btn btn-primary" onclick=${() => { showNewSession.value = true; }}>New Session</button>
@@ -186,11 +186,11 @@ export function TmuxPage() {
                 onMouseOver=${e => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
                 onMouseOut=${e => { e.currentTarget.style.borderColor = 'var(--border)'; }}
               >
-                <span style="font-family:var(--font-mono); font-size:13px; color:var(--text-primary); min-width:0; flex:1">
+                <span style="font-family:var(--font-mono); font-size:var(--fs-sm); color:var(--text-primary); min-width:0; flex:1">
                   <span style="color:var(--text-muted)">w${p.windowIndex}</span>${' '}${p.windowName}${' '}
                   <span style="color:var(--text-muted)">p${p.paneIndex}</span>
                 </span>
-                <span style="font-size:12px; color:var(--text-muted); white-space:nowrap">${p.command}</span>
+                <span style="font-size:var(--fs-xs); color:var(--text-muted); white-space:nowrap">${p.command}</span>
                 <span class="badge badge-low" style="white-space:nowrap">${p.width}x${p.height}</span>
               </button>
             `)}

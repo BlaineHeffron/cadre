@@ -54,7 +54,7 @@ export function ThreatsPage() {
   return html`
     <div class="page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:18px">Threat Alerts</h1>
+        <h1 class="card-title" style="font-size:var(--fs-lg)">Threat Alerts</h1>
         <div style="display:flex; gap:8px; align-items:center">
           <select
             value=${filterSeverity.value}

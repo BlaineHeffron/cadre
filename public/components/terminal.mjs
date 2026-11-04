@@ -240,7 +240,7 @@ export function Terminal({
   if (hasMore && onLoadMore) {
     children.push(h('div', {
       class: 'terminal-load-more',
-      style: 'text-align:center; padding:6px; color:var(--text-muted); font-size:12px; cursor:pointer; user-select:none',
+      style: 'text-align:center; padding:6px; color:var(--text-muted); font-size:var(--fs-xs); cursor:pointer; user-select:none',
       onClick: !loadingMore ? loadMoreFromClick : undefined,
     }, loadingMore ? 'Loading...' : 'Scroll up or tap to load more history'));
   }

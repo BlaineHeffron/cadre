@@ -786,7 +786,7 @@ export function AgentsPage() {
         ` : null}
       ` : html`
       <div class="card-header">
-        <h1 class="card-title" style="font-size:18px">Agents</h1>
+        <h1 class="card-title" style="font-size:var(--fs-lg)">Agents</h1>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
           <button class="btn" onclick=${() => loadAgentSessions(loading, loadError)}>Refresh</button>
           <button class="btn btn-primary" onclick=${() => openNewModal('codex')}>New</button>
@@ -1001,7 +1001,7 @@ export function AgentsPage() {
           <button
             type="button"
             class="btn ${stateFilters.value.includes(filter.id) ? 'btn-primary' : ''}"
-            style="font-size:11px; padding:4px 10px"
+            style="font-size:var(--fs-xs); padding:4px 10px"
             onclick=${() => toggleStateFilter(filter.id)}>
             ${filter.label}
           </button>
@@ -1012,7 +1012,7 @@ export function AgentsPage() {
         <div class="card" style="margin-bottom:12px">
           <div class="card-header" style="margin-bottom:10px">
             <span class="card-title">Live Preview</span>
-            <span style="font-size:11px; color:var(--text-muted)">Pinned previews stay here while you decide which session to open.</span>
+            <span style="font-size:var(--fs-xs); color:var(--text-muted)">Pinned previews stay here while you decide which session to open.</span>
           </div>
           <div class="grid grid-2">
             ${previewSessions.map((session) => html`
@@ -1030,11 +1030,11 @@ export function AgentsPage() {
         <div class="card-header" style="margin-bottom:0">
           <span class="card-title">Fleet</span>
           <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
-            <span style="font-size:11px; color:var(--text-muted)">
+            <span style="font-size:var(--fs-xs); color:var(--text-muted)">
               ${visibleSessions.length} shown of ${allSessions.length}
             </span>
             ${visibleKillableSessions.length > 0 ? html`
-              <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-secondary)">
+              <label style="display:flex; align-items:center; gap:6px; font-size:var(--fs-xs); color:var(--text-secondary)">
                 <input
                   type="checkbox"
                   checked=${allVisibleKillableSelected}

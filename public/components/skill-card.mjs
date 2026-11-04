@@ -16,10 +16,10 @@ export function SkillCard({ skill, onSelect }) {
         <span class="card-title" style="font-family:var(--font-mono)">/${skill.name}</span>
         ${locationBadge(skill.location)}
       </div>
-      <p style="font-size:12px; color:var(--text-secondary); margin-bottom:8px; line-height:1.4">
+      <p style="font-size:var(--fs-xs); color:var(--text-secondary); margin-bottom:8px; line-height:1.4">
         ${skill.description || 'No description'}
       </p>
-      <div style="display:flex; gap:8px; font-size:11px; color:var(--text-muted)">
+      <div style="display:flex; gap:8px; font-size:var(--fs-xs); color:var(--text-muted)">
         ${skill.project ? html`<span>Project: ${skill.project}</span>` : null}
         ${skill.size ? html`<span>${skill.size} bytes</span>` : null}
       </div>

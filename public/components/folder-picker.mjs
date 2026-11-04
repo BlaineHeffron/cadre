@@ -52,12 +52,12 @@ export function FolderPicker({ onSelect, onCancel }) {
     <div style="border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-card); overflow:hidden">
       <!-- Header -->
       <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid var(--border); background:var(--bg-surface)">
-        <span style="font-size:12px; font-weight:600; color:var(--text-primary)">Select Folder</span>
-        <button class="btn" type="button" style="padding:2px 8px; font-size:11px" onclick=${onCancel}>Cancel</button>
+        <span style="font-size:var(--fs-xs); font-weight:600; color:var(--text-primary)">Select Folder</span>
+        <button class="btn" type="button" style="padding:2px 8px; font-size:var(--fs-xs)" onclick=${onCancel}>Cancel</button>
       </div>
 
       <!-- Breadcrumb -->
-      <div style="display:flex; align-items:center; gap:4px; padding:6px 12px; border-bottom:1px solid var(--border); font-size:12px; flex-wrap:wrap; min-height:32px">
+      <div style="display:flex; align-items:center; gap:4px; padding:6px 12px; border-bottom:1px solid var(--border); font-size:var(--fs-xs); flex-wrap:wrap; min-height:32px">
         <button
           type="button"
           onclick=${() => browse('')}
@@ -82,32 +82,32 @@ export function FolderPicker({ onSelect, onCancel }) {
           <button
             type="button"
             onclick=${goUp}
-            style="display:flex; align-items:center; gap:8px; padding:6px 12px; cursor:pointer; border-bottom:1px solid var(--border); font-size:13px; color:var(--text-muted); width:100%; background:transparent; text-align:left"
+            style="display:flex; align-items:center; gap:8px; padding:6px 12px; cursor:pointer; border-bottom:1px solid var(--border); font-size:var(--fs-sm); color:var(--text-muted); width:100%; background:transparent; text-align:left"
             onMouseOver=${e => { e.currentTarget.style.background = 'var(--bg-hover)'; }}
             onMouseOut=${e => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <span style="font-size:14px">↑</span>
+            <span style="font-size:var(--fs-base)">↑</span>
             <span>..</span>
           </button>
         ` : null}
 
         ${loading.value ? html`
-          <div style="padding:16px 12px; text-align:center; color:var(--text-muted); font-size:12px">Loading...</div>
+          <div style="padding:16px 12px; text-align:center; color:var(--text-muted); font-size:var(--fs-xs)">Loading...</div>
         ` : error.value ? html`
-          <div style="padding:16px 12px; text-align:center; color:var(--danger); font-size:12px">${error.value}</div>
+          <div style="padding:16px 12px; text-align:center; color:var(--danger); font-size:var(--fs-xs)">${error.value}</div>
         ` : items.value.length === 0 ? html`
-          <div style="padding:16px 12px; text-align:center; color:var(--text-muted); font-size:12px">No subdirectories</div>
+          <div style="padding:16px 12px; text-align:center; color:var(--text-muted); font-size:var(--fs-xs)">No subdirectories</div>
         ` : items.value.map(item => html`
           <div
-            style="display:flex; align-items:center; gap:8px; padding:6px 12px; border-bottom:1px solid var(--border); font-size:13px"
+            style="display:flex; align-items:center; gap:8px; padding:6px 12px; border-bottom:1px solid var(--border); font-size:var(--fs-sm)"
             onMouseOver=${e => { e.currentTarget.style.background = 'var(--bg-hover)'; }}
             onMouseOut=${e => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <span style="font-size:14px; color:var(--accent)">📁</span>
+            <span style="font-size:var(--fs-base); color:var(--accent)">📁</span>
             <button
               class="btn"
               type="button"
-              style="padding:0; border:none; background:transparent; color:var(--text-primary); font-family:var(--font-mono); font-size:13px; cursor:pointer"
+              style="padding:0; border:none; background:transparent; color:var(--text-primary); font-family:var(--font-mono); font-size:var(--fs-sm); cursor:pointer"
               onclick=${() => {
                 const next = currentPath.value ? `${currentPath.value}/${item.name}` : item.name;
                 selectPath(next);
@@ -116,7 +116,7 @@ export function FolderPicker({ onSelect, onCancel }) {
             <button
               class="btn"
               type="button"
-              style="margin-left:auto; padding:2px 8px; font-size:11px"
+              style="margin-left:auto; padding:2px 8px; font-size:var(--fs-xs)"
               onclick=${() => openDir(item.name)}
             >Open</button>
           </div>
@@ -124,10 +124,10 @@ export function FolderPicker({ onSelect, onCancel }) {
       </div>
 
       <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-top:1px solid var(--border); background:var(--bg-surface)">
-        <span style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%">
+        <span style="font-size:var(--fs-xs); color:var(--text-muted); font-family:var(--font-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%">
           Click a folder name to select it. Use Open to browse deeper.
         </span>
-        <button class="btn" type="button" style="padding:4px 10px; font-size:11px" onclick=${() => selectPath(currentPath.value)}>
+        <button class="btn" type="button" style="padding:4px 10px; font-size:var(--fs-xs)" onclick=${() => selectPath(currentPath.value)}>
           Use Current
         </button>
       </div>

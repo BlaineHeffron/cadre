@@ -607,14 +607,14 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
   return h('div', { class: `claude-session-page${embedded ? ' agent-session-page-embedded' : ''}` },
     h('div', { class: 'claude-session-header' },
       h('div', { class: 'session-header-primary' },
-        !embedded ? h('a', { href: '/agents', class: 'ctrl-btn ctrl-default', style: 'padding:4px 10px; font-size:18px; line-height:1' }, '\u2190') : null,
+        !embedded ? h('a', { href: '/agents', class: 'ctrl-btn ctrl-default', style: 'padding:4px 10px; font-size:var(--fs-lg); line-height:1' }, '\u2190') : null,
         !embedded ? h('button', {
           class: 'ctrl-btn ctrl-default',
           type: 'button',
           disabled: !previous,
           onClick: () => navigateToAgentSession(previous),
           title: previous ? `Previous agent: ${previous.displayName || previous.name || previous.id}` : 'No previous agent',
-          style: 'padding:4px 10px; font-size:18px; line-height:1',
+          style: 'padding:4px 10px; font-size:var(--fs-lg); line-height:1',
         }, '\u2039') : null,
         !embedded ? h('button', {
           class: 'ctrl-btn ctrl-default',
@@ -622,34 +622,34 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
           disabled: !next,
           onClick: () => navigateToAgentSession(next),
           title: next ? `Next agent: ${next.displayName || next.name || next.id}` : 'No next agent',
-          style: 'padding:4px 10px; font-size:18px; line-height:1',
+          style: 'padding:4px 10px; font-size:var(--fs-lg); line-height:1',
         }, '\u203a') : null,
         h('span', { class: 'session-title', title: id }, headerTitle),
         sessionState.value.status !== 'ended'
-          ? h('button', { class: 'ctrl-btn ctrl-default', onClick: startLoop, style: 'padding:4px 8px; font-size:12px' }, 'Start loop')
+          ? h('button', { class: 'ctrl-btn ctrl-default', onClick: startLoop, style: 'padding:4px 8px; font-size:var(--fs-xs)' }, 'Start loop')
           : null,
         isRustManagedReadOnly ? h('span', { class: 'badge badge-low' }, 'rust-managed / read-only') : null,
         h(MachineChip, { machine: sessionInfo.value.machine }),
       ),
       h('div', { class: 'session-header-actions' },
-        h('button', { class: 'ctrl-btn ctrl-default', onClick: copySessionId, style: 'padding:4px 8px; font-size:12px' }, 'Copy ID'),
+        h('button', { class: 'ctrl-btn ctrl-default', onClick: copySessionId, style: 'padding:4px 8px; font-size:var(--fs-xs)' }, 'Copy ID'),
         // A remote session's pane lives on its worker; its own UI (and AUTH_TOKEN) attaches there.
         machine?.url
-          ? h('a', { class: 'ctrl-btn ctrl-default', href: `${machine.url}/${descriptor.kind}/${id}`, target: '_blank', rel: 'noopener noreferrer', style: 'padding:4px 8px; font-size:12px' }, `Open on ${machine.id}`)
+          ? h('a', { class: 'ctrl-btn ctrl-default', href: `${machine.url}/${descriptor.kind}/${id}`, target: '_blank', rel: 'noopener noreferrer', style: 'padding:4px 8px; font-size:var(--fs-xs)' }, `Open on ${machine.id}`)
           : null,
         (!machine && sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process')
-          ? h('button', { class: 'ctrl-btn ctrl-default mobile-hidden', onClick: copyAttachCommand, style: 'padding:4px 8px; font-size:12px' }, 'Copy Attach')
+          ? h('button', { class: 'ctrl-btn ctrl-default mobile-hidden', onClick: copyAttachCommand, style: 'padding:4px 8px; font-size:var(--fs-xs)' }, 'Copy Attach')
           : null,
         (!machine && sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process' && !isRustManagedReadOnly && tmuxCapabilities.value.canOpenTerminal)
-          ? h('button', { class: 'ctrl-btn ctrl-default mobile-hidden', onClick: openInTerminal, style: 'padding:4px 8px; font-size:12px' }, 'Open In Terminator')
+          ? h('button', { class: 'ctrl-btn ctrl-default mobile-hidden', onClick: openInTerminal, style: 'padding:4px 8px; font-size:var(--fs-xs)' }, 'Open In Terminator')
           : null,
         sessionState.value.status === 'ended' && !isRustManagedReadOnly
-          ? h('button', { class: 'ctrl-btn ctrl-default', onClick: resumeSession, style: 'padding:4px 8px; font-size:12px' }, 'Resume')
+          ? h('button', { class: 'ctrl-btn ctrl-default', onClick: resumeSession, style: 'padding:4px 8px; font-size:var(--fs-xs)' }, 'Resume')
           : null,
         sessionState.value.status === 'ended' && !sessionInfo.value.canResume && !isRustManagedReadOnly
-          ? h('button', { class: 'ctrl-btn ctrl-default', onClick: () => startFreshSession(), style: 'padding:4px 8px; font-size:12px' }, 'Start Fresh')
+          ? h('button', { class: 'ctrl-btn ctrl-default', onClick: () => startFreshSession(), style: 'padding:4px 8px; font-size:var(--fs-xs)' }, 'Start Fresh')
           : null,
-        h('button', { class: 'ctrl-btn ctrl-default', onClick: () => loadContent(id, loadedLines.value), style: 'padding:4px 8px; font-size:12px' }, 'Refresh'),
+        h('button', { class: 'ctrl-btn ctrl-default', onClick: () => loadContent(id, loadedLines.value), style: 'padding:4px 8px; font-size:var(--fs-xs)' }, 'Refresh'),
         h('button', {
           class: `ctrl-btn ${renderedTranscript.value ? 'ctrl-send' : 'ctrl-default'}`,
           onClick: () => {
@@ -657,19 +657,19 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
             renderedTranscript.value = next;
             if (next) loadRawTranscript(id);
           },
-          style: 'padding:4px 8px; font-size:12px',
+          style: 'padding:4px 8px; font-size:var(--fs-xs)',
           title: 'Toggle a rendered Markdown and math view built from the model session log. Raw terminal content remains unchanged.',
         }, renderedTranscript.value ? 'Raw Terminal' : 'Rendered Transcript'),
-        !isRustManagedReadOnly ? h('button', { class: 'ctrl-btn ctrl-danger-sm', onClick: killSession, style: 'padding:4px 8px; font-size:12px' }, 'Kill') : null,
+        !isRustManagedReadOnly ? h('button', { class: 'ctrl-btn ctrl-danger-sm', onClick: killSession, style: 'padding:4px 8px; font-size:var(--fs-xs)' }, 'Kill') : null,
       ),
     ),
     renderedTranscript.value
       ? h('div', { class: 'rendered-transcript-wrap', style: 'flex:1; min-height:0; overflow:auto' },
         transcriptRaw.value.status === 'loading'
-          ? h('div', { style: 'padding:12px; color:var(--text-muted); font-size:12px' }, 'Loading session log...')
+          ? h('div', { style: 'padding:12px; color:var(--text-muted); font-size:var(--fs-xs)' }, 'Loading session log...')
           : null,
         transcriptRaw.value.status === 'error'
-          ? h('div', { style: 'padding:8px 12px; color:var(--text-muted); font-size:12px; border-bottom:1px solid rgba(255,255,255,0.08)' },
+          ? h('div', { style: 'padding:8px 12px; color:var(--text-muted); font-size:var(--fs-xs); border-bottom:1px solid rgba(255,255,255,0.08)' },
             `Session log unavailable (${transcriptRaw.value.error}). Falling back to terminal capture — the CLI strips LaTeX delimiters, so math may not render.`)
           : null,
         h(RenderedTranscript, {
@@ -696,7 +696,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
       }),
     !isRustManagedReadOnly ? h(TerminalKeys, { onKey: sendTerminalKey }) : null,
     isRustManagedReadOnly
-      ? h('div', { class: 'claude-control-bar', style: 'border-top:1px solid rgba(255,255,255,0.08); color:var(--text-muted); font-size:12px' }, 'Rust-managed session. View only from Cadre.')
+      ? h('div', { class: 'claude-control-bar', style: 'border-top:1px solid rgba(255,255,255,0.08); color:var(--text-muted); font-size:var(--fs-xs)' }, 'Rust-managed session. View only from Cadre.')
       : null,
     !isRustManagedReadOnly ? h(AgentControlBar, {
       provider: descriptor.kind,

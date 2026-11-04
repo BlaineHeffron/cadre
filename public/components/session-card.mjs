@@ -98,7 +98,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
           ${primaryName}
         </span>
         ${isMutable && onToggleSelected ? html`
-          <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-muted)" onclick=${e => e.stopPropagation()}>
+          <label style="display:flex; align-items:center; gap:6px; font-size:var(--fs-xs); color:var(--text-muted)" onclick=${e => e.stopPropagation()}>
             <input
               type="checkbox"
               checked=${selected}
@@ -108,7 +108,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
         ` : html`<div></div>`}
       </div>
       ${linkedThreads.length > 0 ? html`
-        <div style="font-size:11px; color:var(--text-muted); margin:-4px 0 6px 0; cursor:pointer" onclick=${e => e.stopPropagation()}>
+        <div style="font-size:var(--fs-xs); color:var(--text-muted); margin:-4px 0 6px 0; cursor:pointer" onclick=${e => e.stopPropagation()}>
           ${linkedThreads.map((thread) => html`
             <span
               style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px"
@@ -118,12 +118,12 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
           `)}
         </div>
       ` : null}
-      <div style="display:flex; gap:8px; font-size:12px; color:var(--text-muted); align-items:center">
+      <div style="display:flex; gap:8px; font-size:var(--fs-xs); color:var(--text-muted); align-items:center">
         ${stateInfo.label === 'Done' ? html`<span class="badge badge-info">Done</span>` : null}
         <${MachineChip} machine=${session.machine} />
-        ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono); font-size:11px" title=${session.workDir}>${session.workDir}</span>` : null}
+        ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono); font-size:var(--fs-xs)" title=${session.workDir}>${session.workDir}</span>` : null}
       </div>
-      <div style="display:flex; gap:8px; font-size:11px; color:var(--text-muted); margin-top:2px">
+      <div style="display:flex; gap:8px; font-size:var(--fs-xs); color:var(--text-muted); margin-top:2px">
         ${isRustManagedReadOnly ? html`<span>rust-managed</span><span>read-only</span>` : null}
         ${session.source === 'tmux-external' && !isRustManagedReadOnly ? html`<span>external</span>` : null}
         ${label || session.displayName ? html`<span style="opacity:0.7">${session.name}</span>` : null}
@@ -132,11 +132,11 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
       </div>
       ${!isEnded && onStartLoop ? html`
         <div style="margin-top:4px" onclick=${e => e.stopPropagation()}>
-          <button class="btn" style="font-size:11px; padding:3px 8px" onclick=${() => onStartLoop(session)}>Start loop</button>
+          <button class="btn" style="font-size:var(--fs-xs); padding:3px 8px" onclick=${() => onStartLoop(session)}>Start loop</button>
         </div>
       ` : null}
       ${detailText ? html`
-        <div style="font-size:11px; color:var(--text-secondary); margin-top:4px">${detailText}</div>
+        <div style="font-size:var(--fs-xs); color:var(--text-secondary); margin-top:4px">${detailText}</div>
       ` : null}
       <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap" onclick=${e => e.stopPropagation()}>
           <button class="btn" onclick=${copySessionId} title="Copy session ID">Copy ID</button>

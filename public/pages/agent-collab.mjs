@@ -852,8 +852,8 @@ export function AgentCollabPage({ id }) {
               <span class="card-title">Bootstrap Conference</span>
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">
                 <span class="badge ${mcpHealthBadgeClass(agentBusMcpHealth.value)}">${mcpHealthLabel(agentBusMcpHealth.value)}</span>
-                ${participantsLoading.value ? html`<span style="font-size:11px; color:var(--text-muted)">Loading sessions...</span>` : null}
-                ${modelCatalogLoading.value ? html`<span style="font-size:11px; color:var(--text-muted)">Loading models...</span>` : null}
+                ${participantsLoading.value ? html`<span style="font-size:var(--fs-xs); color:var(--text-muted)">Loading sessions...</span>` : null}
+                ${modelCatalogLoading.value ? html`<span style="font-size:var(--fs-xs); color:var(--text-muted)">Loading models...</span>` : null}
               </div>
             </div>
             <p class="collab-helper">
@@ -863,7 +863,7 @@ export function AgentCollabPage({ id }) {
               <button
                 type="button"
                 class="btn"
-                style="margin-bottom:10px; font-size:11px; padding:4px 10px"
+                style="margin-bottom:10px; font-size:var(--fs-xs); padding:4px 10px"
                 onclick=${prefillLastBootstrap}
                 title="Prefill form with last bootstrap config"
               >Repeat last: ${getLastBootstrapConfigLabel()}</button>
@@ -1068,7 +1068,7 @@ export function AgentCollabPage({ id }) {
                 Closed, stale, or detached threads live here so the main view stays focused on active work.
               </div>
             </div>
-            <span style="font-size:11px; color:var(--text-muted)">${historicalThreads.length} total</span>
+            <span style="font-size:var(--fs-xs); color:var(--text-muted)">${historicalThreads.length} total</span>
           </div>
           ${historicalThreads.length === 0 ? html`
             <p style="padding-top:12px; color:var(--text-muted)">No historical threads yet.</p>
@@ -1084,8 +1084,8 @@ export function AgentCollabPage({ id }) {
                     <span style="font-weight:600">${roomLabel(thread)}</span>
                     <span class="badge ${threadStatusClass(thread.status)}">${thread.status}</span>
                   </div>
-                  <div style="font-size:11px; color:var(--text-muted); margin-top:4px">${participantSummary(thread.participants)}</div>
-                  <div style="font-size:11px; color:var(--text-muted); margin-top:4px">${fmtTime(thread.updatedAt)}</div>
+                  <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">${participantSummary(thread.participants)}</div>
+                  <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">${fmtTime(thread.updatedAt)}</div>
                 </a>
               `)}
             </div>
@@ -1136,8 +1136,8 @@ export function AgentCollabPage({ id }) {
             <div class="card">
               <div class="card-header">
                 <div>
-                  <h2 class="card-title" style="font-size:17px">${roomLabel(threadState.value)}</h2>
-                  <div style="font-size:11px; color:var(--text-muted)">${participantSummary(threadState.value.participants)}</div>
+                  <h2 class="card-title" style="font-size:var(--fs-md)">${roomLabel(threadState.value)}</h2>
+                  <div style="font-size:var(--fs-xs); color:var(--text-muted)">${participantSummary(threadState.value.participants)}</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px">
                   <span class="badge ${threadStatusClass(threadState.value.status)}">${threadState.value.status}</span>
@@ -1156,12 +1156,12 @@ export function AgentCollabPage({ id }) {
                 <div><span style="color:var(--text-muted)">Updated:</span> ${fmtTime(threadState.value.updatedAt)}</div>
               </div>
               ${threadState.value.metadata?.missingParticipants?.length > 0 ? html`
-                <div style="margin-top:10px; font-size:12px; color:var(--danger)">
+                <div style="margin-top:10px; font-size:var(--fs-xs); color:var(--danger)">
                   Missing participants: ${threadState.value.metadata.missingParticipants.map(agentLabel).join(', ')}
                 </div>
               ` : null}
               ${endReport.value ? html`
-                <div role="status" style="margin-top:10px; font-size:12px; color:var(--text-secondary)">${endReport.value}</div>
+                <div role="status" style="margin-top:10px; font-size:var(--fs-xs); color:var(--text-secondary)">${endReport.value}</div>
               ` : null}
               <div class="collab-detail-shortcuts">
                 ${lastBootstrapThreadId.value && lastBootstrapThreadId.value !== threadState.value.id ? html`
@@ -1187,7 +1187,7 @@ export function AgentCollabPage({ id }) {
             <div class="card" id="collab-messages">
               <div class="card-header">
                 <span class="card-title">Messages</span>
-                ${detailLoading.value ? html`<span style="font-size:11px; color:var(--text-muted)">Syncing...</span>` : null}
+                ${detailLoading.value ? html`<span style="font-size:var(--fs-xs); color:var(--text-muted)">Syncing...</span>` : null}
               </div>
               ${messages.value.length === 0 ? html`
                 <p style="color:var(--text-muted)">No messages in this thread yet.</p>
@@ -1199,11 +1199,11 @@ export function AgentCollabPage({ id }) {
                       <div style="display:flex; align-items:center; gap:8px">
                         <span style="font-weight:600">${agentLabel(message.from)}</span>
                         ${message.type && message.type !== 'message' ? html`
-                          <span style="font-size:11px; color:var(--text-muted)">${message.type}</span>
+                          <span style="font-size:var(--fs-xs); color:var(--text-muted)">${message.type}</span>
                         ` : null}
                       </div>
                       <div style="display:flex; align-items:center; gap:8px">
-                        <span style="font-size:11px; color:var(--text-muted)">${fmtTime(message.createdAt)}</span>
+                        <span style="font-size:var(--fs-xs); color:var(--text-muted)">${fmtTime(message.createdAt)}</span>
                         <button
                           type="button"
                           class="btn collab-message-view-toggle"
@@ -1216,7 +1216,7 @@ export function AgentCollabPage({ id }) {
                       ? html`<div class="collab-message-body collab-message-raw" aria-label="Raw source collaboration message">${message.body}</div>`
                       : html`<${MarkdownMath} content=${message.body} className="collab-message-body" ariaLabel="Rendered source collaboration message" />`}
                     ${message.replyTo ? html`
-                      <div style="margin-top:8px; font-size:11px; color:var(--text-muted)">reply to ${message.replyTo}</div>
+                      <div style="margin-top:8px; font-size:var(--fs-xs); color:var(--text-muted)">reply to ${message.replyTo}</div>
                     ` : null}
                   </div>
                 `;
@@ -1227,7 +1227,7 @@ export function AgentCollabPage({ id }) {
             <div class="card" id="collab-send-message">
               <div class="card-header">
                 <span class="card-title">Send Message</span>
-                ${sending.value ? html`<span style="font-size:11px; color:var(--text-muted)">Sending...</span>` : null}
+                ${sending.value ? html`<span style="font-size:var(--fs-xs); color:var(--text-muted)">Sending...</span>` : null}
               </div>
               <div class="collab-form-grid">
                 <label class="collab-field">
@@ -1293,7 +1293,7 @@ export function AgentCollabPage({ id }) {
               <div class="card" id="collab-bootstrap-status">
                 <div class="card-header">
                   <span class="card-title">Bootstrap Status</span>
-                  <span style="font-size:11px; color:var(--text-muted)">
+                  <span style="font-size:var(--fs-xs); color:var(--text-muted)">
                     ${threadState.value.metadata.bootstrapStatus.length} participants
                   </span>
                 </div>
@@ -1304,7 +1304,7 @@ export function AgentCollabPage({ id }) {
                         <div>
                           <div style="font-weight:600">${agentLabel(entry.participant)}</div>
                           ${entry.sessionName ? html`
-                            <div style="font-size:11px; color:var(--text-muted)">${entry.sessionName}</div>
+                            <div style="font-size:var(--fs-xs); color:var(--text-muted)">${entry.sessionName}</div>
                           ` : null}
                         </div>
                         <span class="badge ${bootstrapStatusClass(entry.status)}">${bootstrapStatusLabel(entry.status)}</span>
@@ -1317,7 +1317,7 @@ export function AgentCollabPage({ id }) {
                         <div><span style="color:var(--text-muted)">Done:</span> ${fmtTime(entry.completedAt)}</div>
                       </div>
                       ${entry.error ? html`
-                        <div style="margin-top:8px; font-size:11px; color:var(--danger)">${entry.error}</div>
+                        <div style="margin-top:8px; font-size:var(--fs-xs); color:var(--danger)">${entry.error}</div>
                       ` : null}
                     </div>
                   `)}
@@ -1330,7 +1330,7 @@ export function AgentCollabPage({ id }) {
                 <div class="card-header">
                   <span class="card-title">Bootstrap Transcript</span>
                   <div style="display:flex; align-items:center; gap:8px">
-                    <span style="font-size:11px; color:var(--text-muted)">
+                    <span style="font-size:var(--fs-xs); color:var(--text-muted)">
                       ${threadState.value.metadata.bootstrapTranscript.length} injected entries
                     </span>
                     <button type="button" class="btn" onclick=${() => { showBootstrapTranscript.value = !showBootstrapTranscript.value; }}>
@@ -1344,9 +1344,9 @@ export function AgentCollabPage({ id }) {
                       <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start">
                         <div style="display:flex; gap:8px; align-items:center">
                           <span class="badge ${entry.stage === 'error' ? 'badge-critical' : 'badge-info'}">${transcriptStageLabel(entry.stage)}</span>
-                          <span style="font-size:12px; color:var(--text-secondary)">${agentLabel(entry.participant)}</span>
+                          <span style="font-size:var(--fs-xs); color:var(--text-secondary)">${agentLabel(entry.participant)}</span>
                         </div>
-                        <span style="font-size:11px; color:var(--text-muted)">${fmtTime(entry.createdAt)}</span>
+                        <span style="font-size:var(--fs-xs); color:var(--text-muted)">${fmtTime(entry.createdAt)}</span>
                       </div>
                       <div class="terminal" style="margin-top:8px; max-height:220px">${entry.content}</div>
                     </div>
@@ -1370,7 +1370,7 @@ export function AgentCollabPage({ id }) {
   return html`
     <div class="page">
       <div class="card-header">
-        <h1 class="card-title" style="font-size:18px">Agent Collab</h1>
+        <h1 class="card-title" style="font-size:var(--fs-lg)">Agent Collab</h1>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
           <span class="badge ${mcpHealthBadgeClass(agentBusMcpHealth.value)}">${mcpHealthLabel(agentBusMcpHealth.value)}</span>
           <button type="button" class="btn ${showBootstrapPanel.value ? 'btn-primary' : ''}" onclick=${() => {
@@ -1422,7 +1422,7 @@ export function AgentCollabPage({ id }) {
           <div class="card" style="padding:0; overflow:hidden">
             <div class="card-header" style="padding:16px 16px 0 16px">
               <span class="card-title">Active Threads</span>
-              <span style="font-size:11px; color:var(--text-muted)">${activeThreads.length} live</span>
+              <span style="font-size:var(--fs-xs); color:var(--text-muted)">${activeThreads.length} live</span>
             </div>
             ${loading.value ? html`
               <p style="padding:16px; color:var(--text-muted)">Loading threads...</p>
@@ -1438,10 +1438,10 @@ export function AgentCollabPage({ id }) {
                   <span style="font-weight:600">${roomLabel(thread)}</span>
                   <span class="badge ${threadStatusClass(thread.status)}">${thread.status}</span>
                 </div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:4px">${participantSummary(thread.participants)}</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:4px">${fmtTime(thread.updatedAt)}</div>
+                <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">${participantSummary(thread.participants)}</div>
+                <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">${fmtTime(thread.updatedAt)}</div>
                 ${thread.metadata?.missingParticipants?.length > 0 ? html`
-                  <div style="font-size:11px; color:var(--danger); margin-top:4px">
+                  <div style="font-size:var(--fs-xs); color:var(--danger); margin-top:4px">
                     Missing: ${thread.metadata.missingParticipants.map(agentLabel).join(', ')}
                   </div>
                 ` : null}
@@ -1458,10 +1458,10 @@ export function AgentCollabPage({ id }) {
                 <div style="padding:8px 0; border-top:1px solid var(--border)">
                   <div style="display:flex; align-items:center; gap:8px">
                     <span class="badge badge-critical">${alert.type}</span>
-                    <span style="font-size:12px">${alert.error || alert.messageId || 'Alert'}</span>
+                    <span style="font-size:var(--fs-xs)">${alert.error || alert.messageId || 'Alert'}</span>
                   </div>
                   ${alert.threadId ? html`
-                    <div style="font-size:11px; color:var(--text-muted); margin-top:4px">
+                    <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">
                       <a href="/collab/${alert.threadId}" onclick=${(event) => navigateToThread(event, alert.threadId)} style="color:var(--accent)">Open thread</a>
                     </div>
                   ` : null}
