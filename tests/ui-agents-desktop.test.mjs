@@ -16,7 +16,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   let sessions = demo;
   const root = fileURLToPath(new URL('../', import.meta.url));
   const app = Fastify();
-  t.after(() => app.close());
+  // One hook, browser first: while it is open, its keep-alive connections hold app.close().
+  let browser;
+  t.after(async () => { await browser?.close(); await app.close(); });
   await app.register(fastifyStatic, { root: `${root}public`, prefix: '/' });
   await app.register(fastifyStatic, { root: `${root}node_modules`, prefix: '/vendor/npm/', decorateReply: false });
   const index = await readFile(`${root}public/index.html`, 'utf8');
@@ -67,8 +69,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   app.post('/api/*', () => ({ ok: true }));
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
-  t.after(() => browser.close());
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.setDefaultTimeout(5000);
   const errors = [];

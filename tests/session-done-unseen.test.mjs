@@ -89,7 +89,9 @@ test('viewing a completed turn persists only on that client; another turn become
 test('real session view clears the Done card and badge on only one browser device', { skip: !process.env.CHROMIUM_BIN }, async (t) => {
   const session = completedSession();
   const app = Fastify();
-  t.after(() => app.close());
+  // One hook, browser first: while it is open, its keep-alive connections hold app.close().
+  let browser;
+  t.after(async () => { await browser?.close(); await app.close(); });
   const root = fileURLToPath(new URL('../', import.meta.url));
   await app.register(fastifyStatic, { root: `${root}public`, prefix: '/' });
   await app.register(fastifyStatic, { root: `${root}node_modules`, prefix: '/vendor/npm/', decorateReply: false });
@@ -117,8 +119,7 @@ test('real session view clears the Done card and badge on only one browser devic
   app.get('/api/codex/sessions/one', () => ({ ...session, content: 'Finished turn', readOnly: true, externalOwner: 'rust-monitor' }));
   app.get('/api/*', () => ({}));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
-  t.after(() => browser.close());
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
   const first = await (await browser.newContext()).newPage();
   const second = await (await browser.newContext()).newPage();
   first.setDefaultTimeout(5000);
