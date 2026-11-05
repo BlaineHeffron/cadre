@@ -181,9 +181,17 @@ test('inline code in a prose reply renders as code and keeps its backticks for c
   assert.equal(ansiToHtml('  echo `date`'), '  echo `date`');
 });
 
-test('the user prompt and status lines read as prose; menu choices and tool calls stay terminal text', () => {
-  assert.equal(ansiToHtml('❯ Write an onboarding guide\n  for new contributors'), '<span class="ansi-prose">❯ Write an onboarding guide\n  for new contributors</span>');
+test('the user prompt and status lines read as prose; menu choices, drafts and tool calls stay terminal text', () => {
+  // A prompt keeps the user's own line breaks (the class sets pre-wrap) and its text is unchanged.
+  const prompt = ansiToHtml('❯ run these in order\n  npm ci\n  npm test\n  npm run check');
+  assert.equal(prompt, '<span class="ansi-prose ansi-prompt">❯ run these in order\n  npm ci\n  npm test\n  npm run check</span>');
   assert.equal(ansiToHtml('❯ 1. Yes'), '❯ 1. Yes');
   assert.equal(ansiToHtml('❯ '), '❯ ');
+  // A draft typed into the input box (under its ─ rule) stays terminal text.
+  const rule = '─'.repeat(30);
+  assert.equal(ansiToHtml(`${rule}\n❯ npm te\n${rule}`).replace(/<[^>]+>/g, ''), `${rule}\n❯ npm te\n${rule}`);
+  assert.doesNotMatch(ansiToHtml(`${rule}\n❯ npm te\n${rule}`), /ansi-prose/);
   assert.equal(ansiToHtml('· 2 shells'), '· 2 shells');
+  // A status line is a block of its own; the indented line after it is not folded in.
+  assert.equal(ansiToHtml('✻ Worked for 18s\n\n  ⏵⏵ note'), '<span class="ansi-prose">✻ Worked for 18s\n</span>\n  ⏵⏵ note');
 });

@@ -1172,6 +1172,10 @@ body:has(.tmux-pane-page) {
   word-break: normal;
   overflow-wrap: anywhere;
 }
+/* The user's prompt keeps its own line breaks (pasted commands, lists). */
+.ansi-prompt {
+  white-space: pre-wrap;
+}
 /* Inline code in a reply: monospace on a faint chip; its backticks stay in the text for copying. */
 .ansi-code {
   padding: 1px 4px;
