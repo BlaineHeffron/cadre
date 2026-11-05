@@ -77,6 +77,8 @@ export function AgentControlBar({
   imagePreviewUrl = '',
   imageNote = '',
   inputText,
+  // The raw terminal keys tray, folded into the tools row so the composer is one toolbar.
+  keys = null,
 }) {
   const descriptor = providerDescriptor(provider);
   const skillInsert = useRef(null);
@@ -269,6 +271,7 @@ export function AgentControlBar({
         ${descriptor.hasSlash ? html`
           <button type="button" class="ctrl-btn ctrl-slash ctrl-btn-compact" onclick=${() => { showSlash.value = !showSlash.value; }}>/ Commands</button>
         ` : null}
+        ${keys}
       </div>
 
       <form class="control-row control-row-compose" onSubmit=${handleSubmit}>
