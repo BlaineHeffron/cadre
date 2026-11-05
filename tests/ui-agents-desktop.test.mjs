@@ -156,11 +156,11 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // inside its row, depending on the font; the card cap matters more than one-line labels.
   assert.ok(boxes.every((b) => Math.round(b.height) >= 44 && !b.clipped), `answer heights ${boxes.map((b) => b.height)}`);
   assert.equal(await answers.nth(2).innerText(), 'No, and tell Claude what to do differently (esc)');
-  // The slash menu toggle says what it opens.
-  assert.equal(await page.getByRole('button', { name: '/ Commands', exact: true }).count(), 1);
-  // Composer tools are soft buttons: a faint fill, no outline. The More toggle matches.
+  // While answering, the composer's toolbar is just the ⋯ menu; slash commands and terminal keys
+  // wait inside it, so nothing competes with the answers or Send.
+  assert.deepEqual(await page.locator('.control-row-tools').evaluate((el) => [...el.children].map((child) => (child.querySelector(':scope > summary') || child).textContent.trim())), ['⋯']);
+  // Composer tools are soft buttons: a faint fill, no outline.
   const soft = (el) => [getComputedStyle(el).borderTopColor, getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)'];
-  assert.deepEqual(await page.getByRole('button', { name: '/ Commands', exact: true }).evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
   assert.deepEqual(await page.locator('.control-row-tools > .more-menu > summary').evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
   // The session header's secondary buttons use the same soft style, so the panel has two button styles.
   assert.deepEqual(await page.getByRole('button', { name: 'Rendered Transcript' }).evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
@@ -170,17 +170,20 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // The pending command runs straight into its question.
   const [term, question] = await Promise.all(['.terminal', '.approval-prompt-title'].map((sel) => page.locator(sel).first().boundingBox()));
   assert.ok(question.y - (term.y + term.height) < 16, `question ${question.y - (term.y + term.height)}px below the terminal`);
-  // Raw terminal keys are one more tool in the composer's single toolbar row, not a line of their own.
-  const keysToggle = page.locator('.control-row-tools > .terminal-keys > summary');
-  assert.ok((await keysToggle.boundingBox()).height >= 36, 'Terminal keys toggle is a full control-height target');
-  const [commands, keysBox] = await Promise.all([page.getByRole('button', { name: '/ Commands', exact: true }), keysToggle].map((l) => l.boundingBox()));
-  assert.ok(Math.abs(keysBox.y - commands.y) < 1, `keys at y=${keysBox.y}, / Commands at y=${commands.y}`);
-  // Opened, the tray takes a full row of the toolbar.
-  await keysToggle.click();
+  // Raw terminal keys open from ⋯ as a full-width tray under the toolbar, and close the same way.
+  const composerMenu = page.getByLabel('More composer tools');
+  await composerMenu.click();
+  await page.getByRole('button', { name: 'Terminal keys', exact: true }).click();
   const [tray, tools] = await Promise.all(['.terminal-keys-row', '.control-row-tools'].map((sel) => page.locator(sel).boundingBox()));
-  assert.ok(tray.width > tools.width * 0.9, `key tray ${tray.width}px in a ${tools.width}px toolbar`);
+  assert.ok(tray.width > tools.width * 0.9 && tray.y >= tools.y + tools.height, `key tray ${tray.width}px wide at y=${tray.y}, toolbar ends ${tools.y + tools.height}`);
   await page.locator('.terminal-keys-row').getByRole('button', { name: 'Esc', exact: true }).waitFor();
-  await keysToggle.click();
+  await composerMenu.click();
+  await page.getByRole('button', { name: 'Terminal keys', exact: true }).click();
+  assert.equal(await page.locator('.terminal-keys-row').count(), 0);
+  // Slash commands open from the same menu.
+  await composerMenu.click();
+  assert.equal(await page.getByRole('button', { name: 'Slash commands', exact: true }).isVisible(), true);
+  await composerMenu.click();
   assert.doesNotMatch(await page.locator('.terminal').innerText(), /Do you want to proceed|2\. Yes/);
   assert.equal(await page.locator('.control-row-compose [data-placeholder]').getAttribute('data-placeholder'), 'Message the agent...', 'one composer placeholder whatever the state');
   // While answers are offered they are the only primary actions; Cycle mode and Interrupt step aside.
@@ -247,16 +250,16 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.ok(box.y >= 0 && box.y + box.height <= 900, `Create session at y=${box.y}`);
   // Page titles share one style across pages.
   assert.equal(await page.locator('h1').first().evaluate((el) => getComputedStyle(el).fontSize), '18px');
-  // On a phone the keys toggle rides inside the sticky, safe-area-padded control bar.
+  // On a phone the composer's tools are 44px targets (rounded: the mobile viewport can lay a box out
+  // a hair short), and the keys tray opens inside the sticky, safe-area-padded control bar.
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   phone.setDefaultTimeout(5000);
   await phone.goto(`${origin}/session`);
-  await phone.locator('.terminal-keys').waitFor();
-  // In the tools row on a phone, Keys is the same 44px tap target as the tools beside it (rounded:
-  // the mobile viewport can lay a box out a hair short). It keeps its accessible name.
-  const [keysH, toolH] = await Promise.all([phone.locator('.terminal-keys > summary'), phone.locator('.control-row-tools > .ctrl-btn').first()].map(async (l) => Math.round((await l.boundingBox()).height)));
-  assert.ok(keysH >= 44 && keysH === toolH, `phone Keys toggle ${keysH}px beside a ${toolH}px tool`);
-  assert.equal(await phone.locator('.terminal-keys > summary').getAttribute('aria-label'), 'Terminal keys');
+  const phoneMenu = phone.getByLabel('More composer tools');
+  await phoneMenu.waitFor();
+  assert.ok(Math.round((await phoneMenu.boundingBox()).height) >= 44, 'phone ⋯ is a 44px target');
+  await phoneMenu.click();
+  await phone.getByRole('button', { name: 'Terminal keys', exact: true }).click();
   // On a phone, tool cards keep the transcript's own compact size and row.
   const phoneCard = await phone.locator('.ansi-tool').first().evaluate((el) => {
     const [card, pane] = [el, el.closest('.terminal')].map((node) => getComputedStyle(node));
@@ -265,7 +268,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.deepEqual(phoneCard, [true, true]);
   const phoneRule = await ruleFits(phone);
   assert.ok(phoneRule.rule === phoneRule.content && phoneRule.row === phoneRule.content && phoneRule.overflow === 0, `phone rule ${JSON.stringify(phoneRule)}`);
-  const [phoneKeys, phoneBar] = await Promise.all(['.terminal-keys', '.claude-control-bar'].map((sel) => phone.locator(sel).boundingBox()));
+  const [phoneKeys, phoneBar] = await Promise.all(['.terminal-keys-row', '.claude-control-bar'].map((sel) => phone.locator(sel).boundingBox()));
   assert.ok(phoneKeys.y >= phoneBar.y && phoneKeys.y + phoneKeys.height <= phoneBar.y + phoneBar.height, `phone keys at ${phoneKeys.y}, bar ${phoneBar.y}..${phoneBar.y + phoneBar.height}`);
   await phone.close();
   // A single session reads at a comfortable width on a wide screen, centred.

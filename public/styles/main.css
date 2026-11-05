@@ -2244,10 +2244,6 @@ input[type="checkbox"]:not(.switch) {
   background: var(--bg-hover);
 }
 
-/* Open, the key tray takes the tools row's full width below the other tools. */
-.control-row-tools > .terminal-keys[open] {
-  flex-basis: 100%;
-}
 
 .terminal-keys-row {
   display: flex;
@@ -3709,8 +3705,7 @@ input[type="checkbox"]:not(.switch) {
   .ctrl-btn,
   .ctrl-inline-select,
   .control-row-tools .ctrl-btn,
-  .control-row-tools .ctrl-inline-select,
-  .control-row-tools .terminal-keys > summary {
+  .control-row-tools .ctrl-inline-select {
     min-height: 44px;
   }
 

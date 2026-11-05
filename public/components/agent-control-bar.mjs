@@ -45,11 +45,6 @@ export function optionClass(option, index) {
   return index === 0 ? 'ctrl-approve' : 'ctrl-default';
 }
 
-// Interrupt can step aside only when one of the answers is itself a refusal (which sends Escape).
-export function answersIncludeRefusal(options) {
-  return options.some((option, index) => optionClass(option, index) === 'ctrl-reject');
-}
-
 // A picked skill, quick insert or delay closes the tools menu; "Custom" stays open for its fields.
 function closeAfterPick(event) {
   // Custom delay keeps the menu open so the amount and unit can be set together.
@@ -77,12 +72,13 @@ export function AgentControlBar({
   imagePreviewUrl = '',
   imageNote = '',
   inputText,
-  // The raw terminal keys tray, folded into the tools row so the composer is one toolbar.
+  // The raw terminal keys tray, opened from the ⋯ menu so the composer is one short toolbar.
   keys = null,
 }) {
   const descriptor = providerDescriptor(provider);
   const skillInsert = useRef(null);
   const showSlash = useSignal(false);
+  const showKeys = useSignal(false);
   const selectedDelay = useSignal(0);
   const customDelayAmount = useSignal('');
   const customDelayUnit = useSignal(60000);
@@ -94,7 +90,8 @@ export function AgentControlBar({
     : [];
   // While the bar offers answers, they are the primary actions; Interrupt stays unless an answer refuses.
   const answering = sessionStatus === 'blocked' && interactionOptions.length > 0;
-  const hideInterrupt = answering && answersIncludeRefusal(interactionOptions);
+  // Interrupt is for a running turn; idle or answering, Esc stays one tap away in the keys tray.
+  const showInterrupt = sessionStatus === 'working' || sessionStatus === 'thinking';
 
   function selectedScheduleDelay() {
     if (selectedDelay.value !== 'custom') return Number(selectedDelay.value) || 0;
@@ -201,16 +198,22 @@ export function AgentControlBar({
             ${mode ? `Mode: ${mode}` : 'Cycle mode'}
           </button>
         ` : null}
-        ${hideInterrupt ? null : html`
+        ${showInterrupt ? html`
           <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleReject} title="Send Escape (interrupt)">
             Interrupt
           </button>
-        `}
+        ` : null}
         <details class="more-menu composer-more" onClickCapture=${closeMenuOnChoice} onChange=${closeAfterPick}>
           <summary class="ctrl-btn ctrl-default ctrl-btn-compact" aria-label="More composer tools" title="More composer tools">
             ⋯${selectedDelay.value ? ' · delayed' : ''}${imageAttached ? ' · image' : ''}
           </summary>
           <div class="more-menu-list">
+            ${descriptor.hasSlash ? html`
+              <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" aria-pressed=${String(showSlash.value)} onclick=${() => { showSlash.value = !showSlash.value; }}>Slash commands</button>
+            ` : null}
+            ${keys ? html`
+              <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" aria-pressed=${String(showKeys.value)} onclick=${() => { showKeys.value = !showKeys.value; }}>Terminal keys</button>
+            ` : null}
             <${LaunchSkillSelector} compact=${true} onInsert=${(id) => skillInsert.current?.(id)} />
             <button
               type="button"
@@ -268,11 +271,8 @@ export function AgentControlBar({
             ` : null}
           </div>
         </details>
-        ${descriptor.hasSlash ? html`
-          <button type="button" class="ctrl-btn ctrl-slash ctrl-btn-compact" onclick=${() => { showSlash.value = !showSlash.value; }}>/ Commands</button>
-        ` : null}
-        ${keys}
       </div>
+      ${keys && showKeys.value ? keys : null}
 
       <form class="control-row control-row-compose" onSubmit=${handleSubmit}>
         <${SkillPromptComposer}
