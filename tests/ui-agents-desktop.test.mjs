@@ -306,9 +306,15 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
       if (range.getClientRects().length !== 1) splitWords.push(match[0]);
     }
     const lines = Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight));
-    // The measure is about 75 characters (75ch resolves to px well under the old 760px cap).
+    // The measure is 75 characters of the prose font (font-dependent, so compared with a probe of
+    // 75 zeros rather than a fixed pixel width), and the block stays within it.
+    const probe = Object.assign(document.createElement('span'), { textContent: '0'.repeat(75) });
+    probe.style.cssText = 'position:absolute; visibility:hidden; white-space:nowrap; text-indent:0';
+    el.append(probe);
+    const chars75 = probe.getBoundingClientRect().width;
+    probe.remove();
     const measure = parseFloat(getComputedStyle(el).maxWidth);
-    return [getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily, el.getBoundingClientRect().width <= measure && measure < 700, lines > 1, splitWords];
+    return [getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily, Math.abs(measure - chars75) < 2 && el.getBoundingClientRect().width <= measure + 0.5, lines > 1, splitWords];
   });
   assert.deepEqual(prose, [true, true, true, []], 'prose wraps between words, never mid-word');
   // The transcript reads one step above body text on a wide screen.
