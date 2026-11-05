@@ -260,6 +260,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const shows = (title) => page.waitForFunction((t) => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === t, title);
   await shows('claude-b2');
   assert.equal(await page.locator('.agent-rail-row').count(), 3);
+  // The embedded session is the same one surface: below a short transcript it keeps the transcript's tone.
+  assert.equal(await page.locator('.agent-session-page-embedded').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(26, 26, 46)');
   const historyLength = await page.evaluate(() => history.length);
   // Next wraps from the last Claude session to the Codex one, across providers.
   await page.locator('.agent-session-page-embedded').getByRole('button', { name: '\u203a' }).click();
