@@ -61,7 +61,7 @@ export function ansiToHtml(text) {
     const style = [['color', current.fg], ['background', current.bg]]
       .filter(([, value]) => value?.startsWith('rgb('))
       .map(([prop, value]) => (prop === 'color' ? `color:${liftGrey(value)}`
-        : line ? `background:color-mix(in srgb,${value} 40%,transparent);box-shadow:inset 3px 0 ${value}`
+        : line ? `background:color-mix(in srgb,${value} 28%,transparent);box-shadow:inset 3px 0 ${value}`
           : `background:color-mix(in srgb,${value} 75%,transparent)`))
       .join(';');
     const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;

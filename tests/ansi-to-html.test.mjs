@@ -5,7 +5,7 @@ import { ansiToHtml, foldEmptyPrompt, permissionMode } from '../public/lib/ansi-
 test('truecolor diff backgrounds render, blended toward the terminal, instead of being dropped', () => {
   assert.equal(
     ansiToHtml('\x1b[48;2;34;92;43m  13 + x\x1b[0m'),
-    '<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) 40%,transparent);box-shadow:inset 3px 0 rgb(34,92,43)">  13 + x</span>',
+    '<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) 28%,transparent);box-shadow:inset 3px 0 rgb(34,92,43)">  13 + x</span>',
   );
   assert.equal(ansiToHtml('\x1b[38;2;300;-1;7mhi'), '<span style="color:rgb(255,0,7)">hi</span>');
 });
@@ -17,7 +17,7 @@ test('256-colour codes map to the xterm cube, grey ramp and named colours', () =
   assert.equal(ansiToHtml('\x1b[38;2;40;40;40mx'), '<span style="color:rgb(40,40,40)">x</span>');
   assert.equal(ansiToHtml('\x1b[38;2;240;240;240mx'), '<span style="color:rgb(240,240,240)">x</span>');
   assert.equal(ansiToHtml('\x1b[38;2;148;148;150mx'), '<span style="color:rgb(148,148,150)">x</span>');
-  assert.equal(ansiToHtml('\x1b[48;5;196mred'), '<span class="ansi-line" style="background:color-mix(in srgb,rgb(255,0,0) 40%,transparent);box-shadow:inset 3px 0 rgb(255,0,0)">red</span>');
+  assert.equal(ansiToHtml('\x1b[48;5;196mred'), '<span class="ansi-line" style="background:color-mix(in srgb,rgb(255,0,0) 28%,transparent);box-shadow:inset 3px 0 rgb(255,0,0)">red</span>');
   assert.equal(ansiToHtml('\x1b[38;5;9mx'), '<span class="ansi-fg-bright-red">x</span>');
 });
 
@@ -73,7 +73,7 @@ test('a tool call and the result, output and diff rows under it form one card wi
     '<span class="ansi-tool">● Update(src/a.ts)',
     '  ⎿  Updated src/a.ts',
     '       42   keep();',
-    '<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) 40%,transparent);box-shadow:inset 3px 0 rgb(34,92,43)">       43 + ok();</span>',
+    '<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) 28%,transparent);box-shadow:inset 3px 0 rgb(34,92,43)">       43 + ok();</span>',
     '</span><span class="ansi-tool">● Bash(npm test',
     '      -- a)',
     '  ⎿  ok',
@@ -96,7 +96,7 @@ test('private-use icons and stray control characters never open or close a prose
 test('a line in one background colour spans the pane; badges inside a line do not', () => {
   assert.equal(
     ansiToHtml('ctx\n\x1b[48;2;34;92;43m  43 + x\x1b[0m\nnext'),
-    'ctx\n<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) 40%,transparent);box-shadow:inset 3px 0 rgb(34,92,43)">  43 + x</span>\nnext',
+    'ctx\n<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) 28%,transparent);box-shadow:inset 3px 0 rgb(34,92,43)">  43 + x</span>\nnext',
   );
   assert.equal(
     ansiToHtml('\x1b[48;2;0;170;0m PASS \x1b[0m tests.ts'),
