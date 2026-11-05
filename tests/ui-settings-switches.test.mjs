@@ -10,7 +10,9 @@ import { chromium } from 'playwright-core';
 test('settings uses labelled switches that reflect and change their state', { skip: !process.env.CHROMIUM_BIN, timeout: 30000 }, async (t) => {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const app = Fastify();
-  t.after(() => app.close());
+  // One hook, browser first: while it is open, its keep-alive connections hold app.close().
+  let browser;
+  t.after(async () => { await browser?.close(); await app.close(); });
   await app.register(fastifyStatic, { root: `${root}public`, prefix: '/' });
   await app.register(fastifyStatic, { root: `${root}node_modules`, prefix: '/vendor/npm/', decorateReply: false });
   const index = await readFile(`${root}public/index.html`, 'utf8');
@@ -25,8 +27,7 @@ test('settings uses labelled switches that reflect and change their state', { sk
   app.get('/api/machines', () => ({ role: 'hub', canAdd: false, machines: [] }));
   app.get('/api/*', () => ({}));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
-  t.after(() => browser.close());
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.setDefaultTimeout(5000);
   const errors = [];
