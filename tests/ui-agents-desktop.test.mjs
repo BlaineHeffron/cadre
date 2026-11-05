@@ -92,8 +92,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // A primary button keeps its own hover fill (the shared .btn hover must not outrank it).
   const newSession = toolbar.getByRole('button', { name: 'New session' });
   await newSession.hover();
-  await page.waitForTimeout(250); // the .btn transition is 0.15s
-  assert.equal(await newSession.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(41, 182, 246)');
+  // Polls past the .btn transition; with the shared hover outranking it, the fill ends navy instead.
+  await page.waitForFunction((el) => getComputedStyle(el).backgroundColor === 'rgb(41, 182, 246)', await newSession.elementHandle(), { timeout: 2000 });
   await page.mouse.move(0, 0);
   // Buttons, the search box and the provider select share one control height.
   const heights = await toolbar.locator('.btn, input.input, select.input').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
@@ -245,6 +245,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // Rounded: the mobile viewport sometimes lays the 36px toggle out at 35.99999px (about 1 run in 4 on main).
   const summaryHeight = (await phone.locator('.terminal-keys > summary').boundingBox()).height;
   assert.ok(Math.round(summaryHeight) >= 36, `phone Terminal keys toggle is a full control-height target (${summaryHeight}px)`);
+  // On a phone, tool cards keep the transcript's own compact size and row.
+  const phoneCard = await phone.locator('.ansi-tool').first().evaluate((el) => {
+    const [card, pane] = [el, el.closest('.terminal')].map((node) => getComputedStyle(node));
+    return [card.fontSize === pane.fontSize, card.lineHeight === pane.lineHeight];
+  });
+  assert.deepEqual(phoneCard, [true, true]);
   const phoneRule = await ruleFits(phone);
   assert.ok(phoneRule.rule === phoneRule.content && phoneRule.row === phoneRule.content && phoneRule.overflow === 0, `phone rule ${JSON.stringify(phoneRule)}`);
   const [phoneKeys, phoneBar] = await Promise.all(['.terminal-keys', '.claude-control-bar'].map((sel) => phone.locator(sel).boundingBox()));

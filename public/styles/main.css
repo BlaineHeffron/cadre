@@ -1197,12 +1197,14 @@ body:has(.tmux-pane-page) {
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--text-primary) 3%, transparent);
 }
-/* In the session transcript, monospace reads a step smaller than the sans prose beside it, so a
-   card's code takes the next size up, on the transcript's 21px row so the view still snaps to
-   whole lines. */
-.terminal-fullheight .ansi-tool {
-  font-size: var(--fs-md);
-  line-height: 21px;
+/* In the desktop session transcript (15px on a 21px row), monospace reads a step smaller than the
+   sans prose beside it, so a card's code takes the next size up on the same 21px row, keeping the
+   view's whole-line snap. Phones keep the transcript's own compact size. */
+@media (min-width: 769px) {
+  .terminal-fullheight .ansi-tool {
+    font-size: var(--fs-md);
+    line-height: 21px;
+  }
 }
 /* A row in one background colour (a diff line) spans the pane. */
 .ansi-line {
