@@ -27,12 +27,14 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     isAuthenticated.value = true;
     render(h(AgentsPage, {}), document.getElementById('app'));
   </script>`)));
-  app.get('/route', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
+  // A session's own route, mounted under the router as the app mounts it.
+  app.get('/claude/:id', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
     import { h, render } from 'preact';
+    import Router from 'preact-router';
     import { isAuthenticated } from '/app/state.mjs';
     import { SessionRoute } from '/pages/agents.mjs';
     isAuthenticated.value = true;
-    render(h('main', { class: 'main' }, h(SessionRoute, { id: 'b2', provider: 'claude' })), document.getElementById('app'));
+    render(h('main', { class: 'main' }, h(Router, {}, h(SessionRoute, { path: '/claude/:id', provider: 'claude' }))), document.getElementById('app'));
   </script>`)));
   app.get('/session', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
     import { h, render } from 'preact';
@@ -225,16 +227,25 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // On desktop a session's own route is the Agents split view with that session selected, and the
   // panel's prev/next step through the list beside it.
   sessions = demo;
-  await page.goto(`${origin}/route`);
+  await page.goto(`${origin}/claude/b2`);
   const panelTitle = page.locator('.agent-session-page-embedded .session-title');
   await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-b2');
   assert.equal(await page.locator('.agent-rail-row').count(), 2);
   await page.locator('.agent-session-page-embedded').getByRole('button', { name: '\u203a' }).click();
   await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-a1');
+  // The address follows the shown session, from the arrows or a list click, so a reload or
+  // shared link opens it again.
+  assert.equal(new URL(page.url()).pathname, '/claude/a1');
+  // The router knows the new address too: routing back to the first session shows it again.
+  await page.evaluate(() => import('preact-router').then(({ route }) => route('/claude/b2')));
+  await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-b2');
+  await page.locator('.agent-rail-row').filter({ hasText: 'first task' }).locator('.agent-rail-row-main').click();
+  await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-a1');
+  assert.equal(new URL(page.url()).pathname, '/claude/a1');
   assert.equal(await panelTitle.count(), 1);
   // A phone keeps the full-screen session page.
   const phoneRoute = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-  await phoneRoute.goto(`${origin}/route`);
+  await phoneRoute.goto(`${origin}/claude/b2`);
   await phoneRoute.getByRole('link', { name: 'Back to agents' }).waitFor();
   assert.equal(await phoneRoute.locator('.agent-rail-row').count(), 0);
   await phoneRoute.close();

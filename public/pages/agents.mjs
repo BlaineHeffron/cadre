@@ -576,6 +576,13 @@ export function AgentsPage({ focus = '' } = {}) {
     if (focus) desktopSessionKey.value = focus;
   }, [focus]);
 
+  // On a session's own route the address follows the shown session, so a reload or a shared link
+  // opens it again. /agents keeps its own address.
+  const showSession = (session) => {
+    desktopSessionKey.value = previewKey(session);
+    if (focus) route(`/${session._kind}/${session.id}`, true);
+  };
+
   useEffect(() => {
     // Until the list loads, keep the focused session rather than clearing it.
     if (!desktopLayout.value || !visibleSessions.length) return;
@@ -1143,7 +1150,7 @@ export function AgentsPage({ focus = '' } = {}) {
                       session=${session}
                       active=${desktopSession && previewKey(desktopSession) === previewKey(session)}
                       selected=${selectedSessionKeys.value.includes(previewKey(session))}
-                      onSelect=${selected => { desktopSessionKey.value = previewKey(selected); }}
+                      onSelect=${showSession}
                       onToggleSelected=${toggleSelected}
                     />
                   `)}
@@ -1157,7 +1164,7 @@ export function AgentsPage({ focus = '' } = {}) {
                     provider=${desktopSession._kind}
                     embedded=${true}
                     siblings=${visibleSessions}
-                    onNavigate=${(session) => { desktopSessionKey.value = previewKey(session); }}
+                    onNavigate=${showSession}
                   />
                 ` : html`
                   <${EmptyState} message="No agent session to show." />
