@@ -42,10 +42,9 @@ import { FleetPage } from '../pages/fleet.mjs';
 import { GitHubAgentsPage } from '../pages/github-agents.mjs';
 import { TmuxPage } from '../pages/tmux.mjs';
 import { TmuxPanePage } from '../pages/tmux-pane.mjs';
-import { AgentsPage } from '../pages/agents.mjs';
+import { AgentsPage, SessionRoute } from '../pages/agents.mjs';
 import { ClaudeSessionsPage } from '../pages/claude-sessions.mjs';
 import { CodexSessionsPage } from '../pages/codex-sessions.mjs';
-import { AgentSessionDetailPage } from '../pages/agent-session-detail.mjs';
 import { AgentCollabPage } from '../pages/agent-collab.mjs';
 import { ScheduledAgentsPage } from '../pages/scheduled-agents.mjs';
 import { LoopSessionsPage } from '../pages/loop-sessions.mjs';
@@ -105,12 +104,12 @@ function App({ onRouteChange }) {
         <${TmuxPanePage} path="/tmux/pane/:target" />
         <${TmuxPage} path="/tmux" />
         <${AgentsPage} path="/agents" />
-        <${AgentSessionDetailPage} path="/claude/:id" provider="claude" />
+        <${SessionRoute} path="/claude/:id" provider="claude" />
         <${ClaudeSessionsPage} path="/claude" />
-        <${AgentSessionDetailPage} path="/codex/:id" provider="codex" />
+        <${SessionRoute} path="/codex/:id" provider="codex" />
         <${CodexSessionsPage} path="/codex" />
-        <${AgentSessionDetailPage} path="/pi/:id" provider="pi" />
-        <${AgentSessionDetailPage} path="/deepseek/:id" provider="deepseek" />
+        <${SessionRoute} path="/pi/:id" provider="pi" />
+        <${SessionRoute} path="/deepseek/:id" provider="deepseek" />
         <${AgentCollabPage} path="/collab/:id?" />
         <${ScheduledAgentsPage} path="/scheduled-agents" />
         <${LoopSessionsPage} path="/loop-sessions" />

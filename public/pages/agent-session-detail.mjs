@@ -69,7 +69,8 @@ async function loadImageDataUrl(file) {
   }
 }
 
-export function AgentSessionDetailPage({ id, provider = 'claude', embedded = false }) {
+// An embedded panel steps through its host's list (siblings, onNavigate) instead of fetching its own.
+export function AgentSessionDetailPage({ id, provider = 'claude', embedded = false, siblings = null, onNavigate = navigateToAgentSession }) {
   const descriptor = providerDescriptor(provider);
   const providerKind = descriptor.kind;
   const providerApiBase = descriptor.apiBase;
@@ -177,7 +178,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
   useEffect(() => {
     loadCollabData();
     loadTmuxCapabilities();
-    // Embedded panels hide the prev/next controls, so the sibling fetch would
+    // Embedded panels step through their host's list, so the sibling fetch would
     // only burn requests and overwrite the host page's session signals with a
     // read-only-excluded list.
     if (!embedded) loadSiblingSessions();
@@ -602,7 +603,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
   const fallbackTitle = sessionInfo.value.sessionName || `${descriptor.kind}-${id}`;
   const headerParts = [displayName, threadTitle].filter(Boolean);
   const headerTitle = headerParts.length ? headerParts.join(' / ') : fallbackTitle;
-  const { previous, next } = findSessionNeighbors(siblingSessions.value, descriptor.kind, id);
+  const { previous, next } = findSessionNeighbors(siblings || siblingSessions.value, descriptor.kind, id);
   const { machine } = sessionInfo.value;
   const startLoop = () => route(`/loop-sessions?kind=${encodeURIComponent(descriptor.kind)}&session_id=${encodeURIComponent(id)}`);
 
@@ -610,20 +611,20 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
     h('div', { class: 'claude-session-header' },
       h('div', { class: 'session-header-primary' },
         !embedded ? h('a', { href: '/agents', class: 'btn btn-icon', 'aria-label': 'Back to agents' }, '\u2190') : null,
-        !embedded ? h('button', {
+        h('button', {
           class: 'btn btn-icon',
           type: 'button',
           disabled: !previous,
-          onClick: () => navigateToAgentSession(previous),
+          onClick: () => onNavigate(previous),
           title: previous ? `Previous agent: ${previous.displayName || previous.name || previous.id}` : 'No previous agent',
-        }, '\u2039') : null,
-        !embedded ? h('button', {
+        }, '\u2039'),
+        h('button', {
           class: 'btn btn-icon',
           type: 'button',
           disabled: !next,
-          onClick: () => navigateToAgentSession(next),
+          onClick: () => onNavigate(next),
           title: next ? `Next agent: ${next.displayName || next.name || next.id}` : 'No next agent',
-        }, '\u203a') : null,
+        }, '\u203a'),
         h('span', { class: 'session-title', title: id }, headerTitle),
         sessionState.value.status !== 'ended'
           ? h('button', { class: 'btn mobile-hidden', onClick: startLoop }, 'Start loop')
