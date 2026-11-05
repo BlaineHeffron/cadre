@@ -2244,10 +2244,6 @@ input[type="checkbox"]:not(.switch) {
   background: var(--bg-hover);
 }
 
-/* Open, the key tray takes the tools row's full width below the other tools. */
-.control-row-tools > .terminal-keys[open] {
-  flex-basis: 100%;
-}
 
 .terminal-keys-row {
   display: flex;
@@ -2531,14 +2527,6 @@ input[type="checkbox"]:not(.switch) {
   color: #000;
   border-color: var(--accent);
   padding: 8px 14px;
-}
-
-.ctrl-slash {
-  background: var(--bg-card);
-  color: var(--accent);
-  border-color: var(--accent);
-  padding: 8px 12px;
-  font-size: var(--fs-md);
 }
 
 .ctrl-slash-cmd {
@@ -3709,8 +3697,7 @@ input[type="checkbox"]:not(.switch) {
   .ctrl-btn,
   .ctrl-inline-select,
   .control-row-tools .ctrl-btn,
-  .control-row-tools .ctrl-inline-select,
-  .control-row-tools .terminal-keys > summary {
+  .control-row-tools .ctrl-inline-select {
     min-height: 44px;
   }
 

@@ -732,7 +732,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
       imagePreviewUrl: imageDraft.value.imageDataUrl,
       imageNote: `Attached. This compatibility transport will visibly disclose that it wrote a safe workspace reference for ${descriptor.label}.`,
       inputText,
-      keys: h(TerminalKeys, { onKey: sendTerminalKey }),
+      keys: h(TerminalKeys, { onKey: sendTerminalKey, tray: true }),
     }) : null,
   );
 }
