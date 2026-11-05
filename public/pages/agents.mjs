@@ -364,6 +364,8 @@ export function AgentsPage({ focus = '' } = {}) {
   const stateFilters = useMemo(() => signal([]), []);
   const previewKeys = useMemo(() => signal([]), []);
   const selectedSessionKeys = useMemo(() => signal([]), []);
+  // The rail shows its bulk-select checkboxes only in select mode (or while something is selected).
+  const railSelecting = useMemo(() => signal(false), []);
   const bulkKillProgress = useMemo(() => signal(null), []);
   const bulkPrompt = useMemo(() => signal(''), []);
   const showBulkPrompt = useMemo(() => signal(false), []);
@@ -546,6 +548,7 @@ export function AgentsPage({ focus = '' } = {}) {
   // When every listed session shares one provider, the rail heading names it once instead of every row.
   const railProviders = new Set(visibleSessions.map((session) => session._provider));
   const railProvider = railProviders.size === 1 ? [...railProviders][0] : null;
+  const railChecks = railSelecting.value || selectedSessionKeys.value.length > 0;
   const visibleKillableSessions = visibleSessions.filter((session) =>
     !(session.readOnly === true && session.externalOwner === 'rust-monitor')
   );
@@ -1144,7 +1147,15 @@ export function AgentsPage({ focus = '' } = {}) {
               <aside class="agents-desktop-rail" aria-label="Agent sessions">
                 <div class="agents-desktop-rail-head">
                   <span class="card-title">${railProvider ? `${providerLabel(railProvider)} sessions` : 'Sessions'}</span>
-                  <span aria-label=${`${visibleSessions.length} sessions listed`}>${visibleSessions.length}</span>
+                  <span class="agents-desktop-rail-count" aria-label=${`${visibleSessions.length} sessions listed`}>${visibleSessions.length}</span>
+                  <button
+                    type="button"
+                    class="btn agents-desktop-rail-select"
+                    aria-pressed=${String(railChecks)}
+                    onClick=${() => {
+                      if (railChecks) selectedSessionKeys.value = [];
+                      railSelecting.value = !railChecks;
+                    }}>${railChecks ? 'Done' : 'Select'}</button>
                 </div>
                 <div class="agents-desktop-rail-list" onKeyDown=${handleRailArrowKeys}>
                   ${visibleSessions.map((session) => html`
@@ -1155,7 +1166,7 @@ export function AgentsPage({ focus = '' } = {}) {
                       selected=${selectedSessionKeys.value.includes(previewKey(session))}
                       showProvider=${!railProvider}
                       onSelect=${showSession}
-                      onToggleSelected=${toggleSelected}
+                      onToggleSelected=${railChecks ? toggleSelected : null}
                     />
                   `)}
                 </div>
