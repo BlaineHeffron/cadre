@@ -27,6 +27,13 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     isAuthenticated.value = true;
     render(h(AgentsPage, {}), document.getElementById('app'));
   </script>`)));
+  app.get('/route', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
+    import { h, render } from 'preact';
+    import { isAuthenticated } from '/app/state.mjs';
+    import { SessionRoute } from '/pages/agents.mjs';
+    isAuthenticated.value = true;
+    render(h('main', { class: 'main' }, h(SessionRoute, { id: 'b2', provider: 'claude' })), document.getElementById('app'));
+  </script>`)));
   app.get('/session', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
     import { h, render } from 'preact';
     import { isAuthenticated } from '/app/state.mjs';
@@ -215,5 +222,21 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.ok(width <= 1160 && Math.abs(x - (1440 - x - width)) <= 1, `session page at x=${x}, width=${width}`);
   // The full-height page is one panel tone, so a short transcript leaves no bare page below the controls.
   assert.equal(await single.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(26, 26, 46)');
+  // On desktop a session's own route is the Agents split view with that session selected, and the
+  // panel's prev/next step through the list beside it.
+  sessions = demo;
+  await page.goto(`${origin}/route`);
+  const panelTitle = page.locator('.agent-session-page-embedded .session-title');
+  await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-b2');
+  assert.equal(await page.locator('.agent-rail-row').count(), 2);
+  await page.locator('.agent-session-page-embedded').getByRole('button', { name: '\u203a' }).click();
+  await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-a1');
+  assert.equal(await panelTitle.count(), 1);
+  // A phone keeps the full-screen session page.
+  const phoneRoute = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  await phoneRoute.goto(`${origin}/route`);
+  await phoneRoute.getByRole('link', { name: 'Back to agents' }).waitFor();
+  assert.equal(await phoneRoute.locator('.agent-rail-row').count(), 0);
+  await phoneRoute.close();
   assert.deepEqual(errors, []);
 });

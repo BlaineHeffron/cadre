@@ -350,7 +350,16 @@ function makeResumeSession(loading, loadError) {
   };
 }
 
-export function AgentsPage() {
+// On desktop a session's own route is this split view with that session selected, so one session
+// never has two layouts; phones keep the full-screen session page.
+export function SessionRoute({ id, provider }) {
+  return isDesktopAgentsLayout()
+    ? html`<${AgentsPage} focus=${`${provider}:${id}`} />`
+    : html`<${AgentSessionDetailPage} id=${id} provider=${provider} />`;
+}
+
+// focus ('kind:id') opens the list with that session selected, for a session's own route on desktop.
+export function AgentsPage({ focus = '' } = {}) {
   const loading = useMemo(() => signal(false), []);
   const loadError = useMemo(() => signal(''), []);
   const modelCatalogLoading = useMemo(() => signal(false), []);
@@ -367,7 +376,7 @@ export function AgentsPage() {
   const showNewModal = useMemo(() => signal(false), []);
   const showFolderPicker = useMemo(() => signal(false), []);
   const desktopLayout = useMemo(() => signal(isDesktopAgentsLayout()), []);
-  const desktopSessionKey = useMemo(() => signal(''), []);
+  const desktopSessionKey = useMemo(() => signal(focus), []);
   // The new-session form is a native modal dialog: focus moves in, Tab stays in, and it returns on close.
   const newDialog = useRef(null);
   useEffect(() => {
@@ -564,7 +573,12 @@ export function AgentsPage() {
   }, [allSessions.map((session) => previewKey(session)).join('|')]);
 
   useEffect(() => {
-    if (!desktopLayout.value) return;
+    if (focus) desktopSessionKey.value = focus;
+  }, [focus]);
+
+  useEffect(() => {
+    // Until the list loads, keep the focused session rather than clearing it.
+    if (!desktopLayout.value || !visibleSessions.length) return;
     const validKeys = new Set(visibleSessions.map((session) => previewKey(session)));
     if (!validKeys.has(desktopSessionKey.value)) {
       desktopSessionKey.value = visibleSessions[0] ? previewKey(visibleSessions[0]) : '';
@@ -1142,6 +1156,8 @@ export function AgentsPage() {
                     id=${desktopSession.id}
                     provider=${desktopSession._kind}
                     embedded=${true}
+                    siblings=${visibleSessions}
+                    onNavigate=${(session) => { desktopSessionKey.value = previewKey(session); }}
                   />
                 ` : html`
                   <${EmptyState} message="No agent session to show." />
