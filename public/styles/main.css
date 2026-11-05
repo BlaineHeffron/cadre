@@ -12,7 +12,7 @@
   --accent-hover: #29b6f6;
   --danger: #ef5350;
   /* Danger as readable text on dark surfaces. */
-  --danger-text: #ff8a80;
+  --danger-text: #ffa198;
   --warning: #ffa726;
   --success: #66bb6a;
   --border: #2a2a3e;
@@ -524,9 +524,9 @@ html, body {
   line-height: 1;
 }
 
+/* Danger secondaries read like the approval No: red text, neutral border, red only on hover. */
 .btn-danger {
-  border-color: var(--danger);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .btn-danger:hover {
@@ -601,7 +601,7 @@ textarea.input:focus {
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--bg-secondary);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: var(--fs-xs);
   cursor: pointer;
@@ -2392,7 +2392,6 @@ input[type="checkbox"]:not(.switch) {
   color: var(--accent);
   border-color: var(--accent);
   padding: 8px 12px;
-  font-family: var(--font-mono);
   font-size: var(--fs-md);
 }
 

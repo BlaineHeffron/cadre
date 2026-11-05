@@ -118,12 +118,14 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.ok(boxes[0].width <= 560, `answers ${boxes[0].width}px wide`);
   const colour = (i, prop) => answers.nth(i).evaluate((el, p) => getComputedStyle(el)[p], prop);
   assert.deepEqual([await colour(0, 'color'), await colour(0, 'backgroundColor')], ['rgb(0, 0, 0)', 'rgb(79, 195, 247)']);
-  assert.deepEqual([await colour(2, 'color'), await colour(2, 'backgroundColor'), await colour(2, 'borderTopColor')], ['rgb(255, 138, 128)', 'rgb(22, 33, 62)', await colour(1, 'borderTopColor')]);
+  assert.deepEqual([await colour(2, 'color'), await colour(2, 'backgroundColor'), await colour(2, 'borderTopColor')], ['rgb(255, 161, 152)', 'rgb(22, 33, 62)', await colour(1, 'borderTopColor')]);
   assert.ok(boxes.every((b, i) => i === 0 || b.top > boxes[i - 1].top), 'answers stack in order');
   // At least the 44px tap target and never clipped. In the 560px card a long label may wrap
   // inside its row, depending on the font; the card cap matters more than one-line labels.
   assert.ok(boxes.every((b) => Math.round(b.height) >= 44 && !b.clipped), `answer heights ${boxes.map((b) => b.height)}`);
   assert.equal(await answers.nth(2).innerText(), 'No, and tell Claude what to do differently (esc)');
+  // The slash menu toggle says what it opens.
+  assert.equal(await page.getByRole('button', { name: '/ Commands', exact: true }).count(), 1);
   // The terminal no longer repeats the menu the bar is showing.
   await page.locator('.terminal').getByText('pane text').waitFor();
   // The pending command runs straight into its question; raw terminal keys sit below the composer.
@@ -175,9 +177,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   await page.locator('.empty-state').getByRole('button', { name: 'New session' }).waitFor();
   await page.waitForFunction(() => ![...document.querySelectorAll('.agents-desktop-toolbar button')].some((b) => b.textContent.trim() === 'New session'));
   await page.locator('.empty-state').getByRole('button', { name: 'New session' }).click();
-  const create = page.getByRole('button', { name: 'Create Session' });
+  const create = page.getByRole('button', { name: 'Create session' });
   const box = await create.boundingBox();
-  assert.ok(box.y >= 0 && box.y + box.height <= 900, `Create Session at y=${box.y}`);
+  assert.ok(box.y >= 0 && box.y + box.height <= 900, `Create session at y=${box.y}`);
   // Page titles share one style across pages.
   assert.equal(await page.locator('h1').first().evaluate((el) => getComputedStyle(el).fontSize), '18px');
   // On a phone the keys stay above the sticky, safe-area-padded control bar.

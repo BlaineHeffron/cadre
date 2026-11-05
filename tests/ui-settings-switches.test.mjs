@@ -57,6 +57,9 @@ test('settings uses labelled switches that reflect and change their state', { sk
   const hint = await page.locator('.setting-switch-hint').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
   assert.deepEqual(hint, ['13px', 'rgb(196, 196, 212)']);
   // Card notes read at the same 13px secondary as the switch hints.
+  // Logout is a danger secondary like the approval No: light-red text on the neutral border.
+  const logout = page.getByRole('button', { name: 'Logout' });
+  assert.deepEqual(await logout.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).borderTopColor]), ['rgb(255, 161, 152)', 'rgb(42, 42, 62)']);
   assert.deepEqual(await page.locator('.note').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]), ['13px', 'rgb(196, 196, 212)']);
   assert.deepEqual(errors, []);
 });
