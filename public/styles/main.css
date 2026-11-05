@@ -2265,16 +2265,21 @@ input[type="checkbox"]:not(.switch) {
 }
 
 /* Tool buttons are soft: a faint fill and no outline, stronger on hover, so they still read as
-   buttons but the row stops being a stack of outlined boxes. Only the row's own buttons and the
-   More toggle: menu items stay flat, and selects keep their field border. */
+   buttons but the row stops being a stack of outlined boxes. The session header's own secondary
+   buttons match, so a session has two button styles: filled primary and soft secondary. Only the
+   rows' own buttons and ⋯ toggles: menu items stay flat, and selects keep their field border. */
 .control-row-tools > .ctrl-btn,
-.control-row-tools > .more-menu > summary.ctrl-btn {
+.control-row-tools > .more-menu > summary.ctrl-btn,
+.claude-session-header :is(.session-header-primary, .session-header-actions) > .btn:not(.btn-primary, .btn-subtle),
+.claude-session-header .session-header-actions > .more-menu > summary.btn {
   border-color: transparent;
   background: color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
 .control-row-tools > .ctrl-btn:hover:not(:disabled),
-.control-row-tools > .more-menu > summary.ctrl-btn:hover {
+.control-row-tools > .more-menu > summary.ctrl-btn:hover,
+.claude-session-header :is(.session-header-primary, .session-header-actions) > .btn:not(.btn-primary, .btn-subtle):hover,
+.claude-session-header .session-header-actions > .more-menu > summary.btn:hover {
   background: var(--bg-hover);
 }
 

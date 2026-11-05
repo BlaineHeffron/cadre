@@ -153,6 +153,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const soft = (el) => [getComputedStyle(el).borderTopColor, getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)'];
   assert.deepEqual(await page.getByRole('button', { name: '/ Commands', exact: true }).evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
   assert.deepEqual(await page.locator('.control-row-tools > .more-menu > summary').evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
+  // The session header's secondary buttons use the same soft style, so the panel has two button styles.
+  assert.deepEqual(await page.getByRole('button', { name: 'Rendered Transcript' }).evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
+  assert.deepEqual(await page.getByLabel('More session actions').evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
   // The terminal no longer repeats the menu the bar is showing.
   await page.locator('.terminal').getByText('pane text').waitFor();
   // The pending command runs straight into its question; raw terminal keys sit below the composer.
@@ -166,6 +169,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // Composer extras wait behind one menu.
   const delay = page.getByRole('combobox', { name: 'Send delay' });
   assert.equal(await delay.isVisible(), false);
+  // One overflow word in the app: the nav says More; the composer's own overflow is the ⋯ the
+  // session menus use.
+  assert.equal((await page.getByLabel('More composer tools').innerText()).trim(), '⋯');
   await page.getByLabel('More composer tools').click();
   assert.equal(await delay.isVisible(), true);
   assert.equal(await page.getByRole('button', { name: 'Save as skill' }).isVisible(), true);

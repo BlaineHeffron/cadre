@@ -205,8 +205,8 @@ export function AgentControlBar({
           </button>
         `}
         <details class="more-menu composer-more" onClickCapture=${closeMenuOnChoice} onChange=${closeAfterPick}>
-          <summary class="ctrl-btn ctrl-default ctrl-btn-compact" aria-label="More composer tools">
-            More${selectedDelay.value ? ' · delayed' : ''}${imageAttached ? ' · image' : ''}
+          <summary class="ctrl-btn ctrl-default ctrl-btn-compact" aria-label="More composer tools" title="More composer tools">
+            ⋯${selectedDelay.value ? ' · delayed' : ''}${imageAttached ? ' · image' : ''}
           </summary>
           <div class="more-menu-list">
             <${LaunchSkillSelector} compact=${true} onInsert=${(id) => skillInsert.current?.(id)} />
