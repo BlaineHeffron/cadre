@@ -143,5 +143,19 @@ test('full-height terminal fills the column, starts a short history at the top a
   await terminal.getByText('line 149').waitFor({ state: 'attached' });
   await page.waitForTimeout(150);
   assert.equal(await terminal.evaluate((el) => el.scrollTop), reading, 'no leftover tap after an empty load');
+  // Pinned again, a history only just taller than the pane never leaves the Load earlier pill
+  // half-cut at the top edge: it shows whole or not at all.
+  await terminal.evaluate((el) => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); });
+  for (let n = 20; n <= 26; n++) {
+    await show(lines(n), false);
+    await terminal.getByText(`line ${n - 1}`).waitFor({ state: 'attached' });
+    await page.waitForTimeout(150);
+    const cut = await terminal.evaluate((el) => {
+      const top = el.getBoundingClientRect().top + el.clientTop;
+      const pill = el.querySelector('.terminal-load-more').getBoundingClientRect();
+      return pill.top < top - 0.5 && pill.bottom > top + 0.5 ? pill.bottom - top : 0;
+    });
+    assert.equal(cut, 0, `${n} lines leave ${cut}px of the pill showing`);
+  }
   assert.deepEqual(errors, []);
 });

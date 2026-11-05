@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ansiToHtml, foldEmptyPrompt } from '../public/lib/ansi-to-html.mjs';
+import { ansiToHtml, foldEmptyPrompt, permissionMode } from '../public/lib/ansi-to-html.mjs';
 
 test('truecolor diff backgrounds render, blended toward the terminal, instead of being dropped', () => {
   assert.equal(
@@ -106,10 +106,16 @@ test('a line in one background colour spans the pane; badges inside a line do no
   assert.equal(ansiToHtml(`\uE000${'─'.repeat(30)}\uE001`), `\uE000${'─'.repeat(30)}\uE001`);
 });
 
-test('the CLI\'s empty input box at the foot of the pane is dropped; the mode line and typed text stay', () => {
+test('the CLI\'s empty input box and its mode line at the foot of the pane are dropped; typed text stays', () => {
   const rule = `\x1b[38;5;244m${'─'.repeat(40)}\x1b[0m`;
-  const mode = '  \x1b[95m⏵⏵ accept edits on\x1b[0m';
-  assert.equal(foldEmptyPrompt(['● Done.', '', rule, '❯ ', rule, mode].join('\n')), ['● Done.', '', mode].join('\n'));
+  const mode = '  \x1b[95m⏵⏵ accept edits on\x1b[0m\x1b[38;5;246m (shift+tab to cycle)\x1b[0m';
+  assert.equal(foldEmptyPrompt(['● Done.', '', rule, '❯ ', rule, mode].join('\n')), ['● Done.', ''].join('\n'));
+  // Other footer lines stay.
+  assert.equal(foldEmptyPrompt(['● Done.', rule, '❯ ', rule, '  ? for shortcuts'].join('\n')), ['● Done.', '  ? for shortcuts'].join('\n'));
+  // The mode the composer's button names.
+  assert.equal(permissionMode(['● Done.', rule, '❯ ', rule, mode].join('\n')), 'accept edits');
+  assert.equal(permissionMode('  ⏵⏵ plan mode on (shift+tab to cycle)'), 'plan mode');
+  assert.equal(permissionMode('● Done.\n  ? for shortcuts'), '');
   // Text typed into the box keeps it; so does a box with more than the mode hints under it.
   const typed = ['● Done.', rule, '❯ npm te', rule, mode].join('\n');
   assert.equal(foldEmptyPrompt(typed), typed);

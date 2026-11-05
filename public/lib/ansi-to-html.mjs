@@ -293,5 +293,16 @@ export function foldEmptyPrompt(text) {
   const at = plain.findLastIndex((line) => line === '❯');
   const rule = (line) => /^─{20,}$/.test(line ?? '');
   if (at < 1 || !rule(plain[at - 1]) || !rule(plain[at + 1]) || plain.slice(at + 2).filter(Boolean).length > 2) return text;
-  return [...lines.slice(0, at - 1), ...lines.slice(at + 2)].join('\n');
+  // The mode line under the box goes too: the composer's mode button shows it (see permissionMode).
+  return [...lines.slice(0, at - 1), ...lines.slice(at + 2).filter((_, k) => !MODE_LINE.test(plain[at + 2 + k]))].join('\n');
+}
+
+// The CLI's permission-mode hint, `⏵⏵ accept edits on (shift+tab to cycle)`.
+const MODE_LINE = /^⏵⏵\s+(.+?)\s+on\b/;
+
+// The mode named on the pane's last mode line ('accept edits'), or '' in the default mode.
+export function permissionMode(text) {
+  const plain = String(text || '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').split('\n').map((line) => line.trim());
+  const line = plain.findLast((l) => MODE_LINE.test(l));
+  return line ? line.match(MODE_LINE)[1] : '';
 }

@@ -94,6 +94,14 @@ export function Terminal({
     setScrollTop(el, el.scrollHeight);
     const box = el.getBoundingClientRect();
     const top = box.top + el.clientTop;
+    // The same for the Load earlier pill above the first line: whole or out of view. Scrolling
+    // lands on whole pixels while the layout is fractional, so the lift rounds up with a pixel spare.
+    const pill = el.querySelector('.terminal-load-more')?.getBoundingClientRect();
+    if (body && pill && pill.top < top && pill.bottom > top) {
+      body.style.paddingBottom = `${Math.ceil(pill.bottom - top) + 1}px`;
+      setScrollTop(el, el.scrollHeight);
+      return;
+    }
     const caret = body && el.scrollTop > 0 && document.caretRangeFromPoint?.(box.left + 24, top + 1);
     const line = caret ? caret.startContainer.parentElement : null;
     if (!line || !body.contains(line)) return;
