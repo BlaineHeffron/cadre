@@ -2224,7 +2224,6 @@ input[type="checkbox"]:not(.switch) {
 }
 
 /* The tools row is secondary to Send and the approval answers. */
-/* Composer tools look like every other secondary .btn. */
 .control-row-tools .ctrl-btn,
 .control-row-tools .ctrl-inline-select {
   min-height: var(--control-h);
@@ -2233,6 +2232,17 @@ input[type="checkbox"]:not(.switch) {
   color: var(--text-primary);
   font-size: var(--fs-sm);
   font-weight: 500;
+}
+
+/* Tool buttons are soft: a faint fill and no outline, stronger on hover, so they still read as
+   buttons but the row stops being a stack of outlined boxes. Selects keep their field border. */
+.control-row-tools .ctrl-btn {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+.control-row-tools .ctrl-btn:hover {
+  background: var(--bg-hover);
 }
 
 .approval-prompt-title {

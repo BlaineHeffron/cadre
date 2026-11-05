@@ -141,6 +141,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await answers.nth(2).innerText(), 'No, and tell Claude what to do differently (esc)');
   // The slash menu toggle says what it opens.
   assert.equal(await page.getByRole('button', { name: '/ Commands', exact: true }).count(), 1);
+  // Composer tools are soft buttons: a faint fill, no outline.
+  assert.deepEqual(await page.getByRole('button', { name: '/ Commands', exact: true }).evaluate((el) => [getComputedStyle(el).borderTopColor, getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)']), ['rgba(0, 0, 0, 0)', true]);
   // The terminal no longer repeats the menu the bar is showing.
   await page.locator('.terminal').getByText('pane text').waitFor();
   // The pending command runs straight into its question; raw terminal keys sit below the composer.
