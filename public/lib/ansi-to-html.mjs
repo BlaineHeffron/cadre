@@ -29,6 +29,7 @@ export function ansiToHtml(text) {
   // column count. Its dashes are marked here and drawn as a full-width rule in their colour, so
   // it never stops short of the pane edge; the dashes stay in the DOM for copying.
   text = text.replace(/^((?:\x1b\[[0-9;]*m)*)(─{20,})((?:\x1b\[[0-9;]*m)*)$/gm, '$1\uE000$2\uE001$3');
+  text = markProse(text);
 
   const parts = [];
   let current = { bold: false, dim: false, italic: false, underline: false, strike: false, fg: null, bg: null };
@@ -52,6 +53,13 @@ export function ansiToHtml(text) {
   }
 
   while (i < text.length) {
+    // Prose blocks open and close at the top level, between the self-contained colour spans.
+    if (text[i] === '\uE002' || text[i] === '\uE003') {
+      flushBuf();
+      parts.push(text[i] === '\uE002' ? '<span class="ansi-prose">' : '</span>');
+      i++;
+      continue;
+    }
     // Match ESC[ ... m  (SGR sequence)
     if (text[i] === '\x1b' && text[i + 1] === '[') {
       const end = text.indexOf('m', i + 2);
@@ -89,6 +97,26 @@ function buildClasses(state) {
   if (state.fg !== null && !state.fg.startsWith('rgb(')) cls.push(`ansi-fg-${state.fg}`);
   if (state.bg !== null && !state.bg.startsWith('rgb(')) cls.push(`ansi-bg-${state.bg}`);
   return cls.join(' ');
+}
+
+const SGR = /\x1b\[[0-9;]*m/g;
+
+// The CLI's prose replies are a bullet line that is not a Tool(args) call, plus the lines it
+// hard-wrapped with a two-space indent. Each block is marked (its trailing newline inside) so it
+// can read as proportional, reflowing text; tool calls, output and code stay monospace.
+function markProse(text) {
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const plain = lines[i].replace(SGR, '');
+    if (!/^[●⏺] /.test(plain) || /^[●⏺] \S+\(/.test(plain)) continue;
+    let end = i;
+    while (end + 1 < lines.length && /^ {2}\S/.test(lines[end + 1].replace(SGR, '')) && !/^ {2}⎿/.test(lines[end + 1].replace(SGR, ''))) end++;
+    lines[i] = `\uE002${lines[i]}`;
+    if (end + 1 < lines.length) lines[end + 1] = `\uE003${lines[end + 1]}`;
+    else lines[end] += '\uE003';
+    i = end;
+  }
+  return lines.join('\n');
 }
 
 function liftGrey(color) {

@@ -38,3 +38,17 @@ test('a line of only box-drawing dashes becomes a full-width rule in its colour'
   assert.equal(ansiToHtml(`x ${dashes}`), `x ${dashes}`);
   assert.equal(ansiToHtml(`x \x1b[90m${'─'.repeat(30)}`), `x <span class="ansi-fg-bright-black">${'─'.repeat(30)}</span>`);
 });
+
+test('a prose reply reflows as one block; tool calls and their output stay terminal text', () => {
+  const reply = ['\x1b[37m●\x1b[0m Pagination is in place.', '  The three new tests pass.', '', '● Bash(npm test)', '  ⎿  Waiting…', '⏺ Done.'].join('\n');
+  assert.equal(ansiToHtml(reply), [
+    '<span class="ansi-prose"><span class="ansi-fg-white">●</span> Pagination is in place.',
+    '  The three new tests pass.',
+    '</span>',
+    '● Bash(npm test)',
+    '  ⎿  Waiting…',
+    '<span class="ansi-prose">⏺ Done.</span>',
+  ].join('\n'));
+  // A ⎿ result line never joins the reply above it.
+  assert.equal(ansiToHtml('● Ran it.\n  ⎿  ok'), '<span class="ansi-prose">● Ran it.\n</span>  ⎿  ok');
+});
