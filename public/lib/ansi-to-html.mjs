@@ -51,7 +51,7 @@ export function ansiToHtml(text) {
     // 256-colour and truecolor values have no class; they render inline.
     // Backgrounds are blended toward the terminal so they tint rather than glare. Whole diff rows
     // get a lighter tint and keep the full colour as a gutter bar. Mid-grey text (the CLI's dim
-    // hints and rules) is lifted toward the body text so it stays readable.
+    // hints and rules) is lifted halfway to the body text so it stays readable.
     const style = [['color', current.fg], ['background', current.bg]]
       .filter(([, value]) => value?.startsWith('rgb('))
       .map(([prop, value]) => (prop === 'color' ? `color:${liftGrey(value)}`
@@ -181,7 +181,7 @@ function markTools(text) {
 function liftGrey(color) {
   return color.replace(/^rgb\((\d+),\1,\1\)$/, (match, v) => {
     if (v < 96 || v >= 224) return match;
-    const g = Math.round(+v + (224 - v) / 4);
+    const g = Math.round(+v + (224 - v) / 2);
     return `rgb(${g},${g},${g})`;
   });
 }
