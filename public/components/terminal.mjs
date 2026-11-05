@@ -260,8 +260,8 @@ export function Terminal({
   }
 
   const style = fullHeight
-    // Sized to its content up to the space available: a short history leaves no gap above the controls.
-    ? 'flex:0 1 auto; min-height:0; overflow:auto; overflow-anchor:none'
+    // Fills the panel so the controls stay pinned at the bottom; a short history reads from the top.
+    ? 'min-height:0; overflow:auto; overflow-anchor:none'
     : `max-height:${maxHeight}; min-height:200px; overflow-anchor:none`;
 
   const normalizedContent = typeof content === 'string' ? content.replace(/\r/g, '') : '';
