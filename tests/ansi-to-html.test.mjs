@@ -11,9 +11,9 @@ test('truecolor diff backgrounds render, blended toward the terminal, instead of
 });
 
 test('256-colour codes map to the xterm cube, grey ramp and named colours', () => {
-  assert.equal(ansiToHtml('\x1b[38;5;246mdim'), '<span style="color:rgb(167,167,167)">dim</span>');
+  assert.equal(ansiToHtml('\x1b[38;5;246mdim'), '<span style="color:rgb(186,186,186)">dim</span>');
   // Only mid-grey text is lifted: near-black, near-white and colours keep their values.
-  assert.equal(ansiToHtml('\x1b[38;2;153;153;153mhint'), '<span style="color:rgb(171,171,171)">hint</span>');
+  assert.equal(ansiToHtml('\x1b[38;2;153;153;153mhint'), '<span style="color:rgb(189,189,189)">hint</span>');
   assert.equal(ansiToHtml('\x1b[38;2;40;40;40mx'), '<span style="color:rgb(40,40,40)">x</span>');
   assert.equal(ansiToHtml('\x1b[38;2;240;240;240mx'), '<span style="color:rgb(240,240,240)">x</span>');
   assert.equal(ansiToHtml('\x1b[38;2;148;148;150mx'), '<span style="color:rgb(148,148,150)">x</span>');
@@ -31,7 +31,7 @@ test('named and inline colours combine, and reset clears both', () => {
 
 test('a line of only box-drawing dashes becomes a full-width rule in its colour', () => {
   const dashes = '─'.repeat(110);
-  assert.equal(ansiToHtml(`\x1b[38;5;244m${dashes}\x1b[0m\n❯ `), `<span style="color:rgb(152,152,152)"><span class="ansi-rule">${dashes}</span></span>\n❯ `);
+  assert.equal(ansiToHtml(`\x1b[38;5;244m${dashes}\x1b[0m\n❯ `), `<span style="color:rgb(176,176,176)"><span class="ansi-rule">${dashes}</span></span>\n❯ `);
   assert.equal(ansiToHtml(`above\n${dashes}\nbelow`), `above\n<span class="ansi-rule">${dashes}</span>\nbelow`);
   // Short runs and dashes after text on the same line stay text, coloured or not.
   assert.equal(ansiToHtml('──── title ────'), '──── title ────');
