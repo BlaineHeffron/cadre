@@ -591,7 +591,8 @@ textarea.input:focus {
   flex: 1;
   min-height: 0;
   border-radius: 0;
-  font-size: var(--fs-base);
+  /* One step above body text: the transcript is what the page is read for. */
+  font-size: 15px;
   line-height: 1.4;
   background: var(--terminal-bg);
 }
