@@ -28,14 +28,19 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     render(h(AgentsPage, {}), document.getElementById('app'));
   </script>`)));
   // A session's own route, mounted under the router as the app mounts it.
-  app.get('/claude/:id', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
+  const sessionRoute = (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
     import { h, render } from 'preact';
     import Router from 'preact-router';
     import { isAuthenticated } from '/app/state.mjs';
     import { SessionRoute } from '/pages/agents.mjs';
     isAuthenticated.value = true;
-    render(h('main', { class: 'main' }, h(Router, {}, h(SessionRoute, { path: '/claude/:id', provider: 'claude' }))), document.getElementById('app'));
-  </script>`)));
+    render(h('main', { class: 'main' }, h(Router, {}, ['claude', 'codex'].map((kind) => h(SessionRoute, { path: \`/\${kind}/:id\`, provider: kind })))), document.getElementById('app'));
+  </script>`));
+  app.get('/claude/:id', sessionRoute);
+  app.get('/codex/:id', sessionRoute);
+  let codexSessions = [];
+  app.get('/api/codex/sessions', () => ({ sessions: codexSessions }));
+  app.get('/api/codex/sessions/:id', (req) => ({ id: req.params.id, content: 'codex pane', state: { status: 'working' }, sessionName: `codex-${req.params.id}` }));
   app.get('/session', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
     import { h, render } from 'preact';
     import { isAuthenticated } from '/app/state.mjs';
@@ -248,21 +253,28 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // On desktop a session's own route is the Agents split view with that session selected, and the
   // panel's prev/next step through the list beside it.
   sessions = demo;
+  codexSessions = [{ id: 'c3', displayName: 'third task', workDir: '/home/me/repo', state: { status: 'working' } }];
   await page.goto(`${origin}/claude/b2`);
   const panelTitle = page.locator('.agent-session-page-embedded .session-title');
-  await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-b2');
-  assert.equal(await page.locator('.agent-rail-row').count(), 2);
+  const shows = (title) => page.waitForFunction((t) => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === t, title);
+  await shows('claude-b2');
+  assert.equal(await page.locator('.agent-rail-row').count(), 3);
+  const historyLength = await page.evaluate(() => history.length);
+  // Next wraps from the last Claude session to the Codex one, across providers.
   await page.locator('.agent-session-page-embedded').getByRole('button', { name: '\u203a' }).click();
-  await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-a1');
+  await shows('codex-c3');
   // The address follows the shown session, from the arrows or a list click, so a reload or
   // shared link opens it again.
-  assert.equal(new URL(page.url()).pathname, '/claude/a1');
+  assert.equal(new URL(page.url()).pathname, '/codex/c3');
   // The router knows the new address too: routing back to the first session shows it again.
   await page.evaluate(() => import('preact-router').then(({ route }) => route('/claude/b2')));
   await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-b2');
   await page.locator('.agent-rail-row').filter({ hasText: 'first task' }).locator('.agent-rail-row-main').click();
-  await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-a1');
+  await shows('claude-a1');
   assert.equal(new URL(page.url()).pathname, '/claude/a1');
+  // Stepping replaces the address rather than stacking history entries: the only new entry is
+  // the test's own route() push above.
+  assert.equal(await page.evaluate(() => history.length), historyLength + 1);
   assert.equal(await panelTitle.count(), 1);
   // A phone keeps the full-screen session page.
   const phoneRoute = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
