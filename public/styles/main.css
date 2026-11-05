@@ -486,9 +486,11 @@ html, body {
   gap: 6px;
   min-height: var(--control-h);
   padding: 0 14px;
-  border: 1px solid var(--border);
+  /* Secondary buttons are soft: a faint fill and no outline (a transparent edge keeps the size),
+     so screens stop being stacks of outlined boxes. Primary buttons are the one filled style. */
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  background: var(--bg-secondary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
   color: var(--text-primary);
   font-size: var(--fs-sm);
   font-weight: 500;
@@ -499,8 +501,7 @@ html, body {
 
 /* :where keeps this at .btn's own weight, so the primary, subtle and danger hovers still win. */
 .btn:where(:hover:not(:disabled)) {
-  background: var(--bg-card);
-  border-color: var(--accent);
+  background: var(--bg-hover);
 }
 
 .btn-primary {
@@ -1225,9 +1226,9 @@ body:has(.tmux-pane-page) {
 .ansi-tool {
   display: block;
   padding: 6px 10px;
-  border: 1px solid var(--border);
+  /* Set apart by fill alone, not an outline. */
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
 }
 /* In the desktop session transcript (15px on a 21px row), code in a card sits a step under the
    sans prose so tool output never outsizes it, on the same 21px row (more leading for dense
@@ -2354,22 +2355,17 @@ input[type="checkbox"]:not(.switch) {
   font-weight: 500;
 }
 
-/* Tool buttons are soft: a faint fill and no outline, stronger on hover, so they still read as
-   buttons but the row stops being a stack of outlined boxes. The session header's own secondary
-   buttons match, so a session has two button styles: filled primary and soft secondary. Only the
-   rows' own buttons and ⋯ toggles: menu items stay flat, and selects keep their field border. */
+/* Composer tools take the soft secondary style of .btn: a faint fill, no outline, stronger on
+   hover. Only the row's own buttons and ⋯ toggle: menu items stay flat, and selects keep their
+   field border. */
 .control-row-tools > .ctrl-btn,
-.control-row-tools > .more-menu > summary.ctrl-btn,
-.claude-session-header :is(.session-header-primary, .session-header-actions) > .btn:not(.btn-primary, .btn-subtle),
-.claude-session-header .session-header-actions > .more-menu > summary.btn {
+.control-row-tools > .more-menu > summary.ctrl-btn {
   border-color: transparent;
   background: color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
 .control-row-tools > .ctrl-btn:hover:not(:disabled),
-.control-row-tools > .more-menu > summary.ctrl-btn:hover,
-.claude-session-header :is(.session-header-primary, .session-header-actions) > .btn:not(.btn-primary, .btn-subtle):hover:not(:disabled),
-.claude-session-header .session-header-actions > .more-menu > summary.btn:hover {
+.control-row-tools > .more-menu > summary.ctrl-btn:hover {
   background: var(--bg-hover);
 }
 
