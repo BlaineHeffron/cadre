@@ -1302,8 +1302,8 @@ body:has(.tmux-pane-page) {
 
 /* Plain checkboxes are a comfortable target; switches keep their own shape. */
 input[type="checkbox"]:not(.switch) {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   accent-color: var(--accent);
 }
 
@@ -1368,12 +1368,14 @@ input[type="checkbox"]:not(.switch) {
 }
 
 .switch:checked {
-  border-color: var(--accent);
-  background: var(--accent);
+  /* A deeper accent so the white knob keeps 3:1 (about 4.8:1) on the track. */
+  border-color: #0277bd;
+  background: #0277bd;
 }
 
 .switch:checked::before {
-  background: #000;
+  /* A white knob reads as on at a glance; the off knob is grey on the dark track. */
+  background: #fff;
   transform: translateX(18px);
 }
 
@@ -2227,6 +2229,8 @@ input[type="checkbox"]:not(.switch) {
 
 .control-row-primary .ctrl-btn {
   flex: none;
+  /* The secondary answers need an edge that reads as a button on the panel (28% text on the card). */
+  border-color: #4f566b;
   justify-content: flex-start;
   font-size: var(--fs-base);
   line-height: 1.25;

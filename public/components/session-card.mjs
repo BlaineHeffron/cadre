@@ -109,7 +109,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
           ${isUnseen ? html`<span class="unread-dot" role="img" aria-label="Unread" title="Unread"></span>` : null}${primaryName}
         </span>
         ${isMutable && onToggleSelected ? html`
-          <label style="display:flex; align-items:center; gap:6px; font-size:var(--fs-xs); color:var(--text-muted)" onclick=${e => e.stopPropagation()}>
+          <label style="display:flex; align-items:center; gap:6px; font-size:var(--fs-sm); color:var(--text-secondary)" onclick=${e => e.stopPropagation()}>
             <input
               type="checkbox"
               checked=${selected}
@@ -129,20 +129,20 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
           `)}
         </div>
       ` : null}
-      <div style="display:flex; gap:8px; font-size:var(--fs-xs); color:var(--text-muted); align-items:center">
+      <div style="display:flex; gap:8px; font-size:var(--fs-sm); color:var(--text-secondary); align-items:center">
         <${StatusBadge} status=${status} />
         <${MachineChip} machine=${session.machine} />
-        ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono); font-size:var(--fs-xs)" title=${session.workDir}>${session.workDir}</span>` : null}
+        ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono)" title=${session.workDir}>${session.workDir}</span>` : null}
       </div>
-      <div style="display:flex; gap:8px; font-size:var(--fs-xs); color:var(--text-muted); margin-top:2px">
+      <div style="display:flex; flex-wrap:wrap; gap:0 8px; font-size:var(--fs-sm); color:var(--text-secondary); margin-top:2px; overflow-wrap:anywhere">
         ${isRustManagedReadOnly ? html`<span>rust-managed</span><span>read-only</span>` : null}
         ${session.source === 'tmux-external' && !isRustManagedReadOnly ? html`<span>external</span>` : null}
-        ${label || session.displayName ? html`<span style="opacity:0.7">${session.name}</span>` : null}
+        ${label || session.displayName ? html`<span>${session.name}</span>` : null}
         ${session.pid ? html`<span>PID ${session.pid}</span>` : null}
         ${timeAgo ? html`<span>${timeAgo}</span>` : null}
       </div>
       ${detailText ? html`
-        <div style="font-size:var(--fs-xs); color:var(--text-secondary); margin-top:4px">${detailText}</div>
+        <div style="font-size:var(--fs-sm); color:var(--text-primary); margin-top:4px">${detailText}</div>
       ` : null}
       <div class="session-card-actions" onclick=${e => e.stopPropagation()}>
         ${isEnded && onResume
