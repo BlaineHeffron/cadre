@@ -184,6 +184,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     page.reload(),
   ]);
   await page.locator('.empty-state').getByRole('button', { name: 'New session' }).waitFor();
+  // The empty desktop list fills the page like the split view, with no card nested in its frame.
+  const emptyShell = await page.locator('.agents-desktop-empty').evaluate((el) => {
+    const card = el.querySelector('.empty-state');
+    return { bottom: el.getBoundingClientRect().bottom, cardBorder: getComputedStyle(card).borderTopWidth };
+  });
+  assert.ok(emptyShell.bottom >= 860 && emptyShell.cardBorder === '0px', `empty shell ${JSON.stringify(emptyShell)}`);
   await page.waitForFunction(() => ![...document.querySelectorAll('.agents-desktop-toolbar button')].some((b) => b.textContent.trim() === 'New session'));
   await page.locator('.empty-state').getByRole('button', { name: 'New session' }).click();
   const create = page.getByRole('button', { name: 'Create session' });

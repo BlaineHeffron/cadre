@@ -1945,6 +1945,19 @@ input[type="checkbox"]:not(.switch) {
   }
 }
 
+/* With no sessions the shell still fills the page, like the split view, with its message centred. */
+.agents-desktop-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-card);
+}
+
+.agents-desktop-empty > .empty-state {
+  background: none;
+  border: 0;
+}
+
 .agents-desktop-rail {
   display: flex;
   min-height: 0;
