@@ -319,14 +319,14 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.deepEqual(prose, [true, true, true, []], 'prose wraps between words, never mid-word');
   // The transcript reads one step above body text on a wide screen.
   assert.equal(await single.locator('.terminal').evaluate((el) => getComputedStyle(el).fontSize), '15px');
-  // A tool call sits in one quiet card: monospace, framed, its diff rows spanning the card, its
-  // text exactly the terminal's for copying.
+  // A tool call sits in one quiet card: monospace, set apart by a fill (no outline), its diff rows
+  // spanning the card, its text exactly the terminal's for copying.
   const card = await single.locator('.ansi-tool').evaluate((el) => {
     const cs = getComputedStyle(el);
     const inner = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-    return [cs.fontFamily === getComputedStyle(el.closest('.terminal')).fontFamily, cs.borderTopWidth, cs.borderTopLeftRadius, Math.round(el.querySelector('.ansi-line').getBoundingClientRect().width) === Math.round(inner), el.textContent];
+    return [cs.fontFamily === getComputedStyle(el.closest('.terminal')).fontFamily, cs.borderTopWidth === '0px' && cs.backgroundColor !== 'rgba(0, 0, 0, 0)', cs.borderTopLeftRadius, Math.round(el.querySelector('.ansi-line').getBoundingClientRect().width) === Math.round(inner), el.textContent];
   });
-  assert.deepEqual(card, [true, '1px', '8px', true, '● Update(src/a.ts)\n  ⎿  Updated src/a.ts\n       44 - old();\n']);
+  assert.deepEqual(card, [true, true, '8px', true, '● Update(src/a.ts)\n  ⎿  Updated src/a.ts\n       44 - old();\n']);
   // Code in a card sits a step under the 15px prose on the transcript's 21px row, so tool output
   // never outsizes the prose and the pinned view still snaps to whole lines.
   assert.deepEqual(await single.locator('.ansi-tool').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]), ['14px', '21px']);

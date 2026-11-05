@@ -65,9 +65,9 @@ test('settings uses labelled switches that reflect and change their state', { sk
   // Switch hints are read, so they use the 13px step in secondary grey.
   const hint = await page.locator('.setting-switch-hint').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
   assert.deepEqual(hint, ['13px', 'rgb(218, 218, 230)']);
-  // Logout is a danger secondary: light-red text on the neutral border.
+  // Logout is a danger secondary: light-red text on the soft secondary fill, no outline.
   const logout = page.getByRole('button', { name: 'Logout' });
-  assert.deepEqual(await logout.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).borderTopColor]), ['rgb(255, 161, 152)', 'rgb(42, 42, 62)']);
+  assert.deepEqual(await logout.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).borderTopColor, getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)']), ['rgb(255, 161, 152)', 'rgba(0, 0, 0, 0)', true]);
   // Card notes read at the same 13px secondary as the switch hints.
   assert.deepEqual(await page.locator('.note').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]), ['13px', 'rgb(218, 218, 230)']);
   assert.deepEqual(errors, []);
