@@ -86,20 +86,39 @@ export function Terminal({
     rememberScrollPosition(el);
   }
 
+  // Pinned to the newest output, the view snaps so a whole line sits at the top edge, never a
+  // half-cut one: the body gets just enough bottom space to lift the cut line out of view.
+  function pinToBottom(el) {
+    const body = el.querySelector('.terminal-body');
+    if (body) body.style.paddingBottom = '';
+    setScrollTop(el, el.scrollHeight);
+    const box = el.getBoundingClientRect();
+    const top = box.top + el.clientTop;
+    const caret = body && el.scrollTop > 0 && document.caretRangeFromPoint?.(box.left + 24, top + 1);
+    const line = caret ? caret.startContainer.parentElement : null;
+    if (!line || !body.contains(line)) return;
+    const glyph = caret.getBoundingClientRect();
+    const lineHeight = parseFloat(getComputedStyle(line).lineHeight);
+    const lineTop = glyph.top - (lineHeight - glyph.height) / 2;
+    if (lineTop >= top || lineTop + lineHeight <= top) return;
+    body.style.paddingBottom = `${lineTop + lineHeight - top}px`;
+    setScrollTop(el, el.scrollHeight);
+  }
+
   function scrollToBottomWithRetries() {
     if (!ref.current) return undefined;
     const el = ref.current;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     suppressLoadMoreUntil.current = now + 250;
-    setScrollTop(el, el.scrollHeight);
+    pinToBottom(el);
     const requestFrame = typeof requestAnimationFrame === 'function'
       ? requestAnimationFrame
       : (callback) => setTimeout(callback, 0);
     const cancelFrame = typeof cancelAnimationFrame === 'function'
       ? cancelAnimationFrame
       : clearTimeout;
-    const frame = requestFrame(() => { setScrollTop(el, el.scrollHeight); });
-    const timer = setTimeout(() => { setScrollTop(el, el.scrollHeight); }, 80);
+    const frame = requestFrame(() => { pinToBottom(el); });
+    const timer = setTimeout(() => { pinToBottom(el); }, 80);
     return () => {
       cancelFrame(frame);
       clearTimeout(timer);
@@ -166,7 +185,7 @@ export function Terminal({
       frame = requestFrame(() => {
         frame = undefined;
         if (scrollSnapshot.current.atBottom && ref.current) {
-          setScrollTop(ref.current, ref.current.scrollHeight);
+          pinToBottom(ref.current);
         }
       });
     };
@@ -191,8 +210,9 @@ export function Terminal({
     const el = ref.current;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const snapshot = rememberScrollPosition(el);
-    // The top fade only covers rows that have actually scrolled out of view.
-    el.classList.toggle('terminal-scrolled', el.scrollTop > 0);
+    // The top fade only covers rows that have actually scrolled out of view; pinned to the bottom
+    // the view is snapped to a whole line, so it needs none.
+    el.classList.toggle('terminal-scrolled', el.scrollTop > 0 && !snapshot.atBottom);
     if (snapshot.atBottom) {
       userScrollIntent.current = false;
     }
