@@ -231,6 +231,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await page.locator('.agent-rail-row').count(), 2);
   await page.locator('.agent-session-page-embedded').getByRole('button', { name: '\u203a' }).click();
   await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-a1');
+  // The address follows the shown session, so a reload or shared link opens it again.
+  assert.equal(new URL(page.url()).pathname, '/claude/a1');
   assert.equal(await panelTitle.count(), 1);
   // A phone keeps the full-screen session page.
   const phoneRoute = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
