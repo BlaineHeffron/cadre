@@ -1173,6 +1173,14 @@ body:has(.tmux-pane-page) {
 .ansi-prose-more {
   text-indent: 0;
 }
+/* A tool call and its result sit in one quiet card, set apart from the prose around them. */
+.ansi-tool {
+  display: block;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+}
 /* A row in one background colour (a diff line) spans the pane. */
 .ansi-line {
   display: inline-block;

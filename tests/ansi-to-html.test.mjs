@@ -39,15 +39,15 @@ test('a line of only box-drawing dashes becomes a full-width rule in its colour'
   assert.equal(ansiToHtml(`x \x1b[90m${'─'.repeat(30)}`), `x <span class="ansi-fg-bright-black">${'─'.repeat(30)}</span>`);
 });
 
-test('a prose reply reflows as one block; tool calls and their output stay terminal text', () => {
+test('a prose reply reflows as one block; tool calls and their output stay out of it', () => {
   const reply = ['\x1b[37m●\x1b[0m Pagination is in place.', '  The three new tests pass.', '', '● Bash(npm test)', '  ⎿  Waiting…', '⏺ Done.'].join('\n');
   assert.equal(ansiToHtml(reply), [
     '<span class="ansi-prose"><span class="ansi-fg-white">●</span> Pagination is in place.',
     '  The three new tests pass.',
     '</span>',
-    '● Bash(npm test)',
+    '<span class="ansi-tool">● Bash(npm test)',
     '  ⎿  Waiting…',
-    '<span class="ansi-prose">⏺ Done.</span>',
+    '</span><span class="ansi-prose">⏺ Done.</span>',
   ].join('\n'));
   // A ⎿ result line never joins the reply above it.
   assert.equal(ansiToHtml('● Ran it.\n  ⎿  ok'), '<span class="ansi-prose">● Ran it.\n</span>  ⎿  ok');
@@ -61,8 +61,31 @@ test('lists, box tables and indented code stay terminal text; later paragraphs s
   // A second paragraph of the same reply is prose too; a tool call after it ends the reply.
   assert.equal(
     ansiToHtml('⏺ First paragraph\n  wraps here.\n\n  Second paragraph.\n\n⏺ Bash(ls)\n\n  not prose'),
-    '<span class="ansi-prose">⏺ First paragraph\n  wraps here.\n</span>\n<span class="ansi-prose ansi-prose-more">  Second paragraph.\n</span>\n⏺ Bash(ls)\n\n  not prose',
+    '<span class="ansi-prose">⏺ First paragraph\n  wraps here.\n</span>\n<span class="ansi-prose ansi-prose-more">  Second paragraph.\n</span>\n<span class="ansi-tool">⏺ Bash(ls)\n</span>\n  not prose',
   );
+});
+
+test('a tool call and the result, output and diff rows under it form one card with the text unchanged', () => {
+  const diff = '\x1b[48;2;34;92;43m       43 + ok();\x1b[0m';
+  const text = ['● Update(src/a.ts)', '  ⎿  Updated src/a.ts', '       42   keep();', diff, '● Bash(npm test', '      -- a)', '  ⎿  ok', '', '● All done.'].join('\n');
+  const html = ansiToHtml(text);
+  assert.equal(html, [
+    '<span class="ansi-tool">● Update(src/a.ts)',
+    '  ⎿  Updated src/a.ts',
+    '       42   keep();',
+    '<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) 75%,transparent)">       43 + ok();</span>',
+    '</span><span class="ansi-tool">● Bash(npm test',
+    '      -- a)',
+    '  ⎿  ok',
+    '</span>',
+    '<span class="ansi-prose">● All done.</span>',
+  ].join('\n'));
+  // Copying the transcript gives back exactly the terminal text.
+  assert.equal(html.replace(/<[^>]+>/g, ''), text.replace(/\x1b\[[0-9;]*m/g, ''));
+  // A call still streaming closes at the end of the text, so every render is complete.
+  assert.equal(ansiToHtml('● Bash(ls)\n  ⎿  Running…'), '<span class="ansi-tool">● Bash(ls)\n  ⎿  Running…</span>');
+  // Stray card marks in the pane are dropped like the other marks.
+  assert.equal(ansiToHtml('a\x0eb\x0fc'), 'abc');
 });
 
 test('private-use icons and stray control characters never open or close a prose block', () => {

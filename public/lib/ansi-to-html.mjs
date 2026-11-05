@@ -27,7 +27,7 @@ export function ansiToHtml(text) {
   if (!text) return '';
   // The marks below are non-printing control characters (never Nerd Font icons from the
   // private-use area); any already in the pane are dropped first.
-  text = text.replace(/[\x02-\x07]/g, '');
+  text = text.replace(/[\x02-\x07\x0e\x0f]/g, '');
   // A whole line of only box-drawing dashes (colour codes aside) is the CLI's divider at its own
   // column count. Its dashes are marked and drawn as a full-width rule in their colour, so it
   // never stops short of the pane edge; the dashes stay in the DOM for copying.
@@ -35,7 +35,7 @@ export function ansiToHtml(text) {
   // A whole line in one background colour (a diff row the CLI padded to its own width) spans the
   // pane too, so hunk bars never stop mid-panel.
   text = text.replace(/^(?=\x1b\[[0-9;]*48;[0-9;]*m[^\x1b\n]*(?:\x1b\[0?m)?$)/gm, '\x05');
-  text = markProse(text);
+  text = markTools(markProse(text));
 
   const parts = [];
   let current = { bold: false, dim: false, italic: false, underline: false, strike: false, fg: null, bg: null };
@@ -67,10 +67,10 @@ export function ansiToHtml(text) {
       i++;
       continue;
     }
-    // Prose blocks open and close at the top level, between the self-contained colour spans.
-    if (text[i] === '\x02' || text[i] === '\x03' || text[i] === '\x04') {
+    // Prose and tool-card blocks open and close at the top level, between the self-contained colour spans.
+    if (BLOCK_MARKS[text[i]]) {
       flushBuf();
-      parts.push({ '\x02': '<span class="ansi-prose">', '\x03': '</span>', '\x04': '<span class="ansi-prose ansi-prose-more">' }[text[i]]);
+      parts.push(BLOCK_MARKS[text[i]]);
       i++;
       continue;
     }
@@ -114,6 +114,13 @@ function buildClasses(state) {
 }
 
 const SGR = /\x1b\[[0-9;]*m/g;
+const BLOCK_MARKS = {
+  '\x02': '<span class="ansi-prose">',
+  '\x03': '</span>',
+  '\x04': '<span class="ansi-prose ansi-prose-more">',
+  '\x0e': '<span class="ansi-tool">',
+  '\x0f': '</span>',
+};
 
 // The CLI's prose replies are a bullet line that is not a Tool(args) call, plus the lines it
 // hard-wrapped with a two-space indent; later paragraphs of the same reply are two-space lines
@@ -138,6 +145,27 @@ function markProse(text) {
     if (end + 1 < lines.length) lines[end + 1] = `\x03${lines[end + 1]}`;
     else lines[end] += '\x03';
     inReply = true;
+    i = end;
+  }
+  return lines.join('\n');
+}
+
+// A tool call is its `● Tool(args)` line plus the ⎿ result and deeper-indented lines under it
+// (wrapped arguments, output, diff rows). Each is marked as one card; the text inside is unchanged.
+const isToolStart = (plain) => /^[●⏺] \S+\(/.test(plain);
+const isToolLine = (plain) => /^ {2}⎿|^ {3,}\S/.test(plain);
+
+function markTools(text) {
+  const lines = text.split('\n');
+  const plain = lines.map((line) => line.replace(SGR, '').replace(/[\x02-\x07]/g, ''));
+  for (let i = 0; i < lines.length; i++) {
+    if (!isToolStart(plain[i])) continue;
+    let end = i;
+    while (end + 1 < lines.length && isToolLine(plain[end + 1])) end++;
+    // Open after a prose block's closing mark; close before anything that opens on the next line.
+    lines[i] = lines[i].replace(/^[\x03\x0f]*/, '$&\x0e');
+    if (end + 1 < lines.length) lines[end + 1] = `\x0f${lines[end + 1]}`;
+    else lines[end] += '\x0f';
     i = end;
   }
   return lines.join('\n');
