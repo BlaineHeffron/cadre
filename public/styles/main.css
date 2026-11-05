@@ -2235,13 +2235,16 @@ input[type="checkbox"]:not(.switch) {
 }
 
 /* Tool buttons are soft: a faint fill and no outline, stronger on hover, so they still read as
-   buttons but the row stops being a stack of outlined boxes. Selects keep their field border. */
-.control-row-tools .ctrl-btn {
+   buttons but the row stops being a stack of outlined boxes. Only the row's own buttons and the
+   More toggle: menu items stay flat, and selects keep their field border. */
+.control-row-tools > .ctrl-btn,
+.control-row-tools > .more-menu > summary.ctrl-btn {
   border-color: transparent;
   background: color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
-.control-row-tools .ctrl-btn:hover {
+.control-row-tools > .ctrl-btn:hover:not(:disabled),
+.control-row-tools > .more-menu > summary.ctrl-btn:hover {
   background: var(--bg-hover);
 }
 
