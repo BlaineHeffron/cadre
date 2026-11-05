@@ -73,6 +73,8 @@ test('full-height terminal fits a short history and keeps streaming output pinne
   const block = (name, n) => Array.from({ length: n }, (_, i) => `${name} ${i}`).join('\n');
   const current = `────\n${block('now', 20)}\n────`;
   await show(current, false);
+  // The pill's label reads in body text, not dim grey.
+  assert.equal(await terminal.getByText('Load earlier output').evaluate((el) => getComputedStyle(el).color), 'rgb(224, 224, 224)');
   await terminal.getByText('Load earlier output').click();
   assert.equal(await page.evaluate(() => window.loads), 1);
   await show(current, true);

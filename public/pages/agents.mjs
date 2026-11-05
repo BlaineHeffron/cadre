@@ -1007,7 +1007,7 @@ export function AgentsPage() {
 
           <div class="new-agent-footer">
             <button class="btn btn-primary" type="submit" disabled=${creatingSession.value}>
-              ${creatingSession.value ? 'Creating...' : 'Create Session'}
+              ${creatingSession.value ? 'Creating...' : 'Create session'}
             </button>
             <button class="btn" type="button" onclick=${() => loadModelCatalog(modelCatalogState, modelCatalogLoading)}>Refresh Models</button>
             ${modelCatalogLoading.value ? html`

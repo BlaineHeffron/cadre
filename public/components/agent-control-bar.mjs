@@ -265,7 +265,7 @@ export function AgentControlBar({
           </div>
         </details>
         ${descriptor.hasSlash ? html`
-          <button type="button" class="ctrl-btn ctrl-slash ctrl-btn-compact" onclick=${() => { showSlash.value = !showSlash.value; }}>/</button>
+          <button type="button" class="ctrl-btn ctrl-slash ctrl-btn-compact" onclick=${() => { showSlash.value = !showSlash.value; }}>/ Commands</button>
         ` : null}
       </div>
 

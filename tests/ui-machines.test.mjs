@@ -62,7 +62,7 @@ async function createSession(tab, { provider }) {
   const form = tab.locator('form.new-agent-form');
   await form.getByLabel('Provider').selectOption(provider);
   await form.locator('#agents-workdir-input').fill('/home/me/repo');
-  await form.getByRole('button', { name: 'Create Session' }).click();
+  await form.getByRole('button', { name: 'Create session' }).click();
   return form;
 }
 
@@ -92,7 +92,7 @@ describe('multi-machine dashboard', { skip }, () => {
     assert.deepEqual(await options(), [['', 'This machine', false], ['laptop', offline, true], ['desk', 'desk', false]]);
     await select.selectOption('desk');
     await tab.locator('#agents-workdir-input').fill('/home/me/repo');
-    await tab.getByRole('button', { name: 'Create Session' }).click();
+    await tab.getByRole('button', { name: 'Create session' }).click();
     assert.equal((await waitForPost('/api/agents/sessions')).machine, 'desk');
     await tab.close();
   });
