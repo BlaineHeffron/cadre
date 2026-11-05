@@ -580,7 +580,7 @@ export function AgentsPage({ focus = '' } = {}) {
   // opens it again. /agents keeps its own address.
   const showSession = (session) => {
     desktopSessionKey.value = previewKey(session);
-    if (focus) window.history.replaceState(window.history.state, '', `/${session._kind}/${session.id}`);
+    if (focus) route(`/${session._kind}/${session.id}`, true);
   };
 
   useEffect(() => {
