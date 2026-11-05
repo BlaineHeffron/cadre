@@ -29,6 +29,9 @@ export function ansiToHtml(text) {
   // column count. Its dashes are marked here and drawn as a full-width rule in their colour, so
   // it never stops short of the pane edge; the dashes stay in the DOM for copying.
   text = text.replace(/^((?:\x1b\[[0-9;]*m)*)(─{20,})((?:\x1b\[[0-9;]*m)*)$/gm, '$1\uE000$2\uE001$3');
+  // Prose blocks are marked with non-printing control characters (never Nerd Font icons from the
+  // private-use area); any already in the pane are dropped first.
+  text = markProse(text.replace(/[\x02-\x04]/g, ''));
 
   const parts = [];
   let current = { bold: false, dim: false, italic: false, underline: false, strike: false, fg: null, bg: null };
@@ -52,6 +55,13 @@ export function ansiToHtml(text) {
   }
 
   while (i < text.length) {
+    // Prose blocks open and close at the top level, between the self-contained colour spans.
+    if (text[i] === '\x02' || text[i] === '\x03' || text[i] === '\x04') {
+      flushBuf();
+      parts.push({ '\x02': '<span class="ansi-prose">', '\x03': '</span>', '\x04': '<span class="ansi-prose ansi-prose-more">' }[text[i]]);
+      i++;
+      continue;
+    }
     // Match ESC[ ... m  (SGR sequence)
     if (text[i] === '\x1b' && text[i + 1] === '[') {
       const end = text.indexOf('m', i + 2);
@@ -89,6 +99,36 @@ function buildClasses(state) {
   if (state.fg !== null && !state.fg.startsWith('rgb(')) cls.push(`ansi-fg-${state.fg}`);
   if (state.bg !== null && !state.bg.startsWith('rgb(')) cls.push(`ansi-bg-${state.bg}`);
   return cls.join(' ');
+}
+
+const SGR = /\x1b\[[0-9;]*m/g;
+
+// The CLI's prose replies are a bullet line that is not a Tool(args) call, plus the lines it
+// hard-wrapped with a two-space indent; later paragraphs of the same reply are two-space lines
+// after a blank one. Each paragraph is marked (its trailing newline inside) so it can read as
+// proportional, reflowing text. Lists, box tables, deeper-indented code and ⎿ results never
+// count as prose, so they keep their lines and monospace.
+const STRUCTURED = /^(?:[-*•+] |\d+[.)] |[\u2500-\u257F⎿])/;
+const isReplyStart = (plain) => /^[●⏺] \S/.test(plain) && !/^[●⏺] \S+\(/.test(plain) && !STRUCTURED.test(plain.slice(2));
+const isProseLine = (plain) => /^ {2}\S/.test(plain) && !STRUCTURED.test(plain.slice(2));
+
+function markProse(text) {
+  const lines = text.split('\n');
+  const plain = lines.map((line) => line.replace(SGR, ''));
+  let inReply = false;
+  for (let i = 0; i < lines.length; i++) {
+    const more = inReply && isProseLine(plain[i]);
+    if (!plain[i]) continue;
+    if (!isReplyStart(plain[i]) && !more) { inReply = false; continue; }
+    let end = i;
+    while (end + 1 < lines.length && isProseLine(plain[end + 1])) end++;
+    lines[i] = `${more ? '\x04' : '\x02'}${lines[i]}`;
+    if (end + 1 < lines.length) lines[end + 1] = `\x03${lines[end + 1]}`;
+    else lines[end] += '\x03';
+    inReply = true;
+    i = end;
+  }
+  return lines.join('\n');
 }
 
 function liftGrey(color) {

@@ -38,3 +38,34 @@ test('a line of only box-drawing dashes becomes a full-width rule in its colour'
   assert.equal(ansiToHtml(`x ${dashes}`), `x ${dashes}`);
   assert.equal(ansiToHtml(`x \x1b[90m${'─'.repeat(30)}`), `x <span class="ansi-fg-bright-black">${'─'.repeat(30)}</span>`);
 });
+
+test('a prose reply reflows as one block; tool calls and their output stay terminal text', () => {
+  const reply = ['\x1b[37m●\x1b[0m Pagination is in place.', '  The three new tests pass.', '', '● Bash(npm test)', '  ⎿  Waiting…', '⏺ Done.'].join('\n');
+  assert.equal(ansiToHtml(reply), [
+    '<span class="ansi-prose"><span class="ansi-fg-white">●</span> Pagination is in place.',
+    '  The three new tests pass.',
+    '</span>',
+    '● Bash(npm test)',
+    '  ⎿  Waiting…',
+    '<span class="ansi-prose">⏺ Done.</span>',
+  ].join('\n'));
+  // A ⎿ result line never joins the reply above it.
+  assert.equal(ansiToHtml('● Ran it.\n  ⎿  ok'), '<span class="ansi-prose">● Ran it.\n</span>  ⎿  ok');
+});
+
+test('lists, box tables and indented code stay terminal text; later paragraphs stay prose', () => {
+  // A reply that opens with a list, a table row or code under a bullet keeps its lines.
+  assert.equal(ansiToHtml('⏺ - a\n  - b'), '⏺ - a\n  - b');
+  assert.equal(ansiToHtml('⏺ Results:\n  │ x │ y │\n  1. first'), '<span class="ansi-prose">⏺ Results:\n</span>  │ x │ y │\n  1. first');
+  assert.equal(ansiToHtml('⏺ Changed it:\n    const a = 1;'), '<span class="ansi-prose">⏺ Changed it:\n</span>    const a = 1;');
+  // A second paragraph of the same reply is prose too; a tool call after it ends the reply.
+  assert.equal(
+    ansiToHtml('⏺ First paragraph\n  wraps here.\n\n  Second paragraph.\n\n⏺ Bash(ls)\n\n  not prose'),
+    '<span class="ansi-prose">⏺ First paragraph\n  wraps here.\n</span>\n<span class="ansi-prose ansi-prose-more">  Second paragraph.\n</span>\n⏺ Bash(ls)\n\n  not prose',
+  );
+});
+
+test('private-use icons and stray control characters never open or close a prose block', () => {
+  assert.equal(ansiToHtml(' ~/repo \n⏺ Done.'), ' ~/repo \n<span class="ansi-prose">⏺ Done.</span>');
+  assert.equal(ansiToHtml('a\x02b\x03c\x04'), 'abc');
+});
