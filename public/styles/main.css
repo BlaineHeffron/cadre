@@ -1731,18 +1731,26 @@ input[type="checkbox"]:not(.switch) {
   position: relative;
 }
 
-/* The card's actions sit at the right of its meta lines instead of taking a row of their own. */
-.session-card-foot {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 8px;
-}
-
 .session-card-actions {
   display: flex;
   gap: 8px;
   align-items: center;
+  margin-top: 10px;
+}
+
+/* On a phone the card's actions sit at the right of its meta lines instead of taking a row of
+   their own, so more sessions fit on screen. */
+@media (max-width: 640px) {
+  .session-card-foot {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 8px;
+  }
+
+  .session-card-foot > .session-card-actions {
+    margin-top: 0;
+  }
 }
 
 .more-menu > summary {

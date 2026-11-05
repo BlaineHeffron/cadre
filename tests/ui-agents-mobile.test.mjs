@@ -56,6 +56,9 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   await page.setViewportSize({ width: 960, height: 844 });
   const [left, right] = await Promise.all([0, 1].map((i) => cards.nth(i).boundingBox()));
   assert.ok(right.x > left.x && Math.abs(right.y - left.y) < 0.5, `cards at y=${left.y} and y=${right.y}`);
+  // Wider than a phone, a card keeps its actions on their own row under the meta lines.
+  const wideOpen = await cards.first().getByRole('button', { name: 'Open', exact: true }).boundingBox();
+  assert.ok(wideOpen.x < left.x + left.width / 2, `Open at x=${wideOpen.x} in a card from ${left.x}`);
   await page.setViewportSize({ width: 390, height: 844 });
   // The 13px card meta wraps instead of widening the page.
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390), 'no horizontal scroll at 390px');
@@ -68,8 +71,8 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   const first = cards.first();
   assert.equal(await first.getByRole('button', { name: 'Open', exact: true }).isVisible(), true);
   // The actions sit at the right of the card's meta lines rather than on a row of their own.
-  const [open, foot, card] = await Promise.all([first.getByRole('button', { name: 'Open', exact: true }), first.locator('.session-card-foot'), first].map((l) => l.boundingBox()));
-  assert.ok(open.x > card.x + card.width / 2 && open.x + open.width <= card.x + card.width, `Open at x=${open.x} in a card from ${card.x} to ${card.x + card.width}`);
+  const [open, more, foot, card] = await Promise.all([first.getByRole('button', { name: 'Open', exact: true }), first.getByLabel('More actions for first task'), first.locator('.session-card-foot'), first].map((l) => l.boundingBox()));
+  assert.ok(open.x > card.x + card.width / 2 && more.x + more.width <= card.x + card.width, `Open at x=${open.x}, ⋯ ends ${more.x + more.width}, card ${card.x} to ${card.x + card.width}`);
   assert.ok(open.y >= foot.y && open.y + open.height <= foot.y + foot.height + 0.5, 'Open sits in the meta rows');
   // Unread is a dot, so the status badge is the only label on the card.
   assert.equal(await first.getByText('New', { exact: true }).count(), 0);
