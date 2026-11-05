@@ -167,3 +167,16 @@ test('real CLI footers keep everything but the mode, colours and all', async () 
   assert.equal(permissionMode(footer), 'bypass permissions');
   assert.equal(plain(foldEmptyPrompt(['● Done.', rule, '❯ ', rule, footer].join('\n'))), '● Done.\n  1 shell  ✘ Auto-update failed · Run claude doctor');
 });
+
+test('inline code in a prose reply renders as code and keeps its backticks for copying; elsewhere it stays text', () => {
+  const html = ansiToHtml('● `GET /notes` now accepts `limit`.');
+  assert.equal(html, '<span class="ansi-prose">● <code class="ansi-code"><span class="ansi-tick">`</span>GET /notes<span class="ansi-tick">`</span></code> now accepts <code class="ansi-code"><span class="ansi-tick">`</span>limit<span class="ansi-tick">`</span></code>.</span>');
+  assert.equal(html.replace(/<[^>]+>/g, ''), '● `GET /notes` now accepts `limit`.');
+  // A span the CLI hard-wrapped onto the next line still pairs, and so does everything after it.
+  const wrapped = ansiToHtml('● Set `a` and the `long\n  value` then run the next `step` now.');
+  assert.deepEqual([...wrapped.matchAll(/<code class="ansi-code">(.*?)<\/code>/gs)].map((m) => m[1].replace(/<[^>]+>/g, '')), ['`a`', '`long\n  value`', '`step`']);
+  // Triple backticks are not inline code.
+  assert.equal(ansiToHtml('● Use ```js``` here.'), '<span class="ansi-prose">● Use ```js``` here.</span>');
+  // Tool output and terminal text keep their backticks as typed.
+  assert.equal(ansiToHtml('  echo `date`'), '  echo `date`');
+});

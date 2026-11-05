@@ -1172,6 +1172,18 @@ body:has(.tmux-pane-page) {
   word-break: normal;
   overflow-wrap: anywhere;
 }
+/* Inline code in a reply: monospace on a faint chip; its backticks stay in the text for copying. */
+.ansi-code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.ansi-tick {
+  font-size: 0;
+}
 /* A later paragraph of the same reply has no bullet, so it starts flush with the text above. */
 .ansi-prose-more {
   text-indent: 0;
