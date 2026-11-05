@@ -4100,6 +4100,27 @@ p.new-agent-hint {
   text-align: center;
 }
 
+.empty-state > p {
+  max-width: 440px;
+  margin-inline: auto;
+}
+
+.empty-state-title {
+  margin-bottom: 6px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+/* Numbered steps read as a short left-aligned list inside the centred block. */
+.empty-state-steps {
+  width: fit-content;
+  margin: 0 auto 16px;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  text-align: left;
+  line-height: 1.7;
+}
+
 /* MCP capability selector */
 .mcp-selector-head {
   display: flex;

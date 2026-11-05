@@ -1132,7 +1132,12 @@ export function AgentsPage({ focus = '' } = {}) {
           ? html`<${ErrorState} message=${`Agents failed to load: ${loadError.value}`} actionLabel="Retry" onAction=${() => loadAgentSessions(loading, loadError)} />`
         : visibleSessions.length === 0
           ? html`<div class=${desktopLayout.value ? 'agents-desktop-shell agents-desktop-empty' : undefined}>${allSessions.length === 0
-            ? html`<${EmptyState} message="No agent sessions yet. Start one to see it here." actionLabel="New session" onAction=${() => openNewModal('codex')} />`
+            ? html`<${EmptyState}
+                title="No agent sessions yet"
+                message="A session runs a coding agent in a project folder. Its status, transcript and approvals show up here."
+                steps=${['Pick a provider and model.', 'Choose the project folder.', 'Describe the task, or prompt it after launch.']}
+                actionLabel="New session"
+                onAction=${() => openNewModal('codex')} />`
             : html`<${EmptyState} message=${`No ${providerFilter.value === 'all' ? '' : providerLabel(providerFilter.value) + ' '}sessions match the current filters.`} />`}</div>`
           : desktopLayout.value ? html`
             <div class="agents-desktop-shell">
