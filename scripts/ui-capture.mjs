@@ -223,7 +223,15 @@ try {
   const out = (name) => join(outDir, name);
   const text = (value) => (page) => page.getByText(value).first().waitFor();
   const desktop = await newPage(browser, origin, sessions, DESKTOP);
-  await shoot(desktop, origin, '/agents', out('01-home.png'), text('Apply pending settings migrations'));
+  // Home selects the working session so it reads as an overview, not a copy of 04.
+  // Own context: opening a session marks it read, which would change later shots' badges.
+  await shoot(await newPage(browser, origin, sessions, DESKTOP), origin, '/agents', out('01-home.png'), async (page) => {
+    await text('Apply pending settings migrations')(page);
+    await page.getByText('Onboarding guide', { exact: true }).first().click();
+    await text('Write an onboarding guide')(page);
+  });
+  // The desktop context still opens home first, so 02-05 keep the same read badges.
+  await shoot(desktop, origin, '/agents', join(scratch, 'home.png'), text('Apply pending settings migrations'));
   await shoot(desktop, origin, '/claude/b7c2', out('02-conversation.png'), text('Pagination is in place'));
   await shoot(desktop, origin, '/claude/d2e8', out('03-diff.png'), text('markFailed'));
   await shoot(desktop, origin, '/claude/a1f3', out('04-approval.png'), text('Apply pending settings migrations'));
