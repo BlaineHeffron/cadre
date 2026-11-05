@@ -95,7 +95,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await toolbar.getByRole('button', { name: 'Refresh' }).innerText(), '↻');
   // Row meta (provider, path) is 13px secondary grey; the status line reads as body text.
   const textStyle = (sel) => rows.first().locator(sel).evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
-  assert.deepEqual(await textStyle('.agent-rail-row-meta'), ['13px', 'rgb(196, 196, 212)']);
+  assert.deepEqual(await textStyle('.agent-rail-row-meta'), ['13px', 'rgb(208, 208, 222)']);
   assert.deepEqual(await textStyle('.agent-rail-row-detail'), ['13px', 'rgb(224, 224, 224)']);
   await page.getByRole('checkbox', { name: 'Bulk select first task' }).check();
   assert.equal(await toolbar.getByText('1 selected').isVisible(), true);
