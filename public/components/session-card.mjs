@@ -134,6 +134,8 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
         <${MachineChip} machine=${session.machine} />
         ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title=${session.workDir}>${label}</span>` : null}
       </div>
+      <div class="session-card-foot">
+      <div style="min-width:0">
       <div style="display:flex; flex-wrap:wrap; gap:0 8px; font-size:var(--fs-sm); color:var(--text-secondary); margin-top:2px; overflow-wrap:anywhere">
         ${isRustManagedReadOnly ? html`<span>rust-managed</span><span>read-only</span>` : null}
         ${session.source === 'tmux-external' && !isRustManagedReadOnly ? html`<span>external</span>` : null}
@@ -144,6 +146,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
       ${detailText ? html`
         <div style="font-size:var(--fs-sm); color:var(--text-primary); margin-top:4px">${detailText}</div>
       ` : null}
+      </div>
       <div class="session-card-actions" onclick=${e => e.stopPropagation()}>
         ${isEnded && onResume
           ? html`<button class="btn btn-primary" onclick=${() => onResume(session)} title="Resume prior CLI conversation">Resume</button>`
@@ -166,6 +169,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
             ` : null}
           </div>
         </details>
+      </div>
       </div>
     </div>
   `;

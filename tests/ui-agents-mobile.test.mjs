@@ -67,6 +67,10 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   // Each card leads with one primary action; the rest wait behind its ⋯ menu.
   const first = cards.first();
   assert.equal(await first.getByRole('button', { name: 'Open', exact: true }).isVisible(), true);
+  // The actions sit at the right of the card's meta lines rather than on a row of their own.
+  const [open, foot, card] = await Promise.all([first.getByRole('button', { name: 'Open', exact: true }), first.locator('.session-card-foot'), first].map((l) => l.boundingBox()));
+  assert.ok(open.x > card.x + card.width / 2 && open.x + open.width <= card.x + card.width, `Open at x=${open.x} in a card from ${card.x} to ${card.x + card.width}`);
+  assert.ok(open.y >= foot.y && open.y + open.height <= foot.y + foot.height + 0.5, 'Open sits in the meta rows');
   // Unread is a dot, so the status badge is the only label on the card.
   assert.equal(await first.getByText('New', { exact: true }).count(), 0);
   assert.equal(await first.getByRole('button', { name: 'Kill' }).isVisible(), false);
