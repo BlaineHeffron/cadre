@@ -16,6 +16,9 @@
      pills): black text reads at about 6.3:1 on it, and a switch's white knob at about 3.3:1. The
      lighter --accent stays for text, focus rings and dots on navy. */
   --accent-fill: #3496cd;
+  /* Every secondary button and tool chip: one solid fill, so it is the same grey on the page
+     and on a panel (a translucent mix came out a different grey on each). */
+  --btn-bg: #29293c;
   --accent-fill-hover: #2b86bb;
   --danger: #ef5350;
   /* Danger as readable text on dark surfaces. */
@@ -490,7 +493,7 @@ html, body {
      so screens stop being stacks of outlined boxes. Primary buttons are the one filled style. */
   border: 1px solid transparent;
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  background: var(--btn-bg);
   color: var(--text-primary);
   font-size: var(--fs-sm);
   font-weight: 500;
@@ -2075,8 +2078,6 @@ input[type="checkbox"]:not(.switch) {
 .agents-desktop-rail-select {
   min-height: 28px;
   padding: 0 10px;
-  border-color: transparent;
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
   font-size: var(--fs-xs);
 }
 
@@ -2269,7 +2270,7 @@ input[type="checkbox"]:not(.switch) {
   min-height: var(--control-h);
   padding: 0 12px;
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  background: var(--btn-bg);
   color: var(--text-primary);
   font-size: var(--fs-sm);
   font-weight: 500;
@@ -2361,7 +2362,7 @@ input[type="checkbox"]:not(.switch) {
 .control-row-tools > .ctrl-btn,
 .control-row-tools > .more-menu > summary.ctrl-btn {
   border-color: transparent;
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  background: var(--btn-bg);
 }
 
 .control-row-tools > .ctrl-btn:hover:not(:disabled),
