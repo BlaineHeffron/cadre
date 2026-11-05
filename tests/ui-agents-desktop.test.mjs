@@ -201,6 +201,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     page.reload(),
   ]);
   await page.locator('.empty-state').getByRole('button', { name: 'New session' }).waitFor();
+  // A first run is guided: a named heading and the three steps to a first session, above its button.
+  const empty = page.locator('.empty-state');
+  assert.equal(await empty.getByRole('heading', { name: 'No agent sessions yet' }).isVisible(), true);
+  assert.deepEqual(await empty.getByRole('listitem').allInnerTexts(), ['Pick a provider and model.', 'Choose the project folder.', 'Describe the task, or prompt it after launch.']);
+  const [steps, action] = await Promise.all([empty.getByRole('list').boundingBox(), empty.getByRole('button', { name: 'New session' }).boundingBox()]);
+  assert.ok(steps.y + steps.height <= action.y, 'the steps sit above the New session button');
   // The empty desktop list fills the page like the split view, with no card nested in its frame.
   const emptyShell = await page.locator('.agents-desktop-empty').evaluate((el) => {
     const card = el.querySelector('.empty-state');
