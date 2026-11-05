@@ -134,38 +134,42 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
         <${MachineChip} machine=${session.machine} />
         ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title=${session.workDir}>${label}</span>` : null}
       </div>
-      <div style="display:flex; flex-wrap:wrap; gap:0 8px; font-size:var(--fs-sm); color:var(--text-secondary); margin-top:2px; overflow-wrap:anywhere">
-        ${isRustManagedReadOnly ? html`<span>rust-managed</span><span>read-only</span>` : null}
-        ${session.source === 'tmux-external' && !isRustManagedReadOnly ? html`<span>external</span>` : null}
-        ${label || session.displayName ? html`<span>${session.name}</span>` : null}
-        ${session.pid ? html`<span>PID ${session.pid}</span>` : null}
-        ${timeAgo ? html`<span>${timeAgo}</span>` : null}
-      </div>
-      ${detailText ? html`
-        <div style="font-size:var(--fs-sm); color:var(--text-primary); margin-top:4px">${detailText}</div>
-      ` : null}
-      <div class="session-card-actions" onclick=${e => e.stopPropagation()}>
-        ${isEnded && onResume
-          ? html`<button class="btn btn-primary" onclick=${() => onResume(session)} title="Resume prior CLI conversation">Resume</button>`
-          : html`<button class="btn btn-primary" onclick=${handleClick}>Open</button>`}
-        <details class="more-menu">
-          <summary class="btn" aria-label=${`More actions for ${primaryName}`} title="More actions">⋯</summary>
-          <div class="more-menu-list" onClickCapture=${closeMenuOnChoice}>
-            <button class="btn" onclick=${copySessionId} title="Copy session ID">Copy ID</button>
-            ${extraActions}
-            ${!isEnded && onStartLoop ? html`<button class="btn" onclick=${() => onStartLoop(session)}>Start loop</button>` : null}
-            ${isEnded && !session.canResume && onStartFresh ? html`
-              <button class="btn" onclick=${() => onStartFresh(session)} title="Start a fresh session in this workdir">Start Fresh</button>
-            ` : null}
-            ${isMutable && !isEnded ? html`
-              ${descriptor.hasShiftTab ? html`
-                <button class="btn" onclick=${() => onShiftTab(session.id)} title="Send Shift+Tab (interrupt/accept)">Shift+Tab</button>
-              ` : null}
-              <button class="btn" onclick=${() => onEscape(session.id)} title="Send Escape key">Esc</button>
-              <button class="btn btn-danger" onclick=${() => onKill(session)} title="Kill this session">Kill</button>
-            ` : null}
+      <div class="session-card-foot">
+        <div style="min-width:0">
+          <div style="display:flex; flex-wrap:wrap; gap:0 8px; font-size:var(--fs-sm); color:var(--text-secondary); margin-top:2px; overflow-wrap:anywhere">
+            ${isRustManagedReadOnly ? html`<span>rust-managed</span><span>read-only</span>` : null}
+            ${session.source === 'tmux-external' && !isRustManagedReadOnly ? html`<span>external</span>` : null}
+            ${label || session.displayName ? html`<span>${session.name}</span>` : null}
+            ${session.pid ? html`<span>PID ${session.pid}</span>` : null}
+            ${timeAgo ? html`<span>${timeAgo}</span>` : null}
           </div>
-        </details>
+          ${detailText ? html`
+            <div style="font-size:var(--fs-sm); color:var(--text-primary); margin-top:4px">${detailText}</div>
+          ` : null}
+        </div>
+        <div class="session-card-actions" onclick=${e => e.stopPropagation()}>
+          ${isEnded && onResume
+            ? html`<button class="btn btn-primary" onclick=${() => onResume(session)} title="Resume prior CLI conversation">Resume</button>`
+            : html`<button class="btn btn-primary" onclick=${handleClick}>Open</button>`}
+          <details class="more-menu">
+            <summary class="btn" aria-label=${`More actions for ${primaryName}`} title="More actions">⋯</summary>
+            <div class="more-menu-list" onClickCapture=${closeMenuOnChoice}>
+              <button class="btn" onclick=${copySessionId} title="Copy session ID">Copy ID</button>
+              ${extraActions}
+              ${!isEnded && onStartLoop ? html`<button class="btn" onclick=${() => onStartLoop(session)}>Start loop</button>` : null}
+              ${isEnded && !session.canResume && onStartFresh ? html`
+                <button class="btn" onclick=${() => onStartFresh(session)} title="Start a fresh session in this workdir">Start Fresh</button>
+              ` : null}
+              ${isMutable && !isEnded ? html`
+                ${descriptor.hasShiftTab ? html`
+                  <button class="btn" onclick=${() => onShiftTab(session.id)} title="Send Shift+Tab (interrupt/accept)">Shift+Tab</button>
+                ` : null}
+                <button class="btn" onclick=${() => onEscape(session.id)} title="Send Escape key">Esc</button>
+                <button class="btn btn-danger" onclick=${() => onKill(session)} title="Kill this session">Kill</button>
+              ` : null}
+            </div>
+          </details>
+        </div>
       </div>
     </div>
   `;
