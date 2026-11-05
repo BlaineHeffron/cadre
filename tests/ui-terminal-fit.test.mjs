@@ -78,6 +78,16 @@ test('full-height terminal fills the column, starts a short history at the top a
     return cut;
   });
   assert.deepEqual(await cutRows(), []);
+  // Resizing the pinned pane (composer growth, a phone keyboard) re-snaps it without piling up
+  // blank space under the newest line: the snap padding stays under one row.
+  for (let step = 1; step <= 8; step++) {
+    await page.evaluate((h) => { document.querySelector('#app > div').style.height = `${h}px`; }, 600 - step * 7);
+    await page.waitForTimeout(80);
+    const [pad, row] = await terminal.evaluate((el) => [parseFloat(el.querySelector('.terminal-body').style.paddingBottom) || 0, parseFloat(getComputedStyle(el).lineHeight)]);
+    assert.ok(pad < row, `step ${step}: ${pad}px of snap padding with ${row}px rows`);
+    assert.deepEqual(await cutRows(), [], `step ${step}: no half-cut row at the top`);
+  }
+  await page.evaluate(() => { document.querySelector('#app > div').style.height = '600px'; });
   // Once the reader scrolls up, new output no longer drags the view down.
   await terminal.hover();
   await page.mouse.wheel(0, -2000);

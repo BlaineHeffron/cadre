@@ -88,11 +88,11 @@ export function Terminal({
 
   // Pinned to the newest output, the view snaps so a whole line sits at the top edge, never a
   // half-cut one: the body gets just enough bottom space to lift the cut line out of view.
-  // The padding is only ever added to (resetting it would resize the body, fire the resize
-  // observer and undo the snap on the next frame); it starts over once it grows past a few lines.
+  // The padding is never reset before measuring (that would resize the body, fire the resize
+  // observer and undo the snap on the next frame): it changes only when a row is cut, and wraps
+  // at one line height so it never holds more than a line of blank space.
   function pinToBottom(el) {
     const body = el.querySelector('.terminal-body');
-    if (body && parseFloat(body.style.paddingBottom) > 64) body.style.paddingBottom = '';
     setScrollTop(el, el.scrollHeight);
     const box = el.getBoundingClientRect();
     const top = box.top + el.clientTop;
@@ -103,7 +103,7 @@ export function Terminal({
     const lineHeight = parseFloat(getComputedStyle(line).lineHeight);
     const lineTop = glyph.top - (lineHeight - glyph.height) / 2;
     if (lineTop >= top - 0.5 || lineTop + lineHeight <= top + 0.5) return;
-    body.style.paddingBottom = `${Math.ceil((parseFloat(body.style.paddingBottom) || 0) + lineTop + lineHeight - top)}px`;
+    body.style.paddingBottom = `${Math.ceil(((parseFloat(body.style.paddingBottom) || 0) + lineTop + lineHeight - top) % lineHeight)}px`;
     setScrollTop(el, el.scrollHeight);
   }
 
