@@ -243,6 +243,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     return [getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily, el.getBoundingClientRect().width <= 760, lines > 1, splitWords];
   });
   assert.deepEqual(prose, [true, true, true, []], 'prose wraps between words, never mid-word');
+  // The transcript reads one step above body text on a wide screen.
+  assert.equal(await single.locator('.terminal').evaluate((el) => getComputedStyle(el).fontSize), '15px');
   // A tool call sits in one quiet card: monospace, framed, its diff rows spanning the card, its
   // text exactly the terminal's for copying.
   const card = await single.locator('.ansi-tool').evaluate((el) => {
