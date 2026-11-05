@@ -78,6 +78,16 @@ test('full-height terminal fills the column, starts a short history at the top a
     return cut;
   });
   assert.deepEqual(await cutRows(), []);
+  // Resizing the pinned pane (composer growth, a phone keyboard) re-snaps it without piling up
+  // blank space under the newest line: the snap padding stays under one row.
+  for (let step = 1; step <= 8; step++) {
+    await page.evaluate((h) => { document.querySelector('#app > div').style.height = `${h}px`; }, 600 - step * 7);
+    await page.waitForTimeout(80);
+    const [pad, row] = await terminal.evaluate((el) => [parseFloat(el.querySelector('.terminal-body').style.paddingBottom) || 0, parseFloat(getComputedStyle(el).lineHeight)]);
+    assert.ok(pad < row, `step ${step}: ${pad}px of snap padding with ${row}px rows`);
+    assert.deepEqual(await cutRows(), [], `step ${step}: no half-cut row at the top`);
+  }
+  await page.evaluate(() => { document.querySelector('#app > div').style.height = '600px'; });
   // Once the reader scrolls up, new output no longer drags the view down.
   await terminal.hover();
   await page.mouse.wheel(0, -2000);
@@ -97,8 +107,8 @@ test('full-height terminal fills the column, starts a short history at the top a
   const current = `────\n${block('now', 20)}\n────`;
   await show(current, false);
   // The pill's label reads in body text, not dim grey.
-  assert.equal(await terminal.getByText('Load earlier output').evaluate((el) => getComputedStyle(el).color), 'rgb(224, 224, 224)');
-  await terminal.getByText('Load earlier output').click();
+  assert.equal(await page.getByText('Load earlier output').evaluate((el) => getComputedStyle(el).color), 'rgb(224, 224, 224)');
+  await page.getByText('Load earlier output').click();
   assert.equal(await page.evaluate(() => window.loads), 1);
   await show(current, true);
   const trimmed = `${block('now', 20).split('\n').slice(1).join('\n')}\n────\n${block('live', 10)}`;
@@ -126,7 +136,7 @@ test('full-height terminal fills the column, starts a short history at the top a
   // A load that ends with nothing new (empty or failed) clears the tap and moves nothing:
   // tapping scrolled the pill into view, and the reader stays there through the next live poll.
   const settled = `${lines(100)}\n${trimmed}`;
-  await terminal.getByText('Load earlier output').click();
+  await page.getByText('Load earlier output').click();
   const reading = await terminal.evaluate((el) => el.scrollTop);
   await show(settled, true);
   await show(settled, false);
@@ -144,19 +154,19 @@ test('full-height terminal fills the column, starts a short history at the top a
   await terminal.getByText('line 149').waitFor({ state: 'attached' });
   await page.waitForTimeout(150);
   assert.equal(await terminal.evaluate((el) => el.scrollTop), reading, 'no leftover tap after an empty load');
-  // Pinned again, a history only just taller than the pane never leaves the Load earlier pill
-  // half-cut at the top edge: it shows whole or not at all.
+  // Pinned again, whatever the history's length, the Load earlier pill sits whole above the
+  // transcript (never under its top edge) and stays clickable.
   await terminal.evaluate((el) => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); });
+  const pill = page.locator('.terminal-load-more');
   for (let n = 20; n <= 26; n++) {
     await show(lines(n), false);
     await terminal.getByText(`line ${n - 1}`).waitFor({ state: 'attached' });
     await page.waitForTimeout(150);
-    const cut = await terminal.evaluate((el) => {
-      const top = el.getBoundingClientRect().top + el.clientTop;
-      const pill = el.querySelector('.terminal-load-more').getBoundingClientRect();
-      return pill.top < top - 0.5 && pill.bottom > top + 0.5 ? pill.bottom - top : 0;
-    });
-    assert.equal(cut, 0, `${n} lines leave ${cut}px of the pill showing`);
+    const [pillBox, paneBox] = await Promise.all([pill, terminal].map((l) => l.boundingBox()));
+    assert.ok(pillBox.y >= 0 && pillBox.y + pillBox.height <= paneBox.y + 0.5, `${n} lines: pill ${pillBox.y}..${pillBox.y + pillBox.height}, pane from ${paneBox.y}`);
   }
+  const loads = await page.evaluate(() => window.loads);
+  await pill.click();
+  assert.equal(await page.evaluate(() => window.loads), loads + 1, 'the pill stays clickable');
   assert.deepEqual(errors, []);
 });

@@ -1,4 +1,4 @@
-import { h } from 'preact';
+import { h, Fragment } from 'preact';
 import { useRef, useEffect, useLayoutEffect } from 'preact/hooks';
 import { ansiToHtml } from '../lib/ansi-to-html.mjs';
 
@@ -88,28 +88,22 @@ export function Terminal({
 
   // Pinned to the newest output, the view snaps so a whole line sits at the top edge, never a
   // half-cut one: the body gets just enough bottom space to lift the cut line out of view.
+  // The padding is never reset before measuring (that would resize the body, fire the resize
+  // observer and undo the snap on the next frame): it changes only when a row is cut, and wraps
+  // at one line height so it never holds more than a line of blank space.
   function pinToBottom(el) {
     const body = el.querySelector('.terminal-body');
-    if (body) body.style.paddingBottom = '';
     setScrollTop(el, el.scrollHeight);
     const box = el.getBoundingClientRect();
     const top = box.top + el.clientTop;
-    // The same for the Load earlier pill above the first line: whole or out of view. Scrolling
-    // lands on whole pixels while the layout is fractional, so the lift rounds up with a pixel spare.
-    const pill = el.querySelector('.terminal-load-more')?.getBoundingClientRect();
-    if (body && pill && pill.top < top && pill.bottom > top) {
-      body.style.paddingBottom = `${Math.ceil(pill.bottom - top) + 1}px`;
-      setScrollTop(el, el.scrollHeight);
-      return;
-    }
     const caret = body && el.scrollTop > 0 && document.caretRangeFromPoint?.(box.left + 24, top + 1);
     const line = caret ? caret.startContainer.parentElement : null;
     if (!line || !body.contains(line)) return;
     const glyph = caret.getBoundingClientRect();
     const lineHeight = parseFloat(getComputedStyle(line).lineHeight);
     const lineTop = glyph.top - (lineHeight - glyph.height) / 2;
-    if (lineTop >= top || lineTop + lineHeight <= top) return;
-    body.style.paddingBottom = `${lineTop + lineHeight - top}px`;
+    if (lineTop >= top - 0.5 || lineTop + lineHeight <= top + 0.5) return;
+    body.style.paddingBottom = `${Math.ceil(((parseFloat(body.style.paddingBottom) || 0) + lineTop + lineHeight - top) % lineHeight)}px`;
     setScrollTop(el, el.scrollHeight);
   }
 
@@ -199,6 +193,8 @@ export function Terminal({
     };
     const observer = new ResizeObserver(keepBottomPinned);
     observer.observe(el);
+    // Web fonts change line boxes after the first layout; snap again once they have loaded.
+    document.fonts?.ready.then(keepBottomPinned);
     const body = el.querySelector('.terminal-body');
     if (body) observer.observe(body);
 
@@ -281,17 +277,14 @@ export function Terminal({
     ? linkifyHtml(ansiToHtml(trimmedContent || ''))
     : linkifyHtml(escapeHtml(plainContent));
 
-  const children = [];
-  if (hasMore && onLoadMore) {
-    // A pill, not a focusable button: keys typed in the terminal must keep going to the session.
-    children.push(h('div', {
-      class: 'terminal-load-more',
-      onClick: !loadingMore ? loadMoreFromClick : undefined,
-    }, loadingMore ? 'Loading…' : 'Load earlier output'));
-  }
-  children.push(h('div', { class: 'terminal-body', dangerouslySetInnerHTML: { __html: htmlBody } }));
+  // The pill sits above the scrolling transcript, not inside it, so no scroll position can cut it.
+  // A pill, not a focusable button: keys typed in the terminal must keep going to the session.
+  const loadMore = hasMore && onLoadMore ? h('div', {
+    class: 'terminal-load-more',
+    onClick: !loadingMore ? loadMoreFromClick : undefined,
+  }, loadingMore ? 'Loading…' : 'Load earlier output') : null;
 
-  return h(
+  const pane = h(
     'div',
     {
       ref,
@@ -306,6 +299,7 @@ export function Terminal({
       onKeyDown: captureKeyboard ? onTerminalKeyDown : undefined,
       title: captureKeyboard ? 'Click terminal and type to send keys' : undefined,
     },
-    ...children,
+    h('div', { class: 'terminal-body', dangerouslySetInnerHTML: { __html: htmlBody } }),
   );
+  return loadMore ? h(Fragment, null, loadMore, pane) : pane;
 }

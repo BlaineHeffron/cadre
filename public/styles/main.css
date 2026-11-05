@@ -622,9 +622,11 @@ textarea.input:focus {
   background: var(--terminal-bg);
 }
 
+/* A fixed row above the scrolling transcript, so it is always whole and clickable. */
 .terminal-load-more {
+  flex: none;
   width: fit-content;
-  margin: 2px auto 10px;
+  margin: 8px auto 4px;
   padding: 2px 12px;
   border: 1px solid var(--border);
   border-radius: 999px;
