@@ -77,9 +77,13 @@ process.stdin.on('data', (chunk) => {
 
 const roots = [];
 const transports = [];
+const supervisors = [];
 afterEach(async () => {
   await Promise.allSettled(transports.splice(0).map((transport) => transport.terminate({ grace: 100 })));
-  while (roots.length) await rm(roots.pop(), { recursive: true, force: true });
+  // A killed child's exit can still be writing the supervisor's ledger into the temp dir; let that
+  // write land, and retry the removal if another one starts meanwhile (ENOTEMPTY).
+  await Promise.allSettled(supervisors.splice(0).map((supervisor) => supervisor.writeChain));
+  while (roots.length) await rm(roots.pop(), { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 async function harness(mode = 'normal', options = {}) {
@@ -88,6 +92,7 @@ async function harness(mode = 'normal', options = {}) {
   const workDir = join(root, 'work');
   await mkdir(workDir);
   const supervisor = new ProcessSupervisor({ ledgerPath: join(root, 'ledger.json') });
+  supervisors.push(supervisor);
   const transport = new AcpTransport({
     binary: options.binary || process.execPath,
     configPath: '/tmp/fake-acp.yml',
