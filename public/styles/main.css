@@ -1169,6 +1169,10 @@ body:has(.tmux-pane-page) {
   word-break: normal;
   overflow-wrap: anywhere;
 }
+/* A later paragraph of the same reply has no bullet, so it starts flush with the text above. */
+.ansi-prose-more {
+  text-indent: 0;
+}
 .ansi-italic { font-style: italic; }
 .ansi-underline { text-decoration: underline; }
 .ansi-strike { text-decoration: line-through; }

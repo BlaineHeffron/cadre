@@ -209,8 +209,20 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // The CLI's colours come from the app's palette: the mode hint is the soft violet, not raw magenta.
   assert.equal(await single.locator('.ansi-fg-bright-magenta').evaluate((el) => getComputedStyle(el).color), 'rgb(197, 179, 230)');
   // A prose reply reads in the UI font at a comfortable measure; tool output stays monospace.
-  const prose = await single.locator('.ansi-prose').evaluate((el) => [getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily, el.getBoundingClientRect().width <= 760, getComputedStyle(el).wordBreak]);
-  assert.deepEqual(prose, [true, true, 'normal'], 'prose wraps between words, not mid-word');
+  const prose = await single.locator('.ansi-prose').evaluate((el) => {
+    // Every word sits on one line (each word's range has a single box) across a multi-line wrap.
+    const node = [...el.childNodes].find((child) => child.nodeType === 3 && child.textContent.length > 100);
+    const splitWords = [];
+    for (const match of node.textContent.matchAll(/\S+/g)) {
+      const range = document.createRange();
+      range.setStart(node, match.index);
+      range.setEnd(node, match.index + match[0].length);
+      if (range.getClientRects().length !== 1) splitWords.push(match[0]);
+    }
+    const lines = Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight));
+    return [getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily, el.getBoundingClientRect().width <= 760, lines > 1, splitWords];
+  });
+  assert.deepEqual(prose, [true, true, true, []], 'prose wraps between words, never mid-word');
   const deskRule = await ruleFits(page);
   assert.ok(deskRule.rule === deskRule.content && deskRule.overflow === 0, `desktop rule ${JSON.stringify(deskRule)}`);
   // The focused transcript keeps a thin visible ring (at least 3:1 against its panel tone). It is a

@@ -54,9 +54,9 @@ export function ansiToHtml(text) {
 
   while (i < text.length) {
     // Prose blocks open and close at the top level, between the self-contained colour spans.
-    if (text[i] === '\uE002' || text[i] === '\uE003') {
+    if (text[i] === '\uE002' || text[i] === '\uE003' || text[i] === '\uE004') {
       flushBuf();
-      parts.push(text[i] === '\uE002' ? '<span class="ansi-prose">' : '</span>');
+      parts.push({ '\uE002': '<span class="ansi-prose">', '\uE003': '</span>', '\uE004': '<span class="ansi-prose ansi-prose-more">' }[text[i]]);
       i++;
       continue;
     }
@@ -102,18 +102,28 @@ function buildClasses(state) {
 const SGR = /\x1b\[[0-9;]*m/g;
 
 // The CLI's prose replies are a bullet line that is not a Tool(args) call, plus the lines it
-// hard-wrapped with a two-space indent. Each block is marked (its trailing newline inside) so it
-// can read as proportional, reflowing text; tool calls, output and code stay monospace.
+// hard-wrapped with a two-space indent; later paragraphs of the same reply are two-space lines
+// after a blank one. Each paragraph is marked (its trailing newline inside) so it can read as
+// proportional, reflowing text. Lists, box tables, deeper-indented code and ⎿ results never
+// count as prose, so they keep their lines and monospace.
+const STRUCTURED = /^(?:[-*•+] |\d+[.)] |[\u2500-\u257F⎿])/;
+const isReplyStart = (plain) => /^[●⏺] \S/.test(plain) && !/^[●⏺] \S+\(/.test(plain) && !STRUCTURED.test(plain.slice(2));
+const isProseLine = (plain) => /^ {2}\S/.test(plain) && !STRUCTURED.test(plain.slice(2));
+
 function markProse(text) {
   const lines = text.split('\n');
+  const plain = lines.map((line) => line.replace(SGR, ''));
+  let inReply = false;
   for (let i = 0; i < lines.length; i++) {
-    const plain = lines[i].replace(SGR, '');
-    if (!/^[●⏺] /.test(plain) || /^[●⏺] \S+\(/.test(plain)) continue;
+    const more = inReply && isProseLine(plain[i]);
+    if (!plain[i]) continue;
+    if (!isReplyStart(plain[i]) && !more) { inReply = false; continue; }
     let end = i;
-    while (end + 1 < lines.length && /^ {2}\S/.test(lines[end + 1].replace(SGR, '')) && !/^ {2}⎿/.test(lines[end + 1].replace(SGR, ''))) end++;
-    lines[i] = `\uE002${lines[i]}`;
+    while (end + 1 < lines.length && isProseLine(plain[end + 1])) end++;
+    lines[i] = `${more ? '\uE004' : '\uE002'}${lines[i]}`;
     if (end + 1 < lines.length) lines[end + 1] = `\uE003${lines[end + 1]}`;
     else lines[end] += '\uE003';
+    inReply = true;
     i = end;
   }
   return lines.join('\n');
