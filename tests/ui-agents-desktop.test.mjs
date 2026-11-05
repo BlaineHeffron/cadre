@@ -102,9 +102,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   for (const name of ['Prompt', 'Esc', 'Kill']) assert.equal(await toolbar.getByRole('button', { name, exact: true }).count(), 0, name);
   assert.equal(await toolbar.getByRole('checkbox', { name: 'Select all' }).count(), 0);
   assert.equal(await toolbar.getByRole('button', { name: 'Refresh' }).innerText(), '↻');
-  // Row meta (provider, path) is 13px secondary grey; the status line reads as body text.
+  // Row meta (provider, path) is 13px in body colour (lighter weight than the title); so is the status line.
   const textStyle = (sel) => rows.first().locator(sel).evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
-  assert.deepEqual(await textStyle('.agent-rail-row-meta'), ['13px', 'rgb(208, 208, 222)']);
+  assert.deepEqual(await textStyle('.agent-rail-row-meta'), ['13px', 'rgb(224, 224, 224)']);
   assert.deepEqual(await textStyle('.agent-rail-row-detail'), ['13px', 'rgb(224, 224, 224)']);
   // A reason that only repeats the badge ('Waiting for input' under Idle) adds no line.
   assert.equal(await rows.nth(1).locator('.agent-rail-row-detail').count(), 0);
@@ -299,9 +299,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     return [cs.fontFamily === getComputedStyle(el.closest('.terminal')).fontFamily, cs.borderTopWidth, cs.borderTopLeftRadius, Math.round(el.querySelector('.ansi-line').getBoundingClientRect().width) === Math.round(inner), el.textContent];
   });
   assert.deepEqual(card, [true, '1px', '8px', true, '● Update(src/a.ts)\n  ⎿  Updated src/a.ts\n       44 - old();\n']);
-  // Code in a card is a step above the 15px transcript (mono reads small beside the sans prose),
-  // on the transcript's 21px row so the pinned view still snaps to whole lines.
-  assert.deepEqual(await single.locator('.ansi-tool').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]), ['16px', '21px']);
+  // Code in a card sits a step under the 15px prose on the transcript's 21px row, so tool output
+  // never outsizes the prose and the pinned view still snaps to whole lines.
+  assert.deepEqual(await single.locator('.ansi-tool').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]), ['14px', '21px']);
   // The CLI's empty input box and its mode line are left to the composer below, which names the mode.
   const tail = await single.locator('.terminal-body').innerText();
   assert.ok(!tail.includes('❯') && !tail.includes('accept edits on'), `pane foot: ${tail.slice(-80)}`);

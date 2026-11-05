@@ -139,7 +139,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
           `)}
         </div>
       ` : null}
-      <div style="display:flex; gap:8px; font-size:var(--fs-sm); color:var(--text-secondary); align-items:center">
+      <div style="display:flex; gap:8px; font-size:var(--fs-sm); color:var(--text-primary); align-items:center">
         <${StatusBadge} status=${status} />
         <${MachineChip} machine=${session.machine} />
         ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title=${session.workDir}>${label}</span>` : null}

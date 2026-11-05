@@ -1201,12 +1201,12 @@ body:has(.tmux-pane-page) {
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--text-primary) 3%, transparent);
 }
-/* In the desktop session transcript (15px on a 21px row), monospace reads a step smaller than the
-   sans prose beside it, so a card's code takes the next size up on the same 21px row, keeping the
-   view's whole-line snap. Phones keep the transcript's own compact size. */
+/* In the desktop session transcript (15px on a 21px row), code in a card sits a step under the
+   sans prose so tool output never outsizes it, on the same 21px row (more leading for dense
+   output, and the view's whole-line snap holds). Phones keep the transcript's own compact size. */
 @media (min-width: 769px) {
   .terminal-fullheight .ansi-tool {
-    font-size: var(--fs-md);
+    font-size: var(--fs-base);
     line-height: 21px;
   }
 }
@@ -2125,9 +2125,9 @@ input[type="checkbox"]:not(.switch) {
   font-size: var(--fs-xs);
 }
 
-/* Provider and path are secondary; the latest status line reads as body text. */
+/* Provider and path are 13px under the title; they and the status line read in body colour. */
 .agent-rail-row-meta {
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: var(--fs-sm);
 }
 

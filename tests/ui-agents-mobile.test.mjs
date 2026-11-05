@@ -51,11 +51,11 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   // "Needs attention" leads with a red tint and edge, not a saturated slab; light text stays readable.
   const urgent = await cards.nth(1).locator('.status-badge').evaluate((el) => [el.textContent, getComputedStyle(el).color, getComputedStyle(el).borderTopColor]);
   assert.deepEqual(urgent, ['!Needs attention', 'rgb(255, 161, 152)', 'rgb(239, 83, 80)']);
-  // Card paths and times are read, so they use the 13px step in secondary grey. The path is the
+  // Card paths are read, so they use the 13px step in body colour (times stay secondary). The path is the
   // rail's short form in the body font, so it is not cut mid-word; the full path is its tooltip.
   const path = cards.first().getByTitle('/home/me/repo');
   assert.equal(await path.innerText(), 'me/repo');
-  assert.deepEqual(await path.evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color, getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily]), ['13px', 'rgb(208, 208, 222)', true]);
+  assert.deepEqual(await path.evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color, getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily]), ['13px', 'rgb(224, 224, 224)', true]);
   // At two columns the heading spans the row, so cards side by side line up.
   await page.setViewportSize({ width: 960, height: 844 });
   const [left, right] = await Promise.all([0, 1].map((i) => cards.nth(i).boundingBox()));
