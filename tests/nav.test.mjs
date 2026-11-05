@@ -12,6 +12,9 @@ test('phone navigation keeps frequent routes visible and overflow reachable; des
 }, async (t) => {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const app = Fastify();
+  // One hook, browser first: while it is open, its keep-alive connections hold app.close().
+  let browser;
+  t.after(async () => { await browser?.close(); await app.close(); });
   await app.register(fastifyStatic, { root: join(root, 'public'), prefix: '/' });
   await app.register(fastifyStatic, { root: join(root, 'node_modules'), prefix: '/vendor/npm/', decorateReply: false });
   const index = await readFile(join(root, 'public/index.html'), 'utf8');
@@ -29,9 +32,7 @@ test('phone navigation keeps frequent routes visible and overflow reachable; des
     </script>`,
   )));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
-  // The browser closes first: while it is open, its keep-alive connections hold app.close() (73s in CI).
-  t.after(async () => { await browser.close(); await app.close(); });
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
