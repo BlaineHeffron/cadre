@@ -114,7 +114,7 @@ test('the CLI\'s empty input box and its mode line at the foot of the pane are d
   assert.equal(foldEmptyPrompt(['● Done.', rule, '❯ ', rule, '  ? for shortcuts'].join('\n')), ['● Done.', '  ? for shortcuts'].join('\n'));
   // The mode the composer's button names.
   assert.equal(permissionMode(['● Done.', rule, '❯ ', rule, mode].join('\n')), 'accept edits');
-  assert.equal(permissionMode('  ⏵⏵ plan mode on (shift+tab to cycle)'), 'plan mode');
+  assert.equal(permissionMode('  ⏸ plan mode on (shift+tab to cycle)'), 'plan');
   assert.equal(permissionMode('● Done.\n  ? for shortcuts'), '');
   // Text typed into the box keeps it; so does a box with more than the mode hints under it.
   const typed = ['● Done.', rule, '❯ npm te', rule, mode].join('\n');
@@ -146,4 +146,24 @@ test('the live spinner line takes the accent colour; a finished "Worked for" lin
   // Prose or a list item that merely ends a word with an ellipsis is not a spinner.
   assert.equal(ansiToHtml('Loading… the data'), 'Loading… the data');
   assert.equal(ansiToHtml('\x1b[33m* Note… this is a list item\x1b[0m'), '<span class="ansi-fg-yellow">* Note… this is a list item</span>');
+});
+
+test('real CLI footers keep everything but the mode, colours and all', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const pane = (name) => readFile(new URL(`./fixtures/session-state/panes/${name}.pane`, import.meta.url), 'utf8');
+  const plain = (text) => text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x1b]*\x1b\\/g, '');
+  const foot = (text) => plain(foldEmptyPrompt(text)).split('\n').filter((line) => line.trim()).slice(-1)[0].trim();
+  const idle = await pane('claude-idle-empty-composer');
+  assert.equal(permissionMode(idle), 'bypass permissions');
+  assert.equal(foot(idle), '← for agents');
+  // The rest of the line keeps its own colour codes.
+  assert.match(foldEmptyPrompt(idle), /\x1b\[37m← for agents\x1b\[39m$/m);
+  // That pane's box holds queued pastes, so nothing folds; its real footer under an empty box keeps
+  // the shell count and the update warning.
+  const shells = await pane('claude-795ad3c7-osc-rc-footer');
+  assert.equal(foldEmptyPrompt(shells), shells);
+  const footer = shells.split('\n').find((line) => line.includes('⏵⏵'));
+  const rule = '─'.repeat(40);
+  assert.equal(permissionMode(footer), 'bypass permissions');
+  assert.equal(plain(foldEmptyPrompt(['● Done.', rule, '❯ ', rule, footer].join('\n'))), '● Done.\n  1 shell  ✘ Auto-update failed · Run claude doctor');
 });
