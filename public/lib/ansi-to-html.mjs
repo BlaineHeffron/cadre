@@ -269,3 +269,17 @@ export function foldAnsweredMenu(text, interaction) {
   if (end < 0 || plain.slice(end + 1).some((line) => choice.test(line))) return text;
   return [...lines.slice(0, start), ...lines.slice(end + 1)].join('\n');
 }
+
+/**
+ * The CLI's own input box (a rule, an empty ❯ line, a rule) at the foot of the pane repeats the
+ * composer below it, so it is dropped while empty. The mode line under it stays; anything typed
+ * into the box keeps it in view.
+ */
+export function foldEmptyPrompt(text) {
+  const lines = text.split('\n');
+  const plain = lines.map((line) => line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim());
+  const at = plain.findLastIndex((line) => line === '❯');
+  const rule = (line) => /^─{20,}$/.test(line ?? '');
+  if (at < 1 || !rule(plain[at - 1]) || !rule(plain[at + 1]) || plain.slice(at + 2).filter(Boolean).length > 2) return text;
+  return [...lines.slice(0, at - 1), ...lines.slice(at + 2)].join('\n');
+}

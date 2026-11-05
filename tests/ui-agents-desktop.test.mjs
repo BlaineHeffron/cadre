@@ -63,7 +63,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     return { rule: width('.ansi-rule'), row: width('.ansi-line'), content: Math.round(content), overflow: el.scrollWidth - el.clientWidth };
   });
   const menu = 'pane text\nDo you want to proceed?\n❯ 1. Yes\n  2. Yes, and don\'t ask again\n  3. No, and tell Claude what to do differently (esc)';
-  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: req.params.id === 'b2' ? menu : `pane text\n● ${'The reply reads as prose. '.repeat(12)}\n\x1b[48;2;34;92;43m  43 + const added = true;\x1b[0m\n● Update(src/a.ts)\n  ⎿  Updated src/a.ts\n\x1b[48;2;122;41;54m       44 - old();\x1b[0m\n\x1b[38;5;244m${'─'.repeat(110)}\x1b[0m\n❯ \n\x1b[95m⏵⏵ accept edits on\x1b[0m`, state: req.params.id === 'b2' ? blocked : { status: 'working' }, sessionName: `claude-${req.params.id}` }));
+  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: req.params.id === 'b2' ? menu : `pane text\n● ${'The reply reads as prose. '.repeat(12)}\n\x1b[48;2;34;92;43m  43 + const added = true;\x1b[0m\n● Update(src/a.ts)\n  ⎿  Updated src/a.ts\n\x1b[48;2;122;41;54m       44 - old();\x1b[0m\n\x1b[38;5;244m${'─'.repeat(110)}\x1b[0m\n${'─'.repeat(110)}\n❯ \n${'─'.repeat(110)}\n\x1b[95m⏵⏵ accept edits on\x1b[0m`, state: req.params.id === 'b2' ? blocked : { status: 'working' }, sessionName: `claude-${req.params.id}` }));
   app.post('/api/*', () => ({ ok: true }));
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
@@ -251,6 +251,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     return [cs.fontFamily === getComputedStyle(el.closest('.terminal')).fontFamily, cs.borderTopWidth, cs.borderTopLeftRadius, Math.round(el.querySelector('.ansi-line').getBoundingClientRect().width) === Math.round(inner), el.textContent];
   });
   assert.deepEqual(card, [true, '1px', '8px', true, '● Update(src/a.ts)\n  ⎿  Updated src/a.ts\n       44 - old();\n']);
+  // The CLI's empty input box is left to the composer below; its mode line stays.
+  const tail = await single.locator('.terminal-body').innerText();
+  assert.ok(!tail.includes('❯') && tail.includes('accept edits on'), `pane foot: ${tail.slice(-80)}`);
   const deskRule = await ruleFits(page);
   assert.ok(deskRule.rule === deskRule.content && deskRule.row === deskRule.content && deskRule.overflow === 0, `desktop rule ${JSON.stringify(deskRule)}`);
   // The focused transcript keeps a thin visible ring (at least 3:1 against its panel tone). It is a

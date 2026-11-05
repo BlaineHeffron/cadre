@@ -22,7 +22,7 @@ import { createRevisionGuard } from '../app/revision-guard.mjs';
 import { addToast, agentThreads, markSessionSeenForKind, markSessionAttentionSeen, markSessionTurnSeen, removeSessionForKind } from '../app/state.mjs';
 import { isEditableTarget, mapKeyboardEventToTmux } from '../app/terminal-input.mjs';
 import { Terminal, stripAnsi } from '../components/terminal.mjs';
-import { foldAnsweredMenu } from '../lib/ansi-to-html.mjs';
+import { foldAnsweredMenu, foldEmptyPrompt } from '../lib/ansi-to-html.mjs';
 import { AgentControlBar } from '../components/agent-control-bar.mjs';
 import { TerminalKeys } from '../components/terminal-keys.mjs';
 import { RenderedTranscript } from '../components/rendered-transcript.mjs';
@@ -688,10 +688,11 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
           onLoadEarlier: () => loadEarlierTranscript(id),
         }))
       : h(Terminal, {
-        // Fold only when the control bar below is showing these choices.
+        // Fold the menu only when the control bar below is showing these choices; otherwise drop the
+        // CLI's empty input box, which the composer below stands in for.
         content: !isRustManagedReadOnly && sessionState.value.status === 'blocked' && sessionState.value.capabilities?.canAnswerInteraction
           ? foldAnsweredMenu(content.value, sessionState.value.interaction)
-          : content.value,
+          : isRustManagedReadOnly ? content.value : foldEmptyPrompt(content.value),
         fullHeight: true,
         ansiColors: true,
         captureKeyboard: !isRustManagedReadOnly,

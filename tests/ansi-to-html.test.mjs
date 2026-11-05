@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ansiToHtml } from '../public/lib/ansi-to-html.mjs';
+import { ansiToHtml, foldEmptyPrompt } from '../public/lib/ansi-to-html.mjs';
 
 test('truecolor diff backgrounds render, blended toward the terminal, instead of being dropped', () => {
   assert.equal(
@@ -104,4 +104,16 @@ test('a line in one background colour spans the pane; badges inside a line do no
   );
   // Private-use icons around dashes stay text; only the parser's own marks draw a rule.
   assert.equal(ansiToHtml(`\uE000${'─'.repeat(30)}\uE001`), `\uE000${'─'.repeat(30)}\uE001`);
+});
+
+test('the CLI\'s empty input box at the foot of the pane is dropped; the mode line and typed text stay', () => {
+  const rule = `\x1b[38;5;244m${'─'.repeat(40)}\x1b[0m`;
+  const mode = '  \x1b[95m⏵⏵ accept edits on\x1b[0m';
+  assert.equal(foldEmptyPrompt(['● Done.', '', rule, '❯ ', rule, mode].join('\n')), ['● Done.', '', mode].join('\n'));
+  // Text typed into the box keeps it; so does a box with more than the mode hints under it.
+  const typed = ['● Done.', rule, '❯ npm te', rule, mode].join('\n');
+  assert.equal(foldEmptyPrompt(typed), typed);
+  const earlier = [rule, '❯ ', rule, 'a', 'b', 'c'].join('\n');
+  assert.equal(foldEmptyPrompt(earlier), earlier);
+  assert.equal(foldEmptyPrompt('❯ '), '❯ ');
 });
