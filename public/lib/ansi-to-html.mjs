@@ -27,7 +27,7 @@ export function ansiToHtml(text) {
   if (!text) return '';
   // The marks below are non-printing control characters (never Nerd Font icons from the
   // private-use area); any already in the pane are dropped first.
-  text = text.replace(/[\x02-\x07\x0e\x0f]/g, '');
+  text = text.replace(/[\x02-\x07\x0e-\x10]/g, '');
   // A whole line of only box-drawing dashes (colour codes aside) is the CLI's divider at its own
   // column count. Its dashes are marked and drawn as a full-width rule in their colour, so it
   // never stops short of the pane edge; the dashes stay in the DOM for copying.
@@ -83,7 +83,7 @@ export function ansiToHtml(text) {
     // Prose and tool-card blocks open and close at the top level, between the self-contained colour spans.
     if (BLOCK_MARKS[text[i]]) {
       flushBuf();
-      if (text[i] === '\x02' || text[i] === '\x04') inProse = true;
+      if (text[i] === '\x02' || text[i] === '\x04' || text[i] === '\x10') inProse = true;
       else if (text[i] === '\x03') inProse = false;
       parts.push(BLOCK_MARKS[text[i]]);
       i++;
@@ -133,6 +133,7 @@ const BLOCK_MARKS = {
   '\x02': '<span class="ansi-prose">',
   '\x03': '</span>',
   '\x04': '<span class="ansi-prose ansi-prose-more">',
+  '\x10': '<span class="ansi-prose ansi-prompt">',
   '\x0e': '<span class="ansi-tool">',
   '\x0f': '</span>',
 };
@@ -140,10 +141,15 @@ const BLOCK_MARKS = {
 // The CLI's prose replies are a bullet line that is not a Tool(args) call, plus the lines it
 // hard-wrapped with a two-space indent; later paragraphs of the same reply are two-space lines
 // after a blank one. Each paragraph is marked (its trailing newline inside) so it can read as
-// proportional, reflowing text. Lists, box tables, deeper-indented code and ⎿ results never
-// count as prose, so they keep their lines and monospace.
+// proportional, reflowing text. The user's own prompt (`❯ text` and its lines) reads in the same
+// font but keeps its line breaks, which are the user's; a status line (`✶ Drafting… (52s)`,
+// `✻ Worked for 18s`) is a block of its own. Lists, box tables, deeper-indented code, ⎿ results,
+// numbered menu choices (`❯ 1. Yes`) and a draft in the input box (under a ─ rule) never count,
+// so they keep their lines and monospace.
 const STRUCTURED = /^(?:[-*•+] |\d+[.)] |[\u2500-\u257F⎿])/;
 const isReplyStart = (plain) => /^[●⏺] \S/.test(plain) && !/^[●⏺] \S+\(/.test(plain) && !STRUCTURED.test(plain.slice(2));
+const isPromptStart = (plain, above) => /^❯ \S/.test(plain) && !STRUCTURED.test(plain.slice(2)) && !/^─+$/.test((above ?? '').replace(/[\x06\x07]/g, ''));
+const isStatusLine = (plain) => /^[✻✶✳✢✽·] [A-Z]/.test(plain);
 const isProseLine = (plain) => /^ {2}\S/.test(plain) && !STRUCTURED.test(plain.slice(2));
 
 function markProse(text) {
@@ -153,13 +159,15 @@ function markProse(text) {
   for (let i = 0; i < lines.length; i++) {
     const more = inReply && isProseLine(plain[i]);
     if (!plain[i]) continue;
-    if (!isReplyStart(plain[i]) && !more) { inReply = false; continue; }
+    const prompt = isPromptStart(plain[i], plain[i - 1]);
+    const status = isStatusLine(plain[i]);
+    if (!isReplyStart(plain[i]) && !prompt && !status && !more) { inReply = false; continue; }
     let end = i;
-    while (end + 1 < lines.length && isProseLine(plain[end + 1])) end++;
-    lines[i] = `${more ? '\x04' : '\x02'}${lines[i]}`;
+    while (!status && end + 1 < lines.length && isProseLine(plain[end + 1])) end++;
+    lines[i] = `${prompt ? '\x10' : more ? '\x04' : '\x02'}${lines[i]}`;
     if (end + 1 < lines.length) lines[end + 1] = `\x03${lines[end + 1]}`;
     else lines[end] += '\x03';
-    inReply = true;
+    inReply = !prompt && !status;
     i = end;
   }
   return lines.join('\n');
@@ -173,7 +181,7 @@ const isToolLine = (plain) => /^ {2}[⎿└│]|^ {3,}\S/.test(plain);
 
 function markTools(text) {
   const lines = text.split('\n');
-  const plain = lines.map((line) => line.replace(SGR, '').replace(/[\x02-\x07]/g, ''));
+  const plain = lines.map((line) => line.replace(SGR, '').replace(/[\x02-\x07\x10]/g, ''));
   for (let i = 0; i < lines.length; i++) {
     if (!isToolStart(plain[i])) continue;
     let end = i;
