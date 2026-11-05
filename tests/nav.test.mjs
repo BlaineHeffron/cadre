@@ -24,7 +24,8 @@ test('phone navigation keeps frequent routes visible and overflow reachable; des
       import { h, render } from 'preact';
       import Router from 'preact-router';
       import { Nav } from '/components/nav.mjs';
-      import { queueOpenCount, alerts, claudeSessions } from '/app/state.mjs';
+      import { queueOpenCount, alerts, claudeSessions, wsConnected } from '/app/state.mjs';
+      wsConnected.value = true;
       queueOpenCount.value = 12;
       alerts.value = [{ acknowledged: false }, { acknowledged: false }];
       claudeSessions.value = Array.from({ length: 123 }, (_, id) => ({ id: String(id) }));
@@ -62,6 +63,8 @@ test('phone navigation keeps frequent routes visible and overflow reachable; des
   // A standard phone shows the brand at the left, so the bar does not read as scrolled.
   const brand = await nav.getByText('Cadre', { exact: true }).boundingBox();
   assert.ok(brand && brand.x >= 0 && brand.x + brand.width < (await nav.getByRole('link', { name: /^Agents/ }).boundingBox()).x);
+  // The connection badge is an 8px dot here, the phone's only connection cue, so it stays solid green.
+  assert.equal(await nav.locator('.nav-connection-badge').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(102, 187, 106)');
   await more.click();
   assert.equal(await more.getAttribute('aria-expanded'), 'true');
   if (process.env.NAV_SCREENSHOT) await page.screenshot({ path: process.env.NAV_SCREENSHOT.replace('.png', '-overflow.png') });

@@ -252,9 +252,11 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   phone.setDefaultTimeout(5000);
   await phone.goto(`${origin}/session`);
   await phone.locator('.terminal-keys').waitFor();
-  // Rounded: the mobile viewport sometimes lays the 36px toggle out at 35.99999px (about 1 run in 4 on main).
-  const summaryHeight = (await phone.locator('.terminal-keys > summary').boundingBox()).height;
-  assert.ok(Math.round(summaryHeight) >= 36, `phone Terminal keys toggle is a full control-height target (${summaryHeight}px)`);
+  // In the tools row on a phone, Keys is the same 44px tap target as the tools beside it (rounded:
+  // the mobile viewport can lay a box out a hair short). It keeps its accessible name.
+  const [keysH, toolH] = await Promise.all([phone.locator('.terminal-keys > summary'), phone.locator('.control-row-tools > .ctrl-btn').first()].map(async (l) => Math.round((await l.boundingBox()).height)));
+  assert.ok(keysH >= 44 && keysH === toolH, `phone Keys toggle ${keysH}px beside a ${toolH}px tool`);
+  assert.equal(await phone.locator('.terminal-keys > summary').getAttribute('aria-label'), 'Terminal keys');
   // On a phone, tool cards keep the transcript's own compact size and row.
   const phoneCard = await phone.locator('.ansi-tool').first().evaluate((el) => {
     const [card, pane] = [el, el.closest('.terminal')].map((node) => getComputedStyle(node));

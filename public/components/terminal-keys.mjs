@@ -18,7 +18,7 @@ export function TerminalKeys({ onKey }) {
 
   return html`
     <details class="terminal-keys">
-      <summary title="Terminal keys">Keys</summary>
+      <summary aria-label="Terminal keys" title="Terminal keys">Keys</summary>
       <div class="terminal-keys-row">
         <button style=${btnStyle} onclick=${k('Up')} title="Up arrow">\u25B2</button>
         <button style=${btnStyle} onclick=${k('Down')} title="Down arrow">\u25BC</button>
