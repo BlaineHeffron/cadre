@@ -167,3 +167,11 @@ test('real CLI footers keep everything but the mode, colours and all', async () 
   assert.equal(permissionMode(footer), 'bypass permissions');
   assert.equal(plain(foldEmptyPrompt(['● Done.', rule, '❯ ', rule, footer].join('\n'))), '● Done.\n  1 shell  ✘ Auto-update failed · Run claude doctor');
 });
+
+test('inline code in a prose reply renders as code and keeps its backticks for copying; elsewhere it stays text', () => {
+  const html = ansiToHtml('● `GET /notes` now accepts `limit`.');
+  assert.equal(html, '<span class="ansi-prose">● <code class="ansi-code"><span class="ansi-tick">`</span>GET /notes<span class="ansi-tick">`</span></code> now accepts <code class="ansi-code"><span class="ansi-tick">`</span>limit<span class="ansi-tick">`</span></code>.</span>');
+  assert.equal(html.replace(/<[^>]+>/g, ''), '● `GET /notes` now accepts `limit`.');
+  // Tool output and terminal text keep their backticks as typed.
+  assert.equal(ansiToHtml('  echo `date`'), '  echo `date`');
+});

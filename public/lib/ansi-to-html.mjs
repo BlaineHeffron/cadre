@@ -47,6 +47,7 @@ export function ansiToHtml(text) {
   let i = 0;
   let buf = '';
   let fullLine = false;
+  let inProse = false;
 
   function flushBuf() {
     if (!buf) return;
@@ -64,7 +65,9 @@ export function ansiToHtml(text) {
           : `background:color-mix(in srgb,${value} 75%,transparent)`))
       .join(';');
     const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;
-    const html = esc(buf).replace(/\x06(─+)\x07/g, '<span class="ansi-rule">$1</span>');
+    let html = esc(buf).replace(/\x06(─+)\x07/g, '<span class="ansi-rule">$1</span>');
+    // Inline `code` in a prose reply reads as code; the backticks stay in the DOM (unseen) for copying.
+    if (inProse) html = html.replace(/`([^`\n]+)`/g, '<code class="ansi-code"><span class="ansi-tick">`</span>$1<span class="ansi-tick">`</span></code>');
     parts.push(attrs ? `<span${attrs}>${html}</span>` : html);
     buf = '';
   }
@@ -79,6 +82,8 @@ export function ansiToHtml(text) {
     // Prose and tool-card blocks open and close at the top level, between the self-contained colour spans.
     if (BLOCK_MARKS[text[i]]) {
       flushBuf();
+      if (text[i] === '\x02' || text[i] === '\x04') inProse = true;
+      else if (text[i] === '\x03') inProse = false;
       parts.push(BLOCK_MARKS[text[i]]);
       i++;
       continue;
