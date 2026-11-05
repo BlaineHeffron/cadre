@@ -36,8 +36,9 @@ export function ansiToHtml(text) {
   // pane too, so hunk bars never stop mid-panel.
   text = text.replace(/^(?=\x1b\[[0-9;]*48;[0-9;]*m[^\x1b\n]*(?:\x1b\[0?m)?$)/gm, '\x05');
   // The CLI's live spinner line (`✶ Drafting… (52s · esc to interrupt)`) is a working status, so it
-  // takes the accent the Working badge uses rather than the CLI's own coral.
-  text = text.replace(/^(?:\x1b\[[0-9;]*m)*[✻✶✳✢✽*·](?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*[A-Z][a-z-]*….*$/gm,
+  // takes the accent the Working badge uses rather than the CLI's own coral. It needs the timer or
+  // the interrupt hint after the verb, so a list item like `* Note… text` keeps its own colours.
+  text = text.replace(/^(?:\x1b\[[0-9;]*m)*[✻✶✳✢✽*·](?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*[A-Z][a-z-]*…(?:\x1b\[[0-9;]*m)* \((?:\d+[sm]\b|esc to interrupt).*$/gm,
     (line) => `\x1b[36m${line.replace(SGR, '')}\x1b[0m`);
   text = markTools(markProse(text));
 

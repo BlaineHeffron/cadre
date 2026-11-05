@@ -136,6 +136,8 @@ test('the live spinner line takes the accent colour; a finished "Worked for" lin
   assert.equal(ansiToHtml(`${coral('✶')} ${coral('Drafting… (52s · ↓ 2.4k tokens · esc to interrupt)')}`),
     '<span class="ansi-fg-cyan">✶ Drafting… (52s · ↓ 2.4k tokens · esc to interrupt)</span>');
   assert.equal(ansiToHtml('\x1b[37m✻\x1b[0m \x1b[37mWorked for 18s\x1b[0m'), '<span class="ansi-fg-white">✻</span> <span class="ansi-fg-white">Worked for 18s</span>');
-  // Prose that merely ends a word with an ellipsis is not a spinner.
+  assert.equal(ansiToHtml('✶ Thinking… (esc to interrupt)'), '<span class="ansi-fg-cyan">✶ Thinking… (esc to interrupt)</span>');
+  // Prose or a list item that merely ends a word with an ellipsis is not a spinner.
   assert.equal(ansiToHtml('Loading… the data'), 'Loading… the data');
+  assert.equal(ansiToHtml('\x1b[33m* Note… this is a list item\x1b[0m'), '<span class="ansi-fg-yellow">* Note… this is a list item</span>');
 });
