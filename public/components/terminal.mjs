@@ -211,8 +211,8 @@ export function Terminal({
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const snapshot = rememberScrollPosition(el);
     // The top fade only covers rows that have actually scrolled out of view; pinned to the bottom
-    // the view is snapped to a whole line, so it needs none.
-    el.classList.toggle('terminal-scrolled', el.scrollTop > 0 && !snapshot.atBottom);
+    // the view is snapped to a whole line (where the browser can locate it), so it needs none.
+    el.classList.toggle('terminal-scrolled', el.scrollTop > 0 && (!snapshot.atBottom || !document.caretRangeFromPoint));
     if (snapshot.atBottom) {
       userScrollIntent.current = false;
     }
