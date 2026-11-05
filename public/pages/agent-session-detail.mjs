@@ -732,9 +732,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
       imagePreviewUrl: imageDraft.value.imageDataUrl,
       imageNote: `Attached. This compatibility transport will visibly disclose that it wrote a safe workspace reference for ${descriptor.label}.`,
       inputText,
+      keys: h(TerminalKeys, { onKey: sendTerminalKey }),
     }) : null,
-    // On desktop raw keys sit below the composer, so the pending command meets its answers;
-    // touch-screen CSS keeps them above the sticky control bar.
-    !isRustManagedReadOnly ? h(TerminalKeys, { onKey: sendTerminalKey }) : null,
   );
 }

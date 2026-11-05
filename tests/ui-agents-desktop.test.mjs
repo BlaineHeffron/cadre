@@ -167,10 +167,20 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.deepEqual(await page.getByLabel('More session actions').evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
   // The terminal no longer repeats the menu the bar is showing.
   await page.locator('.terminal').getByText('pane text').waitFor();
-  // The pending command runs straight into its question; raw terminal keys sit below the composer.
-  assert.ok((await page.locator('.terminal-keys > summary').boundingBox()).height >= 36, 'Terminal keys toggle is a full control-height target');
-  const [term, question, keys, compose] = await Promise.all(['.terminal', '.approval-prompt-title', '.terminal-keys', '.control-row-compose'].map((sel) => page.locator(sel).first().boundingBox()));
-  assert.ok(question.y - (term.y + term.height) < 16 && keys.y > compose.y, `question ${question.y - (term.y + term.height)}px below the terminal; keys at ${keys.y}, composer at ${compose.y}`);
+  // The pending command runs straight into its question.
+  const [term, question] = await Promise.all(['.terminal', '.approval-prompt-title'].map((sel) => page.locator(sel).first().boundingBox()));
+  assert.ok(question.y - (term.y + term.height) < 16, `question ${question.y - (term.y + term.height)}px below the terminal`);
+  // Raw terminal keys are one more tool in the composer's single toolbar row, not a line of their own.
+  const keysToggle = page.locator('.control-row-tools > .terminal-keys > summary');
+  assert.ok((await keysToggle.boundingBox()).height >= 36, 'Terminal keys toggle is a full control-height target');
+  const [commands, keysBox] = await Promise.all([page.getByRole('button', { name: '/ Commands', exact: true }), keysToggle].map((l) => l.boundingBox()));
+  assert.ok(Math.abs(keysBox.y - commands.y) < 1, `keys at y=${keysBox.y}, / Commands at y=${commands.y}`);
+  // Opened, the tray takes a full row of the toolbar.
+  await keysToggle.click();
+  const [tray, tools] = await Promise.all(['.terminal-keys-row', '.control-row-tools'].map((sel) => page.locator(sel).boundingBox()));
+  assert.ok(tray.width > tools.width * 0.9, `key tray ${tray.width}px in a ${tools.width}px toolbar`);
+  await page.locator('.terminal-keys-row').getByRole('button', { name: 'Esc', exact: true }).waitFor();
+  await keysToggle.click();
   assert.doesNotMatch(await page.locator('.terminal').innerText(), /Do you want to proceed|2\. Yes/);
   assert.equal(await page.locator('.control-row-compose [data-placeholder]').getAttribute('data-placeholder'), 'Message the agent...', 'one composer placeholder whatever the state');
   // While answers are offered they are the only primary actions; Cycle mode and Interrupt step aside.
@@ -237,14 +247,16 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.ok(box.y >= 0 && box.y + box.height <= 900, `Create session at y=${box.y}`);
   // Page titles share one style across pages.
   assert.equal(await page.locator('h1').first().evaluate((el) => getComputedStyle(el).fontSize), '18px');
-  // On a phone the keys stay above the sticky, safe-area-padded control bar.
+  // On a phone the keys toggle rides inside the sticky, safe-area-padded control bar.
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   phone.setDefaultTimeout(5000);
   await phone.goto(`${origin}/session`);
   await phone.locator('.terminal-keys').waitFor();
-  // Rounded: the mobile viewport sometimes lays the 36px toggle out at 35.99999px (about 1 run in 4 on main).
-  const summaryHeight = (await phone.locator('.terminal-keys > summary').boundingBox()).height;
-  assert.ok(Math.round(summaryHeight) >= 36, `phone Terminal keys toggle is a full control-height target (${summaryHeight}px)`);
+  // In the tools row on a phone, Keys is the same 44px tap target as the tools beside it (rounded:
+  // the mobile viewport can lay a box out a hair short). It keeps its accessible name.
+  const [keysH, toolH] = await Promise.all([phone.locator('.terminal-keys > summary'), phone.locator('.control-row-tools > .ctrl-btn').first()].map(async (l) => Math.round((await l.boundingBox()).height)));
+  assert.ok(keysH >= 44 && keysH === toolH, `phone Keys toggle ${keysH}px beside a ${toolH}px tool`);
+  assert.equal(await phone.locator('.terminal-keys > summary').getAttribute('aria-label'), 'Terminal keys');
   // On a phone, tool cards keep the transcript's own compact size and row.
   const phoneCard = await phone.locator('.ansi-tool').first().evaluate((el) => {
     const [card, pane] = [el, el.closest('.terminal')].map((node) => getComputedStyle(node));
@@ -254,7 +266,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const phoneRule = await ruleFits(phone);
   assert.ok(phoneRule.rule === phoneRule.content && phoneRule.row === phoneRule.content && phoneRule.overflow === 0, `phone rule ${JSON.stringify(phoneRule)}`);
   const [phoneKeys, phoneBar] = await Promise.all(['.terminal-keys', '.claude-control-bar'].map((sel) => phone.locator(sel).boundingBox()));
-  assert.ok(phoneKeys.y + phoneKeys.height <= phoneBar.y + 1, `phone keys end at ${phoneKeys.y + phoneKeys.height}, bar starts at ${phoneBar.y}`);
+  assert.ok(phoneKeys.y >= phoneBar.y && phoneKeys.y + phoneKeys.height <= phoneBar.y + phoneBar.height, `phone keys at ${phoneKeys.y}, bar ${phoneBar.y}..${phoneBar.y + phoneBar.height}`);
   await phone.close();
   // A single session reads at a comfortable width on a wide screen, centred.
   await page.goto(`${origin}/session`);

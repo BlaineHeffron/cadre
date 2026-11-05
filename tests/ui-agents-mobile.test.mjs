@@ -9,7 +9,7 @@ import { chromium } from 'playwright-core';
 
 const sessions = [
   { id: 'a1', displayName: 'first task', workDir: '/home/me/repo', tmuxSession: 'claude-a1', state: { status: 'working' } },
-  { id: 'b2', displayName: 'second task', workDir: '/home/me/repo', tmuxSession: 'claude-b2', state: { status: 'ready' } },
+  { id: 'b2', displayName: 'second task', workDir: '/home/me/repo', tmuxSession: 'claude-b2', state: { status: 'blocked', interaction: { kind: 'permission', detail: 'Do you want to proceed?' } } },
 ];
 
 test('phone Agents page leads with sessions, keeps bulk actions folded until used, and opens a basics-first new-session form', { skip: !process.env.CHROMIUM_BIN, timeout: 30000 }, async (t) => {
@@ -48,6 +48,9 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   // One provider heading per run of cards, not one per card.
   assert.deepEqual(await page.locator('.agents-card-provider').allInnerTexts(), ['Claude']);
   assert.equal(await cards.first().getByRole('img', { name: 'Unread' }).isVisible(), true);
+  // "Needs attention" leads with a red tint and edge, not a saturated slab; light text stays readable.
+  const urgent = await cards.nth(1).locator('.status-badge').evaluate((el) => [el.textContent, getComputedStyle(el).color, getComputedStyle(el).borderTopColor]);
+  assert.deepEqual(urgent, ['!Needs attention', 'rgb(255, 161, 152)', 'rgb(239, 83, 80)']);
   // Card paths and times are read, so they use the 13px step in secondary grey. The path is the
   // rail's short form in the body font, so it is not cut mid-word; the full path is its tooltip.
   const path = cards.first().getByTitle('/home/me/repo');

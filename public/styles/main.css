@@ -1315,15 +1315,24 @@ body:has(.tmux-pane-page) {
   white-space: nowrap;
 }
 
-/* Only "Needs attention" is a solid fill; calmer states are tinted text, so the urgent one leads. */
+/* Status badges, and the nav's connection badge, are tinted rather than solid fills. "Needs
+   attention" leads with a stronger red tint and edge instead of a saturated slab. */
 .status-badge.badge-medium { --tone: var(--warning); }
 .status-badge.badge-info { --tone: var(--accent); }
-.status-badge.badge-success { --tone: var(--success); }
+.status-badge.badge-success,
+.nav-connection-badge.badge-success { --tone: var(--success); }
+.status-badge.badge-critical { --tone: var(--danger-text); }
 
-.status-badge:is(.badge-medium, .badge-info, .badge-success) {
+.status-badge:is(.badge-medium, .badge-info, .badge-success, .badge-critical),
+.nav-connection-badge.badge-success {
   background: color-mix(in srgb, var(--tone) 16%, transparent);
   color: var(--tone);
   border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
+}
+
+.status-badge.badge-critical {
+  background: color-mix(in srgb, var(--danger) 30%, transparent);
+  border-color: var(--danger);
 }
 
 /* Plain checkboxes are a comfortable target; switches keep their own shape. */
@@ -2212,21 +2221,39 @@ input[type="checkbox"]:not(.switch) {
   }
 }
 
-/* The raw-key toggle shares the control height; line-height keeps the disclosure marker. */
+/* The raw-key toggle is one of the composer's soft tool buttons. */
 .terminal-keys > summary {
-  width: fit-content;
-  padding: 0 8px;
-  line-height: var(--control-h);
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-h);
+  padding: 0 12px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
   color: var(--text-primary);
   font-size: var(--fs-sm);
+  font-weight: 500;
+  list-style: none;
   cursor: pointer;
+}
+
+.terminal-keys > summary::-webkit-details-marker {
+  display: none;
+}
+
+.terminal-keys > summary:hover {
+  background: var(--bg-hover);
+}
+
+/* Open, the key tray takes the tools row's full width below the other tools. */
+.control-row-tools > .terminal-keys[open] {
+  flex-basis: 100%;
 }
 
 .terminal-keys-row {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 0 0 4px;
+  padding: 6px 0 0;
 }
 
 /* ── Claude Control Bar ── */
@@ -3461,6 +3488,12 @@ input[type="checkbox"]:not(.switch) {
     font-size: 0;
   }
 
+  /* An 8px dot is the phone's only connection cue, so it stays a solid fill, not a tint. */
+  .nav-connection-badge.badge-success {
+    background: var(--success);
+    border-color: var(--success);
+  }
+
   .nav-link-primary {
     display: none;
   }
@@ -3676,7 +3709,8 @@ input[type="checkbox"]:not(.switch) {
   .ctrl-btn,
   .ctrl-inline-select,
   .control-row-tools .ctrl-btn,
-  .control-row-tools .ctrl-inline-select {
+  .control-row-tools .ctrl-inline-select,
+  .control-row-tools .terminal-keys > summary {
     min-height: 44px;
   }
 
