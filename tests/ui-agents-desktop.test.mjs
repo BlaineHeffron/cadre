@@ -275,6 +275,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     return [cs.fontFamily === getComputedStyle(el.closest('.terminal')).fontFamily, cs.borderTopWidth, cs.borderTopLeftRadius, Math.round(el.querySelector('.ansi-line').getBoundingClientRect().width) === Math.round(inner), el.textContent];
   });
   assert.deepEqual(card, [true, '1px', '8px', true, '● Update(src/a.ts)\n  ⎿  Updated src/a.ts\n       44 - old();\n']);
+  // Code in a card is a step above the 15px transcript (mono reads small beside the sans prose),
+  // on the transcript's 21px row so the pinned view still snaps to whole lines.
+  assert.deepEqual(await single.locator('.ansi-tool').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]), ['16px', '21px']);
   // The CLI's empty input box and its mode line are left to the composer below, which names the mode.
   const tail = await single.locator('.terminal-body').innerText();
   assert.ok(!tail.includes('❯') && !tail.includes('accept edits on'), `pane foot: ${tail.slice(-80)}`);

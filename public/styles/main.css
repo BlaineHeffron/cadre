@@ -9,7 +9,7 @@
   --bg-input: #0a0a15;
   --text-primary: #e0e0e0;
   --text-secondary: #d0d0de;
-  --text-muted: #b0b0c4;
+  --text-muted: #c0c0d2;
   --accent: #4fc3f7;
   --accent-hover: #29b6f6;
   --danger: #ef5350;
@@ -492,7 +492,7 @@ html, body {
   text-decoration: none;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   background: var(--bg-card);
   border-color: var(--accent);
 }
@@ -1192,6 +1192,10 @@ body:has(.tmux-pane-page) {
 .ansi-tool {
   display: block;
   padding: 6px 10px;
+  /* Monospace reads a step smaller than the sans prose beside it, so code takes the next size up,
+     on the transcript's 21px row so the view still snaps to whole lines. */
+  font-size: 16px;
+  line-height: 21px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--text-primary) 3%, transparent);
