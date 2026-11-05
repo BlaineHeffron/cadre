@@ -4109,7 +4109,8 @@ p.new-agent-hint {
 }
 
 .new-agent-dialog::backdrop {
-  background: rgba(5, 5, 12, 0.62);
+  /* Dark enough that the page behind (an approval's buttons, say) does not read through. */
+  background: rgba(5, 5, 12, 0.78);
 }
 
 .new-agent-dialog .new-agent-form {
