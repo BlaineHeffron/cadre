@@ -564,6 +564,13 @@ select.ctrl-inline-select {
   background-position: right 12px center;
 }
 
+/* The small inline pickers keep more room for their label. */
+select:is(.ctrl-inline-select-compact, .ctrl-inline-select-tiny) {
+  padding-right: 26px;
+  background-position: right 9px center;
+  text-overflow: ellipsis;
+}
+
 .input:focus,
 textarea.input:focus {
   outline: 2px solid var(--accent);
@@ -2318,7 +2325,8 @@ input[type="checkbox"]:not(.switch) {
 .control-row-tools .ctrl-inline-select {
   min-height: var(--control-h);
   border-color: var(--border);
-  background: var(--bg-secondary);
+  /* The colour only: a shorthand would drop the selects' chevron image. */
+  background-color: var(--bg-secondary);
   color: var(--text-primary);
   font-size: var(--fs-sm);
   font-weight: 500;

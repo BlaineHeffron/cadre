@@ -202,6 +202,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal((await page.getByLabel('More composer tools').innerText()).trim(), '⋯');
   await page.getByLabel('More composer tools').click();
   assert.equal(await delay.isVisible(), true);
+  // The composer's own pickers draw the same chevron as the form selects (not a bare box).
+  assert.deepEqual(await delay.evaluate((el) => [getComputedStyle(el).appearance, getComputedStyle(el).backgroundImage.startsWith('url("data:image/svg+xml')]), ['none', true]);
   assert.equal(await page.getByRole('button', { name: 'Save as skill' }).isVisible(), true);
   // Custom delay keeps the menu open while its amount and unit are set; the amount box keeps input height.
   await delay.selectOption('custom');
