@@ -9,7 +9,7 @@
   --bg-input: #0a0a15;
   --text-primary: #e0e0e0;
   --text-secondary: #d0d0de;
-  --text-muted: #c0c0d2;
+  --text-muted: #b0b0c4;
   --accent: #4fc3f7;
   --accent-hover: #29b6f6;
   --danger: #ef5350;
@@ -492,7 +492,8 @@ html, body {
   text-decoration: none;
 }
 
-.btn:hover:not(:disabled) {
+/* :where keeps this at .btn's own weight, so the primary, subtle and danger hovers still win. */
+.btn:where(:hover:not(:disabled)) {
   background: var(--bg-card);
   border-color: var(--accent);
 }
@@ -1192,13 +1193,16 @@ body:has(.tmux-pane-page) {
 .ansi-tool {
   display: block;
   padding: 6px 10px;
-  /* Monospace reads a step smaller than the sans prose beside it, so code takes the next size up,
-     on the transcript's 21px row so the view still snaps to whole lines. */
-  font-size: 16px;
-  line-height: 21px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+}
+/* In the session transcript, monospace reads a step smaller than the sans prose beside it, so a
+   card's code takes the next size up, on the transcript's 21px row so the view still snaps to
+   whole lines. */
+.terminal-fullheight .ansi-tool {
+  font-size: var(--fs-md);
+  line-height: 21px;
 }
 /* A row in one background colour (a diff line) spans the pane. */
 .ansi-line {

@@ -89,6 +89,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await rows.first().getByRole('checkbox').evaluate((el) => getComputedStyle(el).colorScheme), 'dark');
 
   const toolbar = page.locator('.agents-desktop-toolbar');
+  // A primary button keeps its own hover fill (the shared .btn hover must not outrank it).
+  const newSession = toolbar.getByRole('button', { name: 'New session' });
+  await newSession.hover();
+  await page.waitForTimeout(250); // the .btn transition is 0.15s
+  assert.equal(await newSession.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(41, 182, 246)');
+  await page.mouse.move(0, 0);
   // Buttons, the search box and the provider select share one control height.
   const heights = await toolbar.locator('.btn, input.input, select.input').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
   assert.ok(heights.length >= 4 && new Set(heights).size === 1, `toolbar control heights ${heights}`);
