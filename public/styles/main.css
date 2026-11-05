@@ -2529,14 +2529,6 @@ input[type="checkbox"]:not(.switch) {
   padding: 8px 14px;
 }
 
-.ctrl-slash {
-  background: var(--bg-card);
-  color: var(--accent);
-  border-color: var(--accent);
-  padding: 8px 12px;
-  font-size: var(--fs-md);
-}
-
 .ctrl-slash-cmd {
   min-height: 36px;
   padding: 4px 12px;

@@ -180,10 +180,16 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   await composerMenu.click();
   await page.getByRole('button', { name: 'Terminal keys', exact: true }).click();
   assert.equal(await page.locator('.terminal-keys-row').count(), 0);
-  // Slash commands open from the same menu.
+  // Slash commands open from the same menu, also under the toolbar (above the message box), with
+  // focus moved into the panel.
   await composerMenu.click();
-  assert.equal(await page.getByRole('button', { name: 'Slash commands', exact: true }).isVisible(), true);
+  await page.getByRole('button', { name: 'Slash commands', exact: true }).click();
+  const [slash, compose] = await Promise.all(['.control-row-slash', '.control-row-compose'].map((sel) => page.locator(sel).boundingBox()));
+  assert.ok(slash.y >= tools.y + tools.height && slash.y + slash.height <= compose.y, `slash panel at y=${slash.y}, composer at y=${compose.y}`);
+  await page.waitForFunction(() => document.activeElement?.closest('.control-row-slash'));
   await composerMenu.click();
+  await page.getByRole('button', { name: 'Slash commands', exact: true }).click();
+  assert.equal(await page.locator('.control-row-slash').count(), 0);
   assert.doesNotMatch(await page.locator('.terminal').innerText(), /Do you want to proceed|2\. Yes/);
   assert.equal(await page.locator('.control-row-compose [data-placeholder]').getAttribute('data-placeholder'), 'Message the agent...', 'one composer placeholder whatever the state');
   // While answers are offered they are the only primary actions; Cycle mode and Interrupt step aside.

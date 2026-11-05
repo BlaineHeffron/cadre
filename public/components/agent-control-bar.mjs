@@ -88,10 +88,17 @@ export function AgentControlBar({
   const interactionOptions = canAnswerInteraction && Array.isArray(state?.interaction?.options)
     ? state.interaction.options
     : [];
-  // While the bar offers answers, they are the primary actions; Interrupt stays unless an answer refuses.
+  // While the bar offers answers, they are the primary actions, so Mode steps aside.
   const answering = sessionStatus === 'blocked' && interactionOptions.length > 0;
-  // Interrupt is for a running turn; idle or answering, Esc stays one tap away in the keys tray.
-  const showInterrupt = sessionStatus === 'working' || sessionStatus === 'thinking';
+  // Interrupt is for a busy turn; idle or answering, Esc stays one tap away in the keys tray.
+  const showInterrupt = ['working', 'thinking', 'awaiting_response'].includes(sessionStatus);
+
+  // A ⋯ choice opens its panel under the toolbar and hands it the focus the closed menu had.
+  function togglePanel(event, panel, selector) {
+    const bar = event.currentTarget.closest('.claude-control-bar');
+    panel.value = !panel.value;
+    if (panel.value) requestAnimationFrame(() => bar?.querySelector(selector)?.focus());
+  }
 
   function selectedScheduleDelay() {
     if (selectedDelay.value !== 'custom') return Number(selectedDelay.value) || 0;
@@ -209,10 +216,10 @@ export function AgentControlBar({
           </summary>
           <div class="more-menu-list">
             ${descriptor.hasSlash ? html`
-              <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" aria-pressed=${String(showSlash.value)} onclick=${() => { showSlash.value = !showSlash.value; }}>Slash commands</button>
+              <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" aria-pressed=${String(showSlash.value)} onclick=${(e) => togglePanel(e, showSlash, '.control-row-slash button')}>Slash commands</button>
             ` : null}
             ${keys ? html`
-              <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" aria-pressed=${String(showKeys.value)} onclick=${() => { showKeys.value = !showKeys.value; }}>Terminal keys</button>
+              <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" aria-pressed=${String(showKeys.value)} onclick=${(e) => togglePanel(e, showKeys, '.terminal-keys-row button')}>Terminal keys</button>
             ` : null}
             <${LaunchSkillSelector} compact=${true} onInsert=${(id) => skillInsert.current?.(id)} />
             <button
@@ -272,6 +279,13 @@ export function AgentControlBar({
           </div>
         </details>
       </div>
+      ${descriptor.hasSlash && showSlash.value ? html`
+        <div class="control-row control-row-slash">
+          ${SLASH_COMMANDS.map(({ cmd, label }) => html`
+            <button class="ctrl-btn ctrl-slash-cmd" onclick=${() => handleSlash(cmd)}>${label}</button>
+          `)}
+        </div>
+      ` : null}
       ${keys && showKeys.value ? keys : null}
 
       <form class="control-row control-row-compose" onSubmit=${handleSubmit}>
@@ -297,13 +311,6 @@ export function AgentControlBar({
         </button>
       </form>
 
-      ${descriptor.hasSlash && showSlash.value ? html`
-        <div class="control-row control-row-slash">
-          ${SLASH_COMMANDS.map(({ cmd, label }) => html`
-            <button class="ctrl-btn ctrl-slash-cmd" onclick=${() => handleSlash(cmd)}>${label}</button>
-          `)}
-        </div>
-      ` : null}
     </div>
   `;
 }
