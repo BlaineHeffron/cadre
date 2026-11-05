@@ -492,7 +492,8 @@ html, body {
   text-decoration: none;
 }
 
-.btn:hover {
+/* :where keeps this at .btn's own weight, so the primary, subtle and danger hovers still win. */
+.btn:where(:hover:not(:disabled)) {
   background: var(--bg-card);
   border-color: var(--accent);
 }
@@ -1199,6 +1200,15 @@ body:has(.tmux-pane-page) {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+}
+/* In the desktop session transcript (15px on a 21px row), monospace reads a step smaller than the
+   sans prose beside it, so a card's code takes the next size up on the same 21px row, keeping the
+   view's whole-line snap. Phones keep the transcript's own compact size. */
+@media (min-width: 769px) {
+  .terminal-fullheight .ansi-tool {
+    font-size: var(--fs-md);
+    line-height: 21px;
+  }
 }
 /* A row in one background colour (a diff line) spans the pane. */
 .ansi-line {

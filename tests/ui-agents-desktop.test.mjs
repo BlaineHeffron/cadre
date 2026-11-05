@@ -89,6 +89,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await rows.first().getByRole('checkbox').evaluate((el) => getComputedStyle(el).colorScheme), 'dark');
 
   const toolbar = page.locator('.agents-desktop-toolbar');
+  // A primary button keeps its own hover fill (the shared .btn hover must not outrank it).
+  const newSession = toolbar.getByRole('button', { name: 'New session' });
+  await newSession.hover();
+  // Polls past the .btn transition; with the shared hover outranking it, the fill ends navy instead.
+  await page.waitForFunction((el) => getComputedStyle(el).backgroundColor === 'rgb(41, 182, 246)', await newSession.elementHandle(), { timeout: 2000 });
+  await page.mouse.move(0, 0);
   // Buttons, the search box and the provider select share one control height.
   const heights = await toolbar.locator('.btn, input.input, select.input').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
   assert.ok(heights.length >= 4 && new Set(heights).size === 1, `toolbar control heights ${heights}`);
@@ -239,6 +245,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // Rounded: the mobile viewport sometimes lays the 36px toggle out at 35.99999px (about 1 run in 4 on main).
   const summaryHeight = (await phone.locator('.terminal-keys > summary').boundingBox()).height;
   assert.ok(Math.round(summaryHeight) >= 36, `phone Terminal keys toggle is a full control-height target (${summaryHeight}px)`);
+  // On a phone, tool cards keep the transcript's own compact size and row.
+  const phoneCard = await phone.locator('.ansi-tool').first().evaluate((el) => {
+    const [card, pane] = [el, el.closest('.terminal')].map((node) => getComputedStyle(node));
+    return [card.fontSize === pane.fontSize, card.lineHeight === pane.lineHeight];
+  });
+  assert.deepEqual(phoneCard, [true, true]);
   const phoneRule = await ruleFits(phone);
   assert.ok(phoneRule.rule === phoneRule.content && phoneRule.row === phoneRule.content && phoneRule.overflow === 0, `phone rule ${JSON.stringify(phoneRule)}`);
   const [phoneKeys, phoneBar] = await Promise.all(['.terminal-keys', '.claude-control-bar'].map((sel) => phone.locator(sel).boundingBox()));
@@ -275,6 +287,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     return [cs.fontFamily === getComputedStyle(el.closest('.terminal')).fontFamily, cs.borderTopWidth, cs.borderTopLeftRadius, Math.round(el.querySelector('.ansi-line').getBoundingClientRect().width) === Math.round(inner), el.textContent];
   });
   assert.deepEqual(card, [true, '1px', '8px', true, '● Update(src/a.ts)\n  ⎿  Updated src/a.ts\n       44 - old();\n']);
+  // Code in a card is a step above the 15px transcript (mono reads small beside the sans prose),
+  // on the transcript's 21px row so the pinned view still snaps to whole lines.
+  assert.deepEqual(await single.locator('.ansi-tool').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]), ['16px', '21px']);
   // The CLI's empty input box and its mode line are left to the composer below, which names the mode.
   const tail = await single.locator('.terminal-body').innerText();
   assert.ok(!tail.includes('❯') && !tail.includes('accept edits on'), `pane foot: ${tail.slice(-80)}`);
