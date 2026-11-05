@@ -2229,7 +2229,7 @@ input[type="checkbox"]:not(.switch) {
 
 .control-row-primary .ctrl-btn {
   flex: none;
-  /* The secondary answers need an edge that reads as a button on the panel (28% text on the card). */
+  /* The secondary answers need an edge that reads as a button on the panel (about 2.2:1 on the card; the label names it). */
   border-color: #4f566b;
   justify-content: flex-start;
   font-size: var(--fs-base);
