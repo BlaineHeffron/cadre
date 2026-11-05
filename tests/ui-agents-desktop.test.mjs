@@ -79,9 +79,14 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const rows = page.locator('.agent-rail-row');
   await rows.first().waitFor();
   assert.equal(await rows.count(), 2);
-  // A row is its status, title and one checkbox; Start loop lives on the session itself.
+  // A row is its status and title; Start loop lives on the session itself, and bulk-select
+  // checkboxes wait for the rail's Select mode instead of standing as an unlabeled column.
   assert.equal(await rows.getByRole('button', { name: 'Start loop' }).count(), 0);
   assert.equal(await rows.first().locator('.status-badge').textContent(), '▶Working');
+  assert.equal(await rows.getByRole('checkbox').count(), 0);
+  const railSelect = page.locator('.agents-desktop-rail-head').getByRole('button', { name: 'Select', exact: true });
+  await railSelect.click();
+  assert.equal(await rows.getByRole('checkbox').count(), 2);
   // Calm states are tinted text, not a solid fill; checkboxes are a 20px target.
   assert.equal(await rows.first().locator('.status-badge').evaluate((el) => getComputedStyle(el).color), 'rgb(79, 195, 247)');
   assert.equal(Math.round((await rows.first().getByRole('checkbox').boundingBox()).width), 20);
@@ -122,6 +127,10 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   await page.getByRole('checkbox', { name: 'Bulk select first task' }).uncheck();
   await page.getByRole('checkbox', { name: 'Bulk select first task' }).check();
   assert.equal(await bulkPrompt.count(), 0);
+  // Done clears the selection and puts the checkboxes away.
+  await page.locator('.agents-desktop-rail-head').getByRole('button', { name: 'Done', exact: true }).click();
+  assert.equal(await rows.getByRole('checkbox').count(), 0);
+  assert.equal(await toolbar.getByText('1 selected').count(), 0);
 
   const header = page.locator('.claude-session-header');
   await header.getByRole('button', { name: 'Rendered Transcript' }).waitFor();

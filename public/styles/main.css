@@ -2050,10 +2050,23 @@ input[type="checkbox"]:not(.switch) {
 .agents-desktop-rail-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
   border-bottom: 1px solid var(--border);
   color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+.agents-desktop-rail-count {
+  margin-left: auto;
+}
+
+/* The rail's own Select toggle: a small soft button, like the session header's. */
+.agents-desktop-rail-select {
+  min-height: 28px;
+  padding: 0 10px;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
   font-size: var(--fs-xs);
 }
 
