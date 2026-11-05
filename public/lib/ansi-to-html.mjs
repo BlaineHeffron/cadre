@@ -150,10 +150,11 @@ function markProse(text) {
   return lines.join('\n');
 }
 
-// A tool call is its `● Tool(args)` line plus the ⎿ result and deeper-indented lines under it
-// (wrapped arguments, output, diff rows). Each is marked as one card; the text inside is unchanged.
-const isToolStart = (plain) => /^[●⏺] \S+\(/.test(plain);
-const isToolLine = (plain) => /^ {2}⎿|^ {3,}\S/.test(plain);
+// A tool call is its `● Tool(args)` line (Codex: `• Ran cmd`, `• Explored`, `• Edited file`) plus
+// the ⎿ / └ result and deeper-indented lines under it (wrapped arguments, output, diff rows). Each
+// is marked as one card; the text inside is unchanged.
+const isToolStart = (plain) => /^[●⏺] \S+\(|^• (?:Ran|Explored|Edited|Added|Deleted|Called|Waited)\b/.test(plain);
+const isToolLine = (plain) => /^ {2}[⎿└]|^ {3,}\S/.test(plain);
 
 function markTools(text) {
   const lines = text.split('\n');

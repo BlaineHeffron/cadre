@@ -40,7 +40,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   app.get('/codex/:id', sessionRoute);
   let codexSessions = [];
   app.get('/api/codex/sessions', () => ({ sessions: codexSessions }));
-  app.get('/api/codex/sessions/:id', (req) => ({ id: req.params.id, content: 'codex pane', state: { status: 'working' }, sessionName: `codex-${req.params.id}` }));
+  app.get('/api/codex/sessions/:id', (req) => ({ id: req.params.id, content: 'codex pane\n\x1b[1m•\x1b[0m \x1b[1mRan\x1b[0m npm test\n\x1b[2m  └ \x1b[0mTests: 3 passed\n\n• Done.', state: { status: 'working' }, sessionName: `codex-${req.params.id}` }));
   app.get('/session', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
     import { h, render } from 'preact';
     import { isAuthenticated } from '/app/state.mjs';
@@ -285,6 +285,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // Next wraps from the last Claude session to the Codex one, across providers.
   await page.locator('.agent-session-page-embedded').getByRole('button', { name: '\u203a' }).click();
   await shows('codex-c3');
+  // Codex's own tool calls (`• Ran …` and the └ output under it) sit in the same cards.
+  assert.equal(await page.locator('.agent-session-page-embedded .ansi-tool').textContent(), '• Ran npm test\n  └ Tests: 3 passed\n');
   // The address follows the shown session, from the arrows or a list click, so a reload or
   // shared link opens it again.
   assert.equal(new URL(page.url()).pathname, '/codex/c3');
