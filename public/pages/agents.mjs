@@ -20,7 +20,7 @@ import {
   sessionDisplayStatus,
   wsConnected,
 } from '../app/state.mjs';
-import { SessionCard, StatusBadge } from '../components/session-card.mjs';
+import { SessionCard, StatusBadge, projectLabel } from '../components/session-card.mjs';
 import { FolderPicker } from '../components/folder-picker.mjs';
 import { DirQuickSelect } from '../components/dir-quick-select.mjs';
 import { recentWorkDirs } from '../app/recent-dirs.mjs';
@@ -160,15 +160,10 @@ function isDesktopAgentsLayout() {
   return typeof window !== 'undefined' && window.matchMedia(DESKTOP_AGENTS_QUERY).matches;
 }
 
-function railProjectLabel(workDir = '') {
-  const parts = String(workDir).replace(/\/+$/, '').split('/').filter(Boolean);
-  return parts.length > 1 ? parts.slice(-2).join('/') : workDir;
-}
-
 // The row body is a real button so Enter/Space, focus, and the disabled state
 // come from the platform. The bulk-select checkbox stays outside it: a button
 // must not contain another interactive control.
-function AgentRailRow({ session, active, selected, onSelect, onToggleSelected }) {
+function AgentRailRow({ session, active, selected, showProvider, onSelect, onToggleSelected }) {
   const status = sessionDisplayStatus(session._kind, session);
   const rustManaged = session.readOnly === true && session.externalOwner === 'rust-monitor';
   const mutable = !rustManaged;
@@ -189,8 +184,8 @@ function AgentRailRow({ session, active, selected, onSelect, onToggleSelected })
           <${MachineChip} machine=${session.machine} />
         </span>
         <span class="agent-rail-row-meta">
-          <span>${providerLabel(session._provider)}</span>
-          ${session.workDir ? html`<span title=${session.workDir}>${railProjectLabel(session.workDir)}</span>` : null}
+          ${showProvider ? html`<span>${providerLabel(session._provider)}</span>` : null}
+          ${session.workDir ? html`<span title=${session.workDir}>${projectLabel(session.workDir)}</span>` : null}
         </span>
         ${rustManaged ? html`
           <span class="agent-rail-row-flag">rust-managed · read-only</span>
@@ -548,6 +543,9 @@ export function AgentsPage({ focus = '' } = {}) {
     if (stateFilters.value.length > 0 && !stateFilters.value.includes(sessionStateFilter(session))) return false;
     return true;
   });
+  // When every listed session shares one provider, the rail heading names it once instead of every row.
+  const railProviders = new Set(visibleSessions.map((session) => session._provider));
+  const railProvider = railProviders.size === 1 ? [...railProviders][0] : null;
   const visibleKillableSessions = visibleSessions.filter((session) =>
     !(session.readOnly === true && session.externalOwner === 'rust-monitor')
   );
@@ -1140,7 +1138,7 @@ export function AgentsPage({ focus = '' } = {}) {
             <div class="agents-desktop-shell">
               <aside class="agents-desktop-rail" aria-label="Agent sessions">
                 <div class="agents-desktop-rail-head">
-                  <span class="card-title">Sessions</span>
+                  <span class="card-title">${railProvider ? `${providerLabel(railProvider)} sessions` : 'Sessions'}</span>
                   <span aria-label=${`${visibleSessions.length} sessions listed`}>${visibleSessions.length}</span>
                 </div>
                 <div class="agents-desktop-rail-list" onKeyDown=${handleRailArrowKeys}>
@@ -1150,6 +1148,7 @@ export function AgentsPage({ focus = '' } = {}) {
                       session=${session}
                       active=${desktopSession && previewKey(desktopSession) === previewKey(session)}
                       selected=${selectedSessionKeys.value.includes(previewKey(session))}
+                      showProvider=${!railProvider}
                       onSelect=${showSession}
                       onToggleSelected=${toggleSelected}
                     />

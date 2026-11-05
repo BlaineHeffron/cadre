@@ -26,7 +26,7 @@ export function StatusBadge({ status }) {
 }
 
 /** Extract a short project label from a full path, e.g. "/home/user/projects/foo" → "projects/foo" */
-function projectLabel(workDir) {
+export function projectLabel(workDir) {
   if (!workDir) return null;
   const parts = workDir.replace(/\/+$/, '').split('/').filter(Boolean);
   if (parts.length <= 2) return workDir;
@@ -132,7 +132,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
       <div style="display:flex; gap:8px; font-size:var(--fs-sm); color:var(--text-secondary); align-items:center">
         <${StatusBadge} status=${status} />
         <${MachineChip} machine=${session.machine} />
-        ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono)" title=${session.workDir}>${session.workDir}</span>` : null}
+        ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title=${session.workDir}>${label}</span>` : null}
       </div>
       <div style="display:flex; flex-wrap:wrap; gap:0 8px; font-size:var(--fs-sm); color:var(--text-secondary); margin-top:2px; overflow-wrap:anywhere">
         ${isRustManagedReadOnly ? html`<span>rust-managed</span><span>read-only</span>` : null}
