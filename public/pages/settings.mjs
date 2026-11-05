@@ -281,7 +281,7 @@ export function SettingsPage({ section }) {
             running sessions keep their current connection. Turn off to connect directly.
           </div>
         </div>
-        <div style="font-size:var(--fs-xs); color:var(--text-secondary); margin-top:10px">
+        <div class="note" style="margin-top:10px">
           Preferred single-agent fallback: ${agentProviders.value.preferredSingleAgent || 'unknown'}<br />
           Collaboration available: ${agentProviders.value.collabEnabled ? 'yes' : 'no'}
         </div>

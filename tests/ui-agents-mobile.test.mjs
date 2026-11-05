@@ -145,6 +145,8 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   const prompt = page.getByRole('textbox', { name: 'Initial prompt' });
   assert.equal(await dialog.isVisible(), true);
   // The scrim is dark enough that the page behind does not read through.
+  // Form hints read at body size, never as small grey print.
+  assert.equal(await dialog.locator('.new-agent-hint').first().evaluate((el) => getComputedStyle(el).fontSize), '14px');
   assert.deepEqual(await dialog.evaluate((el) => [getComputedStyle(el, '::backdrop').backgroundColor, getComputedStyle(el, '::backdrop').backdropFilter]), ['rgba(5, 5, 12, 0.84)', 'blur(3px)']);
   // The form's selects draw the app's chevron, not the platform widget, like the inputs beside them.
   const providerSelect = dialog.getByRole('combobox', { name: 'Provider' });
