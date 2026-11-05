@@ -117,3 +117,16 @@ test('the CLI\'s empty input box at the foot of the pane is dropped; the mode li
   assert.equal(foldEmptyPrompt(earlier), earlier);
   assert.equal(foldEmptyPrompt('❯ '), '❯ ');
 });
+
+test('Codex tool calls (• Ran, • Explored and their └ output) form cards too; its prose does not', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const pane = await readFile(new URL('./fixtures/session-state/panes/codex-e5ea5b75-background-terminal.pane', import.meta.url), 'utf8');
+  // The first line of each card.
+  const cards = ansiToHtml(pane).split('<span class="ansi-tool">').slice(1).map((html) => html.replace(/<[^>]+>/g, '').split('\n')[0]);
+  assert.deepEqual(cards.map((line) => line.slice(0, 8)), ['• Explor', '• Ran gi']);
+  assert.equal(ansiToHtml('• I checked it.\n  All good.'), '• I checked it.\n  All good.');
+  // A reply that happens to open with a call verb has no result under it, so it stays text.
+  assert.equal(ansiToHtml('• Ran the suite; all green.\n  Nothing else changed.'), '• Ran the suite; all green.\n  Nothing else changed.');
+  // A long command wrapped onto │ lines keeps its └ output in the same card.
+  assert.equal(ansiToHtml('• Ran npm test --\n  │ --watch=false\n  └ ok'), '<span class="ansi-tool">• Ran npm test --\n  │ --watch=false\n  └ ok</span>');
+});

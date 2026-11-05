@@ -150,10 +150,11 @@ function markProse(text) {
   return lines.join('\n');
 }
 
-// A tool call is its `● Tool(args)` line plus the ⎿ result and deeper-indented lines under it
-// (wrapped arguments, output, diff rows). Each is marked as one card; the text inside is unchanged.
-const isToolStart = (plain) => /^[●⏺] \S+\(/.test(plain);
-const isToolLine = (plain) => /^ {2}⎿|^ {3,}\S/.test(plain);
+// A tool call is its `● Tool(args)` line (Codex: `• Ran cmd`, `• Explored`, `• Edited file`) plus
+// the ⎿ / └ result and deeper-indented lines under it (wrapped arguments, output, diff rows). Each
+// is marked as one card; the text inside is unchanged.
+const isToolStart = (plain) => /^[●⏺] \S+\(|^• (?:Ran|Explored|Edited|Added|Deleted|Called|Waited)\b/.test(plain);
+const isToolLine = (plain) => /^ {2}[⎿└│]|^ {3,}\S/.test(plain);
 
 function markTools(text) {
   const lines = text.split('\n');
@@ -162,6 +163,8 @@ function markTools(text) {
     if (!isToolStart(plain[i])) continue;
     let end = i;
     while (end + 1 < lines.length && isToolLine(plain[end + 1])) end++;
+    // Codex replies start with `• ` too ("• Ran the suite; all green."); a call always has a result under it.
+    if (end === i && plain[i].startsWith('• ')) continue;
     // Open after a prose block's closing mark; close before anything that opens on the next line.
     lines[i] = lines[i].replace(/^[\x03\x0f]*/, '$&\x0e');
     if (end + 1 < lines.length) lines[end + 1] = `\x0f${lines[end + 1]}`;
