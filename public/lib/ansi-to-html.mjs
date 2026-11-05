@@ -29,7 +29,9 @@ export function ansiToHtml(text) {
   // column count. Its dashes are marked here and drawn as a full-width rule in their colour, so
   // it never stops short of the pane edge; the dashes stay in the DOM for copying.
   text = text.replace(/^((?:\x1b\[[0-9;]*m)*)(─{20,})((?:\x1b\[[0-9;]*m)*)$/gm, '$1\uE000$2\uE001$3');
-  text = markProse(text);
+  // Prose blocks are marked with non-printing control characters (never Nerd Font icons from the
+  // private-use area); any already in the pane are dropped first.
+  text = markProse(text.replace(/[\x02-\x04]/g, ''));
 
   const parts = [];
   let current = { bold: false, dim: false, italic: false, underline: false, strike: false, fg: null, bg: null };
@@ -54,9 +56,9 @@ export function ansiToHtml(text) {
 
   while (i < text.length) {
     // Prose blocks open and close at the top level, between the self-contained colour spans.
-    if (text[i] === '\uE002' || text[i] === '\uE003' || text[i] === '\uE004') {
+    if (text[i] === '\x02' || text[i] === '\x03' || text[i] === '\x04') {
       flushBuf();
-      parts.push({ '\uE002': '<span class="ansi-prose">', '\uE003': '</span>', '\uE004': '<span class="ansi-prose ansi-prose-more">' }[text[i]]);
+      parts.push({ '\x02': '<span class="ansi-prose">', '\x03': '</span>', '\x04': '<span class="ansi-prose ansi-prose-more">' }[text[i]]);
       i++;
       continue;
     }
@@ -120,9 +122,9 @@ function markProse(text) {
     if (!isReplyStart(plain[i]) && !more) { inReply = false; continue; }
     let end = i;
     while (end + 1 < lines.length && isProseLine(plain[end + 1])) end++;
-    lines[i] = `${more ? '\uE004' : '\uE002'}${lines[i]}`;
-    if (end + 1 < lines.length) lines[end + 1] = `\uE003${lines[end + 1]}`;
-    else lines[end] += '\uE003';
+    lines[i] = `${more ? '\x04' : '\x02'}${lines[i]}`;
+    if (end + 1 < lines.length) lines[end + 1] = `\x03${lines[end + 1]}`;
+    else lines[end] += '\x03';
     inReply = true;
     i = end;
   }

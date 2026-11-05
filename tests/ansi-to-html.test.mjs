@@ -64,3 +64,8 @@ test('lists, box tables and indented code stay terminal text; later paragraphs s
     '<span class="ansi-prose">⏺ First paragraph\n  wraps here.\n</span>\n<span class="ansi-prose ansi-prose-more">  Second paragraph.\n</span>\n⏺ Bash(ls)\n\n  not prose',
   );
 });
+
+test('private-use icons and stray control characters never open or close a prose block', () => {
+  assert.equal(ansiToHtml(' ~/repo \n⏺ Done.'), ' ~/repo \n<span class="ansi-prose">⏺ Done.</span>');
+  assert.equal(ansiToHtml('a\x02b\x03c\x04'), 'abc');
+});
