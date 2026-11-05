@@ -20,6 +20,16 @@ const STATE_CONFIG = {
   unknown: { label: 'Unknown', icon: '?', cls: 'badge-low', pulse: true, idle: true },
 };
 
+// Generic reasons that only repeat the status badge add a line without saying anything new.
+const STATUS_ECHOES = new Set(['Provider reports working', 'Provider reports thinking', 'Waiting for input']);
+
+// The line under a session's title: what it is asking or why it is in its state, unless that is
+// just the badge again.
+export function sessionDetail(session) {
+  const detail = session.state?.interaction?.detail || session.state?.reason || '';
+  return STATUS_ECHOES.has(detail) ? '' : detail;
+}
+
 export function StatusBadge({ status }) {
   const { label, icon, cls } = STATE_CONFIG[status] || STATE_CONFIG.unknown;
   return html`<span class="badge status-badge ${cls}"><span aria-hidden="true">${icon}</span><span>${label}</span></span>`;
@@ -55,7 +65,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
   const hasPromptAttention = session.attention?.active
     && session.attention.kind === 'prompt_ready'
     && !hasSeenPromptNotification(descriptor.kind, session.attention.key);
-  const detailText = session.state?.interaction?.detail || session.state?.reason || '';
+  const detailText = sessionDetail(session);
   const shouldPulseState = stateInfo.pulse && (session.state?.status !== 'ready' || hasPromptAttention);
   const shouldIdleState = stateInfo.idle && (session.state?.status !== 'ready' || hasPromptAttention);
   const linkedThreads = linkedThreadsForSession(descriptor.kind, session.id, agentThreads.value.filter(isActiveThread));

@@ -8,8 +8,8 @@ import fastifyStatic from '@fastify/static';
 import { chromium } from 'playwright-core';
 
 const demo = [
-  { id: 'a1', displayName: 'first task', workDir: '/home/me/repo', tmuxSession: 'claude-a1', state: { status: 'working', reason: 'Provider reports working' } },
-  { id: 'b2', displayName: 'second task', workDir: '/home/me/repo', tmuxSession: 'claude-b2', state: { status: 'ready' } },
+  { id: 'a1', displayName: 'first task', workDir: '/home/me/repo', tmuxSession: 'claude-a1', state: { status: 'working', reason: 'Automated delivery is queued' } },
+  { id: 'b2', displayName: 'second task', workDir: '/home/me/repo', tmuxSession: 'claude-b2', state: { status: 'ready', reason: 'Waiting for input' } },
 ];
 
 test('desktop Agents page shows bulk actions only for a selection, folds session extras into one menu, and starts empty with a New action', { skip: !process.env.CHROMIUM_BIN, timeout: 30000 }, async (t) => {
@@ -99,6 +99,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const textStyle = (sel) => rows.first().locator(sel).evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
   assert.deepEqual(await textStyle('.agent-rail-row-meta'), ['13px', 'rgb(208, 208, 222)']);
   assert.deepEqual(await textStyle('.agent-rail-row-detail'), ['13px', 'rgb(224, 224, 224)']);
+  // A reason that only repeats the badge ('Waiting for input' under Idle) adds no line.
+  assert.equal(await rows.nth(1).locator('.agent-rail-row-detail').count(), 0);
   // With one provider listed, the rail heading names it once and rows show only the short path.
   assert.equal(await page.locator('.agents-desktop-rail-head .card-title').innerText(), 'Claude sessions');
   assert.equal(await rows.first().locator('.agent-rail-row-meta').innerText(), 'me/repo');
@@ -306,7 +308,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await page.locator('.agent-session-page-embedded').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(26, 26, 46)');
   const historyLength = await page.evaluate(() => history.length);
   // Next wraps from the last Claude session to the Codex one, across providers.
-  await page.locator('.agent-session-page-embedded').getByRole('button', { name: '\u203a' }).click();
+  await page.locator('.agent-session-page-embedded').getByRole('button', { name: 'Next agent' }).click();
   await shows('codex-c3');
   // Codex's own tool calls (`• Ran …` and the └ output under it) sit in the same cards.
   assert.equal(await page.locator('.agent-session-page-embedded .ansi-tool').textContent(), '• Ran npm test\n  └ Tests: 3 passed\n');

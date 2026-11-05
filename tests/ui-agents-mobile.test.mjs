@@ -140,6 +140,8 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   const dialog = page.getByRole('dialog', { name: 'New Agent Session' });
   const prompt = page.getByRole('textbox', { name: 'Initial prompt' });
   assert.equal(await dialog.isVisible(), true);
+  // The scrim is dark enough that the page behind does not read through.
+  assert.equal(await dialog.evaluate((el) => getComputedStyle(el, '::backdrop').backgroundColor), 'rgba(5, 5, 12, 0.78)');
   await prompt.fill('draft');
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');

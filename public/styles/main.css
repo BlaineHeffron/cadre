@@ -2278,7 +2278,7 @@ input[type="checkbox"]:not(.switch) {
 
 .control-row-tools > .ctrl-btn:hover:not(:disabled),
 .control-row-tools > .more-menu > summary.ctrl-btn:hover,
-.claude-session-header :is(.session-header-primary, .session-header-actions) > .btn:not(.btn-primary, .btn-subtle):hover,
+.claude-session-header :is(.session-header-primary, .session-header-actions) > .btn:not(.btn-primary, .btn-subtle):hover:not(:disabled),
 .claude-session-header .session-header-actions > .more-menu > summary.btn:hover {
   background: var(--bg-hover);
 }
@@ -4109,7 +4109,8 @@ p.new-agent-hint {
 }
 
 .new-agent-dialog::backdrop {
-  background: rgba(5, 5, 12, 0.62);
+  /* Dark enough that the page behind (an approval's buttons, say) does not read through. */
+  background: rgba(5, 5, 12, 0.78);
 }
 
 .new-agent-dialog .new-agent-form {

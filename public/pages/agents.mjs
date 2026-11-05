@@ -20,7 +20,7 @@ import {
   sessionDisplayStatus,
   wsConnected,
 } from '../app/state.mjs';
-import { SessionCard, StatusBadge, projectLabel } from '../components/session-card.mjs';
+import { SessionCard, StatusBadge, projectLabel, sessionDetail } from '../components/session-card.mjs';
 import { FolderPicker } from '../components/folder-picker.mjs';
 import { DirQuickSelect } from '../components/dir-quick-select.mjs';
 import { recentWorkDirs } from '../app/recent-dirs.mjs';
@@ -168,7 +168,7 @@ function AgentRailRow({ session, active, selected, showProvider, onSelect, onTog
   const rustManaged = session.readOnly === true && session.externalOwner === 'rust-monitor';
   const mutable = !rustManaged;
   const title = previewTitle(session);
-  const detail = session.state?.interaction?.detail || session.state?.reason || '';
+  const detail = sessionDetail(session);
 
   return html`
     <div class="agent-rail-row ${active ? 'agent-rail-row-active' : ''} ${mutable && onToggleSelected ? 'agent-rail-row-selectable' : ''}">

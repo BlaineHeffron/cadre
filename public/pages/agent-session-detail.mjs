@@ -616,6 +616,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
           type: 'button',
           disabled: !previous,
           onClick: () => onNavigate(previous),
+          'aria-label': 'Previous agent',
           title: previous ? `Previous agent: ${previous.displayName || previous.name || previous.id}` : 'No previous agent',
         }, '\u2039'),
         h('button', {
@@ -623,6 +624,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
           type: 'button',
           disabled: !next,
           onClick: () => onNavigate(next),
+          'aria-label': 'Next agent',
           title: next ? `Next agent: ${next.displayName || next.name || next.id}` : 'No next agent',
         }, '\u203a'),
         h('span', { class: 'session-title', title: id }, headerTitle),
