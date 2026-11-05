@@ -67,7 +67,8 @@ export function ansiToHtml(text) {
     const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;
     let html = esc(buf).replace(/\x06(─+)\x07/g, '<span class="ansi-rule">$1</span>');
     // Inline `code` in a prose reply reads as code; the backticks stay in the DOM (unseen) for copying.
-    if (inProse) html = html.replace(/`([^`\n]+)`/g, '<code class="ansi-code"><span class="ansi-tick">`</span>$1<span class="ansi-tick">`</span></code>');
+    // A span may wrap across the CLI's hard line breaks; fenced ``` runs are not inline code.
+    if (inProse) html = html.replace(/(?<!`)`([^`]+)`(?!`)/g, '<code class="ansi-code"><span class="ansi-tick">`</span>$1<span class="ansi-tick">`</span></code>');
     parts.push(attrs ? `<span${attrs}>${html}</span>` : html);
     buf = '';
   }
