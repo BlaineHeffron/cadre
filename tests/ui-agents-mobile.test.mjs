@@ -145,7 +145,10 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   const prompt = page.getByRole('textbox', { name: 'Initial prompt' });
   assert.equal(await dialog.isVisible(), true);
   // The scrim is dark enough that the page behind does not read through.
-  assert.equal(await dialog.evaluate((el) => getComputedStyle(el, '::backdrop').backgroundColor), 'rgba(5, 5, 12, 0.78)');
+  assert.deepEqual(await dialog.evaluate((el) => [getComputedStyle(el, '::backdrop').backgroundColor, getComputedStyle(el, '::backdrop').backdropFilter]), ['rgba(5, 5, 12, 0.84)', 'blur(3px)']);
+  // The form's selects draw the app's chevron, not the platform widget, like the inputs beside them.
+  const providerSelect = dialog.getByRole('combobox', { name: 'Provider' });
+  assert.deepEqual(await providerSelect.evaluate((el) => [getComputedStyle(el).appearance, getComputedStyle(el).backgroundImage.startsWith('url("data:image/svg+xml')]), ['none', true]);
   await prompt.fill('draft');
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
