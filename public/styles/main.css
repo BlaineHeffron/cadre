@@ -562,6 +562,7 @@ select.input {
    select reads like the inputs beside it. */
 select.input,
 select.ctrl-inline-select {
+  -webkit-appearance: none;
   appearance: none;
   padding-right: 32px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23b0b0c4' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -1182,12 +1183,14 @@ body:has(.tmux-pane-page) {
   vertical-align: middle;
   border-top: 1px solid currentColor;
   font-size: 0;
+  /* Rules share the CLI's grey with its hints, which are lifted for reading; the line stays quiet. */
+  opacity: 0.55;
 }
 /* The CLI's prose replies read as proportional, reflowing text at a comfortable measure, with
    the bullet hanging. */
 .ansi-prose {
   display: block;
-  max-width: 760px;
+  max-width: 75ch;
   padding-left: 1.2em;
   text-indent: -1.2em;
   font-family: var(--font-sans);

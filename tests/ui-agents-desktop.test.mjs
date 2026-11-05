@@ -306,7 +306,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
       if (range.getClientRects().length !== 1) splitWords.push(match[0]);
     }
     const lines = Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight));
-    return [getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily, el.getBoundingClientRect().width <= 760, lines > 1, splitWords];
+    // The measure is about 75 characters (75ch resolves to px well under the old 760px cap).
+    const measure = parseFloat(getComputedStyle(el).maxWidth);
+    return [getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily, el.getBoundingClientRect().width <= measure && measure < 700, lines > 1, splitWords];
   });
   assert.deepEqual(prose, [true, true, true, []], 'prose wraps between words, never mid-word');
   // The transcript reads one step above body text on a wide screen.
@@ -327,6 +329,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.ok(!tail.includes('❯') && !tail.includes('accept edits on'), `pane foot: ${tail.slice(-80)}`);
   assert.equal(await single.getByRole('button', { name: 'Mode: accept edits', exact: true }).count(), 1);
   const deskRule = await ruleFits(page);
+  // Rules share the CLI's lifted grey with its hints, so the line itself stays quiet.
+  assert.equal(await page.locator('.ansi-rule').first().evaluate((el) => getComputedStyle(el).opacity), '0.55');
   assert.ok(deskRule.rule === deskRule.content && deskRule.row === deskRule.content && deskRule.overflow === 0, `desktop rule ${JSON.stringify(deskRule)}`);
   // The focused transcript keeps a thin visible ring (at least 3:1 against its panel tone). It is a
   // border, which the scroll fade cannot paint over, and it does not shift the layout on focus.
