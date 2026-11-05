@@ -56,12 +56,31 @@ test('full-height terminal fits a short history and keeps streaming output pinne
     await page.waitForTimeout(150);
     assert.equal(await pinned(), true, `pinned after the tool output grows to ${total} lines`);
   }
-  assert.equal(await fade(), '1', 'rows scrolled past the top fade');
+  // Pinned to the newest output, the view is snapped to a whole line at the top edge, so it needs
+  // no fade and no row shows half-cut.
+  assert.equal(await fade(), '0', 'no fade while pinned to the bottom');
+  const cutRows = () => terminal.evaluate((el) => {
+    const top = el.getBoundingClientRect().top + el.clientTop;
+    const walker = document.createTreeWalker(el.querySelector('.terminal-body'), NodeFilter.SHOW_TEXT);
+    const cut = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (const match of node.textContent.matchAll(/[^\n]+/g)) {
+        const range = document.createRange();
+        range.setStart(node, match.index);
+        range.setEnd(node, match.index + match[0].length);
+        const { top: rowTop, bottom } = range.getBoundingClientRect();
+        if (rowTop < top - 1 && bottom > top + 1) cut.push(match[0]);
+      }
+    }
+    return cut;
+  });
+  assert.deepEqual(await cutRows(), []);
   // Once the reader scrolls up, new output no longer drags the view down.
   await terminal.hover();
   await page.mouse.wheel(0, -2000);
   await page.waitForFunction(() => { const el = document.querySelector('.terminal'); return el.scrollHeight - el.clientHeight - el.scrollTop > 200; });
   const readingAt = await terminal.evaluate((el) => el.scrollTop);
+  assert.equal(await fade(), '1', 'rows scrolled past the top fade while reading history');
   await page.evaluate((text) => window.show(text), lines(300));
   await terminal.getByText('line 299').waitFor({ state: 'attached' });
   await page.waitForTimeout(150);
