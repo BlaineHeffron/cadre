@@ -1151,7 +1151,6 @@ export function AgentsPage({ focus = '' } = {}) {
                   <button
                     type="button"
                     class="btn agents-desktop-rail-select"
-                    aria-pressed=${String(railChecks)}
                     onClick=${() => {
                       if (railChecks) selectedSessionKeys.value = [];
                       railSelecting.value = !railChecks;
