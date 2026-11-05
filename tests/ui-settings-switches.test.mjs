@@ -50,6 +50,7 @@ test('settings uses labelled switches that reflect and change their state', { sk
   // On reads at a glance: a white knob on the accent track; off keeps a grey knob.
   const knob = (el) => getComputedStyle(el, '::before').backgroundColor;
   assert.equal(await headroom.evaluate(knob), 'rgb(255, 255, 255)');
+  assert.equal(await headroom.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(2, 119, 189)');
   assert.equal(await page.locator('.switch:not(:checked)').first().evaluate(knob), 'rgb(208, 208, 222)');
   await headroom.click();
   await page.waitForResponse((response) => response.url().endsWith('/api/agent-provider-preferences'));

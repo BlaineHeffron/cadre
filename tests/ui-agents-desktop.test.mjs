@@ -136,8 +136,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const colour = (i, prop) => answers.nth(i).evaluate((el, p) => getComputedStyle(el)[p], prop);
   assert.deepEqual([await colour(0, 'color'), await colour(0, 'backgroundColor')], ['rgb(0, 0, 0)', 'rgb(79, 195, 247)']);
   assert.deepEqual([await colour(2, 'color'), await colour(2, 'backgroundColor'), await colour(2, 'borderTopColor')], ['rgb(255, 161, 152)', 'rgb(22, 33, 62)', await colour(1, 'borderTopColor')]);
-  // The secondary answers carry a visible edge, lighter than the panel's hairline border.
-  assert.notEqual(await colour(1, 'borderTopColor'), await page.locator('.agents-desktop-rail').evaluate((el) => getComputedStyle(el).borderRightColor));
+  // The secondary answers carry a visible edge, much lighter than the panel's rgb(42, 42, 62) hairline.
+  assert.equal(await colour(1, 'borderTopColor'), 'rgb(79, 86, 107)');
   assert.ok(boxes.every((b, i) => i === 0 || b.top > boxes[i - 1].top), 'answers stack in order');
   // At least the 44px tap target and never clipped. In the 560px card a long label may wrap
   // inside its row, depending on the font; the card cap matters more than one-line labels.

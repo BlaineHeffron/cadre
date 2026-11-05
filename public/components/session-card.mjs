@@ -134,7 +134,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
         <${MachineChip} machine=${session.machine} />
         ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono)" title=${session.workDir}>${session.workDir}</span>` : null}
       </div>
-      <div style="display:flex; gap:8px; font-size:var(--fs-sm); color:var(--text-secondary); margin-top:2px">
+      <div style="display:flex; flex-wrap:wrap; gap:0 8px; font-size:var(--fs-sm); color:var(--text-secondary); margin-top:2px; overflow-wrap:anywhere">
         ${isRustManagedReadOnly ? html`<span>rust-managed</span><span>read-only</span>` : null}
         ${session.source === 'tmux-external' && !isRustManagedReadOnly ? html`<span>external</span>` : null}
         ${label || session.displayName ? html`<span>${session.name}</span>` : null}

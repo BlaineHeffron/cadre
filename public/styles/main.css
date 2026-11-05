@@ -1368,8 +1368,9 @@ input[type="checkbox"]:not(.switch) {
 }
 
 .switch:checked {
-  border-color: var(--accent);
-  background: var(--accent);
+  /* A deeper accent so the white knob keeps 3:1 (about 4.8:1) on the track. */
+  border-color: #0277bd;
+  background: #0277bd;
 }
 
 .switch:checked::before {
@@ -2228,8 +2229,8 @@ input[type="checkbox"]:not(.switch) {
 
 .control-row-primary .ctrl-btn {
   flex: none;
-  /* The secondary answers need an edge that reads as a button on the panel. */
-  border-color: color-mix(in srgb, var(--text-primary) 28%, var(--bg-card));
+  /* The secondary answers need an edge that reads as a button on the panel (28% text on the card). */
+  border-color: #4f566b;
   justify-content: flex-start;
   font-size: var(--fs-base);
   line-height: 1.25;
