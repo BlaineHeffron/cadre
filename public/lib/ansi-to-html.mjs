@@ -25,22 +25,28 @@ function esc(str) {
  */
 export function ansiToHtml(text) {
   if (!text) return '';
-  // A whole line of only box-drawing dashes (colour codes aside) is the CLI's divider at its own
-  // column count. Its dashes are marked here and drawn as a full-width rule in their colour, so
-  // it never stops short of the pane edge; the dashes stay in the DOM for copying.
-  text = text.replace(/^((?:\x1b\[[0-9;]*m)*)(─{20,})((?:\x1b\[[0-9;]*m)*)$/gm, '$1\uE000$2\uE001$3');
-  // Prose blocks are marked with non-printing control characters (never Nerd Font icons from the
+  // The marks below are non-printing control characters (never Nerd Font icons from the
   // private-use area); any already in the pane are dropped first.
-  text = markProse(text.replace(/[\x02-\x04]/g, ''));
+  text = text.replace(/[\x02-\x07]/g, '');
+  // A whole line of only box-drawing dashes (colour codes aside) is the CLI's divider at its own
+  // column count. Its dashes are marked and drawn as a full-width rule in their colour, so it
+  // never stops short of the pane edge; the dashes stay in the DOM for copying.
+  text = text.replace(/^((?:\x1b\[[0-9;]*m)*)(─{20,})((?:\x1b\[[0-9;]*m)*)$/gm, '$1\x06$2\x07$3');
+  // A whole line in one background colour (a diff row the CLI padded to its own width) spans the
+  // pane too, so hunk bars never stop mid-panel.
+  text = text.replace(/^(?=\x1b\[[0-9;]*48;[0-9;]*m[^\x1b\n]*(?:\x1b\[0?m)?$)/gm, '\x05');
+  text = markProse(text);
 
   const parts = [];
   let current = { bold: false, dim: false, italic: false, underline: false, strike: false, fg: null, bg: null };
   let i = 0;
   let buf = '';
+  let fullLine = false;
 
   function flushBuf() {
     if (!buf) return;
-    const classes = buildClasses(current);
+    const classes = [buildClasses(current), fullLine && current.bg ? 'ansi-line' : ''].filter(Boolean).join(' ');
+    fullLine = false;
     // 256-colour and truecolor values have no class; they render inline.
     // Backgrounds are blended toward the terminal so diff rows tint rather than glare; mid-grey
     // text (the CLI's dim hints and rules) is lifted toward the body text so it stays readable.
@@ -49,12 +55,18 @@ export function ansiToHtml(text) {
       .map(([prop, value]) => `${prop}:${prop === 'color' ? liftGrey(value) : `color-mix(in srgb,${value} 75%,transparent)`}`)
       .join(';');
     const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;
-    const html = esc(buf).replace(/\uE000(─+)\uE001/g, '<span class="ansi-rule">$1</span>');
+    const html = esc(buf).replace(/\x06(─+)\x07/g, '<span class="ansi-rule">$1</span>');
     parts.push(attrs ? `<span${attrs}>${html}</span>` : html);
     buf = '';
   }
 
   while (i < text.length) {
+    if (text[i] === '\x05') {
+      flushBuf();
+      fullLine = true;
+      i++;
+      continue;
+    }
     // Prose blocks open and close at the top level, between the self-contained colour spans.
     if (text[i] === '\x02' || text[i] === '\x03' || text[i] === '\x04') {
       flushBuf();

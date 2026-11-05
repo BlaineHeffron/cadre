@@ -28,14 +28,19 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     render(h(AgentsPage, {}), document.getElementById('app'));
   </script>`)));
   // A session's own route, mounted under the router as the app mounts it.
-  app.get('/claude/:id', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
+  const sessionRoute = (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
     import { h, render } from 'preact';
     import Router from 'preact-router';
     import { isAuthenticated } from '/app/state.mjs';
     import { SessionRoute } from '/pages/agents.mjs';
     isAuthenticated.value = true;
-    render(h('main', { class: 'main' }, h(Router, {}, h(SessionRoute, { path: '/claude/:id', provider: 'claude' }))), document.getElementById('app'));
-  </script>`)));
+    render(h('main', { class: 'main' }, h(Router, {}, ['claude', 'codex'].map((kind) => h(SessionRoute, { path: \`/\${kind}/:id\`, provider: kind })))), document.getElementById('app'));
+  </script>`));
+  app.get('/claude/:id', sessionRoute);
+  app.get('/codex/:id', sessionRoute);
+  let codexSessions = [];
+  app.get('/api/codex/sessions', () => ({ sessions: codexSessions }));
+  app.get('/api/codex/sessions/:id', (req) => ({ id: req.params.id, content: 'codex pane', state: { status: 'working' }, sessionName: `codex-${req.params.id}` }));
   app.get('/session', (_req, reply) => reply.type('text/html').send(index.replace('<script type="module" src="/app/app.mjs"></script>', `<script type="module">
     import { h, render } from 'preact';
     import { isAuthenticated } from '/app/state.mjs';
@@ -49,15 +54,16 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     { key: '2', label: "Yes, and don't ask again for npm run migrate commands in this project" },
     { key: '3', label: 'No, and tell Claude what to do differently (esc)' },
   ] } };
-  // The CLI's divider rule spans the pane, whatever its column count, without horizontal overflow.
+  // The CLI's divider rule and a diff row span the pane, whatever its column count, without
+  // horizontal overflow.
   const ruleFits = (pg) => pg.locator('.terminal').evaluate((el) => {
-    const rule = el.querySelector('.ansi-rule');
+    const width = (sel) => Math.round(el.querySelector(sel).getBoundingClientRect().width);
     const cs = getComputedStyle(el);
     const content = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-    return { rule: Math.round(rule.getBoundingClientRect().width), content: Math.round(content), overflow: el.scrollWidth - el.clientWidth };
+    return { rule: width('.ansi-rule'), row: width('.ansi-line'), content: Math.round(content), overflow: el.scrollWidth - el.clientWidth };
   });
   const menu = 'pane text\nDo you want to proceed?\n❯ 1. Yes\n  2. Yes, and don\'t ask again\n  3. No, and tell Claude what to do differently (esc)';
-  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: req.params.id === 'b2' ? menu : `pane text\n● ${'The reply reads as prose. '.repeat(12)}\n\x1b[38;5;244m${'─'.repeat(110)}\x1b[0m\n❯ \n\x1b[95m⏵⏵ accept edits on\x1b[0m`, state: req.params.id === 'b2' ? blocked : { status: 'working' }, sessionName: `claude-${req.params.id}` }));
+  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: req.params.id === 'b2' ? menu : `pane text\n● ${'The reply reads as prose. '.repeat(12)}\n\x1b[48;2;34;92;43m  43 + const added = true;\x1b[0m\n\x1b[38;5;244m${'─'.repeat(110)}\x1b[0m\n❯ \n\x1b[95m⏵⏵ accept edits on\x1b[0m`, state: req.params.id === 'b2' ? blocked : { status: 'working' }, sessionName: `claude-${req.params.id}` }));
   app.post('/api/*', () => ({ ok: true }));
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
@@ -184,6 +190,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     page.reload(),
   ]);
   await page.locator('.empty-state').getByRole('button', { name: 'New session' }).waitFor();
+  // The empty desktop list fills the page like the split view, with no card nested in its frame.
+  const emptyShell = await page.locator('.agents-desktop-empty').evaluate((el) => {
+    const card = el.querySelector('.empty-state');
+    return { bottom: el.getBoundingClientRect().bottom, cardBorder: getComputedStyle(card).borderTopWidth };
+  });
+  assert.ok(emptyShell.bottom >= 860 && emptyShell.cardBorder === '0px', `empty shell ${JSON.stringify(emptyShell)}`);
   await page.waitForFunction(() => ![...document.querySelectorAll('.agents-desktop-toolbar button')].some((b) => b.textContent.trim() === 'New session'));
   await page.locator('.empty-state').getByRole('button', { name: 'New session' }).click();
   const create = page.getByRole('button', { name: 'Create session' });
@@ -200,7 +212,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const summaryHeight = (await phone.locator('.terminal-keys > summary').boundingBox()).height;
   assert.ok(Math.round(summaryHeight) >= 36, `phone Terminal keys toggle is a full control-height target (${summaryHeight}px)`);
   const phoneRule = await ruleFits(phone);
-  assert.ok(phoneRule.rule === phoneRule.content && phoneRule.overflow === 0, `phone rule ${JSON.stringify(phoneRule)}`);
+  assert.ok(phoneRule.rule === phoneRule.content && phoneRule.row === phoneRule.content && phoneRule.overflow === 0, `phone rule ${JSON.stringify(phoneRule)}`);
   const [phoneKeys, phoneBar] = await Promise.all(['.terminal-keys', '.claude-control-bar'].map((sel) => phone.locator(sel).boundingBox()));
   assert.ok(phoneKeys.y + phoneKeys.height <= phoneBar.y + 1, `phone keys end at ${phoneKeys.y + phoneKeys.height}, bar starts at ${phoneBar.y}`);
   await phone.close();
@@ -226,7 +238,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   });
   assert.deepEqual(prose, [true, true, true, []], 'prose wraps between words, never mid-word');
   const deskRule = await ruleFits(page);
-  assert.ok(deskRule.rule === deskRule.content && deskRule.overflow === 0, `desktop rule ${JSON.stringify(deskRule)}`);
+  assert.ok(deskRule.rule === deskRule.content && deskRule.row === deskRule.content && deskRule.overflow === 0, `desktop rule ${JSON.stringify(deskRule)}`);
   // The focused transcript keeps a thin visible ring (at least 3:1 against its panel tone). It is a
   // border, which the scroll fade cannot paint over, and it does not shift the layout on focus.
   const ring = (el) => { const cs = getComputedStyle(el); return [cs.borderTopWidth, cs.borderTopColor, cs.outlineStyle, cs.backgroundColor, el.getBoundingClientRect().width]; };
@@ -242,21 +254,28 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // On desktop a session's own route is the Agents split view with that session selected, and the
   // panel's prev/next step through the list beside it.
   sessions = demo;
+  codexSessions = [{ id: 'c3', displayName: 'third task', workDir: '/home/me/repo', state: { status: 'working' } }];
   await page.goto(`${origin}/claude/b2`);
   const panelTitle = page.locator('.agent-session-page-embedded .session-title');
-  await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-b2');
-  assert.equal(await page.locator('.agent-rail-row').count(), 2);
+  const shows = (title) => page.waitForFunction((t) => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === t, title);
+  await shows('claude-b2');
+  assert.equal(await page.locator('.agent-rail-row').count(), 3);
+  const historyLength = await page.evaluate(() => history.length);
+  // Next wraps from the last Claude session to the Codex one, across providers.
   await page.locator('.agent-session-page-embedded').getByRole('button', { name: '\u203a' }).click();
-  await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-a1');
+  await shows('codex-c3');
   // The address follows the shown session, from the arrows or a list click, so a reload or
   // shared link opens it again.
-  assert.equal(new URL(page.url()).pathname, '/claude/a1');
+  assert.equal(new URL(page.url()).pathname, '/codex/c3');
   // The router knows the new address too: routing back to the first session shows it again.
   await page.evaluate(() => import('preact-router').then(({ route }) => route('/claude/b2')));
   await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-b2');
   await page.locator('.agent-rail-row').filter({ hasText: 'first task' }).locator('.agent-rail-row-main').click();
-  await page.waitForFunction(() => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === 'claude-a1');
+  await shows('claude-a1');
   assert.equal(new URL(page.url()).pathname, '/claude/a1');
+  // Stepping replaces the address rather than stacking history entries: the only new entry is
+  // the test's own route() push above.
+  assert.equal(await page.evaluate(() => history.length), historyLength + 1);
   assert.equal(await panelTitle.count(), 1);
   // A phone keeps the full-screen session page.
   const phoneRoute = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });

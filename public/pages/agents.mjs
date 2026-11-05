@@ -1133,9 +1133,9 @@ export function AgentsPage({ focus = '' } = {}) {
         : loadError.value
           ? html`<${ErrorState} message=${`Agents failed to load: ${loadError.value}`} actionLabel="Retry" onAction=${() => loadAgentSessions(loading, loadError)} />`
         : visibleSessions.length === 0
-          ? allSessions.length === 0
+          ? html`<div class=${desktopLayout.value ? 'agents-desktop-shell agents-desktop-empty' : ''}>${allSessions.length === 0
             ? html`<${EmptyState} message="No agent sessions yet. Start one to see it here." actionLabel="New session" onAction=${() => openNewModal('codex')} />`
-            : html`<${EmptyState} message=${`No ${providerFilter.value === 'all' ? '' : providerLabel(providerFilter.value) + ' '}sessions match the current filters.`} />`
+            : html`<${EmptyState} message=${`No ${providerFilter.value === 'all' ? '' : providerLabel(providerFilter.value) + ' '}sessions match the current filters.`} />`}</div>`
           : desktopLayout.value ? html`
             <div class="agents-desktop-shell">
               <aside class="agents-desktop-rail" aria-label="Agent sessions">

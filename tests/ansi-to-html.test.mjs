@@ -5,7 +5,7 @@ import { ansiToHtml } from '../public/lib/ansi-to-html.mjs';
 test('truecolor diff backgrounds render, blended toward the terminal, instead of being dropped', () => {
   assert.equal(
     ansiToHtml('\x1b[48;2;34;92;43m  13 + x\x1b[0m'),
-    '<span style="background:color-mix(in srgb,rgb(34,92,43) 75%,transparent)">  13 + x</span>',
+    '<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) 75%,transparent)">  13 + x</span>',
   );
   assert.equal(ansiToHtml('\x1b[38;2;300;-1;7mhi'), '<span style="color:rgb(255,0,7)">hi</span>');
 });
@@ -17,7 +17,7 @@ test('256-colour codes map to the xterm cube, grey ramp and named colours', () =
   assert.equal(ansiToHtml('\x1b[38;2;40;40;40mx'), '<span style="color:rgb(40,40,40)">x</span>');
   assert.equal(ansiToHtml('\x1b[38;2;240;240;240mx'), '<span style="color:rgb(240,240,240)">x</span>');
   assert.equal(ansiToHtml('\x1b[38;2;148;148;150mx'), '<span style="color:rgb(148,148,150)">x</span>');
-  assert.equal(ansiToHtml('\x1b[48;5;196mred'), '<span style="background:color-mix(in srgb,rgb(255,0,0) 75%,transparent)">red</span>');
+  assert.equal(ansiToHtml('\x1b[48;5;196mred'), '<span class="ansi-line" style="background:color-mix(in srgb,rgb(255,0,0) 75%,transparent)">red</span>');
   assert.equal(ansiToHtml('\x1b[38;5;9mx'), '<span class="ansi-fg-bright-red">x</span>');
 });
 
@@ -68,4 +68,17 @@ test('lists, box tables and indented code stay terminal text; later paragraphs s
 test('private-use icons and stray control characters never open or close a prose block', () => {
   assert.equal(ansiToHtml(' ~/repo \n⏺ Done.'), ' ~/repo \n<span class="ansi-prose">⏺ Done.</span>');
   assert.equal(ansiToHtml('a\x02b\x03c\x04'), 'abc');
+});
+
+test('a line in one background colour spans the pane; badges inside a line do not', () => {
+  assert.equal(
+    ansiToHtml('ctx\n\x1b[48;2;34;92;43m  43 + x\x1b[0m\nnext'),
+    'ctx\n<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) 75%,transparent)">  43 + x</span>\nnext',
+  );
+  assert.equal(
+    ansiToHtml('\x1b[48;2;0;170;0m PASS \x1b[0m tests.ts'),
+    '<span style="background:color-mix(in srgb,rgb(0,170,0) 75%,transparent)"> PASS </span> tests.ts',
+  );
+  // Private-use icons around dashes stay text; only the parser's own marks draw a rule.
+  assert.equal(ansiToHtml(`\uE000${'─'.repeat(30)}\uE001`), `\uE000${'─'.repeat(30)}\uE001`);
 });
