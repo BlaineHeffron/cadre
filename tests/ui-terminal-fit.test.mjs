@@ -1,4 +1,4 @@
-// The session terminal in headless Chromium: short histories sit under nothing, long ones stick to the bottom.
+// The session terminal in headless Chromium: it fills the column, short histories read from the top, long ones stick to the bottom.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +7,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { chromium } from 'playwright-core';
 
-test('full-height terminal fits a short history and keeps streaming output pinned to the bottom', { skip: !process.env.CHROMIUM_BIN, timeout: 30000 }, async (t) => {
+test('full-height terminal fills the column, starts a short history at the top and keeps streaming output pinned to the bottom', { skip: !process.env.CHROMIUM_BIN, timeout: 30000 }, async (t) => {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const app = Fastify();
   t.after(() => app.close());
@@ -37,7 +37,9 @@ test('full-height terminal fits a short history and keeps streaming output pinne
   await terminal.getByText('Waiting…').waitFor();
   const [pane, body, controls] = await Promise.all([terminal, page.locator('.terminal-body'), page.locator('#controls')].map((l) => l.boundingBox()));
   assert.ok(body.y - pane.y < 24, `short history starts ${body.y - pane.y}px below the pane top`);
-  assert.ok(controls.y - (body.y + body.height) < 24, `controls sit ${controls.y - (body.y + body.height)}px below the last line`);
+  // The transcript fills the column, so the controls stay pinned to its bottom edge.
+  assert.equal(Math.round(pane.height), 520, 'a short history still fills the space above the controls');
+  assert.equal(Math.round(controls.y + controls.height - pane.y), 600, 'the controls sit at the bottom of the column');
   // Nothing has scrolled, so the top fade is hidden and the first line reads at full strength.
   const fade = () => terminal.evaluate((el) => getComputedStyle(el, '::before').opacity);
   assert.equal(await fade(), '0');
