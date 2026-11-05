@@ -189,7 +189,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const phoneRule = await ruleFits(phone);
   assert.ok(phoneRule.rule === phoneRule.content && phoneRule.overflow === 0, `phone rule ${JSON.stringify(phoneRule)}`);
   const [phoneKeys, phoneBar] = await Promise.all(['.terminal-keys', '.claude-control-bar'].map((sel) => phone.locator(sel).boundingBox()));
-  assert.ok((await phone.locator('.terminal-keys > summary').boundingBox()).height >= 36, 'phone Terminal keys toggle is a full control-height target');
+  // Measured once the phone layout settles (a one-shot read raced the layout, failing about 1 run in 4 on main).
+  await phone.waitForFunction(() => document.querySelector('.terminal-keys > summary')?.getBoundingClientRect().height >= 36);
   assert.ok(phoneKeys.y + phoneKeys.height <= phoneBar.y + 1, `phone keys end at ${phoneKeys.y + phoneKeys.height}, bar starts at ${phoneBar.y}`);
   await phone.close();
   // A single session reads at a comfortable width on a wide screen, centred.
