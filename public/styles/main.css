@@ -1677,12 +1677,6 @@ input[type="checkbox"]:not(.switch) {
   animation: fadeIn 0.2s ease;
 }
 
-/* A full-route session is one panel down to the viewport bottom, like the embedded one,
-   so a short transcript never leaves bare page below the controls. */
-.claude-session-page:not(.agent-session-page-embedded) {
-  background: var(--bg-secondary);
-}
-
 /* On wide screens a single session reads at a comfortable width instead of edge to edge. */
 @media (min-width: 1240px) {
   .claude-session-page:not(.agent-session-page-embedded) {
@@ -2121,6 +2115,12 @@ input[type="checkbox"]:not(.switch) {
   min-height: 0;
   margin: 0;
   animation: none;
+}
+
+/* A session is one surface in both layouts: below a short transcript the panel keeps the
+   transcript's tone instead of showing the lighter card navy. */
+.claude-session-page {
+  background: var(--bg-secondary);
 }
 
 /* The embedded panel is narrower than a full route, so the header keeps its
