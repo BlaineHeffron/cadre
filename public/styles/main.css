@@ -1,4 +1,6 @@
 :root {
+  /* Native controls (checkboxes, scrollbars, pickers) draw in the dark scheme too. */
+  color-scheme: dark;
   --bg-primary: #0f0f1a;
   --bg-secondary: #1a1a2e;
   --bg-card: #16213e;
