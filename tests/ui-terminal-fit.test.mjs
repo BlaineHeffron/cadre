@@ -48,12 +48,13 @@ test('full-height terminal fits a short history and keeps streaming output pinne
   await terminal.getByText('line 199').waitFor();
   assert.equal(Math.round((await terminal.boundingBox()).height), 520, 'a long history fills the space above the controls');
   await page.waitForFunction(() => { const el = document.querySelector('.terminal'); return el.scrollHeight - el.clientHeight - el.scrollTop < 2; });
-  // Streaming output keeps the view on the newest line.
-  for (const total of [220, 260]) {
-    await page.evaluate((text) => window.show(text), lines(total));
-    await terminal.getByText(`line ${total - 1}`).waitFor();
+  // Streaming output keeps the view on the newest line, also while it grows inside a tool-call card.
+  const streaming = (n) => `${lines(200)}\n● Bash(npm test)\n  ⎿  ${Array.from({ length: n }, (_, i) => `out ${i}`).join('\n     ')}`;
+  for (const total of [20, 60]) {
+    await page.evaluate((text) => window.show(text), streaming(total));
+    await terminal.locator('.ansi-tool').getByText(`out ${total - 1}`).waitFor();
     await page.waitForTimeout(150);
-    assert.equal(await pinned(), true, `pinned after growing to ${total} lines`);
+    assert.equal(await pinned(), true, `pinned after the tool output grows to ${total} lines`);
   }
   assert.equal(await fade(), '1', 'rows scrolled past the top fade');
   // Once the reader scrolls up, new output no longer drags the view down.
