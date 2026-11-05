@@ -140,9 +140,9 @@ test('Codex tool calls (• Ran, • Explored and their └ output) form cards t
 test('the live spinner line takes the accent colour; a finished "Worked for" line keeps its own', () => {
   const coral = (text) => `\x1b[38;5;174m${text}\x1b[0m`;
   assert.equal(ansiToHtml(`${coral('✶')} ${coral('Drafting… (52s · ↓ 2.4k tokens · esc to interrupt)')}`),
-    '<span class="ansi-fg-cyan">✶ Drafting… (52s · ↓ 2.4k tokens · esc to interrupt)</span>');
-  assert.equal(ansiToHtml('\x1b[37m✻\x1b[0m \x1b[37mWorked for 18s\x1b[0m'), '<span class="ansi-fg-white">✻</span> <span class="ansi-fg-white">Worked for 18s</span>');
-  assert.equal(ansiToHtml('✶ Thinking… (esc to interrupt)'), '<span class="ansi-fg-cyan">✶ Thinking… (esc to interrupt)</span>');
+    '<span class="ansi-prose"><span class="ansi-fg-cyan">✶ Drafting… (52s · ↓ 2.4k tokens · esc to interrupt)</span></span>');
+  assert.equal(ansiToHtml('\x1b[37m✻\x1b[0m \x1b[37mWorked for 18s\x1b[0m'), '<span class="ansi-prose"><span class="ansi-fg-white">✻</span> <span class="ansi-fg-white">Worked for 18s</span></span>');
+  assert.equal(ansiToHtml('✶ Thinking… (esc to interrupt)'), '<span class="ansi-prose"><span class="ansi-fg-cyan">✶ Thinking… (esc to interrupt)</span></span>');
   // Prose or a list item that merely ends a word with an ellipsis is not a spinner.
   assert.equal(ansiToHtml('Loading… the data'), 'Loading… the data');
   assert.equal(ansiToHtml('\x1b[33m* Note… this is a list item\x1b[0m'), '<span class="ansi-fg-yellow">* Note… this is a list item</span>');
@@ -179,4 +179,11 @@ test('inline code in a prose reply renders as code and keeps its backticks for c
   assert.equal(ansiToHtml('● Use ```js``` here.'), '<span class="ansi-prose">● Use ```js``` here.</span>');
   // Tool output and terminal text keep their backticks as typed.
   assert.equal(ansiToHtml('  echo `date`'), '  echo `date`');
+});
+
+test('the user prompt and status lines read as prose; menu choices and tool calls stay terminal text', () => {
+  assert.equal(ansiToHtml('❯ Write an onboarding guide\n  for new contributors'), '<span class="ansi-prose">❯ Write an onboarding guide\n  for new contributors</span>');
+  assert.equal(ansiToHtml('❯ 1. Yes'), '❯ 1. Yes');
+  assert.equal(ansiToHtml('❯ '), '❯ ');
+  assert.equal(ansiToHtml('· 2 shells'), '· 2 shells');
 });

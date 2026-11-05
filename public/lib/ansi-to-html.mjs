@@ -139,11 +139,13 @@ const BLOCK_MARKS = {
 
 // The CLI's prose replies are a bullet line that is not a Tool(args) call, plus the lines it
 // hard-wrapped with a two-space indent; later paragraphs of the same reply are two-space lines
-// after a blank one. Each paragraph is marked (its trailing newline inside) so it can read as
-// proportional, reflowing text. Lists, box tables, deeper-indented code and ⎿ results never
-// count as prose, so they keep their lines and monospace.
+// after a blank one. The user's own prompt (`❯ text`) and the status lines (`✶ Drafting… (52s)`,
+// `✻ Worked for 18s`) read the same way. Each paragraph is marked (its trailing newline inside)
+// so it can read as proportional, reflowing text. Lists, box tables, deeper-indented code, ⎿
+// results and menu choices (`❯ 1. Yes`) never count as prose, so they keep their lines and monospace.
 const STRUCTURED = /^(?:[-*•+] |\d+[.)] |[\u2500-\u257F⎿])/;
-const isReplyStart = (plain) => /^[●⏺] \S/.test(plain) && !/^[●⏺] \S+\(/.test(plain) && !STRUCTURED.test(plain.slice(2));
+const isReplyStart = (plain) => (/^[●⏺❯] \S/.test(plain) || /^[✻✶✳✢✽·] [A-Z]/.test(plain))
+  && !/^[●⏺] \S+\(/.test(plain) && !STRUCTURED.test(plain.slice(2));
 const isProseLine = (plain) => /^ {2}\S/.test(plain) && !STRUCTURED.test(plain.slice(2));
 
 function markProse(text) {
