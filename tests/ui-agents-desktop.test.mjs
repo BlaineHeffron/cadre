@@ -134,11 +134,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   }));
   assert.equal(new Set(boxes.map((b) => b.width)).size, 1, `answer widths ${boxes.map((b) => b.width)}`);
   // A compact card, not a full-width slab, in the button system: Yes is the filled primary, No a
-  // secondary with light-red text and the neutral border, so it never outshouts Yes.
+  // secondary that never outshouts Yes.
   assert.ok(boxes[0].width <= 560, `answers ${boxes[0].width}px wide`);
   const colour = (i, prop) => answers.nth(i).evaluate((el, p) => getComputedStyle(el)[p], prop);
   assert.deepEqual([await colour(0, 'color'), await colour(0, 'backgroundColor')], ['rgb(0, 0, 0)', 'rgb(79, 195, 247)']);
-  assert.deepEqual([await colour(2, 'color'), await colour(2, 'backgroundColor'), await colour(2, 'borderTopColor')], ['rgb(255, 161, 152)', 'rgb(22, 33, 62)', await colour(1, 'borderTopColor')]);
+  // No reads at body contrast; only its edge is red-tinted.
+  assert.deepEqual([await colour(2, 'color'), await colour(2, 'backgroundColor'), await colour(2, 'borderTopColor')], ['rgb(224, 224, 224)', 'rgb(22, 33, 62)', 'rgb(152, 63, 73)']);
   // The secondary answers carry a visible edge, much lighter than the panel's rgb(42, 42, 62) hairline.
   assert.equal(await colour(1, 'borderTopColor'), 'rgb(79, 86, 107)');
   assert.ok(boxes.every((b, i) => i === 0 || b.top > boxes[i - 1].top), 'answers stack in order');

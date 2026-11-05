@@ -35,6 +35,10 @@ export function ansiToHtml(text) {
   // A whole line in one background colour (a diff row the CLI padded to its own width) spans the
   // pane too, so hunk bars never stop mid-panel.
   text = text.replace(/^(?=\x1b\[[0-9;]*48;[0-9;]*m[^\x1b\n]*(?:\x1b\[0?m)?$)/gm, '\x05');
+  // The CLI's live spinner line (`✶ Drafting… (52s · esc to interrupt)`) is a working status, so it
+  // takes the accent the Working badge uses rather than the CLI's own coral.
+  text = text.replace(/^(?:\x1b\[[0-9;]*m)*[✻✶✳✢✽*·](?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*[A-Z][a-z-]*….*$/gm,
+    (line) => `\x1b[36m${line.replace(SGR, '')}\x1b[0m`);
   text = markTools(markProse(text));
 
   const parts = [];

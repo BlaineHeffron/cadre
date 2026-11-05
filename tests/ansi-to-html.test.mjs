@@ -130,3 +130,12 @@ test('Codex tool calls (• Ran, • Explored and their └ output) form cards t
   // A long command wrapped onto │ lines keeps its └ output in the same card.
   assert.equal(ansiToHtml('• Ran npm test --\n  │ --watch=false\n  └ ok'), '<span class="ansi-tool">• Ran npm test --\n  │ --watch=false\n  └ ok</span>');
 });
+
+test('the live spinner line takes the accent colour; a finished "Worked for" line keeps its own', () => {
+  const coral = (text) => `\x1b[38;5;174m${text}\x1b[0m`;
+  assert.equal(ansiToHtml(`${coral('✶')} ${coral('Drafting… (52s · ↓ 2.4k tokens · esc to interrupt)')}`),
+    '<span class="ansi-fg-cyan">✶ Drafting… (52s · ↓ 2.4k tokens · esc to interrupt)</span>');
+  assert.equal(ansiToHtml('\x1b[37m✻\x1b[0m \x1b[37mWorked for 18s\x1b[0m'), '<span class="ansi-fg-white">✻</span> <span class="ansi-fg-white">Worked for 18s</span>');
+  // Prose that merely ends a word with an ellipsis is not a spinner.
+  assert.equal(ansiToHtml('Loading… the data'), 'Loading… the data');
+});
