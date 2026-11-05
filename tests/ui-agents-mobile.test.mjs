@@ -47,6 +47,9 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   // One provider heading per run of cards, not one per card.
   assert.deepEqual(await page.locator('.agents-card-provider').allInnerTexts(), ['Claude']);
   assert.equal(await cards.first().getByRole('img', { name: 'Unread' }).isVisible(), true);
+  // Card paths and times are read, so they use the 13px step in secondary grey, like the desktop rail.
+  const path = await cards.first().getByText('/home/me/repo').evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
+  assert.deepEqual(path, ['13px', 'rgb(208, 208, 222)']);
   // At two columns the heading spans the row, so cards side by side line up.
   await page.setViewportSize({ width: 960, height: 844 });
   const [left, right] = await Promise.all([0, 1].map((i) => cards.nth(i).boundingBox()));
@@ -110,7 +113,7 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
     title.firstChild.textContent = before;
     return width;
   });
-  assert.equal(squeezed, 18, 'form checkboxes keep the shared 18px size beside a long label');
+  assert.equal(squeezed, 20, 'form checkboxes keep the shared 20px size beside a long label');
   assert.equal(await page.getByPlaceholder('Optional label').isVisible(), false);
   assert.equal(await page.getByRole('checkbox', { name: /Coordinator/ }).isVisible(), false);
   await page.locator('.new-agent-advanced > summary').click();
