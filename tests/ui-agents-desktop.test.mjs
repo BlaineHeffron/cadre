@@ -184,13 +184,15 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await page.locator('h1').first().evaluate((el) => getComputedStyle(el).fontSize), '18px');
   // On a phone the keys stay above the sticky, safe-area-padded control bar.
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  phone.setDefaultTimeout(5000);
   await phone.goto(`${origin}/session`);
   await phone.locator('.terminal-keys').waitFor();
+  // Rounded: the mobile viewport sometimes lays the 36px toggle out at 35.99999px (about 1 run in 4 on main).
+  const summaryHeight = (await phone.locator('.terminal-keys > summary').boundingBox()).height;
+  assert.ok(Math.round(summaryHeight) >= 36, `phone Terminal keys toggle is a full control-height target (${summaryHeight}px)`);
   const phoneRule = await ruleFits(phone);
   assert.ok(phoneRule.rule === phoneRule.content && phoneRule.overflow === 0, `phone rule ${JSON.stringify(phoneRule)}`);
   const [phoneKeys, phoneBar] = await Promise.all(['.terminal-keys', '.claude-control-bar'].map((sel) => phone.locator(sel).boundingBox()));
-  // Measured once the phone layout settles (a one-shot read raced the layout, failing about 1 run in 4 on main).
-  await phone.waitForFunction(() => document.querySelector('.terminal-keys > summary')?.getBoundingClientRect().height >= 36);
   assert.ok(phoneKeys.y + phoneKeys.height <= phoneBar.y + 1, `phone keys end at ${phoneKeys.y + phoneKeys.height}, bar starts at ${phoneBar.y}`);
   await phone.close();
   // A single session reads at a comfortable width on a wide screen, centred.
