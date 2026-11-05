@@ -84,6 +84,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // Calm states are tinted text, not a solid fill; checkboxes are an 18px target.
   assert.equal(await rows.first().locator('.status-badge').evaluate((el) => getComputedStyle(el).color), 'rgb(79, 195, 247)');
   assert.equal(Math.round((await rows.first().getByRole('checkbox').boundingBox()).width), 18);
+  // Native controls draw in the dark scheme, so an unchecked box is not a white square on the rail.
+  assert.equal(await rows.first().getByRole('checkbox').evaluate((el) => getComputedStyle(el).colorScheme), 'dark');
 
   const toolbar = page.locator('.agents-desktop-toolbar');
   // Buttons, the search box and the provider select share one control height.
