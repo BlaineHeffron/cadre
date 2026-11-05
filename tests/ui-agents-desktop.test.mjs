@@ -99,6 +99,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const textStyle = (sel) => rows.first().locator(sel).evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
   assert.deepEqual(await textStyle('.agent-rail-row-meta'), ['13px', 'rgb(208, 208, 222)']);
   assert.deepEqual(await textStyle('.agent-rail-row-detail'), ['13px', 'rgb(224, 224, 224)']);
+  // With one provider listed, the rail heading names it once and rows show only the short path.
+  assert.equal(await page.locator('.agents-desktop-rail-head .card-title').innerText(), 'Claude sessions');
+  assert.equal(await rows.first().locator('.agent-rail-row-meta').innerText(), 'me/repo');
   await page.getByRole('checkbox', { name: 'Bulk select first task' }).check();
   assert.equal(await toolbar.getByText('1 selected').isVisible(), true);
   assert.equal(await toolbar.getByRole('checkbox', { name: 'Select all' }).isVisible(), true);
@@ -281,6 +284,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const shows = (title) => page.waitForFunction((t) => document.querySelector('.agent-session-page-embedded .session-title')?.textContent === t, title);
   await shows('claude-b2');
   assert.equal(await page.locator('.agent-rail-row').count(), 3);
+  // Mixed providers: each row names its own.
+  assert.equal(await page.locator('.agents-desktop-rail-head .card-title').innerText(), 'Sessions');
+  assert.match(await page.locator('.agent-rail-row', { hasText: 'third task' }).locator('.agent-rail-row-meta').innerText(), /^Codex\s+me\/repo$/);
   // The embedded session is the same one surface: below a short transcript it keeps the transcript's tone.
   assert.equal(await page.locator('.agent-session-page-embedded').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(26, 26, 46)');
   const historyLength = await page.evaluate(() => history.length);

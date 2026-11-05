@@ -47,9 +47,11 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   // One provider heading per run of cards, not one per card.
   assert.deepEqual(await page.locator('.agents-card-provider').allInnerTexts(), ['Claude']);
   assert.equal(await cards.first().getByRole('img', { name: 'Unread' }).isVisible(), true);
-  // Card paths and times are read, so they use the 13px step in secondary grey, like the desktop rail.
-  const path = await cards.first().getByText('/home/me/repo').evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
-  assert.deepEqual(path, ['13px', 'rgb(208, 208, 222)']);
+  // Card paths and times are read, so they use the 13px step in secondary grey. The path is the
+  // rail's short form in the body font, so it is not cut mid-word; the full path is its tooltip.
+  const path = cards.first().getByTitle('/home/me/repo');
+  assert.equal(await path.innerText(), 'me/repo');
+  assert.deepEqual(await path.evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color, getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily]), ['13px', 'rgb(208, 208, 222)', true]);
   // At two columns the heading spans the row, so cards side by side line up.
   await page.setViewportSize({ width: 960, height: 844 });
   const [left, right] = await Promise.all([0, 1].map((i) => cards.nth(i).boundingBox()));
