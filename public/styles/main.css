@@ -2446,6 +2446,13 @@ input[type="checkbox"]:not(.switch) {
   font-size: var(--fs-md);
 }
 
+/* In the answer menu the refusal reads at body contrast; a red-tinted edge (60% danger on the card)
+   marks it instead of red text. */
+.control-row-primary .ctrl-reject {
+  border-color: #983f49;
+  color: var(--text-primary);
+}
+
 .ctrl-reject:active {
   background: color-mix(in srgb, var(--danger) 24%, var(--bg-card));
 }
