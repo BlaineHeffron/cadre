@@ -55,7 +55,7 @@ test('settings uses labelled switches that reflect and change their state', { sk
   // Switch tracks and primary buttons share one fill; success pills are tinted like status badges.
   assert.equal(await page.getByRole('button', { name: 'Pair phone' }).evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(52, 150, 205)');
   assert.equal(await page.locator('.badge-success').first().evaluate((el) => getComputedStyle(el).color), 'rgb(102, 187, 106)');
-  assert.equal(await page.locator('.switch:not(:checked)').first().evaluate(knob), 'rgb(208, 208, 222)');
+  assert.equal(await page.locator('.switch:not(:checked)').first().evaluate(knob), 'rgb(218, 218, 230)');
   await headroom.click();
   await page.waitForResponse((response) => response.url().endsWith('/api/agent-provider-preferences'));
   await page.locator('.setting-switch', { hasText: 'Headroom' }).locator('input:checked').waitFor();
@@ -64,11 +64,11 @@ test('settings uses labelled switches that reflect and change their state', { sk
   assert.ok((await page.locator('.settings-shell').boundingBox()).width <= 960, 'settings rows keep a readable width');
   // Switch hints are read, so they use the 13px step in secondary grey.
   const hint = await page.locator('.setting-switch-hint').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
-  assert.deepEqual(hint, ['13px', 'rgb(208, 208, 222)']);
+  assert.deepEqual(hint, ['13px', 'rgb(218, 218, 230)']);
   // Logout is a danger secondary: light-red text on the neutral border.
   const logout = page.getByRole('button', { name: 'Logout' });
   assert.deepEqual(await logout.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).borderTopColor]), ['rgb(255, 161, 152)', 'rgb(42, 42, 62)']);
   // Card notes read at the same 13px secondary as the switch hints.
-  assert.deepEqual(await page.locator('.note').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]), ['13px', 'rgb(208, 208, 222)']);
+  assert.deepEqual(await page.locator('.note').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]), ['13px', 'rgb(218, 218, 230)']);
   assert.deepEqual(errors, []);
 });
