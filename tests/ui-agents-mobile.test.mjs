@@ -55,6 +55,8 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   const [left, right] = await Promise.all([0, 1].map((i) => cards.nth(i).boundingBox()));
   assert.ok(right.x > left.x && Math.abs(right.y - left.y) < 0.5, `cards at y=${left.y} and y=${right.y}`);
   await page.setViewportSize({ width: 390, height: 844 });
+  // The 13px card meta wraps instead of widening the page.
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390), 'no horizontal scroll at 390px');
   assert.equal(await page.getByRole('textbox', { name: 'Search agents' }).isVisible(), true);
   assert.equal(await page.getByRole('combobox', { name: 'Filter by provider' }).isVisible(), true);
   // One status vocabulary: the filter chip uses the badge's own words.

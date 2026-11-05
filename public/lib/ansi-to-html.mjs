@@ -45,14 +45,18 @@ export function ansiToHtml(text) {
 
   function flushBuf() {
     if (!buf) return;
-    const classes = [buildClasses(current), fullLine && current.bg ? 'ansi-line' : ''].filter(Boolean).join(' ');
+    const line = fullLine && current.bg;
+    const classes = [buildClasses(current), line ? 'ansi-line' : ''].filter(Boolean).join(' ');
     fullLine = false;
     // 256-colour and truecolor values have no class; they render inline.
-    // Backgrounds are blended toward the terminal so diff rows tint rather than glare; mid-grey
-    // text (the CLI's dim hints and rules) is lifted toward the body text so it stays readable.
+    // Backgrounds are blended toward the terminal so they tint rather than glare. Whole diff rows
+    // get a lighter tint and keep the full colour as a gutter bar. Mid-grey text (the CLI's dim
+    // hints and rules) is lifted toward the body text so it stays readable.
     const style = [['color', current.fg], ['background', current.bg]]
       .filter(([, value]) => value?.startsWith('rgb('))
-      .map(([prop, value]) => `${prop}:${prop === 'color' ? liftGrey(value) : `color-mix(in srgb,${value} 75%,transparent)`}`)
+      .map(([prop, value]) => (prop === 'color' ? `color:${liftGrey(value)}`
+        : line ? `background:color-mix(in srgb,${value} 40%,transparent);box-shadow:inset 3px 0 ${value}`
+          : `background:color-mix(in srgb,${value} 75%,transparent)`))
       .join(';');
     const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;
     const html = esc(buf).replace(/\x06(─+)\x07/g, '<span class="ansi-rule">$1</span>');
