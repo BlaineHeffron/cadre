@@ -293,5 +293,34 @@ export function foldEmptyPrompt(text) {
   const at = plain.findLastIndex((line) => line === '❯');
   const rule = (line) => /^─{20,}$/.test(line ?? '');
   if (at < 1 || !rule(plain[at - 1]) || !rule(plain[at + 1]) || plain.slice(at + 2).filter(Boolean).length > 2) return text;
-  return [...lines.slice(0, at - 1), ...lines.slice(at + 2)].join('\n');
+  // The mode under the box moves to the composer's mode button (see permissionMode); the rest of
+  // that footer line (`· ← for agents`, `· 1 shell`) stays, and a line left empty goes.
+  const foot = lines.slice(at + 2).map(dropMode).filter((line, k) => line === lines[at + 2 + k] || stripSgr(line).trim());
+  return [...lines.slice(0, at - 1), ...foot].join('\n');
+}
+
+// The CLI's permission mode: `⏵⏵ accept edits on (shift+tab to cycle) · `, `⏸ plan mode on …`.
+const MODE = /(?:⏵⏵|⏸) (.+?) on\b(?: \(shift\+tab to cycle\))?(?: ·)? ?/;
+const stripSgr = (line) => line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+
+// Removes the mode's characters from a raw line, keeping every colour code so the rest keeps its style.
+function dropMode(line) {
+  const at = [];
+  let plain = '';
+  for (let i = 0; i < line.length;) {
+    const code = /^\x1b\[[0-9;]*[a-zA-Z]/.exec(line.slice(i));
+    if (code) { i += code[0].length; continue; }
+    at.push(i);
+    plain += line[i++];
+  }
+  const match = MODE.exec(plain);
+  if (!match) return line;
+  const drop = new Set(at.slice(match.index, match.index + match[0].length));
+  return [...line.split('').keys()].filter((i) => !drop.has(i)).map((i) => line[i]).join('');
+}
+
+// The mode on the pane's last mode line ('accept edits', 'plan'), or '' in the default mode.
+export function permissionMode(text) {
+  const match = stripSgr(String(text || '')).split('\n').map((line) => MODE.exec(line)).findLast(Boolean);
+  return match ? match[1].replace(/ mode$/, '') : '';
 }

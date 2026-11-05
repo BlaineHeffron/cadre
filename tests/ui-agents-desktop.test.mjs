@@ -63,7 +63,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     return { rule: width('.ansi-rule'), row: width('.ansi-line'), content: Math.round(content), overflow: el.scrollWidth - el.clientWidth };
   });
   const menu = 'pane text\nDo you want to proceed?\n❯ 1. Yes\n  2. Yes, and don\'t ask again\n  3. No, and tell Claude what to do differently (esc)';
-  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: req.params.id === 'b2' ? menu : `pane text\n● ${'The reply reads as prose. '.repeat(12)}\n\x1b[48;2;34;92;43m  43 + const added = true;\x1b[0m\n● Update(src/a.ts)\n  ⎿  Updated src/a.ts\n\x1b[48;2;122;41;54m       44 - old();\x1b[0m\n\x1b[38;5;244m${'─'.repeat(110)}\x1b[0m\n${'─'.repeat(110)}\n❯ \n${'─'.repeat(110)}\n\x1b[95m⏵⏵ accept edits on\x1b[0m`, state: req.params.id === 'b2' ? blocked : { status: 'working' }, sessionName: `claude-${req.params.id}` }));
+  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: req.params.id === 'b2' ? menu : `pane text \x1b[95mviolet\x1b[0m\n● ${'The reply reads as prose. '.repeat(12)}\n\x1b[48;2;34;92;43m  43 + const added = true;\x1b[0m\n● Update(src/a.ts)\n  ⎿  Updated src/a.ts\n\x1b[48;2;122;41;54m       44 - old();\x1b[0m\n\x1b[38;5;244m${'─'.repeat(110)}\x1b[0m\n${'─'.repeat(110)}\n❯ \n${'─'.repeat(110)}\n\x1b[95m⏵⏵ accept edits on\x1b[0m`, state: req.params.id === 'b2' ? blocked : { status: 'working' }, sessionName: `claude-${req.params.id}` }));
   app.post('/api/*', () => ({ ok: true }));
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
@@ -162,7 +162,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.doesNotMatch(await page.locator('.terminal').innerText(), /Do you want to proceed|2\. Yes/);
   assert.equal(await page.locator('.control-row-compose [data-placeholder]').getAttribute('data-placeholder'), 'Message the agent...', 'one composer placeholder whatever the state');
   // While answers are offered they are the only primary actions; Cycle mode and Interrupt step aside.
-  for (const name of ['Cycle mode', 'Interrupt']) assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0, name);
+  for (const name of [/^(Cycle mode|Mode: )/, /^Interrupt$/]) assert.equal(await page.getByRole('button', { name }).count(), 0, String(name));
   // Composer extras wait behind one menu.
   const delay = page.getByRole('combobox', { name: 'Send delay' });
   assert.equal(await delay.isVisible(), false);
@@ -179,7 +179,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await delay.isVisible(), false, 'a preset delay closes the menu');
   // A working session gets them back.
   await rows.first().locator('.agent-rail-row-main').click();
-  for (const name of ['Cycle mode', 'Interrupt']) await page.getByRole('button', { name, exact: true }).waitFor();
+  // The mode button names the CLI's current permission mode.
+  for (const name of ['Mode: accept edits', 'Interrupt']) await page.getByRole('button', { name, exact: true }).waitFor();
   // Interrupt goes through POST /escape, which the server may promote to an interrupt.
   await Promise.all([
     page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/claude/sessions/a1/escape')),
@@ -238,7 +239,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   await page.goto(`${origin}/session`);
   const single = page.locator('.claude-session-page');
   await single.locator('.terminal').waitFor();
-  // The CLI's colours come from the app's palette: the mode hint is the soft violet, not raw magenta.
+  // The CLI's colours come from the app's palette: bright magenta is the soft violet, not raw magenta.
   assert.equal(await single.locator('.ansi-fg-bright-magenta').evaluate((el) => getComputedStyle(el).color), 'rgb(197, 179, 230)');
   // A prose reply reads in the UI font at a comfortable measure; tool output stays monospace.
   const prose = await single.locator('.ansi-prose').evaluate((el) => {
@@ -265,9 +266,10 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     return [cs.fontFamily === getComputedStyle(el.closest('.terminal')).fontFamily, cs.borderTopWidth, cs.borderTopLeftRadius, Math.round(el.querySelector('.ansi-line').getBoundingClientRect().width) === Math.round(inner), el.textContent];
   });
   assert.deepEqual(card, [true, '1px', '8px', true, '● Update(src/a.ts)\n  ⎿  Updated src/a.ts\n       44 - old();\n']);
-  // The CLI's empty input box is left to the composer below; its mode line stays.
+  // The CLI's empty input box and its mode line are left to the composer below, which names the mode.
   const tail = await single.locator('.terminal-body').innerText();
-  assert.ok(!tail.includes('❯') && tail.includes('accept edits on'), `pane foot: ${tail.slice(-80)}`);
+  assert.ok(!tail.includes('❯') && !tail.includes('accept edits on'), `pane foot: ${tail.slice(-80)}`);
+  assert.equal(await single.getByRole('button', { name: 'Mode: accept edits', exact: true }).count(), 1);
   const deskRule = await ruleFits(page);
   assert.ok(deskRule.rule === deskRule.content && deskRule.row === deskRule.content && deskRule.overflow === 0, `desktop rule ${JSON.stringify(deskRule)}`);
   // The focused transcript keeps a thin visible ring (at least 3:1 against its panel tone). It is a

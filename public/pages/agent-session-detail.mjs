@@ -22,7 +22,7 @@ import { createRevisionGuard } from '../app/revision-guard.mjs';
 import { addToast, agentThreads, markSessionSeenForKind, markSessionAttentionSeen, markSessionTurnSeen, removeSessionForKind } from '../app/state.mjs';
 import { isEditableTarget, mapKeyboardEventToTmux } from '../app/terminal-input.mjs';
 import { Terminal, stripAnsi } from '../components/terminal.mjs';
-import { foldAnsweredMenu, foldEmptyPrompt } from '../lib/ansi-to-html.mjs';
+import { foldAnsweredMenu, foldEmptyPrompt, permissionMode } from '../lib/ansi-to-html.mjs';
 import { AgentControlBar } from '../components/agent-control-bar.mjs';
 import { TerminalKeys } from '../components/terminal-keys.mjs';
 import { RenderedTranscript } from '../components/rendered-transcript.mjs';
@@ -711,6 +711,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
     !isRustManagedReadOnly ? h(AgentControlBar, {
       provider: descriptor.kind,
       state: sessionState.value,
+      mode: descriptor.hasShiftTab ? permissionMode(content.value) : '',
       onApprove: descriptor.hasShiftTab ? sendShiftTab : undefined,
       onReject: sendEscape,
       onEscape: sendEscape,

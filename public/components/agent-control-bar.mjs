@@ -59,6 +59,8 @@ function closeAfterPick(event) {
 export function AgentControlBar({
   provider = 'claude',
   state,
+  // The CLI's permission mode ('accept edits'), named on the button that cycles it.
+  mode = '',
   onApprove,
   onReject,
   onEscape,
@@ -194,7 +196,7 @@ export function AgentControlBar({
       <div class="control-row control-row-tools">
         ${descriptor.hasShiftTab && !answering ? html`
           <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleApprove} title="Send Shift+Tab (cycle permission mode)">
-            Cycle mode
+            ${mode ? `Mode: ${mode}` : 'Cycle mode'}
           </button>
         ` : null}
         ${hideInterrupt ? null : html`
