@@ -43,7 +43,7 @@ export function ansiToHtml(text) {
     // text (the CLI's dim hints and rules) is lifted toward the body text so it stays readable.
     const style = [['color', current.fg], ['background', current.bg]]
       .filter(([, value]) => value?.startsWith('rgb('))
-      .map(([prop, value]) => `${prop}:${prop === 'color' ? liftGrey(value) : `color-mix(in srgb,${value} 60%,transparent)`}`)
+      .map(([prop, value]) => `${prop}:${prop === 'color' ? liftGrey(value) : `color-mix(in srgb,${value} 75%,transparent)`}`)
       .join(';');
     const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;
     const html = esc(buf).replace(/\uE000(─+)\uE001/g, '<span class="ansi-rule">$1</span>');

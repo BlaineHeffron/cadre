@@ -1163,21 +1163,23 @@ body:has(.tmux-pane-page) {
 .ansi-fg-black { color: #555; }
 /* On a coloured background (e.g. a PASS badge) black text stays black. */
 [class*='ansi-bg-'].ansi-fg-black, .ansi-fg-black[style*='background'] { color: #000; }
-.ansi-fg-red { color: #f44; }
-.ansi-fg-green { color: #4e4; }
-.ansi-fg-yellow { color: #fe4; }
-.ansi-fg-blue { color: #48f; }
-.ansi-fg-magenta { color: #f4f; }
-.ansi-fg-cyan { color: #4ef; }
-.ansi-fg-white { color: #eee; }
+/* The transcript's colours are the app's palette (status green, danger red, accent cyan, a soft
+   violet), each readable on the panel tone, so CLI output reads as part of the UI. */
+.ansi-fg-red { color: #ef7a7a; }
+.ansi-fg-green { color: var(--success); }
+.ansi-fg-yellow { color: #ffd54f; }
+.ansi-fg-blue { color: #64b5f6; }
+.ansi-fg-magenta { color: #b39ddb; }
+.ansi-fg-cyan { color: var(--accent); }
+.ansi-fg-white { color: var(--text-primary); }
 
-.ansi-fg-bright-black { color: #888; }
-.ansi-fg-bright-red { color: #f77; }
-.ansi-fg-bright-green { color: #7f7; }
-.ansi-fg-bright-yellow { color: #ff7; }
-.ansi-fg-bright-blue { color: #7af; }
-.ansi-fg-bright-magenta { color: #f7f; }
-.ansi-fg-bright-cyan { color: #7ff; }
+.ansi-fg-bright-black { color: #9a9aa8; }
+.ansi-fg-bright-red { color: var(--danger-text); }
+.ansi-fg-bright-green { color: #81c784; }
+.ansi-fg-bright-yellow { color: #ffe082; }
+.ansi-fg-bright-blue { color: #90caf9; }
+.ansi-fg-bright-magenta { color: #c5b3e6; }
+.ansi-fg-bright-cyan { color: #80deea; }
 .ansi-fg-bright-white { color: #fff; }
 
 .ansi-bg-black { background: #000; }
