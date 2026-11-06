@@ -51,9 +51,9 @@ test('settings uses labelled switches that reflect and change their state', { sk
   // On reads at a glance: a white knob on the accent track; off keeps a grey knob.
   const knob = (el) => getComputedStyle(el, '::before').backgroundColor;
   assert.equal(await headroom.evaluate(knob), 'rgb(255, 255, 255)');
-  assert.equal(await headroom.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(52, 150, 205)');
+  assert.equal(await headroom.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(29, 121, 176)');
   // Switch tracks and primary buttons share one fill; success pills are tinted like status badges.
-  assert.equal(await page.getByRole('button', { name: 'Pair phone' }).evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(52, 150, 205)');
+  assert.equal(await page.getByRole('button', { name: 'Pair phone' }).evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(29, 121, 176)');
   assert.equal(await page.locator('.badge-success').first().evaluate((el) => getComputedStyle(el).color), 'rgb(102, 187, 106)');
   assert.equal(await page.locator('.switch:not(:checked)').first().evaluate(knob), 'rgb(218, 218, 230)');
   await headroom.click();
