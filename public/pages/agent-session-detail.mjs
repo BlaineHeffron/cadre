@@ -21,8 +21,8 @@ import { shouldReduceNetworkActivity } from '../app/network-profile.mjs';
 import { createRevisionGuard } from '../app/revision-guard.mjs';
 import { addToast, agentThreads, markSessionSeenForKind, markSessionAttentionSeen, markSessionTurnSeen, removeSessionForKind } from '../app/state.mjs';
 import { isEditableTarget, mapKeyboardEventToTmux } from '../app/terminal-input.mjs';
-import { Terminal, stripAnsi } from '../components/terminal.mjs';
-import { foldAnsweredMenu, foldEmptyPrompt, permissionMode } from '../lib/ansi-to-html.mjs';
+import { Terminal, CliStatus, stripAnsi } from '../components/terminal.mjs';
+import { foldAnsweredMenu, splitCliFooter, permissionMode } from '../lib/ansi-to-html.mjs';
 import { AgentControlBar } from '../components/agent-control-bar.mjs';
 import { TerminalKeys } from '../components/terminal-keys.mjs';
 import { RenderedTranscript } from '../components/rendered-transcript.mjs';
@@ -568,6 +568,9 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
   }
 
   const isRustManagedReadOnly = sessionInfo.value.readOnly === true && sessionInfo.value.externalOwner === 'rust-monitor';
+  // The CLI's empty input box gives way to the composer below; its status lines become a strip.
+  const footer = isRustManagedReadOnly ? { text: content.value, status: [] } : splitCliFooter(content.value);
+  const answering = !isRustManagedReadOnly && sessionState.value.status === 'blocked' && sessionState.value.capabilities?.canAnswerInteraction;
   const activeThreads = agentThreads.value.filter(isActiveThread);
   const linkedThreads = linkedThreadsForSession(descriptor.kind, id, activeThreads);
   const quickInsertOptions = buildQuickInsertOptions({
@@ -698,9 +701,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
       : h(Terminal, {
         // Fold the menu only when the control bar below is showing these choices; otherwise drop the
         // CLI's empty input box, which the composer below stands in for.
-        content: !isRustManagedReadOnly && sessionState.value.status === 'blocked' && sessionState.value.capabilities?.canAnswerInteraction
-          ? foldAnsweredMenu(content.value, sessionState.value.interaction)
-          : isRustManagedReadOnly ? content.value : foldEmptyPrompt(content.value),
+        content: answering ? foldAnsweredMenu(content.value, sessionState.value.interaction) : footer.text,
         fullHeight: true,
         ansiColors: true,
         captureKeyboard: !isRustManagedReadOnly,
@@ -713,6 +714,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         onLoadMore: loadMoreHistory,
         resetKey: id,
       }),
+    renderedTranscript.value || answering ? null : h(CliStatus, { lines: footer.status }),
     isRustManagedReadOnly
       ? h('div', { class: 'claude-control-bar', style: 'border-top:1px solid rgba(255,255,255,0.08); color:var(--text-muted); font-size:var(--fs-xs)' }, 'Rust-managed session. View only from Cadre.')
       : null,

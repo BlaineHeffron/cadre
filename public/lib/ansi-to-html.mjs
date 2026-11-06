@@ -25,6 +25,8 @@ function esc(str) {
  */
 export function ansiToHtml(text) {
   if (!text) return '';
+  // OSC sequences: an OSC 8 hyperlink is kept (ended by ST) for the loop below; any other is dropped.
+  text = text.replace(OSC, (seq, body) => (/^8;[^;]*;/.test(body) ? `\x1b]${body}\x1b\\` : ''));
   // The marks below are non-printing control characters (never Nerd Font icons from the
   // private-use area); any already in the pane are dropped first.
   text = text.replace(/[\x02-\x07\x0e-\x12]/g, '');
@@ -48,6 +50,10 @@ export function ansiToHtml(text) {
   let buf = '';
   let fullLine = false;
   let inProse = false;
+  // The open hyperlink, and one just closed: tmux ends a wrapped link at the line end and opens it
+  // again on the next, so a reopen of the same URL after only blanks continues the same <a>.
+  let link = null;
+  let closed = null;
 
   function flushBuf() {
     if (!buf) return;
@@ -66,6 +72,7 @@ export function ansiToHtml(text) {
           : `background:color-mix(in srgb,${value} var(--ansi-bg-keep),transparent)`))
       .join(';');
     const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;
+    if (closed && /\S/.test(buf)) closed = null;
     let html = esc(buf).replace(/\x06(─+)\x07/g, '<span class="ansi-rule">$1</span>');
     // Inline `code` in a prose reply reads as code; the backticks stay in the DOM (unseen) for copying.
     // A span may wrap across the CLI's hard line breaks; fenced ``` runs are not inline code.
@@ -86,8 +93,35 @@ export function ansiToHtml(text) {
       flushBuf();
       if ('\x02\x04\x10\x11\x12'.includes(text[i])) inProse = true;
       else if (text[i] === '\x03') inProse = false;
-      parts.push(BLOCK_MARKS[text[i]]);
+      // A block edge inside a link closes and reopens it, so the tags stay nested.
+      parts.push(...(link ? ['</a>', BLOCK_MARKS[text[i]], anchor(link)] : [BLOCK_MARKS[text[i]]]));
       i++;
+      continue;
+    }
+    // OSC 8 hyperlink: ESC ] 8 ; params ; URL ST. Only http(s) URLs link; the label is the text.
+    if (text.startsWith('\x1b]', i)) {
+      // One with no terminator before the next escape loses just its `ESC ]`; the rest stays text.
+      OSC_LINK.lastIndex = i;
+      const osc = OSC_LINK.exec(text);
+      if (!osc) {
+        i += 2;
+        continue;
+      }
+      flushBuf();
+      const href = safeUrl(osc[1]);
+      if (href && href === closed?.href) {
+        parts[closed.at] = '';
+        link = href;
+      } else if (href !== link) {
+        if (link) {
+          closed = { href: link, at: parts.length };
+          parts.push('</a>');
+        }
+        if (href) parts.push(anchor(href));
+        link = href;
+      }
+      closed = href ? null : closed;
+      i = OSC_LINK.lastIndex;
       continue;
     }
     // Match ESC[ ... m  (SGR sequence)
@@ -114,7 +148,22 @@ export function ansiToHtml(text) {
   }
 
   flushBuf();
+  if (link) parts.push('</a>');
   return parts.join('');
+}
+
+// Every OSC sequence ended by BEL or ST, and the OSC 8 links kept from them (the URL is group 1).
+const OSC = /\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+const OSC_LINK = /\x1b\]8;[^;\x1b]*;([^\x1b]*)\x1b\\/y;
+const anchor = (href) => `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">`;
+
+function safeUrl(url) {
+  try {
+    const { protocol, href } = new URL(url);
+    return protocol === 'http:' || protocol === 'https:' ? href : null;
+  } catch {
+    return null;
+  }
 }
 
 function buildClasses(state) {
@@ -129,7 +178,8 @@ function buildClasses(state) {
   return cls.join(' ');
 }
 
-const SGR = /\x1b\[[0-9;]*m/g;
+// Colour codes, and the hyperlinks kept above: neither is text.
+const SGR = /\x1b\[[0-9;]*m|\x1b\]8;[^\x1b]*\x1b\\/g;
 const BLOCK_MARKS = {
   '\x02': '<span class="ansi-prose">',
   '\x03': '</span>',
@@ -327,24 +377,27 @@ export function foldAnsweredMenu(text, interaction) {
 
 /**
  * The CLI's own input box (a rule, an empty ❯ line, a rule) at the foot of the pane repeats the
- * composer below it, so it is dropped while empty. The mode line under it stays; anything typed
- * into the box keeps it in view.
+ * composer below it, so while it is empty it is dropped from the text. The status lines under it
+ * (indented or right-aligned: `· ← 1 agent`, `✔ Update installed`, the remote-control link) come
+ * back as `status`, without their padding, for a strip under the transcript. Anything typed into
+ * the box, or output after it, keeps everything in place.
  */
-export function foldEmptyPrompt(text) {
+export function splitCliFooter(text) {
   const lines = text.split('\n');
-  const plain = lines.map((line) => line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim());
-  const at = plain.findLastIndex((line) => line === '❯');
-  const rule = (line) => /^─{20,}$/.test(line ?? '');
-  if (at < 1 || !rule(plain[at - 1]) || !rule(plain[at + 1]) || plain.slice(at + 2).filter(Boolean).length > 2) return text;
-  // The mode under the box moves to the composer's mode button (see permissionMode); the rest of
-  // that footer line (`· ← for agents`, `· 1 shell`) stays, and a line left empty goes.
-  const foot = lines.slice(at + 2).map(dropMode).filter((line, k) => line === lines[at + 2 + k] || stripSgr(line).trim());
-  return [...lines.slice(0, at - 1), ...foot].join('\n');
+  const plain = lines.map(stripSgr);
+  const at = plain.findLastIndex((line) => line.trim() === '❯');
+  const rule = (line) => /^─{20,}$/.test(line?.trim() ?? '');
+  const foot = plain.slice(at + 2).filter((line) => line.trim());
+  if (at < 1 || !rule(plain[at - 1]) || !rule(plain[at + 1]) || foot.length > 4 || foot.some((line) => !/^\s/.test(line) && !MODE.test(line))) return { text, status: [] };
+  // The mode moves to the composer's mode button (see permissionMode); a line left empty goes.
+  const status = lines.slice(at + 2).map((line) => dropMode(line).replace(/^(?:\x1b\[[0-9;]*m|\s)+/, (lead) => lead.replace(/\s+/g, '')))
+    .filter((line) => stripSgr(line).trim());
+  return { text: lines.slice(0, at - 1).join('\n'), status };
 }
 
 // The CLI's permission mode: `⏵⏵ accept edits on (shift+tab to cycle) · `, `⏸ plan mode on …`.
 const MODE = /(?:⏵⏵|⏸) (.+?) on\b(?: \(shift\+tab to cycle\))?(?: ·)? ?/;
-const stripSgr = (line) => line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+const stripSgr = (line) => line.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
 
 // Removes the mode's characters from a raw line, keeping every colour code so the rest keeps its style.
 function dropMode(line) {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ansiToHtml, foldEmptyPrompt, permissionMode } from '../public/lib/ansi-to-html.mjs';
+import { ansiToHtml, splitCliFooter, permissionMode } from '../public/lib/ansi-to-html.mjs';
 
 test('truecolor diff backgrounds render, blended toward the terminal, instead of being dropped', () => {
   assert.equal(
@@ -116,9 +116,10 @@ test('a line in one background colour spans the pane; badges inside a line do no
 test('the CLI\'s empty input box and its mode line at the foot of the pane are dropped; typed text stays', () => {
   const rule = `\x1b[38;5;244m${'─'.repeat(40)}\x1b[0m`;
   const mode = '  \x1b[95m⏵⏵ accept edits on\x1b[0m\x1b[38;5;246m (shift+tab to cycle)\x1b[0m';
-  assert.equal(foldEmptyPrompt(['● Done.', '', rule, '❯ ', rule, mode].join('\n')), ['● Done.', ''].join('\n'));
-  // Other footer lines stay.
-  assert.equal(foldEmptyPrompt(['● Done.', rule, '❯ ', rule, '  ? for shortcuts'].join('\n')), ['● Done.', '  ? for shortcuts'].join('\n'));
+  const foldEmptyPrompt = (text) => splitCliFooter(text).text;
+  assert.deepEqual(splitCliFooter(['● Done.', '', rule, '❯ ', rule, mode].join('\n')), { text: ['● Done.', ''].join('\n'), status: [] });
+  // Other footer lines move to the status strip, without their padding.
+  assert.deepEqual(splitCliFooter(['● Done.', rule, '❯ ', rule, '  ? for shortcuts'].join('\n')), { text: '● Done.', status: ['? for shortcuts'] });
   // The mode the composer's button names.
   assert.equal(permissionMode(['● Done.', rule, '❯ ', rule, mode].join('\n')), 'accept edits');
   assert.equal(permissionMode('  ⏸ plan mode on (shift+tab to cycle)'), 'plan');
@@ -127,7 +128,7 @@ test('the CLI\'s empty input box and its mode line at the foot of the pane are d
   const typed = ['● Done.', rule, '❯ npm te', rule, mode].join('\n');
   assert.equal(foldEmptyPrompt(typed), typed);
   const earlier = [rule, '❯ ', rule, 'a', 'b', 'c'].join('\n');
-  assert.equal(foldEmptyPrompt(earlier), earlier);
+  assert.deepEqual(splitCliFooter(earlier), { text: earlier, status: [] });
   assert.equal(foldEmptyPrompt('❯ '), '❯ ');
 });
 
@@ -159,20 +160,20 @@ test('real CLI footers keep everything but the mode, colours and all', async () 
   const { readFile } = await import('node:fs/promises');
   const pane = (name) => readFile(new URL(`./fixtures/session-state/panes/${name}.pane`, import.meta.url), 'utf8');
   const plain = (text) => text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x1b]*\x1b\\/g, '');
-  const foot = (text) => plain(foldEmptyPrompt(text)).split('\n').filter((line) => line.trim()).slice(-1)[0].trim();
   const idle = await pane('claude-idle-empty-composer');
   assert.equal(permissionMode(idle), 'bypass permissions');
-  assert.equal(foot(idle), '← for agents');
   // The rest of the line keeps its own colour codes.
-  assert.match(foldEmptyPrompt(idle), /\x1b\[37m← for agents\x1b\[39m$/m);
+  assert.deepEqual(splitCliFooter(idle).status, ['\x1b[39m\x1b[95m\x1b[37m← for agents\x1b[39m']);
   // That pane's box holds queued pastes, so nothing folds; its real footer under an empty box keeps
   // the shell count and the update warning.
   const shells = await pane('claude-795ad3c7-osc-rc-footer');
-  assert.equal(foldEmptyPrompt(shells), shells);
+  assert.equal(splitCliFooter(shells).text, shells);
   const footer = shells.split('\n').find((line) => line.includes('⏵⏵'));
   const rule = '─'.repeat(40);
   assert.equal(permissionMode(footer), 'bypass permissions');
-  assert.equal(plain(foldEmptyPrompt(['● Done.', rule, '❯ ', rule, footer].join('\n'))), '● Done.\n  1 shell  ✘ Auto-update failed · Run claude doctor');
+  const split = splitCliFooter(['● Done.', rule, '❯ ', rule, footer].join('\n'));
+  assert.equal(split.text, '● Done.');
+  assert.deepEqual(split.status.map(plain), ['1 shell  ✘ Auto-update failed · Run claude doctor']);
 });
 
 test('inline code in a prose reply renders as code and keeps its backticks for copying; elsewhere it stays text', () => {
@@ -210,4 +211,64 @@ test('the user prompt and status lines read as prose; menu choices, drafts and t
   assert.equal(ansiToHtml('· 2 shells'), '· 2 shells');
   // A status line is a block of its own; the indented line after it is not folded in.
   assert.equal(ansiToHtml('✻ Worked for 18s\n\n  ⏵⏵ note'), '<span class="ansi-prose">✻ Worked for 18s\n</span>\n  ⏵⏵ note');
+});
+
+test('a real Claude Code footer: the empty box folds; mode extras, the update notice and the remote-control link become status lines', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const pane = await readFile(new URL('./fixtures/terminal/claude-update-rc-footer.pane', import.meta.url), 'utf8');
+  const { text, status } = splitCliFooter(pane.replace(/\n+$/, ''));
+  // Nothing of the box is left: no rule, no empty prompt, no escape remnants.
+  assert.ok(text.endsWith('Reconnected to dueno.\n'), JSON.stringify(text.slice(-60)));
+  assert.doesNotMatch(ansiToHtml(text), /─{20}|❯\s*$|\]8;/);
+  // Colour spans aside (their format is the theme's), each line is its text, and the link a link.
+  assert.deepEqual(status.map((line) => ansiToHtml(line).replace(/<\/?span[^>]*>/g, '')), [
+    '← 1 agent',
+    '✔ Update installed · Restart to update',
+    '<a href="https://claude.ai/code/session_00000000?from=cli" target="_blank" rel="noopener noreferrer">/rc</a>',
+  ]);
+});
+
+test('OSC 8 hyperlinks become links: only http(s), one link across a wrap, other OSC sequences dropped', () => {
+  const link = (url, label, params = 'id=a') => `\x1b]8;${params};${url}\x1b\\${label}\x1b]8;;\x1b\\`;
+  assert.equal(ansiToHtml(`see ${link('https://x.test/a?b=1&c=2', 'docs')} now`),
+    'see <a href="https://x.test/a?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">docs</a> now');
+  // Not http(s): the label stays as text and nothing of the sequence shows.
+  assert.equal(ansiToHtml(link('javascript:alert(1)', 'bad')), 'bad');
+  assert.equal(ansiToHtml(link('file:///etc/passwd', 'f', '')), 'f');
+  // BEL-terminated and other OSC sequences (a window title) leave no trace.
+  assert.equal(ansiToHtml('\x1b]0;title\x07a\x1b]8;;https://x.test/\x07b\x1b]8;;\x07c'), 'a<a href="https://x.test/" target="_blank" rel="noopener noreferrer">b</a>c');
+  // tmux ends a wrapped link at the line end and reopens it on the next: still one link.
+  assert.equal(ansiToHtml(`${link('https://x.test/long', 'first half')}\n${link('https://x.test/long', 'second half')}`),
+    '<a href="https://x.test/long" target="_blank" rel="noopener noreferrer">first half\nsecond half</a>');
+  // A link reopened without a close continues too; different URLs stay separate links.
+  assert.equal(ansiToHtml('\x1b]8;;https://x.test/a\x1b\\one\n\x1b]8;;https://x.test/a\x1b\\two\x1b]8;;https://x.test/b\x1b\\three'),
+    '<a href="https://x.test/a" target="_blank" rel="noopener noreferrer">one\ntwo</a><a href="https://x.test/b" target="_blank" rel="noopener noreferrer">three</a>');
+  // A link whose close is cut off by the end of the capture is closed.
+  assert.equal(ansiToHtml('\x1b]8;;https://x.test/a\x1b\\cut'), '<a href="https://x.test/a" target="_blank" rel="noopener noreferrer">cut</a>');
+});
+
+test('an OSC with no terminator before the next escape loses only its ESC ] and never hangs', async () => {
+  const { Worker } = await import('node:worker_threads');
+  // A hang is a synchronous loop, so it runs in a worker the test can stop.
+  const inputs = [
+    'before \x1b]0;title \x1b[31mred\x1b[0m',
+    '\x1b]8;;https://a.com \x1b[31mx\x1b[0m',
+    'a \x1b]0;title\nline2 \x1b[1mbold\x1b[0m line3 \x1b]8;;https://b.test/\x1b\\B\x1b]8;;\x1b\\ tail',
+    'cut \x1b]8;;https://x.test/',
+  ];
+  const worker = new Worker(`
+    const { parentPort, workerData } = require('node:worker_threads');
+    import(workerData.url).then(({ ansiToHtml }) => parentPort.postMessage(workerData.inputs.map(ansiToHtml)));
+  `, { eval: true, workerData: { url: new URL('../public/lib/ansi-to-html.mjs', import.meta.url).href, inputs } });
+  let timer;
+  const html = await Promise.race([
+    new Promise((resolve, reject) => { worker.once('message', resolve); worker.once('error', reject); }),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('ansiToHtml did not return within 5s')), 5000); }),
+  ]).finally(() => { clearTimeout(timer); return worker.terminate(); });
+  assert.deepEqual(html, [
+    'before 0;title <span class="ansi-fg-red">red</span>',
+    '8;;https://a.com <span class="ansi-fg-red">x</span>',
+    'a 0;title\nline2 <span class="ansi-bold">bold</span> line3 <a href="https://b.test/" target="_blank" rel="noopener noreferrer">B</a> tail',
+    'cut 8;;https://x.test/',
+  ]);
 });

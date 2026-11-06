@@ -3,7 +3,7 @@ import { useRef, useEffect, useLayoutEffect } from 'preact/hooks';
 import { ansiToHtml } from '../lib/ansi-to-html.mjs';
 
 export function stripAnsi(text) {
-  return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  return text.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
 }
 
 function escapeHtml(text = '') {
@@ -26,10 +26,12 @@ function safeHref(escapedUrl) {
   }
 }
 
+// Bare URLs become links; a terminal hyperlink is already one.
 function linkifyHtml(text = '') {
   return text.replace(
-    /\bhttps?:\/\/[^\s<>"']+/g,
+    /<a\b[^>]*>[\s\S]*?<\/a>|\bhttps?:\/\/[^\s<>"']+/g,
     (url) => {
+      if (url.startsWith('<')) return url;
       const href = safeHref(url);
       return href ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>` : url;
     }
@@ -303,4 +305,12 @@ export function Terminal({
     h('div', { class: 'terminal-body', dangerouslySetInnerHTML: { __html: htmlBody } }),
   );
   return loadMore ? h(Fragment, null, loadMore, pane) : pane;
+}
+
+// The CLI's status lines (see splitCliFooter) as one strip under the transcript.
+export function CliStatus({ lines = [] }) {
+  if (!lines.length) return null;
+  return h('div', { class: 'terminal-status' }, lines.map((line) => h('span', {
+    dangerouslySetInnerHTML: { __html: linkifyHtml(ansiToHtml(line)) },
+  })));
 }
