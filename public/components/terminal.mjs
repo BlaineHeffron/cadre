@@ -269,9 +269,10 @@ export function Terminal({
     : `max-height:${maxHeight}; min-height:200px; overflow-anchor:none`;
 
   const normalizedContent = typeof content === 'string' ? content.replace(/\r/g, '') : '';
-  const trimmedContent = normalizedContent
-    ? normalizedContent.split('\n').map((line) => line.replace(/[ \t]+$/g, '')).join('\n')
-    : '';
+  const rows = normalizedContent.split('\n').map((line) => line.replace(/[ \t]+$/g, ''));
+  // A tmux capture ends in the pane's unused rows; they are not output, so they are dropped.
+  while (rows.length && /^(?:[ \t]|\x1b\[[0-9;]*m)*$/.test(rows.at(-1))) rows.pop();
+  const trimmedContent = rows.join('\n');
   const plainContent = stripAnsi(trimmedContent || '');
   const htmlBody = ansiColors
     ? linkifyHtml(ansiToHtml(trimmedContent || ''))
