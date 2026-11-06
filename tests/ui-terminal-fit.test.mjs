@@ -99,8 +99,22 @@ test('full-height terminal fills the column, starts a short history at the top a
     const walker = document.createTreeWalker(cards[0], NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.textContent.trim()) fonts.add(getComputedStyle(node.parentElement).fontFamily);
     const fills = [...cards[0].querySelectorAll('span')].map((span) => getComputedStyle(span).backgroundColor).filter((c) => c !== 'rgba(0, 0, 0, 0)');
-    return { count: cards.length, rects: cards[0].getClientRects().length, text: cards[0].textContent, fonts: [...fonts], fills, outside: el.querySelector('.terminal-body').textContent.includes('Called dueno') && !cards[0].textContent.includes('Called dueno') };
+    // Edges against the transcript's content box: the user's bubble sits right, the reply left.
+    const body = el.querySelector('.terminal-body');
+    const content = body.getBoundingClientRect();
+    const pad = getComputedStyle(body);
+    const reply = [...el.querySelectorAll('.ansi-prose:not(.ansi-prompt)')].at(-1).getBoundingClientRect();
+    const bubble = cards[0].getBoundingClientRect();
+    const edges = {
+      bubbleRight: Math.round(content.right - parseFloat(pad.paddingRight) - bubble.right),
+      bubbleIndent: Math.round(bubble.left - content.left - parseFloat(pad.paddingLeft)),
+      replyLeft: Math.round(reply.left - content.left - parseFloat(pad.paddingLeft)),
+    };
+    return { count: cards.length, rects: cards[0].getClientRects().length, text: cards[0].textContent, fonts: [...fonts], fills, edges, outside: el.querySelector('.terminal-body').textContent.includes('Called dueno') && !cards[0].textContent.includes('Called dueno') };
   });
+  assert.equal(card.edges.bubbleRight, 0, 'the user bubble ends at the right edge');
+  assert.ok(card.edges.bubbleIndent > 0, `the user bubble starts in from the left (${card.edges.bubbleIndent}px)`);
+  assert.equal(card.edges.replyLeft, 0, 'the reply starts at the left edge');
   assert.equal(card.count, 1, 'the prompt is one card');
   assert.equal(card.rects, 1, 'one continuous box');
   assert.equal(card.text, '❯ First line of a long pasted prompt that the CLI wrapped at its width \n  and carried on here.\n  A bold second line.\n\n  Use the image as part of your next response.\n', 'text unchanged');
