@@ -628,9 +628,6 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
           title: next ? `Next agent: ${next.displayName || next.name || next.id}` : 'No next agent',
         }, '\u203a'),
         h('span', { class: 'session-title', title: id }, headerTitle),
-        sessionState.value.status !== 'ended'
-          ? h('button', { class: 'btn mobile-hidden', onClick: startLoop }, 'Start loop')
-          : null,
         isRustManagedReadOnly ? h('span', { class: 'badge badge-low' }, 'rust-managed / read-only') : null,
         h(MachineChip, { machine: sessionInfo.value.machine }),
       ),
@@ -642,20 +639,27 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         sessionState.value.status === 'ended' && !isRustManagedReadOnly
           ? h('button', { class: 'btn btn-primary', onClick: resumeSession }, 'Resume')
           : null,
-        h('button', {
-          class: `btn${renderedTranscript.value ? ' btn-subtle' : ''}`,
-          'aria-pressed': String(renderedTranscript.value),
-          onClick: () => {
-            const next = !renderedTranscript.value;
-            renderedTranscript.value = next;
-            if (next) loadRawTranscript(id);
-          },
-          title: 'Toggle a rendered Markdown and math view built from the model session log. Raw terminal content remains unchanged.',
-        }, renderedTranscript.value ? 'Raw Terminal' : 'Rendered Transcript'),
-        // Routine and destructive extras live behind one menu so the header has one clear action.
+        // While the rendered view is on, its way back stays in view.
+        renderedTranscript.value
+          ? h('button', { class: 'btn btn-subtle', onClick: () => { renderedTranscript.value = false; } }, 'Raw Terminal')
+          : null,
+        // Session actions live behind one labelled menu, so the header is the title and one control.
         h('details', { class: 'more-menu' },
-          h('summary', { class: 'btn', 'aria-label': 'More session actions', title: 'More session actions' }, '\u22EF'),
+          h('summary', { class: 'btn', 'aria-label': 'More session actions', title: 'More session actions' }, 'Actions \u25BE'),
           h('div', { class: 'more-menu-list', onClickCapture: closeMenuOnChoice },
+            sessionState.value.status !== 'ended'
+              ? h('button', { class: 'btn', onClick: startLoop }, 'Start loop')
+              : null,
+            h('button', {
+              class: 'btn',
+              'aria-pressed': String(renderedTranscript.value),
+              onClick: () => {
+                const next = !renderedTranscript.value;
+                renderedTranscript.value = next;
+                if (next) loadRawTranscript(id);
+              },
+              title: 'Toggle a rendered Markdown and math view built from the model session log. Raw terminal content remains unchanged.',
+            }, 'Rendered transcript'),
             h('button', { class: 'btn', onClick: copySessionId }, 'Copy ID'),
             (!machine && sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process')
               ? h('button', { class: 'btn mobile-hidden', onClick: copyAttachCommand }, 'Copy Attach')

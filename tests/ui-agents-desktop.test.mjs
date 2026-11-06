@@ -36,7 +36,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     import { isAuthenticated } from '/app/state.mjs';
     import { SessionRoute } from '/pages/agents.mjs';
     isAuthenticated.value = true;
-    render(h('main', { class: 'main' }, h(Router, {}, ['claude', 'codex'].map((kind) => h(SessionRoute, { path: \`/\${kind}/:id\`, provider: kind })))), document.getElementById('app'));
+    render(h('main', { class: 'main' }, h(Router, {}, [...['claude', 'codex'].map((kind) => h(SessionRoute, { path: \`/\${kind}/:id\`, provider: kind })), h('div', { default: true }, 'other page')])), document.getElementById('app'));
   </script>`));
   app.get('/claude/:id', sessionRoute);
   app.get('/codex/:id', sessionRoute);
@@ -132,13 +132,25 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await rows.getByRole('checkbox').count(), 0);
   assert.equal(await toolbar.getByText('1 selected').count(), 0);
 
+  // The session header is the title and one labelled Actions menu; Start loop and the rendered
+  // transcript live in it with the routine and destructive extras.
   const header = page.locator('.claude-session-header');
-  await header.getByRole('button', { name: 'Rendered Transcript' }).waitFor();
-  assert.equal(await header.getByRole('button', { name: 'Kill' }).isVisible(), false);
-  await header.getByLabel('More session actions').click();
-  for (const name of ['Copy ID', 'Refresh', 'Kill']) assert.equal(await header.getByRole('button', { name, exact: true }).isVisible(), true, name);
+  const actions = header.getByLabel('More session actions');
+  await actions.waitFor();
+  assert.equal((await actions.innerText()).trim(), 'Actions ▾');
+  for (const name of ['Start loop', 'Rendered transcript', 'Kill']) assert.equal(await header.getByRole('button', { name, exact: true }).isVisible(), false, name);
+  await actions.click();
+  for (const name of ['Start loop', 'Rendered transcript', 'Copy ID', 'Refresh', 'Kill']) assert.equal(await header.getByRole('button', { name, exact: true }).isVisible(), true, name);
   await header.getByRole('button', { name: 'Refresh', exact: true }).click();
   assert.equal(await header.getByRole('button', { name: 'Kill' }).isVisible(), false, 'choosing an item closes the menu');
+  // Rendered transcript still switches the view, and while it is on a Raw Terminal button stays in
+  // the header to switch back.
+  await actions.click();
+  await header.getByRole('button', { name: 'Rendered transcript', exact: true }).click();
+  await page.locator('.rendered-transcript-wrap').waitFor();
+  await header.getByRole('button', { name: 'Raw Terminal', exact: true }).click();
+  await page.locator('.agent-session-page-embedded .terminal').waitFor();
+  assert.equal(await page.locator('.rendered-transcript-wrap').count(), 0);
 
 
   // An approval lists every answer in one compact card; composer tools are labelled.
@@ -171,8 +183,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // Composer tools are soft buttons: a faint fill, no outline.
   const soft = (el) => [getComputedStyle(el).borderTopColor, getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)'];
   assert.deepEqual(await page.locator('.control-row-tools > .more-menu > summary').evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
-  // The session header's secondary buttons use the same soft style, so the panel has two button styles.
-  assert.deepEqual(await page.getByRole('button', { name: 'Rendered Transcript' }).evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
+  // The session header's Actions menu uses the same soft style, so the panel has two button styles.
   assert.deepEqual(await page.getByLabel('More session actions').evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
   // One secondary fill everywhere: the toolbar, the rail, the session header and the composer
   // tools are the same solid grey whatever surface they sit on.
@@ -180,7 +191,6 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     page.locator('.agents-filter-menu > summary'),
     page.locator('.agents-desktop-toolbar').getByRole('button', { name: 'Refresh' }),
     page.locator('.agents-desktop-rail-head').getByRole('button', { name: 'Select', exact: true }),
-    page.getByRole('button', { name: 'Rendered Transcript' }),
     page.getByLabel('More session actions'),
     page.getByLabel('More composer tools'),
   ].map((l) => l.evaluate((el) => getComputedStyle(el).backgroundColor)));
@@ -394,6 +404,12 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // the test's own route() push above.
   assert.equal(await page.evaluate(() => history.length), historyLength + 1);
   assert.equal(await panelTitle.count(), 1);
+  // Start loop, now in the Actions menu, still opens the loop page for this session.
+  await page.locator('.agent-session-page-embedded').getByLabel('More session actions').click();
+  await page.locator('.agent-session-page-embedded').getByRole('button', { name: 'Start loop', exact: true }).click();
+  await page.waitForFunction(() => location.pathname === '/loop-sessions');
+  const loopUrl = new URL(page.url());
+  assert.deepEqual([loopUrl.searchParams.get('kind'), loopUrl.searchParams.get('session_id')], ['claude', 'a1']);
   // A phone keeps the full-screen session page.
   const phoneRoute = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   await phoneRoute.goto(`${origin}/claude/b2`);
