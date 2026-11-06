@@ -178,12 +178,18 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // inside its row, depending on the font; the card cap matters more than one-line labels.
   assert.ok(boxes.every((b) => Math.round(b.height) >= 44 && !b.clipped), `answer heights ${boxes.map((b) => b.height)}`);
   assert.equal(await answers.nth(2).innerText(), 'No, and tell Claude what to do differently (esc)');
-  // While answering, the composer's toolbar is just the ⋯ menu; slash commands and terminal keys
-  // wait inside it, so nothing competes with the answers or Send.
-  assert.deepEqual(await page.locator('.control-row-tools').evaluate((el) => [...el.children].map((child) => (child.querySelector(':scope > summary') || child).textContent.trim())), ['⋯']);
-  // Composer tools are soft buttons: a faint fill, no outline.
+  // The composer is one rounded box with a slim row of small ghost tools under it: no fill, no
+  // outline, at least 32px, each named. Send is an icon inside the box at its right edge.
   const soft = (el) => [getComputedStyle(el).borderTopColor, getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)'];
-  assert.deepEqual(await page.locator('.control-row-tools > .more-menu > summary').evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
+  const toolRow = page.locator('.control-row-tools');
+  const ghosts = await toolRow.locator(':scope > .ctrl-btn, :scope > .more-menu > summary').evaluateAll((els) => els.map((el) => {
+    const { width, height } = el.getBoundingClientRect();
+    return { name: el.getAttribute('aria-label') || el.title || el.textContent.trim(), fill: getComputedStyle(el).backgroundColor, edge: getComputedStyle(el).borderTopColor, big: width >= 32 && height >= 32 };
+  }));
+  assert.ok(ghosts.length >= 3 && ghosts.every((g) => g.name && g.fill === 'rgba(0, 0, 0, 0)' && g.edge === 'rgba(0, 0, 0, 0)' && g.big), `composer tools ${JSON.stringify(ghosts)}`);
+  const [msgBox, row, send] = await Promise.all(['.composer-box', '.control-row-tools', '.composer-box .composer-send'].map((sel) => page.locator(sel).boundingBox()));
+  assert.ok(row.y >= msgBox.y + msgBox.height && send.x + send.width <= msgBox.x + msgBox.width && msgBox.x + msgBox.width - (send.x + send.width) < 12, `box ${JSON.stringify(msgBox)} send ${JSON.stringify(send)} row ${JSON.stringify(row)}`);
+  assert.equal(await page.locator('.composer-send').getAttribute('title'), 'Send (Enter)');
   // The session header's Actions menu uses the same soft style, so the panel has two button styles.
   assert.deepEqual(await page.locator('.claude-session-header summary', { hasText: 'Actions' }).evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
   // One secondary fill everywhere: the toolbar, the rail, the session header and the composer
@@ -193,7 +199,6 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     page.locator('.agents-desktop-toolbar').getByRole('button', { name: 'Refresh' }),
     page.locator('.agents-desktop-rail-head').getByRole('button', { name: 'Select', exact: true }),
     page.locator('.claude-session-header summary', { hasText: 'Actions' }),
-    page.getByLabel('More composer tools'),
   ].map((l) => l.evaluate((el) => getComputedStyle(el).backgroundColor)));
   assert.deepEqual([...new Set(fills)], ['rgb(48, 48, 45)'], `secondary fills ${fills}`);
   // The terminal no longer repeats the menu the bar is showing.
@@ -201,53 +206,68 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // The pending command runs straight into its question.
   const [term, question] = await Promise.all(['.terminal', '.approval-prompt-title'].map((sel) => page.locator(sel).first().boundingBox()));
   assert.ok(question.y - (term.y + term.height) < 16, `question ${question.y - (term.y + term.height)}px below the terminal`);
-  // Raw terminal keys open from ⋯ as a full-width tray under the toolbar, and close the same way.
+  // Raw terminal keys toggle from the visible Keys button (not ⋯) as a full-width tray above the
+  // message box, with focus moved into it, and close the same way.
+  const keysToggle = toolRow.getByRole('button', { name: 'Keys', exact: true });
+  assert.equal(await keysToggle.getAttribute('title'), 'Terminal keys');
+  await keysToggle.click();
+  assert.equal(await keysToggle.getAttribute('aria-pressed'), 'true');
+  const [tray, compose] = await Promise.all(['.terminal-keys-row', '.control-row-compose'].map((sel) => page.locator(sel).boundingBox()));
+  assert.ok(tray.width > msgBox.width * 0.9 && tray.y + tray.height <= compose.y, `key tray ${tray.width}px wide at y=${tray.y}, composer at y=${compose.y}`);
+  await page.waitForFunction(() => document.activeElement?.closest('.terminal-keys-row'));
+  await page.locator('.terminal-keys-row').getByRole('button', { name: 'Esc', exact: true }).waitFor();
+  await keysToggle.click();
+  assert.equal(await page.locator('.terminal-keys-row').count(), 0);
+  // Slash commands open from the ⋯ menu, also above the message box, with focus moved into the panel.
   const composerMenu = page.getByLabel('More composer tools');
   await composerMenu.click();
-  await page.getByRole('button', { name: 'Terminal keys', exact: true }).click();
-  const [tray, tools] = await Promise.all(['.terminal-keys-row', '.control-row-tools'].map((sel) => page.locator(sel).boundingBox()));
-  assert.ok(tray.width > tools.width * 0.9 && tray.y >= tools.y + tools.height, `key tray ${tray.width}px wide at y=${tray.y}, toolbar ends ${tools.y + tools.height}`);
-  await page.locator('.terminal-keys-row').getByRole('button', { name: 'Esc', exact: true }).waitFor();
-  await composerMenu.click();
-  await page.getByRole('button', { name: 'Terminal keys', exact: true }).click();
-  assert.equal(await page.locator('.terminal-keys-row').count(), 0);
-  // Slash commands open from the same menu, also under the toolbar (above the message box), with
-  // focus moved into the panel.
-  await composerMenu.click();
   await page.getByRole('button', { name: 'Slash commands', exact: true }).click();
-  const [slash, compose] = await Promise.all(['.control-row-slash', '.control-row-compose'].map((sel) => page.locator(sel).boundingBox()));
-  assert.ok(slash.y >= tools.y + tools.height && slash.y + slash.height <= compose.y, `slash panel at y=${slash.y}, composer at y=${compose.y}`);
+  const slash = await page.locator('.control-row-slash').boundingBox();
+  assert.ok(slash.y + slash.height <= compose.y, `slash panel at y=${slash.y}, composer at y=${compose.y}`);
   await page.waitForFunction(() => document.activeElement?.closest('.control-row-slash'));
   await composerMenu.click();
   await page.getByRole('button', { name: 'Slash commands', exact: true }).click();
   assert.equal(await page.locator('.control-row-slash').count(), 0);
   assert.doesNotMatch(await page.locator('.terminal').innerText(), /Do you want to proceed|2\. Yes/);
   assert.equal(await page.locator('.control-row-compose [data-placeholder]').getAttribute('data-placeholder'), 'Message the agent...', 'one composer placeholder whatever the state');
-  // While answers are offered they are the only primary actions; Cycle mode and Interrupt step aside.
+  // While answers are offered they are the only primary actions; Cycle mode and Interrupt step aside,
+  // even inside ⋯.
+  await composerMenu.click();
   for (const name of [/^(Cycle mode|Mode: )/, /^Interrupt$/]) assert.equal(await page.getByRole('button', { name }).count(), 0, String(name));
-  // Composer extras wait behind one menu.
-  const delay = page.getByRole('combobox', { name: 'Send delay' });
-  assert.equal(await delay.isVisible(), false);
+  assert.equal(await page.getByRole('button', { name: 'Save as skill' }).isVisible(), true);
+  await composerMenu.click();
   // One overflow word in the app: the nav says More; the composer's own overflow is the ⋯ the
   // session menus use.
   assert.equal((await page.getByLabel('More composer tools').innerText()).trim(), '⋯');
-  await page.getByLabel('More composer tools').click();
-  assert.equal(await delay.isVisible(), true);
-  // The composer's own pickers draw the same chevron as the form selects (not a bare box).
-  assert.deepEqual(await delay.evaluate((el) => [getComputedStyle(el).appearance, getComputedStyle(el).backgroundImage.startsWith('url("data:image/svg+xml')]), ['none', true]);
-  assert.equal(await page.getByRole('button', { name: 'Save as skill' }).isVisible(), true);
-  // Custom delay keeps the menu open while its amount and unit are set; the amount box keeps input height.
+  // Delayed send is one click: the clock in the row is the delay picker itself, not a ⋯ item.
+  const delay = toolRow.getByRole('combobox', { name: 'Send delay' });
+  assert.equal(await delay.evaluate((el) => !el.closest('.composer-more') && el.closest('.composer-delay').getBoundingClientRect().width >= 32), true);
+  await delay.click();
+  await delay.selectOption({ label: '5m' });
+  assert.equal(await toolRow.locator('.composer-delay > span').innerText(), '5m', 'the set delay shows beside the clock');
+  assert.equal(await page.locator('.composer-send').getAttribute('aria-label'), 'Schedule');
+  // Custom delay shows its amount and unit in the row; the amount box keeps input height.
   await delay.selectOption('custom');
   await page.getByRole('combobox', { name: 'Delay unit' }).selectOption({ index: 1 });
   const amount = page.getByRole('spinbutton', { name: 'Delay amount' });
   assert.equal(await amount.isVisible(), true);
   assert.ok((await amount.boundingBox()).height < 48, 'amount box is not stretched');
   await delay.selectOption({ index: 0 });
-  assert.equal(await delay.isVisible(), false, 'a preset delay closes the menu');
-  // A working session gets them back.
+  assert.equal(await amount.count(), 0);
+  assert.equal(await page.locator('.composer-send').getAttribute('aria-label'), 'Send');
+  // A working session gets them back: Interrupt in the row, and Mode only inside ⋯.
   await rows.first().locator('.agent-rail-row-main').click();
-  // The mode button names the CLI's current permission mode.
-  for (const name of ['Mode: accept edits', 'Interrupt']) await page.getByRole('button', { name, exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Interrupt', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: /^Mode: / }).count(), 0, 'Mode is not a visible button');
+  // The quiet context text names the mode and opens the same menu, where Mode cycles it.
+  const context = page.locator('.composer-context');
+  assert.deepEqual([(await context.innerText()).trim(), await context.evaluate((el) => getComputedStyle(el).backgroundColor)], ['accept edits', 'rgba(0, 0, 0, 0)']);
+  await context.click();
+  await Promise.all([
+    page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/claude/sessions/a1/shift-tab')),
+    page.locator('.composer-more').getByRole('button', { name: 'Mode: accept edits', exact: true }).click(),
+  ]);
+  assert.equal(await page.locator('.composer-more').evaluate((el) => el.open), false, 'choosing Mode closes the menu');
   // Interrupt goes through POST /escape, which the server may promote to an interrupt.
   await Promise.all([
     page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/claude/sessions/a1/escape')),
@@ -302,8 +322,15 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const phoneMenu = phone.getByLabel('More composer tools');
   await phoneMenu.waitFor();
   assert.ok(Math.round((await phoneMenu.boundingBox()).height) >= 44, 'phone ⋯ is a 44px target');
-  await phoneMenu.click();
-  await phone.getByRole('button', { name: 'Terminal keys', exact: true }).click();
+  // At 390px the box, its send icon and the tool row fit without sideways scroll, every tool a 44px target.
+  const phoneFit = await phone.locator('.control-row-compose').evaluate((el) => {
+    const box = el.querySelector('.composer-box').getBoundingClientRect();
+    const send = el.querySelector('.composer-send').getBoundingClientRect();
+    const tools = [...el.querySelectorAll('.control-row-tools > .ctrl-btn, .control-row-tools > .more-menu > summary')].map((t) => t.getBoundingClientRect());
+    return [document.documentElement.scrollWidth <= 390, box.right <= 390 && send.right <= box.right, tools.every((t) => t.right <= 390 && Math.round(t.height) >= 44)];
+  });
+  assert.deepEqual(phoneFit, [true, true, true]);
+  await phone.locator('.control-row-tools').getByRole('button', { name: 'Keys', exact: true }).click();
   // On a phone, tool cards keep the transcript's own compact size and row.
   const phoneCard = await phone.locator('.ansi-tool').first().evaluate((el) => {
     const [card, pane] = [el, el.closest('.terminal')].map((node) => getComputedStyle(node));
@@ -360,7 +387,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // The CLI's empty input box and its mode line are left to the composer below, which names the mode.
   const tail = await single.locator('.terminal-body').innerText();
   assert.ok(!tail.includes('❯') && !tail.includes('accept edits on'), `pane foot: ${tail.slice(-80)}`);
-  assert.equal(await single.getByRole('button', { name: 'Mode: accept edits', exact: true }).count(), 1);
+  assert.equal((await single.locator('.composer-context').innerText()).trim(), 'accept edits');
   const deskRule = await ruleFits(page);
   // Rules share the CLI's lifted grey with its hints, so the line itself stays quiet.
   assert.equal(await page.locator('.ansi-rule').first().evaluate((el) => getComputedStyle(el).opacity), '0.55');

@@ -125,7 +125,7 @@ describe('agent terminal controls', () => {
 
     // The terminal key row only sends raw keys; POST /escape is the route the
     // server may promote to an interrupt. tests/ui-agents-desktop.test.mjs
-    // clicks Interrupt and checks that request, and that Cycle mode shows on a working session.
+    // clicks Interrupt and checks that request, and that Mode in the ⋯ menu reaches shift-tab.
     assert.match(agentDetail, /sessions\/\$\{id\}\/escape/);
   });
 
