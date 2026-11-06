@@ -177,7 +177,10 @@ function markProse(text) {
     const status = isStatusLine(plain[i]);
     if (!isReplyStart(plain[i]) && !prompt && !status && !more) { inReply &&= plain[i].startsWith(' '); continue; }
     let end = i;
-    while (!status && end + 1 < lines.length && isProseLine(plain[end + 1])) end++;
+    // The CLI paints a prompt on one background until it resets it, blank lines included.
+    const painted = prompt && /\x1b\[[0-9;]*48;/.test(lines[i]);
+    const next = (k) => isProseLine(plain[k]) || (painted && !plain[k] && isProseLine(plain[k + 1] ?? '') && !/\x1b\[(?:0|49)?m/.test(lines[k + 1]));
+    while (!status && end + 1 < lines.length && next(end + 1)) end++;
     lines[i] = `${prompt ? '\x10' : more ? '\x04' : '\x02'}${lines[i]}`;
     if (end + 1 < lines.length) lines[end + 1] = `\x03${lines[end + 1]}`;
     else lines[end] += '\x03';
