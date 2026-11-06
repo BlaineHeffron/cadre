@@ -76,18 +76,19 @@ test('full-height terminal fills the column, starts a short history at the top a
     else assert.equal(family, sans, `"${text}" reads in the prose font`);
   }
 
-  // A user prompt as the CLI paints it: one background from ❯ to its reset, wrapped lines and a
-  // blank-separated last paragraph inside. It reads as one card in one font, with no per-line fill.
+  // A user prompt as tmux captures it: one background from ❯ to the reset on the blank line under
+  // it, with wrapped lines, a bold word (a mid-line reset) and a blank-separated last paragraph
+  // inside. It reads as one card in one font, with no per-line fill.
   const bg = '\x1b[38;5;246m\x1b[48;5;237m';
   const word = (w) => `\x1b[38;5;231m${w}\x1b[39m`;
   await page.evaluate((text) => window.show(text), [
     `${bg}❯ ${word('First line of a long pasted prompt that the CLI wrapped at its width ')}`,
     `  ${word('and carried on here.')}`,
-    `  ${word('A second line.')}`,
+    `  ${word('A ')}\x1b[1mbold\x1b[0m${bg}${word(' second line.')}`,
     '',
     `  ${word('Use the image as part of your next response.')}`,
-    '',
-    '\x1b[49m  \x1b[38;5;246mRead 1 file\x1b[39m',
+    '\x1b[49m',
+    '  \x1b[38;5;246mCalled dueno (ctrl+o to expand)\x1b[39m',
     '',
     '● The reply.',
   ].join('\n'));
@@ -98,11 +99,11 @@ test('full-height terminal fills the column, starts a short history at the top a
     const walker = document.createTreeWalker(cards[0], NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.textContent.trim()) fonts.add(getComputedStyle(node.parentElement).fontFamily);
     const fills = [...cards[0].querySelectorAll('span')].map((span) => getComputedStyle(span).backgroundColor).filter((c) => c !== 'rgba(0, 0, 0, 0)');
-    return { count: cards.length, rects: cards[0].getClientRects().length, text: cards[0].textContent, fonts: [...fonts], fills, outside: el.querySelector('.terminal-body').textContent.includes('Read 1 file') && !cards[0].textContent.includes('Read 1 file') };
+    return { count: cards.length, rects: cards[0].getClientRects().length, text: cards[0].textContent, fonts: [...fonts], fills, outside: el.querySelector('.terminal-body').textContent.includes('Called dueno') && !cards[0].textContent.includes('Called dueno') };
   });
   assert.equal(card.count, 1, 'the prompt is one card');
   assert.equal(card.rects, 1, 'one continuous box');
-  assert.equal(card.text, '❯ First line of a long pasted prompt that the CLI wrapped at its width \n  and carried on here.\n  A second line.\n\n  Use the image as part of your next response.\n', 'text unchanged');
+  assert.equal(card.text, '❯ First line of a long pasted prompt that the CLI wrapped at its width \n  and carried on here.\n  A bold second line.\n\n  Use the image as part of your next response.\n', 'text unchanged');
   assert.equal(card.fonts.length, 1, `one font across the prompt: ${card.fonts.join(' | ')}`);
   assert.deepEqual(card.fills, [], 'no per-line highlight inside the card');
   assert.equal(card.outside, true, 'the result under the prompt stays outside the card');
