@@ -682,13 +682,13 @@ textarea.input:focus {
   overscroll-behavior: contain;
 }
 
-.terminal a {
+.terminal a, .terminal-status a {
   color: var(--accent);
   text-decoration: underline;
   word-break: break-all;
 }
 
-.terminal a:hover {
+.terminal a:hover, .terminal-status a:hover {
   color: var(--accent-hover);
 }
 
@@ -4640,7 +4640,8 @@ p.new-agent-hint {
   flex-wrap: wrap;
   gap: 2px 16px;
   padding: 4px 12px;
-  background: var(--terminal-bg);
+  /* The transcript's own tone (see .terminal-fullheight). */
+  background: var(--bg-secondary);
   font-size: var(--fs-xs);
   color: var(--text-muted);
 }

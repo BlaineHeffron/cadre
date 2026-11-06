@@ -52,5 +52,17 @@ test('a captured Claude Code footer renders as a status strip with a clickable l
   const link = strip.getByRole('link', { name: '/rc' });
   assert.deepEqual(await link.evaluate((a) => [a.href, a.target, a.rel]),
     ['https://claude.ai/code/session_00000000?from=cli', '_blank', 'noopener noreferrer']);
+  // In both themes the strip shares the transcript's surface, and its text and link stand off it.
+  for (const theme of ['dark', 'light']) {
+    const look = await page.evaluate((name) => {
+      document.documentElement.dataset.theme = name;
+      const css = (sel, prop) => getComputedStyle(document.querySelector(sel))[prop];
+      return { pane: css('.terminal', 'backgroundColor'), strip: css('.terminal-status', 'backgroundColor'),
+        text: css('.terminal-status > span', 'color'), link: css('.terminal-status a span', 'color') };
+    }, theme);
+    assert.equal(look.strip, look.pane, `${theme}: strip and transcript share a background`);
+    assert.notEqual(look.strip, 'rgba(0, 0, 0, 0)', theme);
+    for (const color of [look.text, look.link]) assert.notEqual(color, look.strip, `${theme}: ${color} on ${look.strip}`);
+  }
   assert.deepEqual(errors, []);
 });
