@@ -26,7 +26,7 @@ function esc(str) {
 export function ansiToHtml(text) {
   if (!text) return '';
   // OSC sequences: an OSC 8 hyperlink is kept (ended by ST) for the loop below; any other is dropped.
-  text = text.replace(OSC, (seq, body) => (body.startsWith('8;') ? `\x1b]${body}\x1b\\` : ''));
+  text = text.replace(OSC, (seq, body) => (/^8;[^;]*;/.test(body) ? `\x1b]${body}\x1b\\` : ''));
   // The marks below are non-printing control characters (never Nerd Font icons from the
   // private-use area); any already in the pane are dropped first.
   text = text.replace(/[\x02-\x07\x0e-\x12]/g, '');
@@ -100,9 +100,15 @@ export function ansiToHtml(text) {
     }
     // OSC 8 hyperlink: ESC ] 8 ; params ; URL ST. Only http(s) URLs link; the label is the text.
     if (text.startsWith('\x1b]', i)) {
-      const end = text.indexOf('\x1b\\', i);
+      // One with no terminator before the next escape loses just its `ESC ]`; the rest stays text.
+      OSC_LINK.lastIndex = i;
+      const osc = OSC_LINK.exec(text);
+      if (!osc) {
+        i += 2;
+        continue;
+      }
       flushBuf();
-      const href = safeUrl(text.slice(text.indexOf(';', i + 4) + 1, end));
+      const href = safeUrl(osc[1]);
       if (href && href === closed?.href) {
         parts[closed.at] = '';
         link = href;
@@ -115,7 +121,7 @@ export function ansiToHtml(text) {
         link = href;
       }
       closed = href ? null : closed;
-      i = end + 2;
+      i = OSC_LINK.lastIndex;
       continue;
     }
     // Match ESC[ ... m  (SGR sequence)
@@ -146,8 +152,9 @@ export function ansiToHtml(text) {
   return parts.join('');
 }
 
-// Every OSC sequence, ended by BEL or ST; one cut off at the end of the capture too.
-const OSC = /\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\|$)/g;
+// Every OSC sequence ended by BEL or ST, and the OSC 8 links kept from them (the URL is group 1).
+const OSC = /\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+const OSC_LINK = /\x1b\]8;[^;\x1b]*;([^\x1b]*)\x1b\\/y;
 const anchor = (href) => `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">`;
 
 function safeUrl(url) {

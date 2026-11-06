@@ -220,10 +220,11 @@ test('a real Claude Code footer: the empty box folds; mode extras, the update no
   // Nothing of the box is left: no rule, no empty prompt, no escape remnants.
   assert.ok(text.endsWith('Reconnected to dueno.\n'), JSON.stringify(text.slice(-60)));
   assert.doesNotMatch(ansiToHtml(text), /─{20}|❯\s*$|\]8;/);
-  assert.deepEqual(status.map(ansiToHtml), [
-    '<span style="color:rgb(199,199,199)">← 1 agent</span>',
-    '<span style="color:rgb(135,215,135)">✔ Update installed · Restart to update</span>',
-    '<a href="https://claude.ai/code/session_00000000?from=cli" target="_blank" rel="noopener noreferrer"><span style="color:rgb(135,215,135)">/rc</span></a>',
+  // Colour spans aside (their format is the theme's), each line is its text, and the link a link.
+  assert.deepEqual(status.map((line) => ansiToHtml(line).replace(/<\/?span[^>]*>/g, '')), [
+    '← 1 agent',
+    '✔ Update installed · Restart to update',
+    '<a href="https://claude.ai/code/session_00000000?from=cli" target="_blank" rel="noopener noreferrer">/rc</a>',
   ]);
 });
 
@@ -242,6 +243,32 @@ test('OSC 8 hyperlinks become links: only http(s), one link across a wrap, other
   // A link reopened without a close continues too; different URLs stay separate links.
   assert.equal(ansiToHtml('\x1b]8;;https://x.test/a\x1b\\one\n\x1b]8;;https://x.test/a\x1b\\two\x1b]8;;https://x.test/b\x1b\\three'),
     '<a href="https://x.test/a" target="_blank" rel="noopener noreferrer">one\ntwo</a><a href="https://x.test/b" target="_blank" rel="noopener noreferrer">three</a>');
-  // A link cut off by the end of the capture is closed.
+  // A link whose close is cut off by the end of the capture is closed.
   assert.equal(ansiToHtml('\x1b]8;;https://x.test/a\x1b\\cut'), '<a href="https://x.test/a" target="_blank" rel="noopener noreferrer">cut</a>');
+});
+
+test('an OSC with no terminator before the next escape loses only its ESC ] and never hangs', async () => {
+  const { Worker } = await import('node:worker_threads');
+  // A hang is a synchronous loop, so it runs in a worker the test can stop.
+  const inputs = [
+    'before \x1b]0;title \x1b[31mred\x1b[0m',
+    '\x1b]8;;https://a.com \x1b[31mx\x1b[0m',
+    'a \x1b]0;title\nline2 \x1b[1mbold\x1b[0m line3 \x1b]8;;https://b.test/\x1b\\B\x1b]8;;\x1b\\ tail',
+    'cut \x1b]8;;https://x.test/',
+  ];
+  const worker = new Worker(`
+    const { parentPort, workerData } = require('node:worker_threads');
+    import(workerData.url).then(({ ansiToHtml }) => parentPort.postMessage(workerData.inputs.map(ansiToHtml)));
+  `, { eval: true, workerData: { url: new URL('../public/lib/ansi-to-html.mjs', import.meta.url).href, inputs } });
+  let timer;
+  const html = await Promise.race([
+    new Promise((resolve, reject) => { worker.once('message', resolve); worker.once('error', reject); }),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('ansiToHtml did not return within 5s')), 5000); }),
+  ]).finally(() => { clearTimeout(timer); return worker.terminate(); });
+  assert.deepEqual(html, [
+    'before 0;title <span class="ansi-fg-red">red</span>',
+    '8;;https://a.com <span class="ansi-fg-red">x</span>',
+    'a 0;title\nline2 <span class="ansi-bold">bold</span> line3 <a href="https://b.test/" target="_blank" rel="noopener noreferrer">B</a> tail',
+    'cut 8;;https://x.test/',
+  ]);
 });
