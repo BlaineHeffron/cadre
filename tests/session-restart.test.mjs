@@ -14,7 +14,7 @@ const coverageEnv = process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.e
 const tempDirs = [];
 afterEach(async () => { while (tempDirs.length) await rm(tempDirs.pop(), { recursive: true, force: true }); });
 
-async function restart({ cliSessionId = 'cli-uuid-1234' } = {}) {
+async function restart({ cliSessionId = 'cli-uuid-1234', requests = 1, meta = {} } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'cadre-restart-'));
   tempDirs.push(tempDir);
   await mkdir(join(tempDir, '.git'));
@@ -39,7 +39,7 @@ exit 0
   await writeFile(join(tempDir, 'tmux-session'), '');
   await writeFile(join(tempDir, '.claude_sessions.json'), JSON.stringify([{
     id, tmuxSession: 'claude-restart', source: 'dashboard', workDir: tempDir, created: Date.now(),
-    provider: 'anthropic', runtime: 'claude', model: 'claude-opus-5-5', thinkingLevel: 'high', cliSessionId,
+    provider: 'anthropic', runtime: 'claude', model: 'claude-opus-5-5', thinkingLevel: 'high', cliSessionId, ...meta,
   }]));
   const script = `
     import Fastify from ${JSON.stringify(pathToFileURL(resolve('node_modules/fastify/fastify.js')).href)};
@@ -48,9 +48,9 @@ exit 0
     const app = Fastify();
     await app.register(getAgentSessionsProvider('claude').plugin, { wsManager: { broadcast() {}, onChannel() {}, channels: new Map() } });
     await app.ready();
-    const response = await app.inject({ method: 'POST', url: '/api/claude/sessions/${id}/restart' });
+    const responses = await Promise.all(Array.from({ length: ${requests} }, () => app.inject({ method: 'POST', url: '/api/claude/sessions/${id}/restart' })));
     await app.close();
-    console.log(JSON.stringify({ statusCode: response.statusCode, body: response.json() }));
+    console.log(JSON.stringify(responses.map((response) => ({ statusCode: response.statusCode, body: response.json() }))));
   `;
   const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', script], {
     cwd: resolve('.'),
@@ -62,7 +62,8 @@ exit 0
     },
   });
   const read = (name) => readFile(join(tempDir, name), 'utf8').catch(() => '');
-  return { id, tempDir, ...JSON.parse(stdout.trim().split('\n').at(-1)), calls: (await read('tmux.log')).split('\n').filter(Boolean), args: await read('tmux-args') };
+  const responses = JSON.parse(stdout.trim().split('\n').at(-1));
+  return { id, tempDir, ...responses[0], responses, calls: (await read('tmux.log')).split('\n').filter(Boolean), args: await read('tmux-args') };
 }
 
 it('restart kills the session and resumes the same conversation in the same tmux session, workdir and model', async () => {
@@ -85,4 +86,16 @@ it('restart refuses before killing anything when the conversation cannot be resu
   assert.equal(result.body.code, 'cli_session_id_unknown');
   assert.ok(!result.calls.includes('kill-session'), result.calls.join(','));
   assert.equal(result.args, '');
+});
+
+it('a second restart while one runs is refused, so only one kill and one launch happen', async () => {
+  const result = await restart({ requests: 2 });
+  assert.deepEqual(result.responses.map((response) => [response.statusCode, response.body.code ?? null]), [[200, null], [409, 'restart_in_progress']]);
+  assert.deepEqual(result.calls.filter((call) => ['kill-session', 'new-session'].includes(call)), ['kill-session', 'new-session']);
+});
+
+it('a resume check that fails (stored MCP capabilities it cannot use) refuses before the kill', async () => {
+  const result = await restart({ meta: { mcpCapabilities: { catalogVersion: 'stale', configurationDigest: 'stale' } } });
+  assert.deepEqual([result.statusCode, result.body.code, result.body.stopped], [400, 'mcp_inherited_selection_invalid', false]);
+  assert.ok(!result.calls.includes('kill-session'), result.calls.join(','));
 });

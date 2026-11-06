@@ -615,6 +615,10 @@ export async function machinesPlugin(app, { role = 'hub', store, credentialStore
     const state = store.read();
     const entry = state.sessions?.[`${kind}:${req.params.id}`];
     if (!entry) return;
+    // Restart kills and resumes on the worker without the rotated credential Resume mints here; use Kill, then Resume.
+    if (req.method === 'POST' && suffix === '/restart') {
+      return reply.code(409).send({ error: 'Restart is not supported for sessions on another machine', code: 'restart_unsupported_remote' });
+    }
     const row = state.machines?.[entry.machine];
     if (!row) await retire(entry.machine);
     const deleting = req.method === 'DELETE' && suffix === '';

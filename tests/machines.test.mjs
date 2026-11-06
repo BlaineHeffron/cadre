@@ -158,6 +158,7 @@ before(async () => {
     // The real hub has these local routes; the proxy hook answers for a remote id before they run.
     app.get('/api/claude/sessions/:id/transcript', async (req, reply) => reply.code(404).send({}));
     app.post('/api/claude/sessions/:id/keys', async (req, reply) => reply.code(404).send({}));
+    app.post('/api/claude/sessions/:id/restart', async (req, reply) => reply.code(404).send({}));
   } });
   requestImpl = buildInProcessFastifyRequest({ app: hub.app, buildHeaders: () => buildInternalBypassHeaders() });
   const serverFactory = buildInProcessAgentBusMcpServer({ requestImpl, monitorMcp: buildMonitorMcpServer({ requestImpl }), credentialStore: busStore });
@@ -483,6 +484,17 @@ describe('multi-machine slice 2', () => {
     secrets.add(rotated);
     assert.deepEqual([await authenticates(tokenA), await authenticates(rotated)], [false, true]);
     tokenA = rotated;
+  });
+
+  it('restart is refused for a remote session before anything reaches the worker; the session keeps running', async () => {
+    const restart = await hub.app.inject({ method: 'POST', url: `/api/claude/sessions/${a}/restart`, headers: hub.authHeaders });
+    assert.deepEqual([restart.statusCode, restart.json().code], [409, 'restart_unsupported_remote']);
+    // Nor does the worker restart for its hub.
+    const direct = await call(`${workerUrl}/api/claude/sessions/${a}/restart`, { method: 'POST', token: hubStore.read().machines.w5.credential });
+    assert.equal(direct.status, 409, direct.text);
+    assert.equal(JSON.parse(direct.text).code, 'restart_unsupported_remote');
+    await execFileAsync('/usr/bin/tmux', ['-L', tmuxSocket, 'has-session', '-t', `claude-${a}`]);
+    assert.equal(await authenticates(tokenA), true);
   });
 
   it('forget of a blocked machine revokes its session tokens on the next sweep, with no session request', async () => {

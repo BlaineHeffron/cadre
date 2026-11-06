@@ -23,9 +23,15 @@ test('Actions ▾ offers Restart session: an idle session restarts at once, a bu
     render(h('main', { class: 'main' }, h(AgentSessionDetailPage, { id: 'a1', provider: 'claude' })), document.getElementById('app'));
   </script>`)));
   let status = 'ready';
+  let attachCommand = 'tmux attach -t claude-a1';
   const restarts = [];
-  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: '● Done.', state: { status }, sessionName: `claude-${req.params.id}` }));
-  app.post('/api/claude/sessions/:id/restart', (req) => { restarts.push(req.params.id); return { id: req.params.id, resumed: true }; });
+  let hold = null;
+  app.get('/api/claude/sessions/:id', (req) => ({ id: req.params.id, content: '● Done.', state: { status }, sessionName: `claude-${req.params.id}`, attachCommand }));
+  app.post('/api/claude/sessions/:id/restart', async (req) => {
+    restarts.push(req.params.id);
+    await hold;
+    return { id: req.params.id, resumed: true };
+  });
   app.post('/api/*', () => ({ ok: true }));
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
@@ -60,5 +66,29 @@ test('Actions ▾ offers Restart session: an idle session restarts at once, a bu
   accept = true;
   await Promise.all([restarted(), restart()]);
   assert.deepEqual(restarts, ['a1', 'a1']);
+
+  // While a restart runs, the item is disabled, so a second click sends nothing.
+  status = 'ready';
+  let release;
+  hold = new Promise((resolve) => { release = resolve; });
+  await page.goto(`${origin}/session`);
+  await page.getByText('Done.').waitFor();
+  const first = restarted();
+  await restart();
+  await page.locator('.claude-session-header summary', { hasText: 'Actions' }).click();
+  const pending = page.getByRole('button', { name: 'Restarting…', exact: true });
+  assert.equal(await pending.isDisabled(), true);
+  release();
+  await first;
+  await page.getByRole('button', { name: 'Restart session', exact: true }).waitFor();
+  assert.deepEqual(restarts, ['a1', 'a1', 'a1']);
+
+  // A session with no tmux pane (structured) has nothing to restart.
+  attachCommand = '';
+  await page.goto(`${origin}/session`);
+  await page.getByText('Done.').waitFor();
+  await page.locator('.claude-session-header summary', { hasText: 'Actions' }).click();
+  await page.getByRole('button', { name: 'Kill', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: /Restart/ }).count(), 0);
   assert.deepEqual(errors, []);
 });
