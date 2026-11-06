@@ -147,7 +147,9 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   // The scrim is dark enough that the page behind does not read through.
   // Form hints read at body size, never as small grey print.
   assert.equal(await dialog.locator('.new-agent-hint').first().evaluate((el) => getComputedStyle(el).fontSize), '14px');
-  assert.deepEqual(await dialog.evaluate((el) => [getComputedStyle(el, '::backdrop').backgroundColor, getComputedStyle(el, '::backdrop').backdropFilter]), ['rgba(5, 5, 12, 0.84)', 'blur(3px)']);
+  assert.deepEqual(await dialog.evaluate((el) => [getComputedStyle(el, '::backdrop').backgroundColor, getComputedStyle(el, '::backdrop').backdropFilter]), ['rgba(5, 5, 12, 0.92)', 'none']);
+  // Workdir choices are secondary buttons in the UI font, not monospace pills.
+  assert.equal(await dialog.locator('.dir-chip').first().evaluate((el) => getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily), true);
   // The form's selects draw the app's chevron, not the platform widget, like the inputs beside them.
   const providerSelect = dialog.getByRole('combobox', { name: 'Provider' });
   assert.deepEqual(await providerSelect.evaluate((el) => [getComputedStyle(el).appearance, getComputedStyle(el).backgroundImage.startsWith('url("data:image/svg+xml')]), ['none', true]);

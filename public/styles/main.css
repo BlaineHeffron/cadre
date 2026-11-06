@@ -4003,15 +4003,16 @@ input[type="checkbox"]:not(.switch) {
   gap: 8px;
 }
 
+/* Workdir choices are the app's secondary buttons, in the UI font; the chosen one takes the
+   accent edge. */
 .dir-chip {
   min-height: 44px;
   padding: 0 14px;
-  border-radius: 22px;
-  border: 1px solid var(--border);
-  background: var(--bg-surface);
-  color: var(--text-primary, #fff);
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: var(--btn-bg);
+  color: var(--text-primary);
   font-size: var(--fs-sm);
-  font-family: var(--font-mono);
   cursor: pointer;
   white-space: nowrap;
   max-width: 100%;
@@ -4020,9 +4021,8 @@ input[type="checkbox"]:not(.switch) {
 }
 
 .dir-chip-active {
-  border-color: var(--accent, #4f8cff);
+  border-color: var(--accent);
   background: var(--bg-hover);
-  color: #fff;
 }
 
 .capture-dir-head {
@@ -4083,14 +4083,14 @@ p.new-agent-hint {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   min-width: 0;
 }
 
 .new-agent-field-label {
   display: block;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   margin-bottom: 6px;
 }
@@ -4142,12 +4142,17 @@ p.new-agent-hint {
 .new-agent-advanced > summary {
   cursor: pointer;
   padding: 8px 12px;
-  font-size: var(--fs-xs);
-  font-weight: 600;
+  /* Reads like the form's other labels, with its hint as a muted aside. */
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   display: flex;
   align-items: baseline;
   gap: 8px;
+}
+
+.new-agent-advanced > summary .new-agent-hint {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
 }
 
 .new-agent-advanced[open] > summary {
@@ -4195,9 +4200,8 @@ p.new-agent-hint {
 }
 
 .new-agent-dialog::backdrop {
-  /* Dark and softly blurred, so the page behind (an approval's buttons, say) does not read through. */
-  background: rgba(5, 5, 12, 0.84);
-  backdrop-filter: blur(3px);
+  /* A plain dark scrim: the page behind (an approval's buttons, say) does not read through. */
+  background: rgba(5, 5, 12, 0.92);
 }
 
 .new-agent-dialog .new-agent-form {

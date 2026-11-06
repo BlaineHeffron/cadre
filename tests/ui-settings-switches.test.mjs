@@ -65,9 +65,9 @@ test('settings uses labelled switches that reflect and change their state', { sk
   // Switch hints are read, so they use the body size in secondary grey.
   const hint = await page.locator('.setting-switch-hint').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
   assert.deepEqual(hint, ['14px', 'rgb(218, 218, 230)']);
-  // Logout is a danger secondary: light-red text on the soft secondary fill, no outline.
+  // Logout is a plain secondary, the same as every other secondary button.
   const logout = page.getByRole('button', { name: 'Logout' });
-  assert.deepEqual(await logout.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).borderTopColor, getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)']), ['rgb(255, 161, 152)', 'rgba(0, 0, 0, 0)', true]);
+  assert.deepEqual(await logout.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).backgroundColor]), ['rgb(224, 224, 224)', 'rgb(41, 41, 60)']);
   // Card notes read at the same body size and secondary grey as the switch hints.
   assert.deepEqual(await page.locator('.note').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]), ['14px', 'rgb(218, 218, 230)']);
   // So do the provider status lines under the switches.
