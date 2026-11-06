@@ -45,10 +45,9 @@ export function optionClass(option, index) {
   return index === 0 ? 'ctrl-approve' : 'ctrl-default';
 }
 
-// A picked skill, quick insert or delay closes the tools menu; "Custom" stays open for its fields.
+// A picked skill or quick insert closes the tools menu.
 function closeAfterPick(event) {
-  // Custom delay keeps the menu open so the amount and unit can be set together.
-  if (event.target.tagName === 'SELECT' && event.target.value !== 'custom' && event.target.ariaLabel !== 'Delay unit') event.currentTarget.open = false;
+  if (event.target.tagName === 'SELECT') event.currentTarget.open = false;
 }
 
 export function AgentControlBar({
@@ -72,7 +71,7 @@ export function AgentControlBar({
   imagePreviewUrl = '',
   imageNote = '',
   inputText,
-  // The raw terminal keys tray, opened from the ⋯ menu so the composer is one short toolbar.
+  // The raw terminal keys tray, opened by the Keys button in the composer's tool row.
   keys = null,
 }) {
   const descriptor = providerDescriptor(provider);
@@ -88,12 +87,12 @@ export function AgentControlBar({
   const interactionOptions = canAnswerInteraction && Array.isArray(state?.interaction?.options)
     ? state.interaction.options
     : [];
-  // While the bar offers answers, they are the primary actions, so Mode steps aside.
+  // While the bar offers answers, they are the primary actions, so the ⋯ menu drops Mode.
   const answering = sessionStatus === 'blocked' && interactionOptions.length > 0;
   // Interrupt is for a busy turn; idle or answering, Esc stays one tap away in the keys tray.
   const showInterrupt = ['working', 'thinking', 'awaiting_response'].includes(sessionStatus);
 
-  // A ⋯ choice opens its panel under the toolbar and hands it the focus the closed menu had.
+  // A tool opens its panel above the message box and hands it the focus.
   function togglePanel(event, panel, selector) {
     const bar = event.currentTarget.closest('.claude-control-bar');
     panel.value = !panel.value;
@@ -105,6 +104,14 @@ export function AgentControlBar({
     const amount = Number(customDelayAmount.value);
     if (!Number.isFinite(amount) || amount <= 0) return 0;
     return Math.round(amount * Number(customDelayUnit.value || 60000));
+  }
+
+  const sendLabel = imageSending ? 'Sending…' : (selectedScheduleDelay() > 0 && !imageAttached ? 'Schedule' : 'Send');
+
+  // The quiet mode text opens the same ⋯ menu that changes the mode.
+  function openTools(event) {
+    const menu = event.currentTarget.closest('form').querySelector('.composer-more');
+    menu.open = !menu.open;
   }
 
   function handleApprove() {
@@ -199,86 +206,6 @@ export function AgentControlBar({
         </div>
       ` : null}
 
-      <div class="control-row control-row-tools">
-        ${descriptor.hasShiftTab && !answering ? html`
-          <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleApprove} title="Send Shift+Tab (cycle permission mode)">
-            ${mode ? `Mode: ${mode}` : 'Cycle mode'}
-          </button>
-        ` : null}
-        ${showInterrupt ? html`
-          <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleReject} title="Send Escape (interrupt)">
-            Interrupt
-          </button>
-        ` : null}
-        <details class="more-menu composer-more" onClickCapture=${closeMenuOnChoice} onChange=${closeAfterPick}>
-          <summary class="ctrl-btn ctrl-default ctrl-btn-compact" aria-label="More composer tools" title="More composer tools">
-            ⋯${selectedDelay.value ? ' · delayed' : ''}${imageAttached ? ' · image' : ''}
-          </summary>
-          <div class="more-menu-list">
-            ${descriptor.hasSlash ? html`
-              <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" aria-pressed=${String(showSlash.value)} onclick=${(e) => togglePanel(e, showSlash, '.control-row-slash button')}>Slash commands</button>
-            ` : null}
-            ${keys ? html`
-              <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" aria-pressed=${String(showKeys.value)} onclick=${(e) => togglePanel(e, showKeys, '.terminal-keys-row button')}>Terminal keys</button>
-            ` : null}
-            <${LaunchSkillSelector} compact=${true} onInsert=${(id) => skillInsert.current?.(id)} />
-            <button
-              type="button"
-              class="ctrl-btn ctrl-default ctrl-btn-compact"
-              title="Open the skill writer with this prompt text"
-              disabled=${!inputText.value.trim()}
-              onclick=${() => openSkillWriterWithDraft(inputText.value)}>
-              Save as skill
-            </button>
-            ${quickInsertOptions.length > 0 ? html`
-              <select class="ctrl-inline-select ctrl-inline-select-compact" aria-label="Quick insert" onInput=${handleQuickInsert}>
-                <option value="">Quick insert</option>
-                ${quickInsertOptions.map((option) => html`
-                  <option value=${option.key} title=${option.label}>${option.label}</option>
-                `)}
-              </select>
-            ` : null}
-            ${onAttachImage ? html`
-              <label class="ctrl-btn ctrl-default ctrl-btn-compact session-image-picker" style="cursor:pointer" title="Attach an image to the next message">
-                ${imageAttached ? 'Image ✓' : 'Image'}
-                <input type="file" accept="image/*" capture="environment" style="display:none" onChange=${onAttachImage} />
-              </label>
-            ` : null}
-            <select
-              class="ctrl-inline-select ctrl-inline-select-tiny"
-              aria-label="Send delay"
-              disabled=${imageAttached}
-              title=${imageAttached ? 'Images send immediately' : 'Send delay'}
-              value=${String(selectedDelay.value)}
-              onInput=${e => { selectedDelay.value = e.target.value === 'custom' ? 'custom' : Number(e.target.value); }}
-            >
-              ${DELAY_OPTIONS.map(o => html`<option value=${String(o.value)}>${o.label}</option>`)}
-              <option value="custom">Custom</option>
-            </select>
-            ${selectedDelay.value === 'custom' ? html`
-              <input
-                type="number"
-                class="ctrl-input"
-                aria-label="Delay amount"
-                min="0"
-                step="any"
-                inputmode="decimal"
-                placeholder="Amount"
-                value=${customDelayAmount.value}
-                onInput=${e => { customDelayAmount.value = e.target.value; }}
-              />
-              <select
-                class="ctrl-inline-select ctrl-inline-select-tiny"
-                aria-label="Delay unit"
-                value=${String(customDelayUnit.value)}
-                onInput=${e => { customDelayUnit.value = Number(e.target.value); }}
-              >
-                ${DELAY_UNITS.map(o => html`<option value=${String(o.value)}>${o.label}</option>`)}
-              </select>
-            ` : null}
-          </div>
-        </details>
-      </div>
       ${descriptor.hasSlash && showSlash.value ? html`
         <div class="control-row control-row-slash">
           ${SLASH_COMMANDS.map(({ cmd, label }) => html`
@@ -288,27 +215,117 @@ export function AgentControlBar({
       ` : null}
       ${keys && showKeys.value ? keys : null}
 
-      <form class="control-row control-row-compose" onSubmit=${handleSubmit}>
-        <${SkillPromptComposer}
-          value=${inputText}
-          insertRef=${skillInsert}
-          placeholder=${imageAttached
-            ? 'Message to send with the image...'
-            : 'Message the agent...'}
-          className="ctrl-input"
-          onSubmit=${handleSubmit}
-          onDropFiles=${onDropFiles}
-          ariaLabel="Session prompt"
-        />
-        <${VoiceInput} className="ctrl-btn" hotkey onResult=${(text) => { inputText.value = appendTranscript(inputText.value, text); }} />
-        <button
-          type="submit"
-          class="ctrl-btn ctrl-send"
-          disabled=${imageSending
-            || (!imageAttached && selectedDelay.value === 'custom' && selectedScheduleDelay() <= 0)
-            || ((imageAttached || selectedScheduleDelay() === 0) && state?.capabilities?.canQueueMessage !== true)}>
-          ${imageSending ? 'Sending…' : (selectedScheduleDelay() > 0 && !imageAttached ? 'Schedule' : 'Send')}
-        </button>
+      <form class="control-row-compose" onSubmit=${handleSubmit}>
+        <div class="composer-box">
+          <${SkillPromptComposer}
+            value=${inputText}
+            insertRef=${skillInsert}
+            placeholder=${imageAttached
+              ? 'Message to send with the image...'
+              : 'Message the agent...'}
+            className="ctrl-input"
+            onSubmit=${handleSubmit}
+            onDropFiles=${onDropFiles}
+            ariaLabel="Session prompt"
+          />
+          <button
+            type="submit"
+            class="composer-send"
+            aria-label=${sendLabel}
+            title=${`${sendLabel} (Enter)`}
+            disabled=${imageSending
+              || (!imageAttached && selectedDelay.value === 'custom' && selectedScheduleDelay() <= 0)
+              || ((imageAttached || selectedScheduleDelay() === 0) && state?.capabilities?.canQueueMessage !== true)}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 5v7a3 3 0 0 1-3 3H5M9 11l-4 4 4 4" /></svg>
+          </button>
+        </div>
+        <div class="control-row control-row-tools">
+          ${showInterrupt ? html`
+            <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleReject} title="Send Escape (interrupt)">
+              Interrupt
+            </button>
+          ` : null}
+          <details class="more-menu composer-more" onClickCapture=${closeMenuOnChoice} onChange=${closeAfterPick}>
+            <summary class="ctrl-btn ctrl-default ctrl-btn-compact" aria-label="More composer tools" title="More composer tools">
+              ⋯${imageAttached ? ' · image' : ''}
+            </summary>
+            <div class="more-menu-list">
+              ${descriptor.hasShiftTab && !answering ? html`
+                <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" onclick=${handleApprove} title="Send Shift+Tab (cycle permission mode)">
+                  ${mode ? `Mode: ${mode}` : 'Cycle mode'}
+                </button>
+              ` : null}
+              ${descriptor.hasSlash ? html`
+                <button type="button" class="ctrl-btn ctrl-default ctrl-btn-compact" aria-pressed=${String(showSlash.value)} onclick=${(e) => togglePanel(e, showSlash, '.control-row-slash button')}>Slash commands</button>
+              ` : null}
+              <${LaunchSkillSelector} compact=${true} onInsert=${(id) => skillInsert.current?.(id)} />
+              <button
+                type="button"
+                class="ctrl-btn ctrl-default ctrl-btn-compact"
+                title="Open the skill writer with this prompt text"
+                disabled=${!inputText.value.trim()}
+                onclick=${() => openSkillWriterWithDraft(inputText.value)}>
+                Save as skill
+              </button>
+              ${quickInsertOptions.length > 0 ? html`
+                <select class="ctrl-inline-select ctrl-inline-select-compact" aria-label="Quick insert" onInput=${handleQuickInsert}>
+                  <option value="">Quick insert</option>
+                  ${quickInsertOptions.map((option) => html`
+                    <option value=${option.key} title=${option.label}>${option.label}</option>
+                  `)}
+                </select>
+              ` : null}
+              ${onAttachImage ? html`
+                <label class="ctrl-btn ctrl-default ctrl-btn-compact session-image-picker" style="cursor:pointer" title="Attach an image to the next message">
+                  ${imageAttached ? 'Image ✓' : 'Image'}
+                  <input type="file" accept="image/*" capture="environment" style="display:none" onChange=${onAttachImage} />
+                </label>
+              ` : null}
+            </div>
+          </details>
+          ${keys ? html`
+            <button type="button" class="ctrl-btn" aria-pressed=${String(showKeys.value)} title="Terminal keys" onclick=${(e) => togglePanel(e, showKeys, '.terminal-keys-row button')}>Keys</button>
+          ` : null}
+          <${VoiceInput} className="ctrl-btn" hotkey onResult=${(text) => { inputText.value = appendTranscript(inputText.value, text); }} />
+          <label class="ctrl-btn composer-delay">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+            ${selectedDelay.value ? html`<span>${selectedDelay.value === 'custom' ? 'Custom' : DELAY_OPTIONS.find((o) => o.value === selectedDelay.value)?.label}</span>` : null}
+            <select
+              aria-label="Send delay"
+              disabled=${imageAttached}
+              title=${imageAttached ? 'Images send immediately' : 'Send delay'}
+              value=${String(selectedDelay.value)}
+              onInput=${e => { selectedDelay.value = e.target.value === 'custom' ? 'custom' : Number(e.target.value); }}
+            >
+              ${DELAY_OPTIONS.map(o => html`<option value=${String(o.value)}>${o.label}</option>`)}
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          ${selectedDelay.value === 'custom' ? html`
+            <input
+              type="number"
+              class="ctrl-input"
+              aria-label="Delay amount"
+              min="0"
+              step="any"
+              inputmode="decimal"
+              placeholder="Amount"
+              value=${customDelayAmount.value}
+              onInput=${e => { customDelayAmount.value = e.target.value; }}
+            />
+            <select
+              class="ctrl-inline-select ctrl-inline-select-tiny"
+              aria-label="Delay unit"
+              value=${String(customDelayUnit.value)}
+              onInput=${e => { customDelayUnit.value = Number(e.target.value); }}
+            >
+              ${DELAY_UNITS.map(o => html`<option value=${String(o.value)}>${o.label}</option>`)}
+            </select>
+          ` : null}
+          ${descriptor.hasShiftTab && mode && !answering ? html`
+            <button type="button" class="composer-context" title="Permission mode: open composer tools to change it" onclick=${openTools}>${mode}</button>
+          ` : null}
+        </div>
       </form>
 
     </div>
