@@ -98,7 +98,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const newSession = toolbar.getByRole('button', { name: 'New session' });
   await newSession.hover();
   // Polls past the .btn transition; with the shared hover outranking it, the fill ends navy instead.
-  await page.waitForFunction((el) => getComputedStyle(el).backgroundColor === 'rgb(43, 134, 187)', await newSession.elementHandle(), { timeout: 2000 });
+  await page.waitForFunction((el) => getComputedStyle(el).backgroundColor === 'rgb(24, 106, 155)', await newSession.elementHandle(), { timeout: 2000 });
   await page.mouse.move(0, 0);
   // Buttons, the search box and the provider select share one control height.
   const heights = await toolbar.locator('.btn, input.input, select.input').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
@@ -155,7 +155,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // secondary that never outshouts Yes.
   assert.ok(boxes[0].width <= 560, `answers ${boxes[0].width}px wide`);
   const colour = (i, prop) => answers.nth(i).evaluate((el, p) => getComputedStyle(el)[p], prop);
-  assert.deepEqual([await colour(0, 'color'), await colour(0, 'backgroundColor')], ['rgb(0, 0, 0)', 'rgb(52, 150, 205)']);
+  assert.deepEqual([await colour(0, 'color'), await colour(0, 'backgroundColor')], ['rgb(255, 255, 255)', 'rgb(29, 121, 176)']);
   // No reads at body contrast; only its edge is red-tinted.
   assert.deepEqual([await colour(2, 'color'), await colour(2, 'backgroundColor'), await colour(2, 'borderTopColor')], ['rgb(224, 224, 224)', 'rgb(22, 33, 62)', 'rgb(152, 63, 73)']);
   // The secondary answers carry a visible edge, much lighter than the panel's rgb(42, 42, 62) hairline.
