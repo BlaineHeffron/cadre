@@ -174,6 +174,17 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // The session header's secondary buttons use the same soft style, so the panel has two button styles.
   assert.deepEqual(await page.getByRole('button', { name: 'Rendered Transcript' }).evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
   assert.deepEqual(await page.getByLabel('More session actions').evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
+  // One secondary fill everywhere: the toolbar, the rail, the session header and the composer
+  // tools are the same solid grey whatever surface they sit on.
+  const fills = await Promise.all([
+    page.locator('.agents-filter-menu > summary'),
+    page.locator('.agents-desktop-toolbar').getByRole('button', { name: 'Refresh' }),
+    page.locator('.agents-desktop-rail-head').getByRole('button', { name: 'Select', exact: true }),
+    page.getByRole('button', { name: 'Rendered Transcript' }),
+    page.getByLabel('More session actions'),
+    page.getByLabel('More composer tools'),
+  ].map((l) => l.evaluate((el) => getComputedStyle(el).backgroundColor)));
+  assert.deepEqual([...new Set(fills)], ['rgb(41, 41, 60)'], `secondary fills ${fills}`);
   // The terminal no longer repeats the menu the bar is showing.
   await page.locator('.terminal').getByText('pane text').waitFor();
   // The pending command runs straight into its question.
