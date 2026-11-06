@@ -4632,3 +4632,15 @@ p.new-agent-hint {
     flex-direction: column;
   }
 }
+
+/* The CLI's status lines (mode extras, update notice, remote-control link) as one strip under the transcript. */
+.terminal-status {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+  padding: 4px 12px;
+  background: var(--terminal-bg);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
