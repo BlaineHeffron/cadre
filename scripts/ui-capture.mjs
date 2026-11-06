@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Captures the eight UI/UX scoring screenshots of the current checkout:
 //   CHROMIUM_BIN=/path/to/chromium node scripts/ui-capture.mjs <out-dir>
+// UI_CAPTURE_SCHEME=dark|light picks the browser colour scheme (default light).
 // Starts this checkout's real server on free ports with side effects off and a
 // throwaway HOME/state dir, then serves hermetic demo sessions to the browser
 // from the network layer (live sessions need real agent processes). Session
@@ -167,7 +168,7 @@ async function startServer(scratch) {
 }
 
 async function newPage(browser, origin, sessions, viewport) {
-  const context = await browser.newContext({ viewport, deviceScaleFactor: 1, colorScheme: 'light', locale: 'en-US', timezoneId: 'UTC', reducedMotion: 'reduce' });
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 1, colorScheme: process.env.UI_CAPTURE_SCHEME || 'light', locale: 'en-US', timezoneId: 'UTC', reducedMotion: 'reduce' });
   await context.clock.setFixedTime(NOW);
   const login = await context.request.post(`${origin}/api/auth/login`, { data: { token: 'capture-auth' } });
   if (!login.ok()) throw new Error(`login failed: ${login.status()}`);
