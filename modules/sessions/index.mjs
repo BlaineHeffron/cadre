@@ -2713,7 +2713,7 @@ async function sessionsPlugin(app, {
     }
   });
 
-  app.post(`/api/${config.id}/sessions/:id/resume`, async (req, reply) => {
+  async function resumeRoute(req, reply) {
     const { id } = req.params;
     // A worker resumes with the rotation token its hub minted and derives no authority itself.
     const hubPeer = req.duenoAuth?.principal?.type === 'hub-peer';
@@ -2734,6 +2734,28 @@ async function sessionsPlugin(app, {
         freshSession: err.freshSession || null,
       });
     }
+  }
+  app.post(`/api/${config.id}/sessions/:id/resume`, resumeRoute);
+
+  // Restart (say, after a CLI update): kill the session's CLI, then resume the same conversation
+  // through Resume, which relaunches it in the same tmux session, workdir, model and flags.
+  app.post(`/api/${config.id}/sessions/:id/restart`, async (req, reply) => {
+    const { id } = req.params;
+    const meta = requireMutableSession(id, reply);
+    if (!meta) return reply;
+    if (!sessions.has(id)) return reply.code(404).send({ error: `Session not found: ${id}`, code: 'session_not_found' });
+    // Only kill what Resume can bring back.
+    await refreshSessionCliMetadata(id, meta);
+    const refreshed = sessions.get(id) || meta;
+    if (['bare-process', 'orphan-process'].includes(refreshed.source)
+      || !normalizeText(refreshed.cliSessionId || refreshed.sessionId || refreshed.metadata?.cliSessionId)) {
+      return reply.code(409).send({ error: 'Cannot restart: this session cannot be resumed', code: 'cli_session_id_unknown' });
+    }
+    const stopped = await terminateSessionRuntime(id, refreshed);
+    if (!stopped.ok) {
+      return reply.code(409).send({ error: stopped.error || stopped.reason, code: stopped.reason || 'termination_failed', residual: stopped.residual || [] });
+    }
+    return resumeRoute(req, reply);
   });
 
   app.put(`/api/${config.id}/sessions/:id`, async (req, reply) => {
