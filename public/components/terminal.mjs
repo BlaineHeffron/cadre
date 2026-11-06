@@ -307,10 +307,16 @@ export function Terminal({
   return loadMore ? h(Fragment, null, loadMore, pane) : pane;
 }
 
-// The CLI's status lines (see splitCliFooter) as one strip under the transcript.
-export function CliStatus({ lines = [] }) {
+// The CLI's status lines (see splitCliFooter) as one strip under the transcript. With onRestart,
+// Claude Code's "Restart to update" is a button for it (disabled while a restart runs).
+export function CliStatus({ lines = [], onRestart = null, restarting = false }) {
   if (!lines.length) return null;
-  return h('div', { class: 'terminal-status' }, lines.map((line) => h('span', {
-    dangerouslySetInnerHTML: { __html: linkifyHtml(ansiToHtml(line)) },
-  })));
+  const button = `<button type="button" class="terminal-status-restart"${restarting ? ' disabled' : ''}>Restart to update</button>`;
+  return h('div', {
+    class: 'terminal-status',
+    onClick: onRestart ? (event) => { if (event.target.closest('.terminal-status-restart:not(:disabled)')) onRestart(); } : undefined,
+  }, lines.map((line) => {
+    const html = linkifyHtml(ansiToHtml(line));
+    return h('span', { dangerouslySetInnerHTML: { __html: onRestart ? html.replace('Restart to update', button) : html } });
+  }));
 }

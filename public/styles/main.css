@@ -4769,3 +4769,24 @@ p.new-agent-hint {
   font-size: var(--fs-xs);
   color: var(--text-muted);
 }
+
+/* Claude Code's "Restart to update" in the strip: the phrase, in its own colour, as a button. */
+.terminal-status-restart {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.terminal-status-restart:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.terminal-status-restart:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
