@@ -1,31 +1,60 @@
+/* Dark is the default theme; index.html sets data-theme="light" from Settings or the system. */
 :root {
-  /* Native controls (checkboxes, scrollbars, pickers) draw in the dark scheme too. */
+  /* Native controls (checkboxes, scrollbars, pickers) draw in the theme's scheme too. */
   color-scheme: dark;
-  --bg-primary: #0f0f1a;
-  --bg-secondary: #1a1a2e;
-  --bg-card: #16213e;
-  --bg-surface: #131f3a;
-  --bg-hover: #223054;
-  --bg-input: #0a0a15;
-  --text-primary: #e0e0e0;
-  --text-secondary: #dadae6;
-  --text-muted: #bcbccc;
-  --accent: #4fc3f7;
-  --accent-hover: #29b6f6;
+  --bg-primary: #1c1c1b;
+  --bg-secondary: #161615;
+  --bg-card: #262624;
+  --bg-surface: #222220;
+  --bg-hover: #31312e;
+  --bg-input: #131312;
+  --text-primary: #ecebe7;
+  --text-secondary: #d6d4ce;
+  --text-muted: #b3b1aa;
+  --accent: #82b6dc;
+  --accent-hover: #a3c9e6;
   /* One calmer fill for every filled control (primary buttons, Yes, Send, switch tracks, count
-     pills), deep enough for white text and a switch's white knob at about 4.8:1, and 3.6:1 off the
-     navy panel. The lighter --accent stays for text, focus rings and dots on navy. */
-  --accent-fill: #1d79b0;
+     pills), deep enough for white text and a switch's white knob at about 5:1. The lighter
+     --accent stays for text, focus rings and dots. */
+  --accent-fill: #2e6c99;
   /* Every secondary button and tool chip: one solid fill, so it is the same grey on the page
      and on a panel (a translucent mix came out a different grey on each). */
-  --btn-bg: #29293c;
-  --accent-fill-hover: #186a9b;
-  --danger: #ef5350;
-  /* Danger as readable text on dark surfaces. */
+  --btn-bg: #30302d;
+  --accent-fill-hover: #275c83;
+  --danger: #e5534b;
+  /* Danger as readable text on the theme's surfaces. */
   --danger-text: #ffa198;
-  --warning: #ffa726;
-  --success: #66bb6a;
-  --border: #2a2a3e;
+  --warning: #e5a443;
+  --success: #6cbf70;
+  --border: #353532;
+  /* An edge that reads as a button on a card. */
+  --border-strong: #5c5b56;
+  /* Terminal colours: the app's palette, readable on the panel tone. Inline 256/truecolor
+     foregrounds keep --ansi-keep of their colour (the rest is body text); backgrounds
+     --ansi-bg-keep, or --ansi-line-keep on a whole diff row. */
+  --ansi-black: #6e6d68;
+  --ansi-red: #ef7a7a;
+  --ansi-yellow: #ffd54f;
+  --ansi-blue: #64b5f6;
+  --ansi-magenta: #b39ddb;
+  --ansi-bright-black: #9e9c95;
+  --ansi-bright-green: #81c784;
+  --ansi-bright-yellow: #ffe082;
+  --ansi-bright-blue: #90caf9;
+  --ansi-bright-magenta: #c5b3e6;
+  --ansi-bright-cyan: #80deea;
+  --ansi-bright-white: #fff;
+  --ansi-bg-red: #8a2a2a;
+  --ansi-bg-green: #3d8c3d;
+  --ansi-bg-yellow: #aa0;
+  --ansi-bg-blue: #00a;
+  --ansi-bg-magenta: #a0a;
+  --ansi-bg-cyan: #0aa;
+  --ansi-bg-black: #000;
+  --ansi-bg-bright-black: #555;
+  --ansi-keep: 100%;
+  --ansi-bg-keep: 75%;
+  --ansi-line-keep: 34%;
   --radius: 8px;
   /* One height for buttons, inputs and selects that sit side by side. */
   --control-h: 36px;
@@ -39,6 +68,54 @@
   --fs-md: 16px;
   --fs-lg: 18px;
   --fs-xl: 28px;
+}
+
+/* Light: warm off-white with the same accent hue, every pair at AA. */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg-primary: #f9f8f4;
+  --bg-secondary: #f0eee8;
+  --bg-card: #ffffff;
+  --bg-surface: #f4f2ec;
+  --bg-hover: #e8e5dd;
+  --bg-input: #ffffff;
+  --text-primary: #1f1e1b;
+  --text-secondary: #3b3a36;
+  --text-muted: #5c5a54;
+  --accent: #1f6697;
+  --accent-hover: #17527a;
+  --accent-fill: #1f6697;
+  --accent-fill-hover: #17527a;
+  --btn-bg: #ebe9e2;
+  --danger: #c4342c;
+  --danger-text: #9e2018;
+  --warning: #93560a;
+  --success: #236829;
+  --border: #dedbd2;
+  --border-strong: #8f8c84;
+  --ansi-black: #3b3a36;
+  --ansi-red: #b0281f;
+  --ansi-yellow: #7a5c00;
+  --ansi-blue: #1f5fa8;
+  --ansi-magenta: #7a3f9e;
+  --ansi-bright-black: #5c5a54;
+  --ansi-bright-green: #236829;
+  --ansi-bright-yellow: #7a5c00;
+  --ansi-bright-blue: #1f6697;
+  --ansi-bright-magenta: #8a3f8a;
+  --ansi-bright-cyan: #0f6e78;
+  --ansi-bright-white: #1f1e1b;
+  --ansi-bg-red: #f5cfcb;
+  --ansi-bg-green: #cde8cd;
+  --ansi-bg-yellow: #f2e3a6;
+  --ansi-bg-blue: #cfdcf5;
+  --ansi-bg-magenta: #ead2ef;
+  --ansi-bg-cyan: #c8ebeb;
+  --ansi-bg-black: #d9d7cf;
+  --ansi-bg-bright-black: #c9c7bf;
+  --ansi-keep: 45%;
+  --ansi-bg-keep: 30%;
+  --ansi-line-keep: 20%;
 }
 
 * {
@@ -220,7 +297,7 @@ html, body {
 .nav-bell-btn-active {
   color: var(--text-primary);
   border-color: var(--danger);
-  box-shadow: 0 0 0 3px rgba(239, 83, 80, 0.14);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 14%, transparent);
 }
 
 .nav-bell-icon {
@@ -282,7 +359,7 @@ html, body {
 }
 
 .nav-bell-item:hover {
-  background: rgba(79, 195, 247, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .nav-bell-item-title {
@@ -356,7 +433,7 @@ html, body {
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(10, 10, 21, 0.45);
+  background: color-mix(in srgb, var(--bg-input) 45%, transparent);
 }
 
 .calendar-month-cell-muted {
@@ -365,7 +442,7 @@ html, body {
 
 .calendar-month-cell-today {
   border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px rgba(79, 195, 247, 0.25);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .calendar-month-date {
@@ -386,7 +463,7 @@ html, body {
   padding: 7px 8px;
   border-left: 3px solid var(--calendar-accent, var(--accent));
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
   overflow: hidden;
 }
 
@@ -470,7 +547,7 @@ html, body {
 
 @keyframes cardPulse {
   0%, 100% { border-color: var(--border); }
-  50% { border-color: var(--danger); box-shadow: 0 0 8px rgba(239, 83, 80, 0.3); }
+  50% { border-color: var(--danger); box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 30%, transparent); }
 }
 
 /* Idle / waiting-for-input left accent strip */
@@ -520,14 +597,14 @@ html, body {
 }
 
 .btn-subtle {
-  background: rgba(79, 195, 247, 0.1);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--text-primary);
-  border-color: rgba(79, 195, 247, 0.25);
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .btn-subtle:hover {
-  background: rgba(79, 195, 247, 0.18);
-  border-color: rgba(79, 195, 247, 0.4);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .btn-icon {
@@ -592,7 +669,7 @@ textarea.input:focus {
 /* Terminal */
 .terminal {
   background: var(--bg-input);
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   line-height: 1.3;
@@ -606,13 +683,13 @@ textarea.input:focus {
 }
 
 .terminal a {
-  color: #7af;
+  color: var(--accent);
   text-decoration: underline;
   word-break: break-all;
 }
 
 .terminal a:hover {
-  color: #9cf;
+  color: var(--accent-hover);
 }
 
 /* The session transcript sits in its panel's tone rather than a black well. */
@@ -670,7 +747,7 @@ textarea.input:focus {
 
 .terminal-interactive:focus {
   outline: none;
-  border-color: rgba(79, 195, 247, 0.6);
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 /* The focused ring is the transcript's only frame: the header and control bar drop their own
@@ -707,7 +784,7 @@ body:has(.tmux-pane-page) {
   min-height: 0;
   overflow: hidden;
   animation: fadeIn 0.2s ease;
-  background: #000;
+  background: var(--bg-input);
 }
 
 .tmux-pane-header {
@@ -827,7 +904,7 @@ body:has(.tmux-pane-page) {
 
 .collab-thread-tab-active {
   border-color: var(--accent);
-  background: rgba(79, 195, 247, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .collab-thread-tab-title {
@@ -861,7 +938,7 @@ body:has(.tmux-pane-page) {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
 }
 
 .collab-status-grid {
@@ -874,7 +951,7 @@ body:has(.tmux-pane-page) {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
 }
 
 .collab-status-list {
@@ -924,7 +1001,7 @@ body:has(.tmux-pane-page) {
   border: 1px dashed var(--border);
   border-radius: var(--radius);
   padding: 10px;
-  background: rgba(79, 195, 247, 0.04);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
 }
 
 .collab-inline-picker {
@@ -969,7 +1046,7 @@ body:has(.tmux-pane-page) {
 
 .collab-thread-item:hover,
 .collab-thread-item-active {
-  background: rgba(79, 195, 247, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .collab-message-card {
@@ -1000,7 +1077,7 @@ body:has(.tmux-pane-page) {
   padding: 10px 12px;
   overflow-x: auto;
   white-space: pre;
-  background: rgba(0, 0, 0, 0.24);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
   border: 1px solid var(--border);
   border-radius: 6px;
 }
@@ -1008,7 +1085,7 @@ body:has(.tmux-pane-page) {
 .markdown-math code {
   padding: 1px 4px;
   white-space: pre-wrap;
-  background: rgba(0, 0, 0, 0.24);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
   border-radius: 3px;
 }
 
@@ -1077,7 +1154,7 @@ body:has(.tmux-pane-page) {
   min-height: 0;
   overflow: auto;
   padding: 14px 18px;
-  background: var(--bg-terminal, #0d1117);
+  background: var(--bg-primary);
 }
 
 .transcript-turn {
@@ -1162,7 +1239,7 @@ body:has(.tmux-pane-page) {
     z-index: 20;
     margin-top: 14px;
     padding: 10px 0;
-    background: linear-gradient(180deg, var(--bg-card) 0%, var(--bg-card) 70%, rgba(22, 33, 62, 0.85) 100%);
+    background: linear-gradient(180deg, var(--bg-card) 0%, var(--bg-card) 70%, color-mix(in srgb, var(--bg-card) 85%, transparent) 100%);
   }
 
   .collab-detail-shortcuts .btn {
@@ -1269,38 +1346,38 @@ body:has(.tmux-pane-page) {
 .ansi-underline { text-decoration: underline; }
 .ansi-strike { text-decoration: line-through; }
 
-.ansi-fg-black { color: #555; }
+.ansi-fg-black { color: var(--ansi-black); }
 /* On a coloured background (e.g. a PASS badge) black text stays black. */
 [class*='ansi-bg-'].ansi-fg-black, .ansi-fg-black[style*='background'] { color: #000; }
 /* The transcript's colours are the app's palette (status green, danger red, accent cyan, a soft
    violet), each readable on the panel tone, so CLI output reads as part of the UI. */
-.ansi-fg-red { color: #ef7a7a; }
+.ansi-fg-red { color: var(--ansi-red); }
 .ansi-fg-green { color: var(--success); }
-.ansi-fg-yellow { color: #ffd54f; }
-.ansi-fg-blue { color: #64b5f6; }
-.ansi-fg-magenta { color: #b39ddb; }
+.ansi-fg-yellow { color: var(--ansi-yellow); }
+.ansi-fg-blue { color: var(--ansi-blue); }
+.ansi-fg-magenta { color: var(--ansi-magenta); }
 .ansi-fg-cyan { color: var(--accent); }
 .ansi-fg-white { color: var(--text-primary); }
 
-.ansi-fg-bright-black { color: #9a9aa8; }
+.ansi-fg-bright-black { color: var(--ansi-bright-black); }
 .ansi-fg-bright-red { color: var(--danger-text); }
-.ansi-fg-bright-green { color: #81c784; }
-.ansi-fg-bright-yellow { color: #ffe082; }
-.ansi-fg-bright-blue { color: #90caf9; }
-.ansi-fg-bright-magenta { color: #c5b3e6; }
-.ansi-fg-bright-cyan { color: #80deea; }
-.ansi-fg-bright-white { color: #fff; }
+.ansi-fg-bright-green { color: var(--ansi-bright-green); }
+.ansi-fg-bright-yellow { color: var(--ansi-bright-yellow); }
+.ansi-fg-bright-blue { color: var(--ansi-bright-blue); }
+.ansi-fg-bright-magenta { color: var(--ansi-bright-magenta); }
+.ansi-fg-bright-cyan { color: var(--ansi-bright-cyan); }
+.ansi-fg-bright-white { color: var(--ansi-bright-white); }
 
-.ansi-bg-black { background: #000; }
-.ansi-bg-red { background: #8a2a2a; }
-.ansi-bg-green { background: #2a6a2a; }
-.ansi-bg-yellow { background: #aa0; }
-.ansi-bg-blue { background: #00a; }
-.ansi-bg-magenta { background: #a0a; }
-.ansi-bg-cyan { background: #0aa; }
+.ansi-bg-black { background: var(--ansi-bg-black); }
+.ansi-bg-red { background: var(--ansi-bg-red); }
+.ansi-bg-green { background: var(--ansi-bg-green); }
+.ansi-bg-yellow { background: var(--ansi-bg-yellow); }
+.ansi-bg-blue { background: var(--ansi-bg-blue); }
+.ansi-bg-magenta { background: var(--ansi-bg-magenta); }
+.ansi-bg-cyan { background: var(--ansi-bg-cyan); }
 .ansi-bg-white { background: #aaa; }
 
-.ansi-bg-bright-black { background: #555; }
+.ansi-bg-bright-black { background: var(--ansi-bg-bright-black); }
 .ansi-bg-bright-red { background: #f55; }
 .ansi-bg-bright-green { background: #5f5; }
 .ansi-bg-bright-yellow { background: #ff5; }
@@ -1321,8 +1398,8 @@ body:has(.tmux-pane-page) {
 
 .badge-critical { background: #c62828; color: #fff; }
 .badge-high { background: #bf360c; color: #fff; }
-.badge-medium { background: var(--warning); color: #000; }
-.badge-warning { background: var(--warning); color: #000; }
+.badge-medium { background: var(--warning); color: var(--bg-primary); }
+.badge-warning { background: var(--warning); color: var(--bg-primary); }
 .badge-low { background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border); }
 .badge-success { --tone: var(--success); }
 .badge-info { background: var(--accent-fill); color: #fff; }
@@ -1891,7 +1968,7 @@ input[type="checkbox"]:not(.switch) {
   flex-direction: column;
   gap: 10px;
   padding: 10px 12px;
-  background: rgba(79, 195, 247, 0.06);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -2145,12 +2222,12 @@ input[type="checkbox"]:not(.switch) {
 }
 
 .agent-rail-row:hover:not(.agent-rail-row-disabled) {
-  background: rgba(79, 195, 247, 0.06);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .agent-rail-row-active {
   border-left-color: var(--accent);
-  background: rgba(79, 195, 247, 0.11);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
 }
 
 .agent-rail-row-disabled {
@@ -2359,7 +2436,7 @@ input[type="checkbox"]:not(.switch) {
 .control-row-primary .ctrl-btn {
   flex: none;
   /* The secondary answers need an edge that reads as a button on the panel (about 2.2:1 on the card; the label names it). */
-  border-color: #4f566b;
+  border-color: var(--border-strong);
   justify-content: flex-start;
   font-size: var(--fs-base);
   line-height: 1.25;
@@ -2564,7 +2641,7 @@ input[type="checkbox"]:not(.switch) {
 /* In the answer menu the refusal reads at body contrast; a red-tinted edge (60% danger on the card)
    marks it instead of red text. */
 .control-row-primary .ctrl-reject {
-  border-color: #983f49;
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--bg-card));
   color: var(--text-primary);
 }
 
@@ -2658,8 +2735,8 @@ input[type="checkbox"]:not(.switch) {
 }
 
 @keyframes pulseBorder {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(79, 195, 247, 0.5); }
-  50% { box-shadow: 0 0 0 4px rgba(79, 195, 247, 0.3); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent); }
 }
 
 /* ── Floating Action Button ── */
@@ -2707,9 +2784,9 @@ input[type="checkbox"]:not(.switch) {
   border: 1px solid var(--border);
   border-radius: 20px;
   background:
-    radial-gradient(circle at top left, rgba(79, 195, 247, 0.16), transparent 36%),
-    radial-gradient(circle at bottom right, rgba(102, 187, 106, 0.18), transparent 34%),
-    linear-gradient(135deg, rgba(10, 14, 24, 0.96), rgba(19, 28, 46, 0.92));
+    radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 16%, transparent), transparent 36%),
+    radial-gradient(circle at bottom right, color-mix(in srgb, var(--success) 18%, transparent), transparent 34%),
+    linear-gradient(135deg, var(--bg-input), var(--bg-card));
 }
 
 .goals-section-eyebrow,
@@ -2746,10 +2823,10 @@ input[type="checkbox"]:not(.switch) {
 }
 
 .goals-progress-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
   border-radius: 16px;
   padding: 14px;
-  background: rgba(6, 10, 18, 0.46);
+  background: color-mix(in srgb, var(--bg-input) 46%, transparent);
 }
 
 .goals-progress-label {
@@ -2768,14 +2845,14 @@ input[type="checkbox"]:not(.switch) {
   height: 10px;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
 .goals-progress-bar span {
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent), #7ee081);
+  background: linear-gradient(90deg, var(--accent), var(--success));
 }
 
 .goals-layout {
@@ -2823,7 +2900,7 @@ input[type="checkbox"]:not(.switch) {
 .goals-scorecard-section {
   border: 1px solid var(--border);
   padding: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
 }
 
 .goals-command-focus {
@@ -2838,7 +2915,7 @@ input[type="checkbox"]:not(.switch) {
   border: 1px dashed var(--border);
   border-radius: 12px;
   padding: 10px;
-  background: rgba(79, 195, 247, 0.04);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
 }
 
 .goals-form-grid {
@@ -2935,7 +3012,7 @@ input[type="checkbox"]:not(.switch) {
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 14px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
 }
 
 .goals-task-head {
@@ -2993,7 +3070,7 @@ input[type="checkbox"]:not(.switch) {
   padding: 10px;
   border-radius: 12px;
   border: 1px dashed var(--border);
-  background: rgba(102, 187, 106, 0.06);
+  background: color-mix(in srgb, var(--success) 6%, transparent);
 }
 
 .goals-task-error {
@@ -3048,7 +3125,7 @@ input[type="checkbox"]:not(.switch) {
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
 }
 
 .email-ops-stat span,
@@ -3101,7 +3178,7 @@ input[type="checkbox"]:not(.switch) {
   border: 1px solid var(--border);
   border-radius: 16px;
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015));
+    linear-gradient(180deg, color-mix(in srgb, var(--text-primary) 3%, transparent), color-mix(in srgb, var(--text-primary) 1.5%, transparent));
   padding: 14px;
   display: grid;
   gap: 10px;
@@ -3111,9 +3188,9 @@ input[type="checkbox"]:not(.switch) {
 
 .email-ops-queue-item:hover,
 .email-ops-queue-item-active {
-  border-color: rgba(79, 195, 247, 0.5);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
   background:
-    linear-gradient(180deg, rgba(79,195,247,0.11), rgba(255,255,255,0.03));
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 11%, transparent), color-mix(in srgb, var(--text-primary) 3%, transparent));
 }
 
 .email-ops-queue-item:hover {
@@ -3172,7 +3249,7 @@ input[type="checkbox"]:not(.switch) {
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
 }
 
 .email-ops-message-meta,
@@ -3191,9 +3268,9 @@ input[type="checkbox"]:not(.switch) {
   display: grid;
   gap: 4px;
   padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
 }
 
 .email-ops-next-meta strong {
@@ -3212,9 +3289,9 @@ input[type="checkbox"]:not(.switch) {
   display: grid;
   gap: 4px;
   padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
 }
 
 .email-ops-message-meta strong,
@@ -3257,16 +3334,16 @@ input[type="checkbox"]:not(.switch) {
 
 .email-ops-warning,
 .email-ops-empty {
-  border: 1px dashed rgba(255, 179, 0, 0.4);
+  border: 1px dashed color-mix(in srgb, var(--warning) 40%, transparent);
   border-radius: 14px;
   padding: 12px;
-  background: rgba(255, 179, 0, 0.06);
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
   color: var(--text-primary);
 }
 
 .email-ops-empty {
   border-color: var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
   display: grid;
   gap: 10px;
 }
@@ -3296,7 +3373,7 @@ input[type="checkbox"]:not(.switch) {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
   color: var(--text-secondary);
   font-size: var(--fs-sm);
 }
@@ -3332,7 +3409,7 @@ input[type="checkbox"]:not(.switch) {
 .dashboard-mini-link {
   border: 1px solid var(--border);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
 }
 
 .dashboard-metric {
@@ -3843,7 +3920,7 @@ input[type="checkbox"]:not(.switch) {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--bg-input);
-  color: var(--text-primary, #fff);
+  color: var(--text-primary);
   /* 16px avoids iOS auto-zoom on focus. */
   font-size: var(--fs-md);
   line-height: 1.5;
@@ -3853,7 +3930,7 @@ input[type="checkbox"]:not(.switch) {
 .capture-textarea:focus {
   outline: 2px solid var(--accent);
   outline-offset: 0;
-  border-color: var(--accent, #4f8cff);
+  border-color: var(--accent);
 }
 
 .capture-compose-meta {
@@ -3886,7 +3963,7 @@ input[type="checkbox"]:not(.switch) {
 .capture-note-text {
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--text-primary, #fff);
+  color: var(--text-primary);
   font-size: var(--fs-base);
   line-height: 1.5;
 }
@@ -4010,7 +4087,7 @@ input[type="checkbox"]:not(.switch) {
   width: auto;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  color: var(--text-primary, #fff);
+  color: var(--text-primary);
 }
 .capture-savebar-row .capture-save-btn { flex: 1; }
 
@@ -4223,7 +4300,7 @@ p.new-agent-hint {
 
 .new-agent-dialog::backdrop {
   /* A plain dark scrim: the page behind (an approval's buttons, say) does not read through. */
-  background: rgba(5, 5, 12, 0.92);
+  background: color-mix(in srgb, var(--bg-input) 92%, transparent);
 }
 
 .new-agent-dialog .new-agent-form {
@@ -4352,7 +4429,7 @@ p.new-agent-hint {
 
 .mcp-selector-alert {
   margin-top: 8px;
-  color: var(--warning, #a66b00);
+  color: var(--warning);
   font-size: var(--fs-xs);
 }
 

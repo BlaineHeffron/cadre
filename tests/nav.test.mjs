@@ -34,7 +34,7 @@ test('phone navigation keeps frequent routes visible and overflow reachable; des
   )));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme: 'dark' });
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(`${origin}/nav-fixture`);
@@ -64,7 +64,7 @@ test('phone navigation keeps frequent routes visible and overflow reachable; des
   const brand = await nav.getByText('Cadre', { exact: true }).boundingBox();
   assert.ok(brand && brand.x >= 0 && brand.x + brand.width < (await nav.getByRole('link', { name: /^Agents/ }).boundingBox()).x);
   // The connection badge is an 8px dot here, the phone's only connection cue, so it stays solid green.
-  assert.equal(await nav.locator('.nav-connection-badge').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(102, 187, 106)');
+  assert.equal(await nav.locator('.nav-connection-badge').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(108, 191, 112)');
   await more.click();
   assert.equal(await more.getAttribute('aria-expanded'), 'true');
   if (process.env.NAV_SCREENSHOT) await page.screenshot({ path: process.env.NAV_SCREENSHOT.replace('.png', '-overflow.png') });

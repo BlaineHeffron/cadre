@@ -5,33 +5,33 @@ import { ansiToHtml, foldEmptyPrompt, permissionMode } from '../public/lib/ansi-
 test('truecolor diff backgrounds render, blended toward the terminal, instead of being dropped', () => {
   assert.equal(
     ansiToHtml('\x1b[48;2;34;92;43m  13 + x\x1b[0m'),
-    '<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) 34%,transparent);box-shadow:inset 3px 0 rgb(34,92,43)">  13 + x</span>',
+    '<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) var(--ansi-line-keep),transparent);box-shadow:inset 3px 0 rgb(34,92,43)">  13 + x</span>',
   );
-  assert.equal(ansiToHtml('\x1b[38;2;300;-1;7mhi'), '<span style="color:rgb(255,0,7)">hi</span>');
+  assert.equal(ansiToHtml('\x1b[38;2;300;-1;7mhi'), '<span style="color:color-mix(in srgb,rgb(255,0,7) var(--ansi-keep),var(--text-primary))">hi</span>');
 });
 
 test('256-colour codes map to the xterm cube, grey ramp and named colours', () => {
-  assert.equal(ansiToHtml('\x1b[38;5;246mdim'), '<span style="color:rgb(199,199,199)">dim</span>');
+  assert.equal(ansiToHtml('\x1b[38;5;246mdim'), '<span style="color:color-mix(in srgb,rgb(199,199,199) var(--ansi-keep),var(--text-primary))">dim</span>');
   // Only mid-grey text is lifted: near-black, near-white and colours keep their values.
-  assert.equal(ansiToHtml('\x1b[38;2;153;153;153mhint'), '<span style="color:rgb(200,200,200)">hint</span>');
-  assert.equal(ansiToHtml('\x1b[38;2;40;40;40mx'), '<span style="color:rgb(40,40,40)">x</span>');
-  assert.equal(ansiToHtml('\x1b[38;2;240;240;240mx'), '<span style="color:rgb(240,240,240)">x</span>');
-  assert.equal(ansiToHtml('\x1b[38;2;148;148;150mx'), '<span style="color:rgb(148,148,150)">x</span>');
-  assert.equal(ansiToHtml('\x1b[48;5;196mred'), '<span class="ansi-line" style="background:color-mix(in srgb,rgb(255,0,0) 34%,transparent);box-shadow:inset 3px 0 rgb(255,0,0)">red</span>');
+  assert.equal(ansiToHtml('\x1b[38;2;153;153;153mhint'), '<span style="color:color-mix(in srgb,rgb(200,200,200) var(--ansi-keep),var(--text-primary))">hint</span>');
+  assert.equal(ansiToHtml('\x1b[38;2;40;40;40mx'), '<span style="color:color-mix(in srgb,rgb(40,40,40) var(--ansi-keep),var(--text-primary))">x</span>');
+  assert.equal(ansiToHtml('\x1b[38;2;240;240;240mx'), '<span style="color:color-mix(in srgb,rgb(240,240,240) var(--ansi-keep),var(--text-primary))">x</span>');
+  assert.equal(ansiToHtml('\x1b[38;2;148;148;150mx'), '<span style="color:color-mix(in srgb,rgb(148,148,150) var(--ansi-keep),var(--text-primary))">x</span>');
+  assert.equal(ansiToHtml('\x1b[48;5;196mred'), '<span class="ansi-line" style="background:color-mix(in srgb,rgb(255,0,0) var(--ansi-line-keep),transparent);box-shadow:inset 3px 0 rgb(255,0,0)">red</span>');
   assert.equal(ansiToHtml('\x1b[38;5;9mx'), '<span class="ansi-fg-bright-red">x</span>');
 });
 
 test('named and inline colours combine, and reset clears both', () => {
   assert.equal(
     ansiToHtml('\x1b[1;30;48;2;0;170;0m PASS \x1b[0m ok'),
-    '<span class="ansi-bold ansi-fg-black" style="background:color-mix(in srgb,rgb(0,170,0) 75%,transparent)"> PASS </span> ok',
+    '<span class="ansi-bold ansi-fg-black" style="background:color-mix(in srgb,rgb(0,170,0) var(--ansi-bg-keep),transparent)"> PASS </span> ok',
   );
   assert.equal(ansiToHtml('\x1b[42;30m PASS \x1b[0m'), '<span class="ansi-fg-black ansi-bg-green"> PASS </span>');
 });
 
 test('a line of only box-drawing dashes becomes a full-width rule in its colour', () => {
   const dashes = '─'.repeat(110);
-  assert.equal(ansiToHtml(`\x1b[38;5;244m${dashes}\x1b[0m\n❯ `), `<span style="color:rgb(192,192,192)"><span class="ansi-rule">${dashes}</span></span>\n❯ `);
+  assert.equal(ansiToHtml(`\x1b[38;5;244m${dashes}\x1b[0m\n❯ `), `<span style="color:color-mix(in srgb,rgb(192,192,192) var(--ansi-keep),var(--text-primary))"><span class="ansi-rule">${dashes}</span></span>\n❯ `);
   assert.equal(ansiToHtml(`above\n${dashes}\nbelow`), `above\n<span class="ansi-rule">${dashes}</span>\nbelow`);
   // Short runs and dashes after text on the same line stay text, coloured or not.
   assert.equal(ansiToHtml('──── title ────'), '──── title ────');
@@ -80,7 +80,7 @@ test('a tool call and the result, output and diff rows under it form one card wi
     '<span class="ansi-tool">● Update(src/a.ts)',
     '  ⎿  Updated src/a.ts',
     '       42   keep();',
-    '<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) 34%,transparent);box-shadow:inset 3px 0 rgb(34,92,43)">       43 + ok();</span>',
+    '<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) var(--ansi-line-keep),transparent);box-shadow:inset 3px 0 rgb(34,92,43)">       43 + ok();</span>',
     '</span><span class="ansi-tool">● Bash(npm test',
     '      -- a)',
     '  ⎿  ok',
@@ -103,11 +103,11 @@ test('private-use icons and stray control characters never open or close a prose
 test('a line in one background colour spans the pane; badges inside a line do not', () => {
   assert.equal(
     ansiToHtml('ctx\n\x1b[48;2;34;92;43m  43 + x\x1b[0m\nnext'),
-    'ctx\n<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) 34%,transparent);box-shadow:inset 3px 0 rgb(34,92,43)">  43 + x</span>\nnext',
+    'ctx\n<span class="ansi-line" style="background:color-mix(in srgb,rgb(34,92,43) var(--ansi-line-keep),transparent);box-shadow:inset 3px 0 rgb(34,92,43)">  43 + x</span>\nnext',
   );
   assert.equal(
     ansiToHtml('\x1b[48;2;0;170;0m PASS \x1b[0m tests.ts'),
-    '<span style="background:color-mix(in srgb,rgb(0,170,0) 75%,transparent)"> PASS </span> tests.ts',
+    '<span style="background:color-mix(in srgb,rgb(0,170,0) var(--ansi-bg-keep),transparent)"> PASS </span> tests.ts',
   );
   // Private-use icons around dashes stay text; only the parser's own marks draw a rule.
   assert.equal(ansiToHtml(`\uE000${'─'.repeat(30)}\uE001`), `\uE000${'─'.repeat(30)}\uE001`);

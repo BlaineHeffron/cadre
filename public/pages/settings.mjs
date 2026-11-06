@@ -65,6 +65,34 @@ function SettingSwitch({ label, hint = '', checked, disabled = false, onChange }
   `;
 }
 
+// The theme choice lives in this browser; index.html applies it before first paint.
+function ThemeSelect() {
+  let choice = 'system';
+  try { choice = localStorage.getItem('cadre_theme') || 'system'; } catch { /* storage may be blocked */ }
+  function save(event) {
+    try {
+      if (event.currentTarget.value === 'system') localStorage.removeItem('cadre_theme');
+      else localStorage.setItem('cadre_theme', event.currentTarget.value);
+    } catch (error) {
+      addToast(`Theme not saved: ${error.message}`, 'error');
+    }
+    window.applyCadreTheme();
+  }
+  return html`
+    <label class="setting-switch">
+      <span class="setting-switch-text">
+        <span>Theme</span>
+        <span class="setting-switch-hint">System follows this device's light or dark setting.</span>
+      </span>
+      <select class="input" style="width:auto" value=${choice} onChange=${save}>
+        <option value="system">System</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </label>
+  `;
+}
+
 export function SettingsPage({ section }) {
   const inputToken = useMemo(() => signal(''), []);
   const pairing = useMemo(() => signal(null), []);
@@ -258,6 +286,13 @@ export function SettingsPage({ section }) {
             <button class="btn btn-primary" onclick=${saveToken}>Save</button>
           </div>
         `}
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Appearance</span>
+        </div>
+        <${ThemeSelect} />
       </div>
 
       <div class="card">
