@@ -2114,33 +2114,16 @@ input[type="checkbox"]:not(.switch) {
   min-height: 0;
 }
 
-.agents-desktop-shell {
-  display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-  flex: 1 1 auto;
-  /* Explicit min-height replaces the content-based auto minimum so the shell can
-     shrink into the space the chrome leaves. */
-  min-height: 360px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-card);
-}
-
-@media (min-width: 1200px) {
-  .agents-desktop-shell {
-    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  }
-}
-
 /* With a session listed, the view fills the window: the toolbar and rail run the full height on
    the left, and the nav and the session run to the right edge. The wrappers between #app and
    those parts step aside (display: contents) so they all sit on one grid. */
 #app:has(.agents-desktop-shell:not(.agents-desktop-empty)) {
   display: grid;
   grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-  grid-template-rows: 48px auto auto minmax(0, 1fr);
+  /* On a short window the page scrolls rather than squeezing the rail and session below 360px. */
+  grid-template-rows: 48px auto auto minmax(360px, 1fr);
   grid-template-areas: 'side nav' 'side detail' 'bulk detail' 'rail detail';
+  overflow: auto;
 }
 
 @media (min-width: 1200px) {
@@ -2186,10 +2169,10 @@ input[type="checkbox"]:not(.switch) {
    full-height panel. */
 .agents-desktop-empty {
   display: flex;
+  flex: 1 1 auto;
+  min-height: 360px;
   align-items: center;
   justify-content: center;
-  border-color: transparent;
-  background: none;
 }
 
 .agents-desktop-empty > .empty-state {

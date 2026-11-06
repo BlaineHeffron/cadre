@@ -15,7 +15,6 @@ describe('responsive agents layout', () => {
     assert.match(agents, /desktopLayout\.value \? html`[\s\S]*: html`[\s\S]*<\$\{SessionCard\}/);
     assert.match(detail, /embedded = false/);
     assert.match(detail, /agent-session-page-embedded/);
-    assert.match(styles, /\.agents-desktop-shell\s*\{[\s\S]*grid-template-columns:/);
     assert.match(styles, /\.agent-session-page-embedded\s*\{[\s\S]*height: 100%/);
   });
 
@@ -59,7 +58,6 @@ describe('responsive agents layout', () => {
     assert.doesNotMatch(styles, /\.agents-desktop-shell\s*\{[^}]*height: calc\(100dvh - 370px\)/);
     assert.match(styles, /#app:has\(\.agents-desktop-shell\)\s*\{[\s\S]*height: calc\(100dvh/);
     assert.match(styles, /\.main:has\(\.agents-desktop-shell\)\s*\{[\s\S]*overflow: auto/);
-    assert.match(styles, /\.agents-desktop-shell\s*\{[\s\S]*flex: 1 1 auto/);
     // Long titles must not widen the single-column mobile card grid.
     assert.match(styles, /\.agents-card-grid > \*\s*\{\s*min-width: 0/);
   });

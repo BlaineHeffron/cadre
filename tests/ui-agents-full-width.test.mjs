@@ -60,5 +60,13 @@ test('a desktop session fills the window: full-height rail, edge-to-edge pane, r
   assert.equal(column.left, column.right);
   assert.ok(column.width - column.left - column.right <= 880, `reading column ${column.width - column.left - column.right}px`);
   assert.equal(await page.evaluate(() => document.scrollingElement.scrollWidth), 1600);
+
+  // A short desktop window scrolls the view instead of squeezing the rail and session below 360px.
+  await page.setViewportSize({ width: 981, height: 420 });
+  assert.ok((await box('.agents-desktop-rail')).bottom - (await box('.agents-desktop-rail')).top >= 360);
+  await page.locator('.claude-control-bar').scrollIntoViewIfNeeded();
+  const composer = await box('.claude-control-bar');
+  assert.ok(composer.top >= 0 && composer.bottom <= 420, `composer on screen: ${JSON.stringify(composer)}`);
+  assert.equal(await page.evaluate(() => document.scrollingElement.scrollWidth), 981);
   assert.deepEqual(errors, []);
 });
