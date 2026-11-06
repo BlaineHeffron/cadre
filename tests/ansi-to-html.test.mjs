@@ -192,6 +192,15 @@ test('the user prompt and status lines read as prose; menu choices, drafts and t
   // A prompt keeps the user's own line breaks (the class sets pre-wrap) and its text is unchanged.
   const prompt = ansiToHtml('❯ run these in order\n  npm ci\n  npm test\n  npm run check');
   assert.equal(prompt, '<span class="ansi-prose ansi-prompt">❯ run these in order\n  npm ci\n  npm test\n  npm run check</span>');
+  // A painted prompt goes on past a blank line until its background is reset, on the blank line or
+  // at the start of the next; an unpainted one (even with a truecolor 48 in its foreground) stops.
+  const bg = '\x1b[38;5;246m\x1b[48;5;237m';
+  const card = (text) => ansiToHtml(text).match(/<span class="ansi-prose ansi-prompt">[\s\S]*?\n<\/span>/)?.[0].replace(/<[^>]+>/g, '');
+  assert.equal(card(`${bg}❯ \x1b[39mhi\n  wraps\n\x1b[49m\n  Called dueno`), '❯ hi\n  wraps\n');
+  assert.equal(card(`${bg}❯ \x1b[39mhi\n\n  more\n\n\x1b[49m  Read 1 file`), '❯ hi\n\n  more\n');
+  assert.equal(card('\x1b[38;2;48;5;5m❯ \x1b[39mhi\n\n  Read 1 file'), '❯ hi\n');
+  // A reply right under a prompt (no blank line between) is a block of its own, not inside the card.
+  assert.equal(ansiToHtml('❯ hi\n  more\n● Reply'), '<span class="ansi-prose ansi-prompt">❯ hi\n  more\n</span><span class="ansi-prose">● Reply</span>');
   assert.equal(ansiToHtml('❯ 1. Yes'), '❯ 1. Yes');
   assert.equal(ansiToHtml('❯ '), '❯ ');
   // A draft typed into the input box (under its ─ rule) stays terminal text.

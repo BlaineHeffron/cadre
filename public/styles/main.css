@@ -1206,9 +1206,18 @@ body:has(.tmux-pane-page) {
   word-break: normal;
   overflow-wrap: anywhere;
 }
-/* The user's prompt keeps its own line breaks (pasted commands, lists). */
+/* The user's prompt is one card that keeps its own line breaks (pasted commands, lists); the
+   CLI's per-line background gives way to the card's fill and accent. */
 .ansi-prompt {
+  width: fit-content;
+  padding: 6px 10px 6px calc(10px + 1.2em);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  box-shadow: inset 3px 0 var(--accent);
   white-space: pre-wrap;
+}
+.ansi-prompt span {
+  background: none !important;
 }
 /* Inline code in a reply: monospace on a faint chip; its backticks stay in the text for copying. */
 .ansi-code {

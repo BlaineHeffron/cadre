@@ -177,8 +177,16 @@ function markProse(text) {
     const status = isStatusLine(plain[i]);
     if (!isReplyStart(plain[i]) && !prompt && !status && !more) { inReply &&= plain[i].startsWith(' '); continue; }
     let end = i;
-    while (!status && end + 1 < lines.length && isProseLine(plain[end + 1])) end++;
-    lines[i] = `${prompt ? '\x10' : more ? '\x04' : '\x02'}${lines[i]}`;
+    // The CLI paints a prompt on one background until it resets it, blank lines included: the
+    // prompt goes on past a blank line while that background is still on where the next line starts.
+    const paint = prompt ? withSgr({ bg: null }, lines[i]) : null;
+    const next = (k) => isProseLine(plain[k]) || (paint?.bg != null && !plain[k] && isProseLine(plain[k + 1] ?? '')
+      && withSgr({ ...paint }, lines[k] + lines[k + 1].match(/^(?:[ \t]|\x1b\[[0-9;]*m)*/)[0]).bg != null);
+    while (!status && end + 1 < lines.length && next(end + 1)) {
+      end++;
+      if (paint) withSgr(paint, lines[end]);
+    }
+    lines[i] = lines[i].replace(/^\x03?/, `$&${prompt ? '\x10' : more ? '\x04' : '\x02'}`);
     if (end + 1 < lines.length) lines[end + 1] = `\x03${lines[end + 1]}`;
     else lines[end] += '\x03';
     inReply = !prompt && !status;
@@ -228,6 +236,12 @@ function xterm256(n) {
   const level = (v) => (v ? 55 + v * 40 : 0);
   const i = n - 16;
   return `rgb(${level(Math.floor(i / 36))},${level(Math.floor(i / 6) % 6)},${level(i % 6)})`;
+}
+
+// The colour state after every SGR code in the text.
+function withSgr(state, text) {
+  for (const [, params] of text.matchAll(/\x1b\[([0-9;]*)m/g)) applyGrCodes(state, params.split(';').map(Number));
+  return state;
 }
 
 function applyGrCodes(state, codes) {
