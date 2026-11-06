@@ -2133,6 +2133,54 @@ input[type="checkbox"]:not(.switch) {
   }
 }
 
+/* With a session listed, the view fills the window: the toolbar and rail run the full height on
+   the left, and the nav and the session run to the right edge. The wrappers between #app and
+   those parts step aside (display: contents) so they all sit on one grid. */
+#app:has(.agents-desktop-shell:not(.agents-desktop-empty)) {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  grid-template-rows: 48px auto auto minmax(0, 1fr);
+  grid-template-areas: 'side nav' 'side detail' 'bulk detail' 'rail detail';
+}
+
+@media (min-width: 1200px) {
+  #app:has(.agents-desktop-shell:not(.agents-desktop-empty)) {
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  }
+}
+
+.main:has(.agents-desktop-shell:not(.agents-desktop-empty)),
+.page:has(> .agents-desktop-shell:not(.agents-desktop-empty)),
+.agents-desktop-shell:not(.agents-desktop-empty) {
+  display: contents;
+}
+
+#app:has(.agents-desktop-shell:not(.agents-desktop-empty)) > .nav { grid-area: nav; }
+.page:has(> .agents-desktop-shell:not(.agents-desktop-empty)) > .agents-desktop-toolbar {
+  grid-area: side;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 6px 12px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+.page:has(> .agents-desktop-shell:not(.agents-desktop-empty)) > .agents-bulk-prompt-bar {
+  grid-area: bulk;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0 12px 8px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+.agents-desktop-shell > .agents-desktop-rail { grid-area: rail; }
+.agents-desktop-shell > .agents-desktop-detail { grid-area: detail; }
+
+/* Inside the full-width pane the transcript and composer keep a reading column; the padding
+   leaves the scrollbar at the window edge. */
+.agents-desktop-detail :is(.terminal, .claude-control-bar) {
+  padding-inline: max(12px, calc((100% - 880px) / 2));
+}
+
 /* With no sessions the shell still fills the page, like the split view, with its message centred. */
 /* With no sessions, the guide is a compact card centred on the page, not one line in a
    full-height panel. */
