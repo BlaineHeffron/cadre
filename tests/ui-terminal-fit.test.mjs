@@ -45,6 +45,37 @@ test('full-height terminal fills the column, starts a short history at the top a
   const fade = () => terminal.evaluate((el) => getComputedStyle(el, '::before').opacity);
   assert.equal(await fade(), '0');
 
+  // A reply with a paragraph, a numbered list (one item wrapped), nested bullets, code and a closing
+  // paragraph: every line of prose and list reads in the sans font; only the code stays monospace.
+  await page.evaluate((text) => window.show(text), [
+    '\x1b[38;5;231m●\x1b[39m The opening paragraph of the reply.',
+    '',
+    '  It will:',
+    '  1. Find the cause. The likely suspects are the recent changes to how the',
+    '     transcript fills the panel.',
+    '  2. Fix it.',
+    '  - A bullet',
+    '    - A nested bullet',
+    '',
+    '      const answer = 42;',
+    '',
+    '  It won\'t merge or deploy.',
+  ].join('\n'));
+  await terminal.getByText('merge or deploy').waitFor();
+  const fonts = await terminal.evaluate((el) => {
+    const font = (text) => {
+      const walker = document.createTreeWalker(el.querySelector('.terminal-body'), NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.textContent.includes(text)) return getComputedStyle(node.parentElement).fontFamily;
+      return null;
+    };
+    return Object.fromEntries(['opening paragraph', 'It will:', 'Find the cause', 'transcript fills', 'Fix it.', 'A bullet', 'A nested bullet', 'merge or deploy', 'const answer'].map((t) => [t, font(t)]));
+  });
+  const sans = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
+  for (const [text, family] of Object.entries(fonts)) {
+    if (text === 'const answer') assert.notEqual(family, sans, 'code stays monospace');
+    else assert.equal(family, sans, `"${text}" reads in the prose font`);
+  }
+
   const pinned = () => terminal.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop < 2);
   const lines = (n) => Array.from({ length: n }, (_, i) => `line ${i}`).join('\n');
   await page.evaluate((text) => window.show(text), lines(200));
