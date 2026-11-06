@@ -53,11 +53,18 @@ test('a prose reply reflows as one block; tool calls and their output stay out o
   assert.equal(ansiToHtml('● Ran it.\n  ⎿  ok'), '<span class="ansi-prose">● Ran it.\n</span>  ⎿  ok');
 });
 
-test('lists, box tables and indented code stay terminal text; later paragraphs stay prose', () => {
-  // A reply that opens with a list, a table row or code under a bullet keeps its lines.
+test('box tables and indented code stay terminal text; list items and later paragraphs stay prose', () => {
+  // A reply that opens with a list keeps its lines; a table row or code under a bullet stays
+  // terminal text, and the reply goes on past it: a list item after it is prose.
   assert.equal(ansiToHtml('⏺ - a\n  - b'), '⏺ - a\n  - b');
-  assert.equal(ansiToHtml('⏺ Results:\n  │ x │ y │\n  1. first'), '<span class="ansi-prose">⏺ Results:\n</span>  │ x │ y │\n  1. first');
+  assert.equal(ansiToHtml('⏺ Results:\n  │ x │ y │\n  1. first'), '<span class="ansi-prose">⏺ Results:\n</span>  │ x │ y │\n<span class="ansi-prose ansi-item">  1. first</span>');
   assert.equal(ansiToHtml('⏺ Changed it:\n    const a = 1;'), '<span class="ansi-prose">⏺ Changed it:\n</span>    const a = 1;');
+  assert.equal(ansiToHtml('⏺ Changed it:\n    const a = 1;\n\n  Then this.'), '<span class="ansi-prose">⏺ Changed it:\n</span>    const a = 1;\n\n<span class="ansi-prose ansi-prose-more">  Then this.</span>');
+  // Each list item is a block with the lines it wrapped onto; a nested item is a step in.
+  assert.equal(
+    ansiToHtml('⏺ Steps:\n  1. one\n     wraps\n    - nested\n  2. two'),
+    '<span class="ansi-prose">⏺ Steps:\n</span><span class="ansi-prose ansi-item">  1. one\n     wraps\n</span><span class="ansi-prose ansi-item ansi-nested">    - nested\n</span><span class="ansi-prose ansi-item">  2. two</span>',
+  );
   // A second paragraph of the same reply is prose too; a tool call after it ends the reply.
   assert.equal(
     ansiToHtml('⏺ First paragraph\n  wraps here.\n\n  Second paragraph.\n\n⏺ Bash(ls)\n\n  not prose'),

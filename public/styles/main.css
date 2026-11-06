@@ -1226,6 +1226,13 @@ body:has(.tmux-pane-page) {
 .ansi-prose-more {
   text-indent: 0;
 }
+/* A list item's marker sits under the reply's text; a nested item one step further in. */
+.ansi-item {
+  margin-left: 1.2em;
+}
+.ansi-nested {
+  margin-left: 2.4em;
+}
 /* A tool call and its result sit in one quiet card, set apart from the prose around them. */
 .ansi-tool {
   display: block;
