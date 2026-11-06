@@ -626,6 +626,9 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
   const headerTitle = headerParts.length ? headerParts.join(' / ') : fallbackTitle;
   const { previous, next } = findSessionNeighbors(siblings || siblingSessions.value, descriptor.kind, id);
   const { machine } = sessionInfo.value;
+  // Only a tmux session here (one with an attach command) restarts; structured and remote ones do not.
+  const canRestart = sessionState.value.status !== 'ended' && !isRustManagedReadOnly && !machine
+    && Boolean(sessionInfo.value.attachCommand) && sessionInfo.value.source !== 'bare-process';
   const startLoop = () => route(`/loop-sessions?kind=${encodeURIComponent(descriptor.kind)}&session_id=${encodeURIComponent(id)}`);
 
   return h('div', { class: `claude-session-page${embedded ? ' agent-session-page-embedded' : ''}` },
@@ -694,8 +697,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
               ? h('button', { class: 'btn', onClick: () => startFreshSession() }, 'Start Fresh')
               : null,
             h('button', { class: 'btn', onClick: () => loadContent(id, loadedLines.value) }, 'Refresh'),
-            // Only a tmux session here (one with an attach command) restarts; structured and remote ones do not.
-            sessionState.value.status !== 'ended' && !isRustManagedReadOnly && !machine && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process'
+            canRestart
               ? h('button', { class: 'btn', onClick: restartSession, disabled: restarting.value, title: 'Kill the CLI and resume this conversation in place' }, restarting.value ? 'Restarting…' : 'Restart session')
               : null,
             !isRustManagedReadOnly ? h('button', { class: 'btn btn-danger', onClick: killSession }, 'Kill') : null,
@@ -736,7 +738,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         onLoadMore: loadMoreHistory,
         resetKey: id,
       }),
-    renderedTranscript.value || answering ? null : h(CliStatus, { lines: footer.status }),
+    renderedTranscript.value || answering ? null : h(CliStatus, { lines: footer.status, onRestart: canRestart ? restartSession : null, restarting: restarting.value }),
     isRustManagedReadOnly
       ? h('div', { class: 'claude-control-bar', style: 'border-top:1px solid rgba(255,255,255,0.08); color:var(--text-muted); font-size:var(--fs-xs)' }, 'Rust-managed session. View only from Cadre.')
       : null,
