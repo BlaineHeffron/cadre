@@ -8,13 +8,16 @@ import { join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import { resolveMcpCapabilities } from '../modules/integrations/mcp-capability-resolver.mjs';
+import { buildMcpCapabilityCatalog } from '../modules/integrations/mcp-server-catalog.mjs';
+import { sanitizedMcpSnapshot } from '../modules/integrations/mcp-launch-preflight.mjs';
 
 const execFileAsync = promisify(execFile);
 const coverageEnv = process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {};
 const tempDirs = [];
 afterEach(async () => { while (tempDirs.length) await rm(tempDirs.pop(), { recursive: true, force: true }); });
 
-async function restart({ cliSessionId = 'cli-uuid-1234', requests = 1, meta = {} } = {}) {
+async function restart({ cliSessionId = 'cli-uuid-1234', requests = 1, meta = {}, route = 'restart' } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), 'cadre-restart-'));
   tempDirs.push(tempDir);
   await mkdir(join(tempDir, '.git'));
@@ -36,7 +39,8 @@ exit 0
   await writeFile(join(binDir, 'claude'), '#!/bin/sh\nexit 0\n');
   await chmod(join(binDir, 'tmux'), 0o755);
   await chmod(join(binDir, 'claude'), 0o755);
-  await writeFile(join(tempDir, 'tmux-session'), '');
+  // Restart finds the session running; Resume finds it ended.
+  if (route === 'restart') await writeFile(join(tempDir, 'tmux-session'), '');
   await writeFile(join(tempDir, '.claude_sessions.json'), JSON.stringify([{
     id, tmuxSession: 'claude-restart', source: 'dashboard', workDir: tempDir, created: Date.now(),
     provider: 'anthropic', runtime: 'claude', model: 'claude-opus-5-5', thinkingLevel: 'high', cliSessionId, ...meta,
@@ -45,10 +49,13 @@ exit 0
     import Fastify from ${JSON.stringify(pathToFileURL(resolve('node_modules/fastify/fastify.js')).href)};
     process.chdir(${JSON.stringify(tempDir)});
     const { getAgentSessionsProvider } = await import(${JSON.stringify(pathToFileURL(resolve('modules/sessions/index.mjs')).href)});
+    const { AgentBusCredentialStore } = await import(${JSON.stringify(pathToFileURL(resolve('modules/agent-bus/mcp-auth.mjs')).href)});
+    let saved = null;
+    const credentialStore = new AgentBusCredentialStore({ mode: 'issue_only', store: { mode: 'memory', async load() { return saved; }, async save(next) { saved = structuredClone(next); }, async close() {} } });
     const app = Fastify();
-    await app.register(getAgentSessionsProvider('claude').plugin, { wsManager: { broadcast() {}, onChannel() {}, channels: new Map() } });
+    await app.register(getAgentSessionsProvider('claude').plugin, { wsManager: { broadcast() {}, onChannel() {}, channels: new Map() }, credentialStore });
     await app.ready();
-    const responses = await Promise.all(Array.from({ length: ${requests} }, () => app.inject({ method: 'POST', url: '/api/claude/sessions/${id}/restart' })));
+    const responses = await Promise.all(Array.from({ length: ${requests} }, () => app.inject({ method: 'POST', url: '/api/claude/sessions/${id}/${route}' })));
     await app.close();
     console.log(JSON.stringify(responses.map((response) => ({ statusCode: response.statusCode, body: response.json() }))));
   `;
@@ -59,11 +66,16 @@ exit 0
       TMUX_LOG: join(tempDir, 'tmux.log'), TMUX_ARGS: join(tempDir, 'tmux-args'), TMUX_MARKER: join(tempDir, 'tmux-session'),
       LOG_LEVEL: 'error', APP_STATE_STORAGE: 'file', CLAUDE_SESSIONS_STORAGE: 'file', DATABASE_URL: '',
       CADRE_AGENT_CGROUP_ISOLATION: '0', CADRE_DISABLE_SIDE_EFFECTS: '1',
+      // No agent bus listens here, so the launch check settles on the local credential store.
+      AGENT_BUS_MCP_HTTP_HOST: '127.0.0.1', AGENT_BUS_MCP_HTTP_PORT: '1', AGENT_BUS_MCP_HTTP_PATH: '/mcp',
     },
   });
   const read = (name) => readFile(join(tempDir, name), 'utf8').catch(() => '');
   const responses = JSON.parse(stdout.trim().split('\n').at(-1));
-  return { id, tempDir, ...responses[0], responses, calls: (await read('tmux.log')).split('\n').filter(Boolean), args: await read('tmux-args') };
+  const json = (path) => readFile(join(tempDir, '.dueno', 'state', path), 'utf8').then(JSON.parse, () => null);
+  const stored = (await json('claude_sessions.json'))?.find?.((entry) => entry.id === id) || null;
+  const mcpConfig = await json(`mcp_client_configs/claude-${id}.json`);
+  return { id, tempDir, ...responses[0], responses, stored, mcpConfig, calls: (await read('tmux.log')).split('\n').filter(Boolean), args: await read('tmux-args') };
 }
 
 it('restart kills the session and resumes the same conversation in the same tmux session, workdir and model', async () => {
@@ -97,5 +109,34 @@ it('a second restart while one runs is refused, so only one kill and one launch 
 it('a resume check that fails (stored MCP capabilities it cannot use) refuses before the kill', async () => {
   const result = await restart({ meta: { mcpCapabilities: { catalogVersion: 'stale', configurationDigest: 'stale' } } });
   assert.deepEqual([result.statusCode, result.body.code, result.body.stopped], [400, 'mcp_inherited_selection_invalid', false]);
+  assert.ok(!result.calls.includes('kill-session'), result.calls.join(','));
+});
+
+// A session recorded under catalog A: the dueno server as it was before it gained the antigravity
+// provider (Oct 29). The catalog is now B, so the recorded digest no longer matches.
+function launchedUnderCatalogA() {
+  const now = buildMcpCapabilityCatalog();
+  const before = { ...now, servers: now.servers.map((server) => (server.id === 'dueno' ? { ...server, providers: server.providers.filter((p) => p !== 'antigravity') } : server)) };
+  const recorded = sanitizedMcpSnapshot(resolveMcpCapabilities({ inherited: { serverIds: ['dueno'], profileId: 'dueno' }, provider: 'claude', runtime: 'claude', catalog: before }));
+  const current = resolveMcpCapabilities({ inherited: { serverIds: ['dueno'], profileId: 'dueno' }, provider: 'claude', runtime: 'claude', catalog: now });
+  assert.notEqual(recorded.configurationDigest, current.configurationDigest, 'the catalog change moves the digest');
+  return recorded;
+}
+
+for (const route of ['restart', 'resume']) {
+  it(`${route} of a session launched before a catalog change relaunches with its recorded MCP servers, no more`, async () => {
+    const result = await restart({ route, meta: { mcpCapabilities: launchedUnderCatalogA() } });
+    assert.equal(result.statusCode, 200, JSON.stringify(result.body));
+    assert.match(result.args, /'--resume' 'cli-uuid-1234'/);
+    assert.deepEqual(result.stored.mcpCapabilities.serverIds, ['dueno']);
+    assert.deepEqual(Object.keys(result.mcpConfig.mcpServers), ['dueno']);
+  });
+}
+
+it('a recorded MCP server that no longer exists is refused before the kill, saying why and what to do', async () => {
+  const result = await restart({ meta: { mcpCapabilities: { ...launchedUnderCatalogA(), serverIds: ['dueno', 'retired-server'] } } });
+  assert.equal(result.body.code, 'mcp_server_unknown');
+  assert.equal(result.body.stopped, false);
+  assert.match(result.body.error, /can't be reused: Unknown MCP server: retired-server\. Start a fresh session/);
   assert.ok(!result.calls.includes('kill-session'), result.calls.join(','));
 });

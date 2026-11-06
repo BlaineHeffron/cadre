@@ -988,13 +988,15 @@ function legacyMcpRequest(meta = {}) {
   return {};
 }
 
-function assertResumeDigest(stored, resolved) {
+// Resume and Restart relaunch a session with the MCP servers it recorded. Resolving from that record
+// adds nothing and refuses a server that is gone or no longer configured, so what is left to check is
+// that the catalog schema and the selection are unchanged. The configuration digest is not compared:
+// it also hashes catalog details that do not change this session (say, a server gaining a provider).
+function assertResumeSelection(stored, resolved) {
   if (!stored) return;
-  if (
-    stored.catalogVersion === resolved.catalogVersion
-    && stored.configurationDigest === resolved.configurationDigest
-  ) return;
-  const error = new Error('MCP capability configuration changed; start a fresh session to change capabilities');
+  const ids = (list) => [...(list || [])].sort().join(',');
+  if (stored.catalogVersion === resolved.catalogVersion && ids(stored.serverIds) === ids(resolved.serverIds)) return;
+  const error = new Error(`This session's MCP servers (${ids(stored.serverIds) || 'none'}) can no longer be reused as recorded; start a fresh session in the same workdir to change capabilities`);
   error.statusCode = 409;
   error.code = 'mcp_resume_configuration_drift';
   throw error;
@@ -1334,14 +1336,23 @@ async function checkResumable(id, { onWorker = false } = {}) {
   const storedMcp = refreshed.mcpCapabilities && typeof refreshed.mcpCapabilities === 'object'
     ? refreshed.mcpCapabilities
     : null;
-  const resolvedMcp = resolveMcpCapabilities({
-    request: storedMcp ? {} : legacyMcpRequest(refreshed),
-    inherited: storedMcp,
-    provider: capabilityProvider(config.id, sessionRuntime),
-    runtime: sessionRuntime.runtime,
-    catalog: buildMcpCapabilityCatalog(),
-  });
-  assertResumeDigest(storedMcp, resolvedMcp);
+  let resolvedMcp;
+  try {
+    resolvedMcp = resolveMcpCapabilities({
+      request: storedMcp ? {} : legacyMcpRequest(refreshed),
+      inherited: storedMcp,
+      provider: capabilityProvider(config.id, sessionRuntime),
+      runtime: sessionRuntime.runtime,
+      catalog: buildMcpCapabilityCatalog(),
+    });
+  } catch (err) {
+    // A recorded server that is gone or no longer configured: say so, and what to do.
+    if (storedMcp && String(err?.code || '').startsWith('mcp_')) {
+      err.message = `This session's MCP servers can't be reused: ${err.message}. Start a fresh session in the same workdir.`;
+    }
+    throw err;
+  }
+  assertResumeSelection(storedMcp, resolvedMcp);
   if (sandboxMode === 'nono') {
     assertNonoSupported({ researchSafeRuntime: config.id === 'codex' && hasResearchWorkbenchLaunchProfile(refreshed.metadata),
       codexPlugins: refreshed.codexPlugins, serverIds: resolvedMcp.serverIds });
