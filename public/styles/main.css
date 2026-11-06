@@ -439,10 +439,11 @@ html, body {
   font-weight: 600;
 }
 
-/* Explanatory text people actually read: one size and tone for card notes and form hints. */
+/* Explanatory text people actually read: one size and tone for card notes and form hints, at
+   body size so it never reads as small grey print. */
 .note,
 .new-agent-hint {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-base);
   color: var(--text-secondary);
 }
 
@@ -536,12 +537,12 @@ html, body {
   line-height: 1;
 }
 
-/* Danger secondaries read like the approval No: red text, neutral border, red only on hover. */
+/* Danger secondaries: light-red text on the soft secondary fill, a red fill only on hover. */
 .btn-danger {
   color: var(--danger-text);
 }
 
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
   background: var(--danger);
   color: #fff;
 }
@@ -1405,7 +1406,7 @@ input[type="checkbox"]:not(.switch) {
 
 .setting-switch-hint {
   color: var(--text-secondary);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-base);
 }
 
 .switch {

@@ -62,13 +62,15 @@ test('settings uses labelled switches that reflect and change their state', { sk
   // Page titles share one style across pages.
   assert.equal(await page.locator('h1').first().evaluate((el) => getComputedStyle(el).fontSize), '18px');
   assert.ok((await page.locator('.settings-shell').boundingBox()).width <= 960, 'settings rows keep a readable width');
-  // Switch hints are read, so they use the 13px step in secondary grey.
+  // Switch hints are read, so they use the body size in secondary grey.
   const hint = await page.locator('.setting-switch-hint').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
-  assert.deepEqual(hint, ['13px', 'rgb(218, 218, 230)']);
+  assert.deepEqual(hint, ['14px', 'rgb(218, 218, 230)']);
   // Logout is a danger secondary: light-red text on the soft secondary fill, no outline.
   const logout = page.getByRole('button', { name: 'Logout' });
   assert.deepEqual(await logout.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).borderTopColor, getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)']), ['rgb(255, 161, 152)', 'rgba(0, 0, 0, 0)', true]);
-  // Card notes read at the same 13px secondary as the switch hints.
-  assert.deepEqual(await page.locator('.note').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]), ['13px', 'rgb(218, 218, 230)']);
+  // Card notes read at the same body size and secondary grey as the switch hints.
+  assert.deepEqual(await page.locator('.note').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]), ['14px', 'rgb(218, 218, 230)']);
+  // So do the provider status lines under the switches.
+  assert.equal(await page.getByText(/Preferred single-agent fallback/).evaluate((el) => getComputedStyle(el).fontSize), '14px');
   assert.deepEqual(errors, []);
 });
