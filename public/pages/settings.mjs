@@ -227,7 +227,7 @@ export function SettingsPage({ section }) {
         ${isAuthenticated.value ? html`
           <div style="display:flex; gap:8px; flex-wrap:wrap">
             <button class="btn btn-primary" onclick=${pairPhone}>Pair phone</button>
-            <button class="btn btn-danger" onclick=${logout}>Logout</button>
+            <button class="btn" onclick=${logout}>Logout</button>
           </div>
           ${pairing.value ? html`
             <div style="display:grid; gap:8px; justify-items:start; margin-top:12px">
