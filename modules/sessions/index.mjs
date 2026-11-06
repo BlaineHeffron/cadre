@@ -1294,7 +1294,8 @@ async function refreshSessionCliMetadata(id, meta = {}, targetSessions = session
   return true;
 }
 
-async function resumeSession(id, { loopRegistrationPolicy = null, busCredential = null, duenoUrl = '' } = {}) {
+// Everything Resume checks before it touches the session or its process; Restart runs these before its kill.
+async function checkResumable(id, { onWorker = false } = {}) {
   const meta = sessions.get(id);
   if (!meta) {
     const err = new Error(`Session not found: ${id}`);
@@ -1326,6 +1327,36 @@ async function resumeSession(id, { loopRegistrationPolicy = null, busCredential 
     throw err;
   }
 
+  const sandboxMode = resolveSandbox(refreshed.sandbox, { resume: true });
+  const sessionBinary = await findCompatibleBinary();
+  const normalizedWorkDir = await normalizeSessionWorkDir(refreshed.workDir || process.cwd(), { onWorker });
+  const sessionRuntime = config.normalizeRuntime(refreshed.provider || config.defaultProvider, refreshed.runtime || config.defaultRuntime);
+  const storedMcp = refreshed.mcpCapabilities && typeof refreshed.mcpCapabilities === 'object'
+    ? refreshed.mcpCapabilities
+    : null;
+  const resolvedMcp = resolveMcpCapabilities({
+    request: storedMcp ? {} : legacyMcpRequest(refreshed),
+    inherited: storedMcp,
+    provider: capabilityProvider(config.id, sessionRuntime),
+    runtime: sessionRuntime.runtime,
+    catalog: buildMcpCapabilityCatalog(),
+  });
+  assertResumeDigest(storedMcp, resolvedMcp);
+  if (sandboxMode === 'nono') {
+    assertNonoSupported({ researchSafeRuntime: config.id === 'codex' && hasResearchWorkbenchLaunchProfile(refreshed.metadata),
+      codexPlugins: refreshed.codexPlugins, serverIds: resolvedMcp.serverIds });
+  }
+  const resumedModel = config.revalidateModelOnResume
+    ? await config.assertModel(refreshed.model || '', {
+        provider: sessionRuntime.provider,
+        piBin: sessionBinary,
+      })
+    : (refreshed.model || '');
+  return { refreshed, cliSessionId, sandboxMode, sessionBinary, normalizedWorkDir, sessionRuntime, storedMcp, resolvedMcp, resumedModel };
+}
+
+async function resumeSession(id, { loopRegistrationPolicy = null, busCredential = null, duenoUrl = '' } = {}) {
+  const { refreshed, cliSessionId, sandboxMode, sessionBinary, normalizedWorkDir, sessionRuntime, storedMcp, resolvedMcp, resumedModel } = await checkResumable(id, { onWorker: busCredential !== null });
   const sessionName = refreshed.tmuxSession || `${config.tmuxPrefix}-${id}`;
   const existing = await exec('tmux', ['has-session', '-t', sessionName]);
   if (existing.code === 0) {
@@ -1352,31 +1383,6 @@ async function resumeSession(id, { loopRegistrationPolicy = null, busCredential 
     }
   }
 
-  const sandboxMode = resolveSandbox(refreshed.sandbox, { resume: true });
-  const sessionBinary = await findCompatibleBinary();
-  const normalizedWorkDir = await normalizeSessionWorkDir(refreshed.workDir || process.cwd(), { onWorker: busCredential !== null });
-  const sessionRuntime = config.normalizeRuntime(refreshed.provider || config.defaultProvider, refreshed.runtime || config.defaultRuntime);
-  const storedMcp = refreshed.mcpCapabilities && typeof refreshed.mcpCapabilities === 'object'
-    ? refreshed.mcpCapabilities
-    : null;
-  const resolvedMcp = resolveMcpCapabilities({
-    request: storedMcp ? {} : legacyMcpRequest(refreshed),
-    inherited: storedMcp,
-    provider: capabilityProvider(config.id, sessionRuntime),
-    runtime: sessionRuntime.runtime,
-    catalog: buildMcpCapabilityCatalog(),
-  });
-  assertResumeDigest(storedMcp, resolvedMcp);
-  if (sandboxMode === 'nono') {
-    assertNonoSupported({ researchSafeRuntime: config.id === 'codex' && hasResearchWorkbenchLaunchProfile(refreshed.metadata),
-      codexPlugins: refreshed.codexPlugins, serverIds: resolvedMcp.serverIds });
-  }
-  const resumedModel = config.revalidateModelOnResume
-    ? await config.assertModel(refreshed.model || '', {
-        provider: sessionRuntime.provider,
-        piBin: sessionBinary,
-      })
-    : (refreshed.model || '');
   const resumeStartedAt = Date.now();
   await cleanupMcpCapabilityLaunch({
     backendType: config.id,
@@ -2733,6 +2739,41 @@ async function sessionsPlugin(app, {
         code: err.code || null,
         freshSession: err.freshSession || null,
       });
+    }
+  });
+
+  // Restart (say, after a CLI update): kill the session's CLI, then resume the same conversation,
+  // which relaunches it in the same tmux session, workdir, model and flags. One at a time per session.
+  const restarting = new Set();
+  app.post(`/api/${config.id}/sessions/:id/restart`, async (req, reply) => {
+    const { id } = req.params;
+    if (!requireMutableSession(id, reply)) return reply;
+    // A remote session resumes with a credential its hub mints; the hub refuses restart, and so does the worker.
+    if (req.duenoAuth?.principal?.type === 'hub-peer') {
+      return reply.code(409).send({ error: 'Restart is not supported for sessions on another machine', code: 'restart_unsupported_remote' });
+    }
+    if (restarting.has(id)) return reply.code(409).send({ error: 'Session is already restarting', code: 'restart_in_progress' });
+    restarting.add(id);
+    let stopped = false;
+    try {
+      // Everything Resume checks that does not need the process stopped, so a session is never
+      // killed only to fail to come back.
+      await checkResumable(id);
+      const result = await terminateSessionRuntime(id, sessions.get(id));
+      if (!result.ok) {
+        return reply.code(409).send({ error: result.error || result.reason, code: result.reason || 'termination_failed', residual: result.residual || [], stopped });
+      }
+      stopped = true;
+      const resumed = await resumeSession(id, {
+        loopRegistrationPolicy: operatorResumeLoopRegistrationPolicy(req.duenoAuth?.principal, sessions.get(id)?.metadata),
+      });
+      broadcastSessionList(wsManager);
+      return resumed;
+    } catch (err) {
+      if (stopped) broadcastSessionList(wsManager);
+      return reply.code(err.statusCode || 500).send({ error: err.message, code: err.code || null, stopped });
+    } finally {
+      restarting.delete(id);
     }
   });
 

@@ -47,6 +47,7 @@ async function request(method, path, body = null) {
     wrapped.policy = err.policy || null;
     wrapped.preview = err.preview || null;
     wrapped.freshSession = err.freshSession || null;
+    wrapped.stopped = err.stopped === true;
     throw wrapped;
   }
 

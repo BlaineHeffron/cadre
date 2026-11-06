@@ -76,6 +76,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
   const providerApiBase = descriptor.apiBase;
   const providerLabel = descriptor.label;
   const content = useSignal('');
+  const restarting = useSignal(false);
   const inputText = useSignal('');
   const sessionState = useSignal({
     status: 'unknown',
@@ -475,6 +476,23 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
     }
   }
 
+  // Kills the CLI and resumes the same conversation in place (say, to pick up a CLI update).
+  // An idle session restarts at once; one mid-turn or waiting on a question asks first.
+  async function restartSession() {
+    if (restarting.value) return;
+    if (sessionState.value.status !== 'ready' && !window.confirm(`Restart ${descriptor.label} session ${descriptor.kind}-${id}? It is not idle, so the current turn will be interrupted.`)) return;
+    restarting.value = true;
+    try {
+      await api.post(`${descriptor.apiBase}/sessions/${id}/restart`);
+      addToast('Session restarted', 'success');
+    } catch (e) {
+      addToast(e.stopped ? `The session was stopped but did not start again (${e.message}). Resume it to continue.` : `Restart failed: ${e.message}`, 'error');
+    } finally {
+      restarting.value = false;
+    }
+    await loadContent(id, loadedLines.value);
+  }
+
   async function openInTerminal() {
     const sessionName = sessionInfo.value.sessionName;
     if (sessionInfo.value.readOnly === true && sessionInfo.value.externalOwner === 'rust-monitor') return;
@@ -676,6 +694,10 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
               ? h('button', { class: 'btn', onClick: () => startFreshSession() }, 'Start Fresh')
               : null,
             h('button', { class: 'btn', onClick: () => loadContent(id, loadedLines.value) }, 'Refresh'),
+            // Only a tmux session here (one with an attach command) restarts; structured and remote ones do not.
+            sessionState.value.status !== 'ended' && !isRustManagedReadOnly && !machine && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process'
+              ? h('button', { class: 'btn', onClick: restartSession, disabled: restarting.value, title: 'Kill the CLI and resume this conversation in place' }, restarting.value ? 'Restarting…' : 'Restart session')
+              : null,
             !isRustManagedReadOnly ? h('button', { class: 'btn btn-danger', onClick: killSession }, 'Kill') : null,
           ),
         ),
