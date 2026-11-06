@@ -51,6 +51,19 @@ test('full-height terminal fills the column, starts a short history at the top a
   await terminal.getByText('line 199').waitFor();
   assert.equal(Math.round((await terminal.boundingBox()).height), 520, 'a long history fills the space above the controls');
   await page.waitForFunction(() => { const el = document.querySelector('.terminal'); return el.scrollHeight - el.clientHeight - el.scrollTop < 2; });
+  // A tmux capture ends in the pane's unused rows (blank, or only colour codes); they are not
+  // output, so the newest line still sits directly above the controls.
+  await page.evaluate((text) => window.show(text), `${lines(200)}\x1b[0m\n\x1b[39m  \n${'\n'.repeat(20)}`);
+  await page.waitForTimeout(150);
+  const band = await terminal.evaluate((el) => {
+    const walker = document.createTreeWalker(el.querySelector('.terminal-body'), NodeFilter.SHOW_TEXT);
+    let last;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.textContent.includes('line 199')) last = node;
+    const range = document.createRange();
+    range.selectNodeContents(last);
+    return [el.getBoundingClientRect().bottom - range.getBoundingClientRect().bottom, parseFloat(getComputedStyle(el).lineHeight)];
+  });
+  assert.ok(band[0] < band[1] + 12, `${band[0]}px of blank space under the newest line`);
   // Streaming output keeps the view on the newest line, also while it grows inside a tool-call card.
   const streaming = (n) => `${lines(200)}\n● Bash(npm test)\n  ⎿  ${Array.from({ length: n }, (_, i) => `out ${i}`).join('\n     ')}`;
   for (const total of [20, 60]) {
