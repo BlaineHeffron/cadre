@@ -265,12 +265,14 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.deepEqual(await empty.getByRole('listitem').allInnerTexts(), ['Pick a provider and model.', 'Choose the project folder.', 'Describe the task, or prompt it after launch.']);
   const [steps, action] = await Promise.all([empty.getByRole('list').boundingBox(), empty.getByRole('button', { name: 'New session' }).boundingBox()]);
   assert.ok(steps.y + steps.height <= action.y, 'the steps sit above the New session button');
-  // The empty desktop list fills the page like the split view, with no card nested in its frame.
+  // The empty page is the guide as one compact card centred in the open space, not a line in a
+  // full-height panel: the shell has no frame of its own, and the card is much shorter than it.
   const emptyShell = await page.locator('.agents-desktop-empty').evaluate((el) => {
-    const card = el.querySelector('.empty-state');
-    return { bottom: el.getBoundingClientRect().bottom, cardBorder: getComputedStyle(card).borderTopWidth };
+    const card = el.querySelector('.empty-state').getBoundingClientRect();
+    const shell = el.getBoundingClientRect();
+    return { bottom: shell.bottom, shellBg: getComputedStyle(el).backgroundColor, compact: card.height < shell.height / 2, centred: Math.abs((card.top + card.bottom) / 2 - (shell.top + shell.bottom) / 2) < 2 };
   });
-  assert.ok(emptyShell.bottom >= 860 && emptyShell.cardBorder === '0px', `empty shell ${JSON.stringify(emptyShell)}`);
+  assert.deepEqual([emptyShell.bottom >= 860, emptyShell.shellBg, emptyShell.compact, emptyShell.centred], [true, 'rgba(0, 0, 0, 0)', true, true], `empty shell ${JSON.stringify(emptyShell)}`);
   await page.waitForFunction(() => ![...document.querySelectorAll('.agents-desktop-toolbar button')].some((b) => b.textContent.trim() === 'New session'));
   await page.locator('.empty-state').getByRole('button', { name: 'New session' }).click();
   const create = page.getByRole('button', { name: 'Create session' });
