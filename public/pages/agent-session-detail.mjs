@@ -645,7 +645,9 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
           : null,
         // Session actions live behind one labelled menu, so the header is the title and one control.
         h('details', { class: 'more-menu' },
-          h('summary', { class: 'btn', 'aria-label': 'More session actions', title: 'More session actions' }, 'Actions \u25BE'),
+          // The visible label is the control's name (no aria-label), so "Actions" is what people and
+          // voice control both find.
+          h('summary', { class: 'btn' }, 'Actions \u25BE'),
           h('div', { class: 'more-menu-list', onClickCapture: closeMenuOnChoice },
             sessionState.value.status !== 'ended'
               ? h('button', { class: 'btn', onClick: startLoop }, 'Start loop')

@@ -135,9 +135,10 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // The session header is the title and one labelled Actions menu; Start loop and the rendered
   // transcript live in it with the routine and destructive extras.
   const header = page.locator('.claude-session-header');
-  const actions = header.getByLabel('More session actions');
+  const actions = header.locator('summary', { hasText: 'Actions' });
   await actions.waitFor();
-  assert.equal((await actions.innerText()).trim(), 'Actions ▾');
+  // Its visible label is its name: no aria-label overrides it (label in name).
+  assert.deepEqual([(await actions.innerText()).trim(), await actions.getAttribute('aria-label')], ['Actions ▾', null]);
   for (const name of ['Start loop', 'Rendered transcript', 'Kill']) assert.equal(await header.getByRole('button', { name, exact: true }).isVisible(), false, name);
   await actions.click();
   for (const name of ['Start loop', 'Rendered transcript', 'Copy ID', 'Refresh', 'Kill']) assert.equal(await header.getByRole('button', { name, exact: true }).isVisible(), true, name);
@@ -184,14 +185,14 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const soft = (el) => [getComputedStyle(el).borderTopColor, getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)'];
   assert.deepEqual(await page.locator('.control-row-tools > .more-menu > summary').evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
   // The session header's Actions menu uses the same soft style, so the panel has two button styles.
-  assert.deepEqual(await page.getByLabel('More session actions').evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
+  assert.deepEqual(await page.locator('.claude-session-header summary', { hasText: 'Actions' }).evaluate(soft), ['rgba(0, 0, 0, 0)', true]);
   // One secondary fill everywhere: the toolbar, the rail, the session header and the composer
   // tools are the same solid grey whatever surface they sit on.
   const fills = await Promise.all([
     page.locator('.agents-filter-menu > summary'),
     page.locator('.agents-desktop-toolbar').getByRole('button', { name: 'Refresh' }),
     page.locator('.agents-desktop-rail-head').getByRole('button', { name: 'Select', exact: true }),
-    page.getByLabel('More session actions'),
+    page.locator('.claude-session-header summary', { hasText: 'Actions' }),
     page.getByLabel('More composer tools'),
   ].map((l) => l.evaluate((el) => getComputedStyle(el).backgroundColor)));
   assert.deepEqual([...new Set(fills)], ['rgb(41, 41, 60)'], `secondary fills ${fills}`);
@@ -293,6 +294,9 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   phone.setDefaultTimeout(5000);
   await phone.goto(`${origin}/session`);
+  // The session header fits a phone without scrolling sideways.
+  await phone.locator('.claude-session-header').waitFor();
+  assert.equal(await phone.locator('.claude-session-header').evaluate((el) => el.scrollWidth <= el.clientWidth), true);
   const phoneMenu = phone.getByLabel('More composer tools');
   await phoneMenu.waitFor();
   assert.ok(Math.round((await phoneMenu.boundingBox()).height) >= 44, 'phone ⋯ is a 44px target');
@@ -405,7 +409,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await page.evaluate(() => history.length), historyLength + 1);
   assert.equal(await panelTitle.count(), 1);
   // Start loop, now in the Actions menu, still opens the loop page for this session.
-  await page.locator('.agent-session-page-embedded').getByLabel('More session actions').click();
+  await page.locator('.agent-session-page-embedded').locator('summary', { hasText: 'Actions' }).click();
   await page.locator('.agent-session-page-embedded').getByRole('button', { name: 'Start loop', exact: true }).click();
   await page.waitForFunction(() => location.pathname === '/loop-sessions');
   const loopUrl = new URL(page.url());
