@@ -199,6 +199,8 @@ test('the user prompt and status lines read as prose; menu choices, drafts and t
   assert.equal(card(`${bg}❯ \x1b[39mhi\n  wraps\n\x1b[49m\n  Called dueno`), '❯ hi\n  wraps\n');
   assert.equal(card(`${bg}❯ \x1b[39mhi\n\n  more\n\n\x1b[49m  Read 1 file`), '❯ hi\n\n  more\n');
   assert.equal(card('\x1b[38;2;48;5;5m❯ \x1b[39mhi\n\n  Read 1 file'), '❯ hi\n');
+  // A reply right under a prompt (no blank line between) is a block of its own, not inside the card.
+  assert.equal(ansiToHtml('❯ hi\n  more\n● Reply'), '<span class="ansi-prose ansi-prompt">❯ hi\n  more\n</span><span class="ansi-prose">● Reply</span>');
   assert.equal(ansiToHtml('❯ 1. Yes'), '❯ 1. Yes');
   assert.equal(ansiToHtml('❯ '), '❯ ');
   // A draft typed into the input box (under its ─ rule) stays terminal text.

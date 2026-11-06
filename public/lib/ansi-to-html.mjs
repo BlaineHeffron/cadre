@@ -186,7 +186,7 @@ function markProse(text) {
       end++;
       if (paint) withSgr(paint, lines[end]);
     }
-    lines[i] = `${prompt ? '\x10' : more ? '\x04' : '\x02'}${lines[i]}`;
+    lines[i] = lines[i].replace(/^\x03?/, `$&${prompt ? '\x10' : more ? '\x04' : '\x02'}`);
     if (end + 1 < lines.length) lines[end + 1] = `\x03${lines[end + 1]}`;
     else lines[end] += '\x03';
     inReply = !prompt && !status;
