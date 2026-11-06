@@ -70,7 +70,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
   page.setDefaultTimeout(5000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -88,7 +88,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   await railSelect.click();
   assert.equal(await rows.getByRole('checkbox').count(), 2);
   // Calm states are tinted text, not a solid fill; checkboxes are a 20px target.
-  assert.equal(await rows.first().locator('.status-badge').evaluate((el) => getComputedStyle(el).color), 'rgb(79, 195, 247)');
+  assert.equal(await rows.first().locator('.status-badge').evaluate((el) => getComputedStyle(el).color), 'rgb(130, 182, 220)');
   assert.equal(Math.round((await rows.first().getByRole('checkbox').boundingBox()).width), 20);
   // Native controls draw in the dark scheme, so an unchecked box is not a white square on the rail.
   assert.equal(await rows.first().getByRole('checkbox').evaluate((el) => getComputedStyle(el).colorScheme), 'dark');
@@ -98,7 +98,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const newSession = toolbar.getByRole('button', { name: 'New session' });
   await newSession.hover();
   // Polls past the .btn transition; with the shared hover outranking it, the fill ends navy instead.
-  await page.waitForFunction((el) => getComputedStyle(el).backgroundColor === 'rgb(24, 106, 155)', await newSession.elementHandle(), { timeout: 2000 });
+  await page.waitForFunction((el) => getComputedStyle(el).backgroundColor === 'rgb(39, 92, 131)', await newSession.elementHandle(), { timeout: 2000 });
   await page.mouse.move(0, 0);
   // Buttons, the search box and the provider select share one control height.
   const heights = await toolbar.locator('.btn, input.input, select.input').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
@@ -109,8 +109,8 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await toolbar.getByRole('button', { name: 'Refresh' }).innerText(), '↻');
   // Row meta (provider, path) is 13px in body colour (lighter weight than the title); so is the status line.
   const textStyle = (sel) => rows.first().locator(sel).evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
-  assert.deepEqual(await textStyle('.agent-rail-row-meta'), ['13px', 'rgb(224, 224, 224)']);
-  assert.deepEqual(await textStyle('.agent-rail-row-detail'), ['13px', 'rgb(224, 224, 224)']);
+  assert.deepEqual(await textStyle('.agent-rail-row-meta'), ['13px', 'rgb(236, 235, 231)']);
+  assert.deepEqual(await textStyle('.agent-rail-row-detail'), ['13px', 'rgb(236, 235, 231)']);
   // A reason that only repeats the badge ('Waiting for input' under Idle) adds no line.
   assert.equal(await rows.nth(1).locator('.agent-rail-row-detail').count(), 0);
   // With one provider listed, the rail heading names it once and rows show only the short path.
@@ -168,11 +168,11 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   // secondary that never outshouts Yes.
   assert.ok(boxes[0].width <= 560, `answers ${boxes[0].width}px wide`);
   const colour = (i, prop) => answers.nth(i).evaluate((el, p) => getComputedStyle(el)[p], prop);
-  assert.deepEqual([await colour(0, 'color'), await colour(0, 'backgroundColor')], ['rgb(255, 255, 255)', 'rgb(29, 121, 176)']);
+  assert.deepEqual([await colour(0, 'color'), await colour(0, 'backgroundColor')], ['rgb(255, 255, 255)', 'rgb(46, 108, 153)']);
   // No reads at body contrast; only its edge is red-tinted.
-  assert.deepEqual([await colour(2, 'color'), await colour(2, 'backgroundColor'), await colour(2, 'borderTopColor')], ['rgb(224, 224, 224)', 'rgb(22, 33, 62)', 'rgb(152, 63, 73)']);
-  // The secondary answers carry a visible edge, much lighter than the panel's rgb(42, 42, 62) hairline.
-  assert.equal(await colour(1, 'borderTopColor'), 'rgb(79, 86, 107)');
+  assert.deepEqual([await colour(2, 'color'), await colour(2, 'backgroundColor'), await colour(2, 'borderTopColor')], ['rgb(236, 235, 231)', 'rgb(38, 38, 36)', 'color(srgb 0.598431 0.254902 0.232941)']);
+  // The secondary answers carry a visible edge, much lighter than the panel's rgb(53, 53, 50) hairline.
+  assert.equal(await colour(1, 'borderTopColor'), 'rgb(92, 91, 86)');
   assert.ok(boxes.every((b, i) => i === 0 || b.top > boxes[i - 1].top), 'answers stack in order');
   // At least the 44px tap target and never clipped. In the 560px card a long label may wrap
   // inside its row, depending on the font; the card cap matters more than one-line labels.
@@ -195,7 +195,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
     page.locator('.claude-session-header summary', { hasText: 'Actions' }),
     page.getByLabel('More composer tools'),
   ].map((l) => l.evaluate((el) => getComputedStyle(el).backgroundColor)));
-  assert.deepEqual([...new Set(fills)], ['rgb(41, 41, 60)'], `secondary fills ${fills}`);
+  assert.deepEqual([...new Set(fills)], ['rgb(48, 48, 45)'], `secondary fills ${fills}`);
   // The terminal no longer repeats the menu the bar is showing.
   await page.locator('.terminal').getByText('pane text').waitFor();
   // The pending command runs straight into its question.
@@ -293,7 +293,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await page.locator('h1').first().evaluate((el) => getComputedStyle(el).fontSize), '18px');
   // On a phone the composer's tools are 44px targets (rounded: the mobile viewport can lay a box out
   // a hair short), and the keys tray opens inside the sticky, safe-area-padded control bar.
-  const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme: 'dark', hasTouch: true, isMobile: true });
   phone.setDefaultTimeout(5000);
   await phone.goto(`${origin}/session`);
   // The session header fits a phone without scrolling sideways.
@@ -370,13 +370,13 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const ring = (el) => { const cs = getComputedStyle(el); return [cs.borderTopWidth, cs.borderTopColor, cs.outlineStyle, cs.backgroundColor, el.getBoundingClientRect().width]; };
   const [, , , , blurredWidth] = await single.locator('.terminal').evaluate(ring);
   await single.locator('.terminal').focus();
-  assert.deepEqual(await single.locator('.terminal').evaluate(ring), ['1px', 'rgba(79, 195, 247, 0.6)', 'none', 'rgb(26, 26, 46)', blurredWidth]);
+  assert.deepEqual(await single.locator('.terminal').evaluate(ring), ['1px', 'color(srgb 0.509804 0.713725 0.862745 / 0.6)', 'none', 'rgb(22, 22, 21)', blurredWidth]);
   // The ring is the transcript's only frame: the header and control bar drop their lines beside it.
   assert.deepEqual(await single.evaluate((el) => [getComputedStyle(el.querySelector('.claude-session-header')).borderBottomColor, getComputedStyle(el.querySelector('.claude-control-bar')).borderTopColor]), ['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)']);
   const { x, width } = await single.boundingBox();
   assert.ok(width <= 1160 && Math.abs(x - (1440 - x - width)) <= 1, `session page at x=${x}, width=${width}`);
   // The full-height page is one panel tone, so a short transcript leaves no bare page below the controls.
-  assert.equal(await single.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(26, 26, 46)');
+  assert.equal(await single.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(22, 22, 21)');
   // On desktop a session's own route is the Agents split view with that session selected, and the
   // panel's prev/next step through the list beside it.
   sessions = demo;
@@ -390,7 +390,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   assert.equal(await page.locator('.agents-desktop-rail-head .card-title').innerText(), 'Sessions');
   assert.match(await page.locator('.agent-rail-row', { hasText: 'third task' }).locator('.agent-rail-row-meta').innerText(), /^Codex\s+me\/repo$/);
   // The embedded session is the same one surface: below a short transcript it keeps the transcript's tone.
-  assert.equal(await page.locator('.agent-session-page-embedded').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(26, 26, 46)');
+  assert.equal(await page.locator('.agent-session-page-embedded').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(22, 22, 21)');
   const historyLength = await page.evaluate(() => history.length);
   // Next wraps from the last Claude session to the Codex one, across providers.
   await page.locator('.agent-session-page-embedded').getByRole('button', { name: 'Next agent' }).click();
@@ -417,7 +417,7 @@ test('desktop Agents page shows bulk actions only for a selection, folds session
   const loopUrl = new URL(page.url());
   assert.deepEqual([loopUrl.searchParams.get('kind'), loopUrl.searchParams.get('session_id')], ['claude', 'a1']);
   // A phone keeps the full-screen session page.
-  const phoneRoute = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const phoneRoute = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme: 'dark', hasTouch: true, isMobile: true });
   await phoneRoute.goto(`${origin}/claude/b2`);
   await phoneRoute.getByRole('link', { name: 'Back to agents' }).waitFor();
   assert.equal(await phoneRoute.locator('.agent-rail-row').count(), 0);

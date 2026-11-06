@@ -28,7 +28,7 @@ test('settings uses labelled switches that reflect and change their state', { sk
   app.get('/api/*', () => ({}));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
   page.setDefaultTimeout(5000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -51,11 +51,11 @@ test('settings uses labelled switches that reflect and change their state', { sk
   // On reads at a glance: a white knob on the accent track; off keeps a grey knob.
   const knob = (el) => getComputedStyle(el, '::before').backgroundColor;
   assert.equal(await headroom.evaluate(knob), 'rgb(255, 255, 255)');
-  assert.equal(await headroom.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(29, 121, 176)');
+  assert.equal(await headroom.evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(46, 108, 153)');
   // Switch tracks and primary buttons share one fill; success pills are tinted like status badges.
-  assert.equal(await page.getByRole('button', { name: 'Pair phone' }).evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(29, 121, 176)');
-  assert.equal(await page.locator('.badge-success').first().evaluate((el) => getComputedStyle(el).color), 'rgb(102, 187, 106)');
-  assert.equal(await page.locator('.switch:not(:checked)').first().evaluate(knob), 'rgb(218, 218, 230)');
+  assert.equal(await page.getByRole('button', { name: 'Pair phone' }).evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(46, 108, 153)');
+  assert.equal(await page.locator('.badge-success').first().evaluate((el) => getComputedStyle(el).color), 'rgb(108, 191, 112)');
+  assert.equal(await page.locator('.switch:not(:checked)').first().evaluate(knob), 'rgb(214, 212, 206)');
   await headroom.click();
   await page.waitForResponse((response) => response.url().endsWith('/api/agent-provider-preferences'));
   await page.locator('.setting-switch', { hasText: 'Headroom' }).locator('input:checked').waitFor();
@@ -64,12 +64,12 @@ test('settings uses labelled switches that reflect and change their state', { sk
   assert.ok((await page.locator('.settings-shell').boundingBox()).width <= 960, 'settings rows keep a readable width');
   // Switch hints are read, so they use the body size in secondary grey.
   const hint = await page.locator('.setting-switch-hint').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]);
-  assert.deepEqual(hint, ['14px', 'rgb(218, 218, 230)']);
+  assert.deepEqual(hint, ['14px', 'rgb(214, 212, 206)']);
   // Logout is a plain secondary, the same as every other secondary button.
   const logout = page.getByRole('button', { name: 'Logout' });
-  assert.deepEqual(await logout.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).backgroundColor]), ['rgb(224, 224, 224)', 'rgb(41, 41, 60)']);
+  assert.deepEqual(await logout.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).backgroundColor]), ['rgb(236, 235, 231)', 'rgb(48, 48, 45)']);
   // Card notes read at the same body size and secondary grey as the switch hints.
-  assert.deepEqual(await page.locator('.note').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]), ['14px', 'rgb(218, 218, 230)']);
+  assert.deepEqual(await page.locator('.note').first().evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color]), ['14px', 'rgb(214, 212, 206)']);
   // So do the provider status lines under the switches.
   assert.equal(await page.getByText(/Preferred single-agent fallback/).evaluate((el) => getComputedStyle(el).fontSize), '14px');
   assert.deepEqual(errors, []);

@@ -58,11 +58,12 @@ export function ansiToHtml(text) {
     // Backgrounds are blended toward the terminal so they tint rather than glare. Whole diff rows
     // get a lighter tint and keep the full colour as a gutter bar. Mid-grey text (the CLI's dim
     // hints and rules) is lifted two thirds of the way to the body text so it stays readable.
+    // Themes set how much colour each keeps (--ansi-keep, --ansi-bg-keep, --ansi-line-keep).
     const style = [['color', current.fg], ['background', current.bg]]
       .filter(([, value]) => value?.startsWith('rgb('))
-      .map(([prop, value]) => (prop === 'color' ? `color:${liftGrey(value)}`
-        : line ? `background:color-mix(in srgb,${value} 34%,transparent);box-shadow:inset 3px 0 ${value}`
-          : `background:color-mix(in srgb,${value} 75%,transparent)`))
+      .map(([prop, value]) => (prop === 'color' ? `color:color-mix(in srgb,${liftGrey(value)} var(--ansi-keep),var(--text-primary))`
+        : line ? `background:color-mix(in srgb,${value} var(--ansi-line-keep),transparent);box-shadow:inset 3px 0 ${value}`
+          : `background:color-mix(in srgb,${value} var(--ansi-bg-keep),transparent)`))
       .join(';');
     const attrs = `${classes ? ` class="${classes}"` : ''}${style ? ` style="${style}"` : ''}`;
     let html = esc(buf).replace(/\x06(─+)\x07/g, '<span class="ansi-rule">$1</span>');

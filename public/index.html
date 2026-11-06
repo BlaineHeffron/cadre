@@ -3,7 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes, interactive-widget=resizes-content, viewport-fit=cover">
-    <meta name="theme-color" content="#1a1a2e">
+    <meta name="theme-color" content="#161615">
+    <script>
+      // Theme before first paint: the Settings choice (cadre_theme), else the system's.
+      // Settings calls applyCadreTheme() after saving; System follows OS changes live.
+      (() => {
+        const light = matchMedia('(prefers-color-scheme: light)');
+        window.applyCadreTheme = () => {
+          let choice = null;
+          try { choice = localStorage.getItem('cadre_theme'); } catch { /* storage may be blocked */ }
+          const theme = choice === 'light' || choice === 'dark' ? choice : (light.matches ? 'light' : 'dark');
+          document.documentElement.dataset.theme = theme;
+          document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#f0eee8' : '#161615';
+        };
+        window.applyCadreTheme();
+        light.addEventListener('change', window.applyCadreTheme);
+      })();
+    </script>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="description" content="Self-hosted control plane for coding-agent sessions">

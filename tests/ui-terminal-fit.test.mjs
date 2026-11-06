@@ -28,7 +28,7 @@ test('full-height terminal fills the column, starts a short history at the top a
   </script>`)));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+  const page = await browser.newPage({ viewport: { width: 1000, height: 800 }, colorScheme: 'dark' });
   page.setDefaultTimeout(5000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -183,7 +183,7 @@ test('full-height terminal fills the column, starts a short history at the top a
   const current = `────\n${block('now', 20)}\n────`;
   await show(current, false);
   // The pill's label reads in body text, not dim grey.
-  assert.deepEqual(await page.getByText('Load earlier output').evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).fontSize]), ['rgb(224, 224, 224)', '13px']);
+  assert.deepEqual(await page.getByText('Load earlier output').evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).fontSize]), ['rgb(236, 235, 231)', '13px']);
   await page.getByText('Load earlier output').click();
   assert.equal(await page.evaluate(() => window.loads), 1);
   await show(current, true);

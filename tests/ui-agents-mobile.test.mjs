@@ -36,7 +36,7 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   app.get('/api/*', () => ({ sessions: [] }));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme: 'dark' });
   page.setDefaultTimeout(5000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -50,12 +50,12 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   assert.equal(await cards.first().getByRole('img', { name: 'Unread' }).isVisible(), true);
   // "Needs attention" leads with a red tint and edge, not a saturated slab; light text stays readable.
   const urgent = await cards.nth(1).locator('.status-badge').evaluate((el) => [el.textContent, getComputedStyle(el).color, getComputedStyle(el).borderTopColor]);
-  assert.deepEqual(urgent, ['!Needs attention', 'rgb(255, 161, 152)', 'rgb(239, 83, 80)']);
+  assert.deepEqual(urgent, ['!Needs attention', 'rgb(255, 161, 152)', 'rgb(229, 83, 75)']);
   // Card paths are read, so they use the 13px step in body colour (times stay secondary). The path is the
   // rail's short form in the body font, so it is not cut mid-word; the full path is its tooltip.
   const path = cards.first().getByTitle('/home/me/repo');
   assert.equal(await path.innerText(), 'me/repo');
-  assert.deepEqual(await path.evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color, getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily]), ['13px', 'rgb(224, 224, 224)', true]);
+  assert.deepEqual(await path.evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).color, getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily]), ['13px', 'rgb(236, 235, 231)', true]);
   // At two columns the heading spans the row, so cards side by side line up.
   await page.setViewportSize({ width: 960, height: 844 });
   const [left, right] = await Promise.all([0, 1].map((i) => cards.nth(i).boundingBox()));
@@ -147,7 +147,7 @@ test('phone Agents page leads with sessions, keeps bulk actions folded until use
   // The scrim is dark enough that the page behind does not read through.
   // Form hints read at body size, never as small grey print.
   assert.equal(await dialog.locator('.new-agent-hint').first().evaluate((el) => getComputedStyle(el).fontSize), '14px');
-  assert.deepEqual(await dialog.evaluate((el) => [getComputedStyle(el, '::backdrop').backgroundColor, getComputedStyle(el, '::backdrop').backdropFilter]), ['rgba(5, 5, 12, 0.92)', 'none']);
+  assert.deepEqual(await dialog.evaluate((el) => [getComputedStyle(el, '::backdrop').backgroundColor, getComputedStyle(el, '::backdrop').backdropFilter]), ['color(srgb 0.0745098 0.0745098 0.0705882 / 0.92)', 'none']);
   // Workdir choices are secondary buttons in the UI font, not monospace pills.
   assert.equal(await dialog.locator('.dir-chip').first().evaluate((el) => getComputedStyle(el).fontFamily === getComputedStyle(document.body).fontFamily), true);
   // The form's selects draw the app's chevron, not the platform widget, like the inputs beside them.
