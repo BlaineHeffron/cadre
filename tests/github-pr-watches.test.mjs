@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
 
 const creator = { kind: 'pi', sessionId: 'pi-1' };
@@ -260,6 +261,57 @@ test('merge notifies the room owner, leaves the room open and removes the watch'
   assert.deepEqual(s.h.deletedSessions.claude, []);
   assert.deepEqual(s.commands.map((item) => [item.sessionId, item.text]), [[creator.sessionId, '[PR_WATCH] PR octo/demo#1 merged (1234567)']]);
   assert.deepEqual(await s.store.listWatches(), []);
+});
+
+test('merge records a durable session ledger entry with journal and hook rollups; missing data is null', async (t) => {
+  const s = await setup(t);
+  const { FileJournalStore } = await import('../modules/sessions/journal-store.mjs');
+  const { registerProtocolSessionProvider } = await import('../modules/sessions/protocol-session-registry.mjs');
+  const { buildHookSessionPaths, registerHookSessionRegistry } = await import('../modules/agent/hook-events.mjs');
+  const journal = new FileJournalStore({ rootDir: join(s.h.stateDir, 'journal'), fsync: 'never' });
+  await journal.init();
+  const transport = (event, disposition = 'applied') => journal.append('stream-1', { type: 'transport.event', data: { disposition, event } });
+  await journal.append('stream-1', { type: 'turn.created', data: { turnId: 't1' } });
+  await transport({ type: 'usage', turnId: 't1', inputTokens: 9, outputTokens: 9, cacheReadTokens: 9, cacheWriteTokens: 9, costUsd: 0 });
+  await transport({ type: 'usage', turnId: 't1', inputTokens: 10, outputTokens: 20, cacheReadTokens: 100, cacheWriteTokens: 5, costUsd: 0.5 });
+  await transport({ type: 'tool.call', turnId: 't1', toolCallId: 'a' });
+  await transport({ type: 'tool.update', turnId: 't1', toolCallId: 'a', status: 'failed' });
+  await transport({ type: 'tool.update', turnId: 't1', toolCallId: 'b', status: 'failed' }, 'stale');
+  await journal.append('stream-1', { type: 'turn.created', data: { turnId: 't2' } });
+  await transport({ type: 'tool.call', turnId: 't2', toolCallId: 'c' });
+  await transport({ type: 'tool.update', turnId: 't2', toolCallId: 'c', status: 'completed' });
+  await transport({ type: 'usage', turnId: 't2', inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4, costUsd: 0.75 });
+  t.after(registerProtocolSessionProvider('claude', { service: { journal } }));
+  const workDir = join(s.h.stateDir, 'tmux-work');
+  t.after(registerHookSessionRegistry('codex', () => new Map([['tmux-1', { workDir }]])));
+  const { eventsPath } = await buildHookSessionPaths({ workDir, provider: 'codex', sessionId: 'tmux-1' });
+  await mkdir(dirname(eventsPath), { recursive: true });
+  await writeFile(eventsPath, [
+    { eventName: 'UserPromptSubmit', transcriptPath: '/transcripts/tmux-1.jsonl', payload: {} },
+    { eventName: 'PreToolUse', payload: { tool_use_id: 'x' } },
+    { eventName: 'PostToolUse', payload: { tool_use_id: 'x' } },
+    { eventName: 'PreToolUse', payload: { tool_use_id: 'y' } },
+  ].map((line) => JSON.stringify(line)).join('\n') + '\nnot json\n');
+  await s.call('watch_pr', { repo: 'octo/demo', number: 1 }, { kind: 'claude', sessionId: 'stream-1' });
+  await s.call('watch_pr', { repo: 'octo/demo', number: 2 }, { kind: 'codex', sessionId: 'tmux-1' });
+  await s.watch(3);
+  s.setPr({ merged: true, state: 'closed', merge_commit_sha: 'merge123', merged_at: '2026-11-08T00:00:00Z' });
+  await s.poller.pollOnce();
+  const nulls = { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, costUsd: null, turns: null, toolCalls: null, failedToolCalls: null, transcriptPath: null };
+  const entry = (number, creatorRef, rollup) => ({ repo: 'octo/demo', number, mergeSha: 'merge123', headSha: 'abcdef123',
+    sessionId: creatorRef.sessionId, kind: creatorRef.kind, thread_id: number === 3 ? s.thread.id : null, mergedAt: '2026-11-08T00:00:00Z', rollup });
+  const expected = [
+    entry(3, creator, nulls),
+    entry(2, { kind: 'codex', sessionId: 'tmux-1' }, { ...nulls, turns: 1, toolCalls: 2, failedToolCalls: 1, transcriptPath: '/transcripts/tmux-1.jsonl' }),
+    entry(1, { kind: 'claude', sessionId: 'stream-1' }, { ...nulls, inputTokens: 11, outputTokens: 22, cacheReadTokens: 103, cacheWriteTokens: 9, costUsd: 0.75, turns: 2, toolCalls: 2, failedToolCalls: 1 }),
+  ];
+  assert.deepEqual(await s.store.listWatches(), []);
+  assert.deepEqual((await s.requestImpl('/api/agents/github/ledger')).entries, expected);
+  assert.deepEqual((await s.requestImpl('/api/agents/github/ledger?limit=1')).entries, expected.slice(0, 1));
+  const { buildGithubAgentRepoStore } = await import('../modules/integrations/github-agents.mjs');
+  const reloaded = buildGithubAgentRepoStore({ storeFile: join(s.h.stateDir, 'repos.json'), env: { APP_STATE_STORAGE: 'file' } });
+  assert.deepEqual(await reloaded.listLedger(), expected);
+  await reloaded.close();
 });
 
 test('close leaves room open; no room owner falls back to creator; missing sessions drop', async (t) => {
