@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile, symlink } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, unlink, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -27,7 +27,7 @@ it('startup-input reports the launch log when a real tmux agent exits', async (t
   const dir = await mkdtemp(join(tmpdir(), 'cadre-startup-route-'));
   const socket = join(dir, 'socket'), log = join(dir, 'launch.log');
   const tmux = (args) => exec('tmux', ['-S', socket, ...args]);
-  t.after(async () => { await tmux(['kill-server']); await rm(dir, { recursive: true, force: true }); });
+  t.after(async () => { await tmux(['kill-server']); await unlink(socket).catch(() => {}); await rm(dir, { recursive: true, force: true }); });
   // Keep the isolated server alive while the failed agent pane disappears.
   assert.equal((await tmux(['new-session', '-d', '-s', 'keeper', 'cat'])).code, 0);
   assert.equal((await tmux(['new-session', '-d', '-s', 'codex-exited', 'sh', '-c', `echo route-launch-error > '${log}'; exit 1`])).code, 0);
@@ -68,7 +68,7 @@ it('startup-input reports the launch log when a real tmux agent exits', async (t
 it('types the initial prompt into a new Codex pane instead of its argv', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'cadre-codex-startup-'));
   const socket = join(dir, 'socket'), out = join(dir, 'typed.txt');
-  t.after(async () => { await exec('tmux', ['-S', socket, 'kill-server']); await rm(dir, { recursive: true, force: true }); });
+  t.after(async () => { await exec('tmux', ['-S', socket, 'kill-server']); await unlink(socket).catch(() => {}); await rm(dir, { recursive: true, force: true }); });
   await mkdir(join(dir, 'bin'));
   await mkdir(join(dir, 'work'));
   const binary = (await exec('which', ['tmux'])).stdout.trim();
