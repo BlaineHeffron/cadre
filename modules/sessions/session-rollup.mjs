@@ -11,9 +11,13 @@ export function foldJournalEvent(acc, event) {
   else if (e.type === 'tool.call') acc.toolCalls += 1;
   else if (e.type === 'tool.update' && e.status === 'failed') acc.failedToolCalls += 1;
   // Claude repeats partial usage per stream event; only its result events (costUsd > 0) carry turn totals,
-  // and their cost is cumulative per process. Codex reports per-request deltas without a cost.
+  // and their cost is cumulative per process. Codex reports per-request deltas without a cost, resent unchanged
+  // on rate-limit updates, and its input includes cached reads, which Claude's excludes.
   else if (e.type === 'usage' && e.costUsd !== 0) {
-    acc.inputTokens += Number(e.inputTokens) || 0;
+    const codexUsage = e.costUsd === undefined ? [e.inputTokens, e.cachedInputTokens, e.outputTokens, e.reasoningOutputTokens].join() : null;
+    if (codexUsage && codexUsage === acc.lastCodexUsage) return acc;
+    acc.lastCodexUsage = codexUsage;
+    acc.inputTokens += (Number(e.inputTokens) || 0) - (Number(e.cachedInputTokens) || 0);
     acc.outputTokens += Number(e.outputTokens) || 0;
     acc.cacheReadTokens += Number(e.cacheReadTokens ?? e.cachedInputTokens) || 0;
     acc.cacheWriteTokens += Number(e.cacheWriteTokens ?? e.cacheWriteInputTokens) || 0;
