@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgentBusHarness } from './helpers/agent-bus-test-harness.mjs';
 import { renderCollabOnboarding } from '../modules/agent-bus/protocol.mjs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { exec } from '../lib/exec.mjs';
@@ -13,7 +13,9 @@ async function tmuxFixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'cadre-startup-pane-'));
   const socket = join(dir, 'tmux');
   const run = (cmd, args, opts) => exec(cmd, ['-S', socket, ...args], opts);
-  t.after(async () => { await run('tmux', ['kill-server']); await rm(dir, { recursive: true, force: true }); });
+  // Unlink the socket without stat-ing it: Node 22's cached realpathSync reuses the last sync stat, so rm's lstat of a
+  // socket makes later ESM imports through a symlinked node_modules load a second, broken fastify instance.
+  t.after(async () => { await run('tmux', ['kill-server']); await unlink(socket).catch(() => {}); await rm(dir, { recursive: true, force: true }); });
   return { dir, run };
 }
 
