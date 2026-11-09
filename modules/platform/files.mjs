@@ -264,6 +264,7 @@ export async function filesPlugin(app) {
 
       return {
         path: req.query.path || '',
+        root: realpathSync(getAllowedRoot()),
         name: basename(targetPath),
         type: stat.isDirectory() ? 'dir' : 'file',
         size: stat.size,
