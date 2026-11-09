@@ -10,7 +10,9 @@ export function buildGradePrompt(entry) {
     '',
     `Grade the session that produced PR ${entry.repo}#${entry.number} (merge commit ${entry.mergeSha || 'unknown'}).`,
     `Transcript: ${entry.rollup.transcriptPath}`,
-    `Use \`gh pr diff ${entry.number} -R ${entry.repo}\` and \`gh pr view ${entry.number} -R ${entry.repo}\`. Do not edit files, push, or comment.`,
+    `There is no local checkout. Use \`gh pr diff ${entry.number} -R ${entry.repo}\` and \`gh pr view ${entry.number} -R ${entry.repo}\`.`,
+    `For AGENTS.md as the session saw it: \`gh api repos/${entry.repo}/commits/${entry.mergeSha} --jq '.parents[0].sha'\`, then \`gh api 'repos/${entry.repo}/contents/AGENTS.md?ref=<parent>' -H 'Accept: application/vnd.github.raw'\`.`,
+    'Do not edit files, push, or comment.',
   ].join('\n'));
 }
 

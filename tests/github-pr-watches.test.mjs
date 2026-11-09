@@ -327,7 +327,7 @@ async function gradingSetup(t, env, grading = { sampleRate: 1 }) {
   const spawns = [];
   const statuses = new Map();
   const terminated = [];
-  s.poller.config = { ...s.poller.config, workDir: s.h.stateDir, env: { ...s.poller.config.env, ...env } };
+  s.poller.config = { ...s.poller.config, workDir: s.h.stateDir, repoPaths: { 'octo/demo': '/operator/checkout/demo' }, env: { ...s.poller.config.env, ...env } };
   s.poller.grading = { ...s.poller.grading, ...grading, model: 'claude-sonnet-5-5', terminate: (task) => terminated.push(task.taskId), tasks: () => ({
     spawn: async (parentTaskId, taskKey, spec) => {
       spawns.push({ parentTaskId, taskKey, spec });
@@ -353,6 +353,8 @@ test('merged sessions with a transcript get one grader task whose JSON grade lan
   assert.equal(spec.provider, 'claude');
   assert.equal(spec.model, 'claude-sonnet-5-5');
   assert.match(spec.workDir, /scratch\/octo-demo\/grade-1-/);
+  assert.ok(spawns.every((item) => !item.spec.workDir.startsWith('/operator/checkout')), 'never the configured clone');
+  assert.match(spec.initialPrompt, /contents\/AGENTS\.md\?ref=/);
   assert.match(spec.initialPrompt, /# Session Grade/);
   assert.match(spec.initialPrompt, /Transcript: \/transcripts\/tmux-1\.jsonl/);
   assert.match(spec.initialPrompt, /gh pr diff 1 -R octo\/demo/);

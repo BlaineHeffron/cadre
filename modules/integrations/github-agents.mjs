@@ -845,8 +845,8 @@ export class GithubAgentPoller {
     if (random() >= sampleRate) return;
     let patch;
     try {
-      const workDir = configuredRepoPath(this.config.repoPaths, entry.repo)
-        || await this.resolveScratchWorkDir({ baseDir: expandHomePath(this.config.workDir || '~/.dueno-fleet/github-agents'), repoId: entry.repo, kind: 'grade', number: entry.number, nowMs: this.now() });
+      // Scratch only: workspace-write must never reach an operator's configured clone.
+      const workDir = await this.resolveScratchWorkDir({ baseDir: expandHomePath(this.config.workDir || '~/.dueno-fleet/github-agents'), repoId: entry.repo, kind: 'grade', number: entry.number, nowMs: this.now() });
       const task = await service.spawn(null, `grade:${entry.repo}#${entry.number}`, {
         provider: 'claude', model, workDir, permissionMode: 'workspace-write', displayName: `grade ${entry.repo}#${entry.number}`,
         initialPrompt: buildGradePrompt(entry), parentRef: GRADER_REF, toolScopes: ['room_context', 'room_send'],
