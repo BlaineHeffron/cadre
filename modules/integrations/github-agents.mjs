@@ -5,12 +5,14 @@ import { exec } from '../../lib/exec.mjs';
 import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
 import { createGithubIssueWorktree, createGithubPullRequestWorktree, reapWorktrees, removeAgentSessionWorktree } from '../fleet/git-worktree.mjs';
 import { legacyRootStatePath, runtimeStatePath } from '../ops/runtime-state.mjs';
+import { sessionRollup } from '../sessions/session-rollup.mjs';
 
 const DEFAULT_STORE_FILE = runtimeStatePath('github_agent_repos.json');
 const LEGACY_STORE_FILE = legacyRootStatePath('github_agent_repos.json');
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_SPAWNS_PER_POLL = 5;
 const MAX_SPAWNED_ITEM_KEYS = 500;
+const MAX_LEDGER_ENTRIES = 1000;
 const SPAWN_BACKOFF_BASE_MS = 60_000;
 const SPAWN_BACKOFF_MAX_MS = 30 * 60_000;
 const ORPHAN_WORKTREE_GRACE_MS = 10 * 60_000;
@@ -462,12 +464,24 @@ export function buildGithubAgentRepoStore({
     return clone(watch);
   }
 
+  // One entry per merged PR, kept because the watch that links it to its session is deleted on merge.
+  async function recordMerge(entry) {
+    await load();
+    state.ledger = [...state.ledger.filter((item) => item.repo !== entry.repo || item.number !== entry.number), clone(entry)].slice(-MAX_LEDGER_ENTRIES);
+    await save();
+  }
+
+  async function listLedger(limit = 50) {
+    await load();
+    return state.ledger.slice(-Math.max(1, Math.min(MAX_LEDGER_ENTRIES, Number(limit) || 50))).reverse().map(clone);
+  }
+
   async function close() {
     await saveQueue.catch(() => {});
     if (typeof backingStore.close === 'function') await backingStore.close();
   }
 
-  return { upsertRepo, updateRepo, listRepos, getRepo, deleteRepo, listWatches, putWatch, updateWatch, close };
+  return { upsertRepo, updateRepo, listRepos, getRepo, deleteRepo, listWatches, putWatch, updateWatch, recordMerge, listLedger, close };
 }
 
 export async function pollGithubRepo(repoInput = {}, {
@@ -784,6 +798,11 @@ export class GithubAgentPoller {
         for (const review of reviews) this.reviewedPrs.add(`${repo.id}#${watch.number}@${review.commit_id}`);
         if (!reviews.length && !watch.lastReviewId) unreviewed.push(watch.number);
         if (reviews.length === 100) await this.repoStore.updateWatch(repo.id, watch.number, { reviewPage: (watch.reviewPage || 1) + 1 });
+        if (pr.merged) {
+          await this.repoStore.recordMerge({ repo: repo.id, number: watch.number, mergeSha: pr.merge_commit_sha || null, headSha: pr.head?.sha || null,
+            sessionId: watch.creator?.sessionId || null, kind: watch.creator?.kind || null, thread_id: watch.thread_id || null, mergedAt: pr.merged_at || null,
+            rollup: await sessionRollup(watch.creator || {}).catch(() => null) });
+        }
         if (pr.merged || pr.state === 'closed') {
           await notify(pr.merged ? `merged (${String(pr.merge_commit_sha || pr.head?.sha || '').slice(0, 7)})` : 'closed without merge');
           await this.repoStore.updateWatch(repo.id, watch.number);
@@ -1185,7 +1204,7 @@ function normalizeStoreState(raw = {}) {
       // Ignore malformed persisted rows; route layer can surface validation on writes.
     }
   }
-  return { version: 1, repos };
+  return { version: 1, repos, ledger: Array.isArray(raw?.ledger) ? raw.ledger : [] };
 }
 
 function safeRepoRecord(repo = {}) {
