@@ -30,7 +30,7 @@ export const ANTHROPIC_FALLBACK_MODELS = Object.freeze([
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
   { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' },
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
-  { id: 'claude-fable-5-1', label: 'Fable 5.1' },
+  { id: 'claude-fable-5-2', label: 'Fable 5.2' },
 ]);
 
 const PROVIDERS = Object.freeze({
