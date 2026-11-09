@@ -947,7 +947,7 @@ function buildSessionImproveLauncher({ inner, listLedger, createWorktree, worktr
   return async (input = {}) => {
     if (input.taskId !== SESSION_IMPROVE_TASK_ID) return inner(input);
     const since = now() - DAY_MS;
-    const grades = (await listLedger?.() || []).filter((entry) => Date.parse(entry.gradedAt) >= since && hasFailingRubric(entry)).map((entry) => entry.grade);
+    const grades = (await listLedger?.() || []).filter((entry) => Date.parse(entry.gradedAt) >= since && hasFailingRubric(entry)).map((entry) => ({ repo: entry.repo, pr: entry.number, mergeSha: entry.mergeSha || null, grade: entry.grade }));
     if (!grades.length) return { skip: true, action: 'skippedNoFailures' };
     const worktree = await (createWorktree || createAgentSessionWorktree)({
       repoPath: input.workDir, baseDir: worktreeBaseDir, displayName: 'session-improve', branchPrefix: 'dueno-fleet/session-improve', nowMs: now(),

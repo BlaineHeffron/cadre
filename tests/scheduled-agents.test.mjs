@@ -2186,7 +2186,7 @@ describe('scheduled agents routes', () => {
     const failing = { session: 's1', pr: 1, scores: { verbosity: { score: 0.4, pass: false, reason: 'restated diff', evidence: ['PR body'] } } };
     const passing = { session: 's2', pr: 2, scores: { verbosity: { score: 1, pass: true, reason: 'ok', evidence: [] } } };
     let ledger = [
-      { repo: 'o/r', number: 1, grade: failing, gradedAt: new Date(nowMs - day / 2).toISOString() },
+      { repo: 'o/r', number: 1, mergeSha: 'm1', grade: failing, gradedAt: new Date(nowMs - day / 2).toISOString() },
       { repo: 'o/r', number: 2, grade: passing, gradedAt: new Date(nowMs - day / 2).toISOString() },
       { repo: 'o/r', number: 3, grade: { ...failing, pr: 3 }, gradedAt: new Date(nowMs - 2 * day).toISOString() },
       { repo: 'o/r', number: 4, grade: null, gradeError: 'malformed grade', gradedAt: new Date(nowMs - day / 2).toISOString() },
@@ -2211,7 +2211,7 @@ describe('scheduled agents routes', () => {
     assert.equal(launches[0].workDir, '/wt/session-improve');
     assert.equal(worktrees[0].repoPath, '/repo/fleet');
     assert.match(launches[0].prompt, /# Session Improve/);
-    assert.ok(launches[0].prompt.includes(JSON.stringify(failing)));
+    assert.ok(launches[0].prompt.includes(JSON.stringify({ repo: 'o/r', pr: 1, mergeSha: 'm1', grade: failing })));
     assert.ok(!launches[0].prompt.includes(JSON.stringify(passing)));
     assert.ok(!launches[0].prompt.includes('"pr":3'));
 

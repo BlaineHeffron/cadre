@@ -15,7 +15,7 @@ export function buildGradePrompt(entry) {
 }
 
 export function buildImprovePrompt(grades) {
-  return expandSkillTokens(`{{skill:session-improve}}\n\nGrade JSONs from the last 24 hours with a failing rubric:\n\n${grades.map((grade) => `\`\`\`json\n${JSON.stringify(grade)}\n\`\`\``).join('\n\n')}`);
+  return expandSkillTokens(`{{skill:session-improve}}\n\nGrade JSONs from the last 24 hours with a failing rubric, each with its repo, PR and merge commit:\n\n${grades.map((grade) => `\`\`\`json\n${JSON.stringify(grade)}\n\`\`\``).join('\n\n')}`);
 }
 
 // Text the grader's work turns committed; the grade is the last fenced json block in it.
