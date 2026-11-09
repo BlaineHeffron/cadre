@@ -82,6 +82,7 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
   await credentialStore.init();
   taskService ||= new TaskService({ store, sessionServiceForProvider: getProtocolSessionProvider, startupTimeoutMs: 120_000, logger: app.log });
   await taskService.init();
+  app.agentBusLifecycle.taskService = taskService;
   registerTaskRoutes({ app, store, service: taskService });
 
   app.get('/api/agent-bus/auth/readiness', async () => {

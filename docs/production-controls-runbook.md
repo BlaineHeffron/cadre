@@ -159,6 +159,8 @@ are rejected.
 
 ## Current Flags
 
+- Session grading on merge and the daily session improver are off by default; see `docs/session-grading.md`.
+
 - `agentBus.deliveryReplay`: controls replay of failed or timed-out Agent Bus deliveries.
 
 ## Agent Bus MCP authentication rollout

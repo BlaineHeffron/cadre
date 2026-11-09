@@ -6,6 +6,8 @@ import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
 import { createGithubIssueWorktree, createGithubPullRequestWorktree, reapWorktrees, removeAgentSessionWorktree } from '../fleet/git-worktree.mjs';
 import { legacyRootStatePath, runtimeStatePath } from '../ops/runtime-state.mjs';
 import { sessionRollup } from '../sessions/session-rollup.mjs';
+import { buildGradePrompt, parseGrade } from '../sessions/session-grading.mjs';
+import { shouldSuppressSideEffectLoops } from '../platform/side-effect-loops.mjs';
 
 const DEFAULT_STORE_FILE = runtimeStatePath('github_agent_repos.json');
 const LEGACY_STORE_FILE = legacyRootStatePath('github_agent_repos.json');
@@ -13,6 +15,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_SPAWNS_PER_POLL = 5;
 const MAX_SPAWNED_ITEM_KEYS = 500;
 const MAX_LEDGER_ENTRIES = 1000;
+const GRADER_REF = { kind: 'system', sessionId: 'session-grader' };
 const SPAWN_BACKOFF_BASE_MS = 60_000;
 const SPAWN_BACKOFF_MAX_MS = 30 * 60_000;
 const ORPHAN_WORKTREE_GRACE_MS = 10 * 60_000;
@@ -471,6 +474,12 @@ export function buildGithubAgentRepoStore({
     await save();
   }
 
+  async function updateLedger(repo, number, patch) {
+    await load();
+    state.ledger = state.ledger.map((item) => (item.repo === repo && item.number === number ? { ...item, ...clone(patch) } : item));
+    await save();
+  }
+
   async function listLedger(limit = 50) {
     await load();
     return state.ledger.slice(-Math.max(1, Math.min(MAX_LEDGER_ENTRIES, Number(limit) || 50))).reverse().map(clone);
@@ -481,7 +490,7 @@ export function buildGithubAgentRepoStore({
     if (typeof backingStore.close === 'function') await backingStore.close();
   }
 
-  return { upsertRepo, updateRepo, listRepos, getRepo, deleteRepo, listWatches, putWatch, updateWatch, recordMerge, listLedger, close };
+  return { upsertRepo, updateRepo, listRepos, getRepo, deleteRepo, listWatches, putWatch, updateWatch, recordMerge, updateLedger, listLedger, close };
 }
 
 export async function pollGithubRepo(repoInput = {}, {
@@ -579,6 +588,7 @@ export class GithubAgentPoller {
     onResult = () => {},
     getThread = () => null,
     notifyWatch = async () => {},
+    grading = null,
     log = null,
   } = {}) {
     this.repoStore = repoStore;
@@ -602,6 +612,7 @@ export class GithubAgentPoller {
     this.onResult = onResult;
     this.getThread = getThread;
     this.notifyWatch = notifyWatch;
+    this.grading = grading;
     this.log = log;
     this.timer = null;
   }
@@ -799,9 +810,11 @@ export class GithubAgentPoller {
         if (!reviews.length && !watch.lastReviewId) unreviewed.push(watch.number);
         if (reviews.length === 100) await this.repoStore.updateWatch(repo.id, watch.number, { reviewPage: (watch.reviewPage || 1) + 1 });
         if (pr.merged) {
-          await this.repoStore.recordMerge({ repo: repo.id, number: watch.number, mergeSha: pr.merge_commit_sha || null, headSha: pr.head?.sha || null,
+          const entry = { repo: repo.id, number: watch.number, mergeSha: pr.merge_commit_sha || null, headSha: pr.head?.sha || null,
             sessionId: watch.creator?.sessionId || null, kind: watch.creator?.kind || null, thread_id: watch.thread_id || null, mergedAt: pr.merged_at || null,
-            rollup: await sessionRollup(watch.creator || {}).catch(() => null) });
+            rollup: await sessionRollup(watch.creator || {}).catch(() => null) };
+          await this.repoStore.recordMerge(entry);
+          await this.requestGrade(entry);
         }
         if (pr.merged || pr.state === 'closed') {
           await notify(pr.merged ? `merged (${String(pr.merge_commit_sha || pr.head?.sha || '').slice(0, 7)})` : 'closed without merge');
@@ -821,6 +834,50 @@ export class GithubAgentPoller {
       }
     }
     return { moved, reviewed, unreviewed };
+  }
+
+  // One grader task per merged session with a transcript; a failed spawn or malformed grade is recorded, never retried.
+  async requestGrade(entry) {
+    const { tasks, model, sampleRate = 0, random = Math.random } = this.grading || {};
+    const service = tasks?.();
+    if (!service || shouldSuppressSideEffectLoops({ env: this.config.env || process.env }) || !entry.rollup?.transcriptPath) return;
+    if ((await this.repoStore.listLedger(MAX_LEDGER_ENTRIES)).some((item) => item.gradeSessionId && item.gradeSessionId === entry.sessionId)) return;
+    if (random() >= sampleRate) return;
+    let patch;
+    try {
+      const workDir = configuredRepoPath(this.config.repoPaths, entry.repo)
+        || await this.resolveScratchWorkDir({ baseDir: expandHomePath(this.config.workDir || '~/.dueno-fleet/github-agents'), repoId: entry.repo, kind: 'grade', number: entry.number, nowMs: this.now() });
+      const task = await service.spawn(null, `grade:${entry.repo}#${entry.number}`, {
+        provider: 'claude', model, workDir, permissionMode: 'workspace-write', displayName: `grade ${entry.repo}#${entry.number}`,
+        initialPrompt: buildGradePrompt(entry), parentRef: GRADER_REF, toolScopes: ['room_context', 'room_send'],
+      });
+      patch = { gradeTaskId: task.taskId, gradeSessionId: task.sessionId, graderModel: model };
+    } catch (error) {
+      patch = { grade: null, gradeError: `spawn failed: ${error.message}`, gradedAt: new Date(this.now()).toISOString(), graderModel: model };
+    }
+    await this.repoStore.updateLedger(entry.repo, entry.number, patch);
+  }
+
+  async collectGrades() {
+    const service = this.grading?.tasks?.();
+    if (!service) return;
+    for (const entry of await this.repoStore.listLedger(MAX_LEDGER_ENTRIES)) {
+      if (!entry.gradeTaskId || entry.gradedAt) continue;
+      try {
+        const status = await service.status(entry.gradeTaskId);
+        const result = status.result;
+        if (!result && !['startup_failed', 'unknown', 'cancelled'].includes(status.state)) continue;
+        let patch = { grade: null, gradeError: `grader ${result?.state || status.state}` };
+        if (result?.state === 'completed') {
+          try { patch = { grade: parseGrade(result.output) }; }
+          catch (error) { patch.gradeError = `malformed grade: ${error.message}`; }
+        }
+        await this.repoStore.updateLedger(entry.repo, entry.number, { ...patch, gradedAt: new Date(this.now()).toISOString() });
+        await this.grading.terminate?.(status);
+      } catch (error) {
+        this.log?.warn?.({ repoId: entry.repo, number: entry.number, err: error.message }, 'Session grade collection failed');
+      }
+    }
   }
 
   pollOnce(options = {}) {
@@ -870,6 +927,7 @@ export class GithubAgentPoller {
         results.push(payload);
       }
     }
+    await this.collectGrades().catch((error) => this.log?.warn?.({ err: error.message }, 'Session grade collection failed'));
     return results;
   }
 

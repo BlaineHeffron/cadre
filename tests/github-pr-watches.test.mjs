@@ -314,6 +314,85 @@ test('merge records a durable session ledger entry with journal and hook rollups
   await reloaded.close();
 });
 
+async function gradingSetup(t, env, grading = { sampleRate: 1 }) {
+  const s = await setup(t);
+  const { buildHookSessionPaths, registerHookSessionRegistry } = await import('../modules/agent/hook-events.mjs');
+  const workDir = join(s.h.stateDir, 'tmux-work');
+  t.after(registerHookSessionRegistry('codex', () => new Map(['tmux-1', 'tmux-2'].map((id) => [id, { workDir }]))));
+  for (const sessionId of ['tmux-1', 'tmux-2']) {
+    const { eventsPath } = await buildHookSessionPaths({ workDir, provider: 'codex', sessionId });
+    await mkdir(dirname(eventsPath), { recursive: true });
+    await writeFile(eventsPath, JSON.stringify({ eventName: 'UserPromptSubmit', transcriptPath: `/transcripts/${sessionId}.jsonl`, payload: {} }));
+  }
+  const spawns = [];
+  const statuses = new Map();
+  const terminated = [];
+  s.poller.config = { ...s.poller.config, workDir: s.h.stateDir, env: { ...s.poller.config.env, ...env } };
+  s.poller.grading = { ...s.poller.grading, ...grading, model: 'claude-sonnet-5-5', terminate: (task) => terminated.push(task.taskId), tasks: () => ({
+    spawn: async (parentTaskId, taskKey, spec) => {
+      spawns.push({ parentTaskId, taskKey, spec });
+      statuses.set(`task-${spawns.length}`, { state: 'working', result: null });
+      return { taskId: `task-${spawns.length}`, sessionId: `grader-${spawns.length}` };
+    },
+    status: async (taskId) => ({ taskId, ...statuses.get(taskId) }),
+  }) };
+  return { s, spawns, statuses, terminated };
+}
+
+test('merged sessions with a transcript get one grader task whose JSON grade lands on the ledger entry', async (t) => {
+  const { s, spawns, statuses, terminated } = await gradingSetup(t, { CADRE_ALLOW_SIDE_EFFECTS: '1' });
+  await s.call('watch_pr', { repo: 'octo/demo', number: 1 }, { kind: 'codex', sessionId: 'tmux-1' });
+  await s.call('watch_pr', { repo: 'octo/demo', number: 2 }, { kind: 'codex', sessionId: 'tmux-2' });
+  await s.watch(3);
+  s.setPr({ merged: true, state: 'closed', merge_commit_sha: 'merge123', merged_at: '2026-11-08T00:00:00Z' });
+  await s.poller.pollOnce();
+
+  assert.deepEqual(spawns.map((item) => item.taskKey), ['grade:octo/demo#1', 'grade:octo/demo#2'], 'PR 3 has no transcript');
+  const { spec } = spawns[0];
+  assert.equal(spawns[0].parentTaskId, null);
+  assert.equal(spec.provider, 'claude');
+  assert.equal(spec.model, 'claude-sonnet-5-5');
+  assert.match(spec.workDir, /scratch\/octo-demo\/grade-1-/);
+  assert.match(spec.initialPrompt, /# Session Grade/);
+  assert.match(spec.initialPrompt, /Transcript: \/transcripts\/tmux-1\.jsonl/);
+  assert.match(spec.initialPrompt, /gh pr diff 1 -R octo\/demo/);
+  const ledger = async () => Object.fromEntries((await s.store.listLedger()).map((entry) => [entry.number, entry]));
+  assert.equal((await ledger())[1].gradeTaskId, 'task-1');
+  assert.equal((await ledger())[1].graderModel, 'claude-sonnet-5-5');
+  assert.equal((await ledger())[3].gradeTaskId, undefined);
+
+  await s.poller.pollOnce();
+  assert.equal((await ledger())[1].gradedAt, undefined, 'a working grader leaves the entry pending');
+
+  const grade = { session: '/transcripts/tmux-1.jsonl', pr: 1, scores: { efficiency: { score: 0.5, pass: false, reason: 'retries', evidence: ['tool call 3'] } } };
+  const done = (text) => ({ state: 'completed', result: { state: 'completed', output: [{ type: 'message.committed', blocks: [{ type: 'text', text }] }] } });
+  statuses.set('task-1', done(`Graded.\n\`\`\`json\n${JSON.stringify(grade)}\n\`\`\``));
+  statuses.set('task-2', done('I could not finish the grade.'));
+  await s.poller.pollOnce();
+  const graded = await ledger();
+  assert.deepEqual(graded[1].grade, grade);
+  assert.ok(graded[1].gradedAt);
+  assert.equal(graded[2].grade, null);
+  assert.match(graded[2].gradeError, /malformed grade: no fenced json/);
+  assert.deepEqual(terminated.sort(), ['task-1', 'task-2']);
+
+  await s.poller.pollOnce();
+  assert.equal(spawns.length, 2, 'graded and malformed entries are never retried');
+  const trend = await s.requestImpl('/api/agents/github/ledger/trend');
+  assert.deepEqual(trend.days, [{ day: '2026-11-08', rubrics: { efficiency: { count: 1, passRate: 0, meanScore: 0.5 } } }]);
+});
+
+for (const [name, env, grading] of [['side-effect loops are suppressed', { PORT: '4511' }, { sampleRate: 1 }], ['no sample rate is configured', { CADRE_ALLOW_SIDE_EFFECTS: '1' }, {}]]) {
+  test(`merged sessions are not graded while ${name}`, async (t) => {
+    const { s, spawns } = await gradingSetup(t, env, grading);
+    await s.call('watch_pr', { repo: 'octo/demo', number: 1 }, { kind: 'codex', sessionId: 'tmux-1' });
+    s.setPr({ merged: true, state: 'closed', merge_commit_sha: 'merge123', merged_at: '2026-11-08T00:00:00Z' });
+    await s.poller.pollOnce();
+    assert.equal(spawns.length, 0);
+    assert.equal((await s.store.listLedger())[0].gradeTaskId, undefined);
+  });
+}
+
 test('close leaves room open; no room owner falls back to creator; missing sessions drop', async (t) => {
   const s = await setup(t);
   const unowned = await s.h.store.createThread({ title: 'Unowned', participants, createdBy: creator });

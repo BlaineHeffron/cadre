@@ -32,7 +32,7 @@ import { githubAgentsPlugin } from './modules/integrations/github-agents-plugin.
 import { buildGithubAgentRepoStore } from './modules/integrations/github-agents.mjs';
 import { cloudSessionsPlugin } from './modules/integrations/cloud-sessions-plugin.mjs';
 import { scheduledAgentsPlugin } from './modules/integrations/scheduled-agents-plugin.mjs';
-import { buildScheduledAgentStore, listEnabledAgentBackendKinds, lookupSessionStateVia, SchedulerLoop } from './modules/integrations/scheduled-agents.mjs';
+import { buildScheduledAgentStore, listEnabledAgentBackendKinds, lookupSessionStateVia } from './modules/integrations/scheduled-agents.mjs';
 import { audioPlugin } from './modules/audio/index.mjs';
 import { quickCapturePlugin } from './modules/integrations/quick-capture.mjs';
 import { pushPlugin } from './modules/platform/push.mjs';
@@ -197,27 +197,20 @@ await app.register(commandCenterAIPlugin, { wsManager });
 // BusinessOS fleet monitoring
 await app.register(fleetPlugin, { wsManager });
 
+const githubAgentRepoStore = buildGithubAgentRepoStore({ defaultAutoReviewEnabled: config.githubAgents.autoReviewEnabled });
 const scheduledAgentStore = buildScheduledAgentStore({ env: process.env });
-const scheduledAgentLoop = new SchedulerLoop({
-  config: config.scheduledAgents,
-  store: scheduledAgentStore,
-  sessionLauncher: launchScheduledAgentSession,
-  lookupSessionState: lookupScheduledAgentSessionState,
-  logger: app.log,
-});
 
 // Scheduled recurring agents
 await app.register(scheduledAgentsPlugin, {
   store: scheduledAgentStore,
-  loop: scheduledAgentLoop,
   config: config.scheduledAgents,
   rootConfig: config,
   sessionLauncher: launchScheduledAgentSession,
   lookupSessionState: lookupScheduledAgentSessionState,
+  listLedger: () => githubAgentRepoStore.listLedger(1000),
 });
 
 // GitHub PR/issue listener agents
-const githubAgentRepoStore = buildGithubAgentRepoStore({ defaultAutoReviewEnabled: config.githubAgents.autoReviewEnabled });
 await app.register(githubAgentsPlugin, { wsManager, repoStore: githubAgentRepoStore });
 
 // Claude Code cloud sessions: owners, the 60 s state watcher (a side-effect loop) and room attach
