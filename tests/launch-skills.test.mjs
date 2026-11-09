@@ -335,6 +335,12 @@ describe('launch skill authoring', () => {
     assert.match(expanded, /# Web Design Review/);
   });
 
+  it('discovers the session grading skills', () => {
+    const ids = new Set(discoverLaunchSkills().map((skill) => skill.id));
+    assert.equal(ids.has('session-grade'), true);
+    assert.equal(ids.has('session-improve'), true);
+  });
+
   it('discovers reverse-engineer-anything and inlines every REA target guide', () => {
     const ids = new Set(discoverLaunchSkills().map((skill) => skill.id));
     assert.equal(ids.has('reverse-engineer-anything'), true);

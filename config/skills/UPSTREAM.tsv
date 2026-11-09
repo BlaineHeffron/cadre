@@ -1,6 +1,6 @@
 # Ported-skill upstream pins. Columns: local_skill  repo  upstream_path  pinned_sha  note
 # Sync: node scripts/skills-upstream-check.mjs  (see docs/skills-upstream-integration.md)
-# Fleet-native (no upstream, untracked): experiment, custody, client-update, bootstrap, visual-design-it-twice
+# Fleet-native (no upstream, untracked): experiment, custody, client-update, bootstrap, visual-design-it-twice, session-grade, session-improve
 #
 # local_skill	repo	upstream_path	pinned_sha	note
 adr-format	mattpocock/skills	skills/engineering/domain-modeling/ADR-FORMAT.md	24fe0ef
