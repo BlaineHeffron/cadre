@@ -225,7 +225,7 @@ describe('Agent provider interface', () => {
       assert.equal(isModelCompatibleWithProvider('codex', 'gpt-test'), false);
       assert.equal(isModelCompatibleWithProvider('codex', 'fable'), false);
       assert.equal(isModelCompatibleWithProvider('claude', 'fable'), false);
-      assert.equal(isModelCompatibleWithProvider('claude', 'claude-fable-5-1'), true);
+      assert.equal(isModelCompatibleWithProvider('claude', 'claude-fable-5-2'), true);
     });
 
   it('accepts GPT-6.1 Sol/Luna, Opus 5.5, and Grok 4.7', () => {

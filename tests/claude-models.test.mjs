@@ -17,7 +17,7 @@ describe('Claude model validation', () => {
         env: {},
       })).map((entry) => entry.id);
       assert.deepEqual(ids, [
-        'claude-fable-5-1',
+        'claude-fable-5-2',
         'claude-haiku-4-5',
         'claude-haiku-5-5',
         'claude-opus-4-8',
@@ -30,7 +30,7 @@ describe('Claude model validation', () => {
       assert.equal(await isValidClaudeModel('claude-opus-5', { apiKey: '', cacheFile, forceRefresh: true, env: {} }), true);
       assert.equal(await isValidClaudeModel('claude-opus-5-5', { apiKey: '', cacheFile, forceRefresh: true, env: {} }), true);
       assert.equal(await isValidClaudeModel('claude-opus-4-8', { apiKey: '', cacheFile, forceRefresh: true, env: {} }), true);
-      assert.equal(await isValidClaudeModel('claude-fable-5-1', { apiKey: '', cacheFile, forceRefresh: true, env: {} }), true);
+      assert.equal(await isValidClaudeModel('claude-fable-5-2', { apiKey: '', cacheFile, forceRefresh: true, env: {} }), true);
       assert.equal(await isValidClaudeModel('fable', { apiKey: '', cacheFile, forceRefresh: true, env: {} }), false);
       assert.equal(await isValidClaudeModel('claude-opus-4-6', { apiKey: '', cacheFile, forceRefresh: true, env: {} }), false);
       assert.equal(await isValidClaudeModel('claude-2', { apiKey: '', cacheFile, forceRefresh: true, env: {} }), false);
@@ -134,7 +134,7 @@ describe('Claude model validation', () => {
 
       const ids = (await listClaudeModels(options)).map((entry) => entry.id);
       assert.deepEqual(ids, [
-        'claude-fable-5-1',
+        'claude-fable-5-2',
         'claude-haiku-4-5',
         'claude-haiku-5-5',
         'claude-opus-4-8',

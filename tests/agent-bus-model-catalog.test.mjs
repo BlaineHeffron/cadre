@@ -105,7 +105,7 @@ describe('agent-bus model catalog route data', () => {
       ],
       listProviderModelsImpl: async () => ({
         models: [
-          { id: 'claude-fable-5-1', label: 'Fable 5.1' },
+          { id: 'claude-fable-5-2', label: 'Fable 5.2' },
           { id: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
         ],
       }),

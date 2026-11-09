@@ -92,7 +92,7 @@ describe('Model catalog', () => {
 
     assert.equal(result.source, 'api');
     assert.deepEqual(result.models.map((entry) => entry.id), [
-      'claude-fable-5-1',
+      'claude-fable-5-2',
       'claude-haiku-4-5',
       'claude-haiku-5-5',
       'claude-opus-4-8',
@@ -174,7 +174,7 @@ describe('Model catalog', () => {
       'gpt-6.1-sol',
     ]);
     assert.deepEqual(anthropic.models.map((entry) => entry.id), [
-      'claude-fable-5-1',
+      'claude-fable-5-2',
       'claude-haiku-4-5',
       'claude-haiku-5-5',
       'claude-opus-4-8',
