@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { Marked } from 'marked';
 import katex from 'katex';
+import { linkifyPaths } from './local-path.mjs';
 
 export const MAX_RENDERED_MARKDOWN_CHARS = 200_000;
 
@@ -171,7 +172,7 @@ function renderToken(token, key) {
     case 'text':
       return token.tokens
         ? h('span', { key }, ...renderTokens(token.tokens, key))
-        : String(token.text ?? '');
+        : linkifyPaths(token.text, key);
     case 'blockquote':
       return h('blockquote', { key }, ...renderTokens(token.tokens, key));
     case 'list': {
@@ -186,8 +187,9 @@ function renderToken(token, key) {
     }
     case 'code':
       return h('pre', { key }, h('code', { class: token.lang ? `language-${token.lang}` : undefined }, token.text));
+    // Inline code links local paths; fenced code blocks stay verbatim.
     case 'codespan':
-      return h('code', { key }, token.text);
+      return h('code', { key }, ...linkifyPaths(token.text, key));
     case 'strong':
       return h('strong', { key }, ...renderTokens(token.tokens, key));
     case 'em':

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -26,6 +26,16 @@ describe('Files module', () => {
   it('should be importable without errors', async () => {
     const mod = await import('../modules/platform/files.mjs');
     assert.equal(typeof mod.filesPlugin, 'function');
+  });
+
+  it('reports the allowed root and accepts absolute paths under it', async () => {
+    writeFileSync(join(root, 'a.txt'), 'a');
+    const inside = await app.inject({ url: `/api/files/info?path=${encodeURIComponent(join(root, 'a.txt'))}` });
+    assert.equal(inside.statusCode, 200);
+    assert.equal(JSON.parse(inside.body).root, realpathSync(root));
+    assert.equal(JSON.parse(inside.body).type, 'file');
+    const outside = await app.inject({ url: `/api/files/info?path=${encodeURIComponent('/etc/hostname')}` });
+    assert.equal(outside.statusCode, 400);
   });
 
   it('uploads a file into the selected directory', async () => {

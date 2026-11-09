@@ -6,6 +6,7 @@ import { api } from '../app/api.mjs';
 import { addToast } from '../app/state.mjs';
 import { EmptyState, ErrorState, LoadingState } from '../components/page-state.mjs';
 import { McpCapabilitySelector } from '../components/mcp-capability-selector.mjs';
+import { LocalPath } from '../components/local-path.mjs';
 
 const DEFAULT_FORM = {
   id: '',
@@ -155,7 +156,7 @@ function TaskCard({ task, state }) {
         </div>
         <span class="badge ${statusBadge(task.status)}">${task.status}</span>
       </div>
-      <div class="fleet-meta">workdir ${task.workDir}</div>
+      <div class="fleet-meta">workdir <${LocalPath} path=${task.workDir} /></div>
       <div class="fleet-meta">next ${formatTime(task.nextRunAtEpochMs)} · iteration ${task.currentIteration || 0}${task.maxIterations ? `/${task.maxIterations}` : ''}</div>
       ${task.lastSessionId ? html`<div class="fleet-meta">last session <a href="/agents">${task.lastSessionId}</a></div>` : null}
       <pre class="terminal" style="max-height:180px; margin-top:12px">${task.prompt}</pre>

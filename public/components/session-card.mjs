@@ -6,6 +6,7 @@ import { providerDescriptor } from '../app/providers.mjs';
 import { isActiveThread } from '../pages/agent-collab/format.mjs';
 import { addToast, agentThreads, seenSessionStoreForKind, hasSeenPromptNotification, sessionDisplayStatus } from '../app/state.mjs';
 import { MachineChip } from './machines.mjs';
+import { LocalPath } from './local-path.mjs';
 
 // Every state pairs its colour with a glyph and a label, so it reads without colour.
 const STATE_CONFIG = {
@@ -142,7 +143,7 @@ export function SessionCard({ session, provider = 'claude', onShiftTab, onEscape
       <div style="display:flex; gap:8px; font-size:var(--fs-sm); color:var(--text-primary); align-items:center">
         <${StatusBadge} status=${status} />
         <${MachineChip} machine=${session.machine} />
-        ${session.workDir ? html`<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title=${session.workDir}>${label}</span>` : null}
+        ${session.workDir ? html`<${LocalPath} path=${session.workDir} style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${label}<//>` : null}
       </div>
       <div class="session-card-foot">
         <div style="min-width:0">

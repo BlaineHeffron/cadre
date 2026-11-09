@@ -44,8 +44,9 @@ function makeGoUp(currentPath, items, loading, selectedFile, fileContent) {
   };
 }
 
-function makeSelectFile(currentPath, selectedFile, fileContent, fileLoading) {
+function makeSelectFile(currentPath, selectedFile, fileContent, fileLoading, selectedLine) {
   return async function selectFile(item) {
+    selectedLine.value = null;
     if (!item.isText) {
       addToast('Binary files cannot be previewed', 'warning');
       return;
@@ -64,6 +65,33 @@ function makeSelectFile(currentPath, selectedFile, fileContent, fileLoading) {
       fileLoading.value = false;
     }
   };
+}
+
+// Opens a deep-linked file or directory (absolute or root-relative), e.g. /files?path=/abs/x.mjs&line=12.
+function makeOpenPath(currentPath, items, loading, selectedFile, fileContent, selectFile, selectedLine) {
+  return async function openPath(path, line) {
+    let info;
+    try {
+      info = await api.get(`/files/info?path=${encodeURIComponent(path)}`);
+    } catch (e) {
+      addToast(`Failed to open ${path}: ${e.message}`, 'error');
+      return loadDirectory(currentPath, items, loading, selectedFile, fileContent, '');
+    }
+    if (info.type === 'dir') return loadDirectory(currentPath, items, loading, selectedFile, fileContent, path);
+    await loadDirectory(currentPath, items, loading, selectedFile, fileContent, path.slice(0, Math.max(path.lastIndexOf('/'), 0)));
+    await selectFile(info);
+    selectedLine.value = line;
+  };
+}
+
+const scrollToLine = (element) => element?.scrollIntoView({ block: 'center' });
+
+function contentWithLine(content, line) {
+  const lines = content.split('\n');
+  if (!line || line > lines.length) return content;
+  const before = lines.slice(0, line - 1).map((text) => `${text}\n`).join('');
+  const after = lines.slice(line).map((text) => `\n${text}`).join('');
+  return [before, html`<mark class="files-line" ref=${scrollToLine}>${lines[line - 1]}</mark>`, after];
 }
 
 function makeClosePreview(selectedFile, fileContent) {
@@ -130,25 +158,32 @@ function makeCreateDocument(currentPath, items, loading, selectedFile, fileConte
   };
 }
 
-export function FilesPage() {
+export function FilesPage({ url }) {
   const currentPath = useMemo(() => signal(''), []);
   const items = useMemo(() => signal([]), []);
   const loading = useMemo(() => signal(false), []);
   const selectedFile = useMemo(() => signal(null), []);
   const fileContent = useMemo(() => signal(''), []);
   const fileLoading = useMemo(() => signal(false), []);
+  const selectedLine = useMemo(() => signal(null), []);
   const uploadBusy = useMemo(() => signal(false), []);
   const documentForm = useMemo(() => signal({ open: false, name: '', content: '', busy: false }), []);
 
   const navigateToDir = useMemo(() => makeNavigateToDir(currentPath, items, loading, selectedFile, fileContent), []);
   const navigateToPath = useMemo(() => makeNavigateToPath(currentPath, items, loading, selectedFile, fileContent), []);
   const goUp = useMemo(() => makeGoUp(currentPath, items, loading, selectedFile, fileContent), []);
-  const selectFile = useMemo(() => makeSelectFile(currentPath, selectedFile, fileContent, fileLoading), []);
+  const selectFile = useMemo(() => makeSelectFile(currentPath, selectedFile, fileContent, fileLoading, selectedLine), []);
+  const openPath = useMemo(() => makeOpenPath(currentPath, items, loading, selectedFile, fileContent, selectFile, selectedLine), []);
   const closePreview = useMemo(() => makeClosePreview(selectedFile, fileContent), []);
   const uploadFile = useMemo(() => makeUploadFile(currentPath, items, loading, selectedFile, fileContent, uploadBusy), []);
   const createDocument = useMemo(() => makeCreateDocument(currentPath, items, loading, selectedFile, fileContent, documentForm), []);
 
-  useEffect(() => { loadDirectory(currentPath, items, loading, selectedFile, fileContent, ''); }, []);
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const path = query.get('path');
+    if (path) openPath(path, Number(query.get('line')) || null);
+    else loadDirectory(currentPath, items, loading, selectedFile, fileContent, '');
+  }, [url]);
 
   return html`
     <div class="page">
@@ -219,7 +254,7 @@ export function FilesPage() {
             ? html`<p style="color:var(--text-muted)">Loading file...</p>`
             : html`
               <div class="terminal" style="max-height:500px; overflow:auto">
-                <pre style="margin:0; white-space:pre-wrap; word-break:break-all">${fileContent.value}</pre>
+                <pre style="margin:0; white-space:pre-wrap; word-break:break-all">${contentWithLine(fileContent.value, selectedLine.value)}</pre>
               </div>
             `
           }
