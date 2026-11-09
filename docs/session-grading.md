@@ -13,21 +13,29 @@ Two separate jobs close the self-improvement loop. Both are **off by default**, 
 
 ## Config
 
-| Knob | Env / route | Default |
+Settings → **Session Grading** controls both jobs without a restart:
+
+- **Sample rate** and **Grader model** are saved in the agent provider preferences (`PUT /api/agent-provider-preferences` with `graderSampleRate` 0..1 and `graderModel` from the Claude model catalog; `null` clears either). The poller reads them on every merge.
+- **Daily improver** turns on through the setup route and off through the scheduled-agent cancel route below. The panel shows its next run and a **Run now** button.
+- The panel also shows each rubric's pass rate and graded count over the last 7 days, and the latest graded PRs with their failing rubrics.
+
+Precedence: a value saved in Settings wins; with none saved, the env var applies; with neither, the default below.
+
+| Knob | Settings / env / route | Default |
 | --- | --- | --- |
-| Grading sample rate | `CADRE_SESSION_GRADER_SAMPLE_RATE` (0..1) | `0` (off) |
-| Grader model | `CADRE_SESSION_GRADER_MODEL` | `claude-sonnet-5-5` |
-| Improver | `POST /api/fleet/session-improve/setup` registers it; cancel with `POST /api/agents/scheduled/sched_session_improve_daily/cancel` | not registered |
+| Grading sample rate | Settings, else `CADRE_SESSION_GRADER_SAMPLE_RATE` (0..1) | `0` (off) |
+| Grader model | Settings, else `CADRE_SESSION_GRADER_MODEL` | `claude-sonnet-5-5` |
+| Improver | Settings switch, or `POST /api/fleet/session-improve/setup` registers it; cancel with `POST /api/agents/scheduled/sched_session_improve_daily/cancel` | not registered |
 | Improver repo | `DM_SKILLS_UPSTREAM_REPO_PATH`, or the first fleet/githubAgents repo path | — |
 | Improver provider / model | `config.sessionImprove`, otherwise inherited from `githubAgents` | githubAgents pair |
 
-`POST /api/fleet/session-improve/run-now` runs the improver immediately and registers it if needed.
+`POST /api/fleet/session-improve/run-now` runs the improver immediately and registers it if needed. Re-enabling a cancelled improver schedules its next run a day later.
 
 ## Rollout on this instance
 
-1. Set `CADRE_SESSION_GRADER_SAMPLE_RATE=0.25` in the managed environment, then restart: `bash scripts/server.sh restart`.
-2. Run grading alone for a week to calibrate. Read the results from `GET /api/agents/github/ledger` and `GET /api/agents/github/ledger/trend`.
-3. Turn on the improver with `POST /api/fleet/session-improve/setup`.
+1. Set the sample rate in Settings (this instance also sets `CADRE_SESSION_GRADER_SAMPLE_RATE=0.25` in its managed environment as the fallback).
+2. Run grading alone for a week to calibrate. Read the results in the Settings panel, or from `GET /api/agents/github/ledger` and `GET /api/agents/github/ledger/trend`.
+3. Turn on the improver with the Settings switch.
 
 ## Trend
 

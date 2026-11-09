@@ -6,6 +6,7 @@ import { resolveAgentProviderSelection } from '../agent/provider-interface.mjs';
 import { resolveSandbox } from '../agent/nono-launch.mjs';
 import { getProtocolSessionProvider } from '../sessions/protocol-session-registry.mjs';
 import { gradeTrend, promptChanges } from '../sessions/session-grading.mjs';
+import { resolveGraderSettings } from '../agent/provider-preferences.mjs';
 import {
   buildGithubAgentRepoStore,
   GithubAgentPoller,
@@ -186,7 +187,8 @@ export async function githubAgentsPlugin(app, opts = {}) {
     },
     onResult: handleResult,
     grading: {
-      tasks: () => app.agentBusLifecycle?.taskService, model: sourceConfig.graderModel, sampleRate: sourceConfig.graderSampleRate, random: opts.random,
+      tasks: () => app.agentBusLifecycle?.taskService, random: opts.random,
+      settings: () => resolveGraderSettings({ sampleRate: sourceConfig.graderSampleRate, model: sourceConfig.graderModel }, opts.preferences),
       terminate: (task) => getProtocolSessionProvider(task.provider)?.service.terminate(task.sessionId, { reason: 'graded' }),
     },
     log: opts.log || app.log,

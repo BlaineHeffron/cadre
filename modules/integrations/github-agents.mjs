@@ -838,10 +838,11 @@ export class GithubAgentPoller {
 
   // One grader task per merged session with a transcript; a failed spawn or malformed grade is recorded, never retried.
   async requestGrade(entry) {
-    const { tasks, model, sampleRate = 0, random = Math.random } = this.grading || {};
+    const { tasks, random = Math.random } = this.grading || {};
     const service = tasks?.();
     if (!service || shouldSuppressSideEffectLoops({ env: this.config.env || process.env }) || !entry.rollup?.transcriptPath) return;
     if ((await this.repoStore.listLedger(MAX_LEDGER_ENTRIES)).some((item) => item.gradeSessionId && item.gradeSessionId === entry.sessionId)) return;
+    const { model, sampleRate } = await this.grading.settings();
     if (random() >= sampleRate) return;
     let patch;
     try {

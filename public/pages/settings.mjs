@@ -93,6 +93,121 @@ function ThemeSelect() {
   `;
 }
 
+const IMPROVER_ID = 'sched_session_improve_daily';
+const percent = (rate) => `${Math.round(rate * 100)}%`;
+
+// Per rubric over merge days in the last week: graded count and pass rate.
+function weeklyRubrics(trendDays = []) {
+  const since = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+  const sums = {};
+  for (const { day, rubrics } of trendDays.filter((item) => item.day >= since)) {
+    for (const [rubric, { count, passRate }] of Object.entries(rubrics)) {
+      const sum = (sums[rubric] ||= { count: 0, passed: 0 });
+      sum.count += count;
+      sum.passed += passRate * count;
+    }
+  }
+  return Object.entries(sums).map(([rubric, sum]) => ({ rubric, count: sum.count, passRate: sum.passed / sum.count }));
+}
+
+// Grading settings live in the provider preferences; the improver is the scheduled task the setup route registers.
+function SessionGradingCard({ prefs, save }) {
+  const improver = useMemo(() => signal(null), []);
+  const rubrics = useMemo(() => signal([]), []);
+  const recent = useMemo(() => signal([]), []);
+  async function load() {
+    try {
+      const [scheduled, trend, ledger] = await Promise.all([
+        api.get('/agents/scheduled'), api.get('/agents/github/ledger/trend'), api.get('/agents/github/ledger?limit=50'),
+      ]);
+      improver.value = scheduled.tasks?.find((task) => task.id === IMPROVER_ID) || null;
+      rubrics.value = weeklyRubrics(trend.days);
+      recent.value = (ledger.entries || []).filter((entry) => entry.gradedAt).slice(0, 5);
+    } catch (error) {
+      addToast(`Session grading error: ${error.message}`, 'error');
+    }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function toggleImprover(on) {
+    try {
+      improver.value = on ? await api.post('/fleet/session-improve/setup') : await api.post(`/agents/scheduled/${IMPROVER_ID}/cancel`);
+      addToast(on ? 'Daily improver on' : 'Daily improver off', 'success');
+    } catch (error) {
+      addToast(`Improver error: ${error.message}`, 'error');
+      return false;
+    }
+  }
+  async function runNow() {
+    try {
+      const { task, step } = await api.post('/fleet/session-improve/run-now');
+      improver.value = task;
+      addToast(step?.spawned ? 'Improver started' : 'No failing grades in the last 24 hours', 'info');
+    } catch (error) {
+      addToast(`Improver error: ${error.message}`, 'error');
+    }
+  }
+
+  const defaults = prefs.graderDefaults || {};
+  const improverOn = improver.value?.status === 'active';
+  return html`
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Session Grading</span>
+        <span class="badge ${(prefs.graderSampleRate ?? defaults.sampleRate) > 0 ? 'badge-success' : 'badge-low'}">
+          ${percent(prefs.graderSampleRate ?? defaults.sampleRate ?? 0)} graded
+        </span>
+      </div>
+      <p class="note" style="margin-bottom:8px">
+        Grades a share of merged sessions. Saved values override the server's env defaults and apply from the next merge. Clear a field to use the env default.
+      </p>
+      <label class="setting-switch">
+        <span class="setting-switch-text">
+          <span>Sample rate</span>
+          <span class="setting-switch-hint">0 to 1. Env default: ${defaults.sampleRate ?? 'unknown'}.</span>
+        </span>
+        <input type="number" class="input" style="width:96px" min="0" max="1" step="0.05" placeholder=${defaults.sampleRate ?? ''}
+          value=${prefs.graderSampleRate ?? ''} disabled=${prefs.loading}
+          onChange=${(e) => save({ graderSampleRate: e.currentTarget.value === '' ? null : Number(e.currentTarget.value) })} />
+      </label>
+      <label class="setting-switch">
+        <span class="setting-switch-text">
+          <span>Grader model</span>
+          <span class="setting-switch-hint">Env default: ${defaults.model || 'unknown'}.</span>
+        </span>
+        <select class="input" style="width:auto" value=${prefs.graderModel || ''} disabled=${prefs.loading}
+          onChange=${(e) => save({ graderModel: e.currentTarget.value || null })}>
+          <option value="">Env default</option>
+          ${(prefs.graderModels || []).map((model) => html`<option value=${model}>${model}</option>`)}
+        </select>
+      </label>
+      <${SettingSwitch} label="Daily improver"
+        hint=${improverOn ? `Next run ${new Date(improver.value.nextRunAtEpochMs).toLocaleString()}.` : 'Turns each day\'s failing grades into fix PRs.'}
+        checked=${improverOn} onChange=${toggleImprover} />
+      ${improverOn ? html`<button class="btn" style="margin-bottom:8px" onclick=${runNow}>Run now</button>` : null}
+      <div class="note" style="border-top:1px solid var(--border); padding-top:8px">
+        <div style="margin-bottom:4px">Last 7 days</div>
+        ${rubrics.value.length ? html`
+          <table class="loop-table">
+            <thead><tr><th>Rubric</th><th>Pass rate</th><th>Graded</th></tr></thead>
+            <tbody>${rubrics.value.map((row) => html`<tr><td>${row.rubric}</td><td>${percent(row.passRate)}</td><td>${row.count}</td></tr>`)}</tbody>
+          </table>
+        ` : html`<div>No graded sessions.</div>`}
+        ${recent.value.length ? html`
+          <div style="margin:8px 0 4px">Recent grades</div>
+          <table class="loop-table">
+            <thead><tr><th>PR</th><th>Failing rubrics</th></tr></thead>
+            <tbody>${recent.value.map((entry) => {
+              const failing = Object.entries(entry.grade?.scores || {}).filter(([, item]) => item.pass === false).map(([rubric]) => rubric);
+              return html`<tr><td>${entry.repo}#${entry.number}</td><td>${entry.grade ? (failing.join(', ') || 'none') : `grade error: ${entry.gradeError || 'unknown'}`}</td></tr>`;
+            })}</tbody>
+          </table>
+        ` : null}
+      </div>
+    </div>
+  `;
+}
+
 export function SettingsPage({ section }) {
   const inputToken = useMemo(() => signal(''), []);
   const pairing = useMemo(() => signal(null), []);
@@ -323,6 +438,7 @@ export function SettingsPage({ section }) {
       </div>
 
       ${isAuthenticated.value ? html`<${MachinesCard} />` : null}
+      ${isAuthenticated.value ? html`<${SessionGradingCard} prefs=${agentProviders.value} save=${saveAgentProviderPreferences} />` : null}
 
       <div class="card">
         <div class="card-header">

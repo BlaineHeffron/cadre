@@ -1412,7 +1412,9 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
     if (problem) return reply.code(400).send({ error: problem });
     const input = buildSessionImproveTaskInput(rootConfig, { nowMs: now() });
     const existing = await store.get(SESSION_IMPROVE_TASK_ID);
-    await (existing ? store.update(SESSION_IMPROVE_TASK_ID, { ...input, status: 'active', nextRunAtEpochMs: existing.nextRunAtEpochMs }) : store.register(input));
+    // A cancelled task's old run time is stale; re-enabling schedules a day out.
+    const nextRunAtEpochMs = existing?.status === 'active' ? existing.nextRunAtEpochMs : input.nextRunAtEpochMs;
+    await (existing ? store.update(SESSION_IMPROVE_TASK_ID, { ...input, status: 'active', nextRunAtEpochMs }) : store.register(input));
     if (req.params.action === 'setup') return safeTask(await store.get(SESSION_IMPROVE_TASK_ID));
     await store.update(SESSION_IMPROVE_TASK_ID, { nextRunAtEpochMs: now(), updatedAt: now() });
     const step = safeStepSummary(await stepDue(now(), stepDeps));

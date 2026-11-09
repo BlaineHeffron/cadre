@@ -140,7 +140,10 @@ await app.register(authPlugin, isWorker ? { workerMachines: machines } : {});
 // The machine supervisors are the hub's one machine loop, gated by the side-effect switch like every other loop.
 await app.register(machinesPlugin, { role: config.role, store: machines, credentialStore: getAgentBusCredentialStore(), hubMcpUrl: config.machines.hubMcpUrl,
   supervise: !sideEffectLoopsSuppressed, routeCommands: routeRemoteSessionCommands, wsManager: { broadcast: (...args) => wsManager.broadcast(...args) } });
-await app.register(agentProviderPreferencesPlugin, sideEffectLoopsSuppressed ? {} : { exec });
+await app.register(agentProviderPreferencesPlugin, {
+  graderDefaults: { sampleRate: config.githubAgents.graderSampleRate, model: config.githubAgents.graderModel },
+  ...(sideEffectLoopsSuppressed ? {} : { exec }),
+});
 
 // WebSocket manager (must be after websocket plugin)
 const wsManager = new WsManager(app);

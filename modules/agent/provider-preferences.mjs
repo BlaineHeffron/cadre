@@ -8,6 +8,7 @@ import {
   FAST_CLAUDE_MODEL,
   defaultModelForSpawnType as unifiedDefaultModelForSpawnType,
 } from '../sessions/provider-models.mjs';
+import { ANTHROPIC_FALLBACK_MODELS } from '../sessions/model-catalog.mjs';
 import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
 import { legacyRootStatePath, runtimeStatePath } from '../ops/runtime-state.mjs';
 
@@ -21,7 +22,12 @@ const DEFAULT_PREFERENCES = Object.freeze({
   deepseek: false,
   pi: true,
   headroomEnabled: true,
+  graderSampleRate: null,
+  graderModel: null,
 });
+
+const GRADER_MODELS = ANTHROPIC_FALLBACK_MODELS.map((entry) => entry.id);
+const validRate = (value) => typeof value === 'number' && value >= 0 && value <= 1;
 
 function normalizePreferences(input = {}) {
   const normalized = {
@@ -30,6 +36,9 @@ function normalizePreferences(input = {}) {
     deepseek: input?.deepseekEnabled === true || input?.deepseek === true,
     pi: input?.piEnabled === false ? false : input?.pi !== false,
     headroomEnabled: input?.headroomEnabled !== false,
+    // null falls back to the env defaults in config.githubAgents.
+    graderSampleRate: validRate(input?.graderSampleRate) ? input.graderSampleRate : null,
+    graderModel: GRADER_MODELS.includes(input?.graderModel) ? input.graderModel : null,
   };
   if (!normalized.claude && !normalized.codex && !normalized.deepseek && !normalized.pi) {
     throw new Error('At least one agent provider must remain enabled');
@@ -51,6 +60,7 @@ function defaultMetadata(preferences) {
     preferredSingleAgent: preferredSingleAgent(normalized),
     preferredSingleProvider: preferredSingleProvider(normalized),
     providerCatalog: buildAgentProviderCatalog(normalized),
+    graderModels: GRADER_MODELS,
   };
 }
 
@@ -109,6 +119,12 @@ export async function updateAgentProviderPreferences(input = {}, { storeFile } =
   if (input.headroomEnabled !== undefined && typeof input.headroomEnabled !== 'boolean') {
     throw new TypeError('headroomEnabled must be a boolean');
   }
+  if (input.graderSampleRate != null && !validRate(input.graderSampleRate)) {
+    throw new TypeError('graderSampleRate must be a number from 0 to 1, or null for the env default');
+  }
+  if (input.graderModel != null && !GRADER_MODELS.includes(input.graderModel)) {
+    throw new TypeError(`graderModel must be one of ${GRADER_MODELS.join(', ')}, or null for the env default`);
+  }
   const current = await readStore(storeFile);
   const next = normalizePreferences({
     ...current,
@@ -116,6 +132,12 @@ export async function updateAgentProviderPreferences(input = {}, { storeFile } =
   });
   await writeStore(next, storeFile);
   return defaultMetadata(next);
+}
+
+// A value saved in Settings overrides the env defaults; read on every merge, so no restart is needed.
+export async function resolveGraderSettings(defaults = {}, { storeFile } = {}) {
+  const saved = await readStore(storeFile);
+  return { sampleRate: saved.graderSampleRate ?? defaults.sampleRate ?? 0, model: saved.graderModel ?? defaults.model };
 }
 
 export function availableSpawnTypes(preferences = DEFAULT_PREFERENCES, capabilityOptions = {}) {
@@ -201,7 +223,8 @@ export function resolveCollabModels(preferences = DEFAULT_PREFERENCES, requested
 }
 
 export async function agentProviderPreferencesPlugin(app, opts = {}) {
-  app.get('/api/agent-provider-preferences', async () => getAgentProviderPreferences(opts));
+  const withDefaults = (preferences) => ({ ...preferences, graderDefaults: opts.graderDefaults || null });
+  app.get('/api/agent-provider-preferences', async () => withDefaults(await getAgentProviderPreferences(opts)));
   app.put('/api/agent-provider-preferences', async (req, reply) => {
     let preferences;
     try {
@@ -225,6 +248,6 @@ export async function agentProviderPreferencesPlugin(app, opts = {}) {
       const result = await opts.exec('systemctl', args).catch(fail);
       if (result.code !== 0) req.log.warn({ stderr: result.stderr }, `systemctl ${verb} dueno-headroom.service failed`);
     }
-    return preferences;
+    return withDefaults(preferences);
   });
 }
