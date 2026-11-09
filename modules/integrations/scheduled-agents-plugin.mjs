@@ -49,6 +49,7 @@ import {
   shouldDispatchRepoQualityFix,
 } from './repo-quality.mjs';
 import { buildDelegatedScheduledAgentInput } from '../agent-bus/coordinator-policy.mjs';
+import { buildImprovePrompt, hasFailingRubric } from '../sessions/session-grading.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -60,6 +61,8 @@ const LEGACY_DEPENDENCY_WATCH_TASK_ID = 'sched_dependency_watch_daily';
 const DEFAULT_DEPENDENCY_WATCH_INTERVAL_SECONDS = 1296000;
 const JOB_OPPORTUNITIES_TASK_ID = 'sched_job_opportunities_daily';
 const DEFAULT_JOB_OPPORTUNITIES_INTERVAL_SECONDS = 86400;
+const SESSION_IMPROVE_TASK_ID = 'sched_session_improve_daily';
+const DAY_MS = 86_400_000;
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -925,6 +928,37 @@ function buildSkillsUpstreamLauncher({
   };
 }
 
+// Runs in the fleet clone used for skill syncs; the launcher moves each run into a fresh worktree.
+function buildSessionImproveTaskInput(sourceConfig = appConfig, { nowMs = Date.now() } = {}) {
+  return {
+    id: SESSION_IMPROVE_TASK_ID,
+    workDir: configuredSkillsUpstreamRepoPath(sourceConfig),
+    prompt: 'Daily session-improve: when the last 24h of graded merged sessions include a failing rubric, one agent turns those grades into environment-fix PRs.',
+    ...resolveWatcherProviderModel(sourceConfig?.sessionImprove, [sourceConfig?.githubAgents], 'sessionImprove'),
+    intervalSeconds: 86400,
+    maxIterations: 0,
+    startImmediately: false,
+    nextRunAtEpochMs: nowMs + DAY_MS,
+    metadata: { kind: 'session_improve' },
+  };
+}
+
+function buildSessionImproveLauncher({ inner, listLedger, createWorktree, worktreeBaseDir, now } = {}) {
+  return async (input = {}) => {
+    if (input.taskId !== SESSION_IMPROVE_TASK_ID) return inner(input);
+    const since = now() - DAY_MS;
+    const grades = (await listLedger?.() || []).filter((entry) => Date.parse(entry.gradedAt) >= since && hasFailingRubric(entry)).map((entry) => ({ repo: entry.repo, pr: entry.number, mergeSha: entry.mergeSha || null, grade: entry.grade }));
+    if (!grades.length) return { skip: true, action: 'skippedNoFailures' };
+    const worktree = await (createWorktree || createAgentSessionWorktree)({
+      repoPath: input.workDir, baseDir: worktreeBaseDir, displayName: 'session-improve', branchPrefix: 'dueno-fleet/session-improve', nowMs: now(),
+    });
+    return inner({
+      prompt: buildImprovePrompt(grades), workDir: worktree.worktreePath, provider: input.provider, model: input.model,
+      displayName: 'session-improve', parentThreadId: input.parentThreadId || null,
+    });
+  };
+}
+
 async function defaultCreateRepoQualityWorktree({
   repoPath,
   baseDir,
@@ -1164,7 +1198,13 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
   const now = opts.now || (() => Date.now());
   const sessionLauncher = buildRepoQualityLauncher({
     inner: buildSkillsUpstreamLauncher({
-      inner: opts.sessionLauncher,
+      inner: buildSessionImproveLauncher({
+        inner: opts.sessionLauncher,
+        listLedger: opts.listLedger,
+        createWorktree: opts.createSessionImproveWorktree,
+        worktreeBaseDir: configuredSkillsUpstreamWorktreeBase(rootConfig),
+        now,
+      }),
       detectSkillsUpstream: opts.detectSkillsUpstream,
       createWorktree: opts.createSkillsUpstreamWorktree,
       worktreeBaseDir: configuredSkillsUpstreamWorktreeBase(rootConfig),
@@ -1364,6 +1404,19 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
       ...safeSkillsUpstreamStatus(updatedTask, rootConfig),
       step: safeStepSummary(summary),
     };
+  });
+
+  app.post('/api/fleet/session-improve/:action', async (req, reply) => {
+    if (!['setup', 'run-now'].includes(req.params.action)) return reply.code(404).send({ error: 'Unknown action', code: 'not_found' });
+    const problem = skillsUpstreamRepoProblem(configuredSkillsUpstreamRepoPath(rootConfig));
+    if (problem) return reply.code(400).send({ error: problem });
+    const input = buildSessionImproveTaskInput(rootConfig, { nowMs: now() });
+    const existing = await store.get(SESSION_IMPROVE_TASK_ID);
+    await (existing ? store.update(SESSION_IMPROVE_TASK_ID, { ...input, status: 'active', nextRunAtEpochMs: existing.nextRunAtEpochMs }) : store.register(input));
+    if (req.params.action === 'setup') return safeTask(await store.get(SESSION_IMPROVE_TASK_ID));
+    await store.update(SESSION_IMPROVE_TASK_ID, { nextRunAtEpochMs: now(), updatedAt: now() });
+    const step = safeStepSummary(await stepDue(now(), stepDeps));
+    return { task: safeTask(await store.get(SESSION_IMPROVE_TASK_ID)), step };
   });
 
   app.get('/api/fleet/job-opportunities', async () => {

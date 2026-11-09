@@ -1,8 +1,11 @@
+import { fileURLToPath } from 'node:url';
 import { createAgentAdapters } from '../agent-bus/adapters.mjs';
 import { config as appConfig } from '../../config.mjs';
 import { createAgentSession, enqueueAgentSessionCommand } from '../sessions/index.mjs';
 import { resolveAgentProviderSelection } from '../agent/provider-interface.mjs';
 import { resolveSandbox } from '../agent/nono-launch.mjs';
+import { getProtocolSessionProvider } from '../sessions/protocol-session-registry.mjs';
+import { gradeTrend, promptChanges } from '../sessions/session-grading.mjs';
 import {
   buildGithubAgentRepoStore,
   GithubAgentPoller,
@@ -182,6 +185,10 @@ export async function githubAgentsPlugin(app, opts = {}) {
       });
     },
     onResult: handleResult,
+    grading: {
+      tasks: () => app.agentBusLifecycle?.taskService, model: sourceConfig.graderModel, sampleRate: sourceConfig.graderSampleRate, random: opts.random,
+      terminate: (task) => getProtocolSessionProvider(task.provider)?.service.terminate(task.sessionId, { reason: 'graded' }),
+    },
     log: opts.log || app.log,
   });
 
@@ -206,6 +213,10 @@ export async function githubAgentsPlugin(app, opts = {}) {
 
   app.get('/api/agents/github/watches', async () => ({ watches: await repoStore.listWatches() }));
   app.get('/api/agents/github/ledger', async (req) => ({ entries: await repoStore.listLedger(req.query?.limit) }));
+  app.get('/api/agents/github/ledger/trend', async () => ({
+    days: gradeTrend(await repoStore.listLedger(1000)),
+    promptChanges: await promptChanges(opts.promptRepoDir || fileURLToPath(new URL('../..', import.meta.url))),
+  }));
   app.get('/api/agents/github/status', async (req) => poller.prStatus(req.query?.repo, Number(req.query?.pr)));
   app.route({ method: ['POST', 'DELETE'], url: '/api/agents/github/watches', handler: async (req, reply) => {
     const principal = req.duenoAuth?.principal;

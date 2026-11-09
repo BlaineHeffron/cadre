@@ -304,6 +304,9 @@ export const config = {
     spawnOnStartup: envFlag('DM_GITHUB_AGENT_SPAWN_ON_STARTUP', false),
     maxSpawnsPerPoll: envInt('DM_GITHUB_AGENT_MAX_SPAWNS_PER_POLL', 5, { min: 1, max: 25 }),
     worktreeReapMaxPerPass: envInt('DM_GITHUB_AGENT_WORKTREE_REAP_MAX_PER_PASS', 20, { min: 1, max: 100 }),
+    // Share of merged sessions graded by a Claude task (0..1); 0 (default) is off. See docs/session-grading.md.
+    graderSampleRate: Math.min(1, Math.max(0, Number(env('DM_SESSION_GRADER_SAMPLE_RATE', 0)) || 0)),
+    graderModel: env('DM_SESSION_GRADER_MODEL', 'claude-sonnet-5-5'),
   },
 
   scheduledAgents: {

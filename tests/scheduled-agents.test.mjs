@@ -2177,6 +2177,52 @@ describe('scheduled agents routes', () => {
     assert.equal(launches.length, 1);
     await app.close();
   });
+
+  it('runs the daily session improver once over failing grades from the last 24h, and skips when none fail', async () => {
+    const day = 86_400_000;
+    let nowMs = 10 * day;
+    const launches = [];
+    const worktrees = [];
+    const failing = { session: 's1', pr: 1, scores: { verbosity: { score: 0.4, pass: false, reason: 'restated diff', evidence: ['PR body'] } } };
+    const passing = { session: 's2', pr: 2, scores: { verbosity: { score: 1, pass: true, reason: 'ok', evidence: [] } } };
+    let ledger = [
+      { repo: 'o/r', number: 1, mergeSha: 'm1', grade: failing, gradedAt: new Date(nowMs - day / 2).toISOString() },
+      { repo: 'o/r', number: 2, grade: passing, gradedAt: new Date(nowMs - day / 2).toISOString() },
+      { repo: 'o/r', number: 3, grade: { ...failing, pr: 3 }, gradedAt: new Date(nowMs - 2 * day).toISOString() },
+      { repo: 'o/r', number: 4, grade: null, gradeError: 'malformed grade', gradedAt: new Date(nowMs - day / 2).toISOString() },
+    ];
+    const app = await buildScheduledRoutesApp({
+      now: () => nowMs,
+      rootConfig: { skillsUpstream: { repoPath: '/repo/fleet' }, fleet: { repoPaths: {} }, githubAgents: { repoPaths: {} } },
+      listLedger: async () => ledger,
+      createSessionImproveWorktree: async (input) => { worktrees.push(input); return { worktreePath: '/wt/session-improve' }; },
+      sessionLauncher: async (input) => { launches.push(input); return { id: `sess_improve_${launches.length}` }; },
+    });
+
+    const unregistered = await app.inject({ method: 'POST', url: '/api/agents/scheduled/step-now' });
+    assert.equal(unregistered.json().spawned, 0, 'the improver is off until setup');
+    assert.equal(launches.length, 0);
+    const setup = await app.inject({ method: 'POST', url: '/api/fleet/session-improve/setup' });
+    assert.equal(setup.json().id, 'sched_session_improve_daily');
+    assert.equal(setup.json().intervalSeconds, 86400);
+    const run = await app.inject({ method: 'POST', url: '/api/fleet/session-improve/run-now' });
+    assert.equal(run.json().step.spawned, 1);
+    assert.equal(launches.length, 1);
+    assert.equal(launches[0].workDir, '/wt/session-improve');
+    assert.equal(worktrees[0].repoPath, '/repo/fleet');
+    assert.match(launches[0].prompt, /# Session Improve/);
+    assert.ok(launches[0].prompt.includes(JSON.stringify({ repo: 'o/r', pr: 1, mergeSha: 'm1', grade: failing })));
+    assert.ok(!launches[0].prompt.includes(JSON.stringify(passing)));
+    assert.ok(!launches[0].prompt.includes('"pr":3'));
+
+    ledger = ledger.filter((entry) => entry.number !== 1);
+    nowMs += day;
+    const idle = await app.inject({ method: 'POST', url: '/api/fleet/session-improve/run-now' });
+    assert.equal(idle.json().step.spawned, 0);
+    assert.equal(idle.json().step.tasks[0].action, 'skippedNoFailures');
+    assert.equal(launches.length, 1);
+    await app.close();
+  });
 });
 
 function baseTask(overrides = {}) {
@@ -2219,6 +2265,8 @@ async function buildScheduledRoutesApp({
   runRepoQualityCheck,
   saveRepoQualityReport,
   loadPreviousRepoQualityReport,
+  listLedger,
+  createSessionImproveWorktree,
   rootConfig = {
     dependencyWatch: { repoPaths: {} },
     fleet: { repoPaths: {} },
@@ -2247,6 +2295,8 @@ async function buildScheduledRoutesApp({
     runRepoQualityCheck,
     saveRepoQualityReport,
     loadPreviousRepoQualityReport,
+    listLedger,
+    createSessionImproveWorktree,
     sessionLauncher,
     lookupSessionState,
     loop: {
