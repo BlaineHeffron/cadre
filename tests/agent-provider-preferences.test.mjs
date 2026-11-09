@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Fastify from 'fastify';
 import {
+  agentProviderPreferencesPlugin,
+  resolveGraderSettings,
   getAgentProviderPreferences,
   availableInteractiveProviders,
   resolveCollabModels,
@@ -128,5 +131,41 @@ describe('resolveCollabModels', () => {
 
   it('enables collab from shorthand claude and codex keys while deepseek is on', () => {
     assert.equal(resolveCollabModels({ claude: true, codex: true, deepseek: true }).enabled, true);
+  });
+});
+
+describe('session grading settings', () => {
+  it('validates and persists the grader rate and model, and overrides the env defaults until cleared', async () => {
+    const storeFile = await makeStoreFile();
+    const app = Fastify();
+    await app.register(agentProviderPreferencesPlugin, { storeFile, graderDefaults: { sampleRate: 0.25, model: 'claude-sonnet-5-5' } });
+    const put = (body) => app.inject({ method: 'PUT', url: '/api/agent-provider-preferences', payload: body });
+    const env = { sampleRate: 0.25, model: 'claude-sonnet-5-5' };
+
+    const initial = (await app.inject({ method: 'GET', url: '/api/agent-provider-preferences' })).json();
+    assert.equal(initial.graderSampleRate, null);
+    assert.deepEqual(initial.graderDefaults, env);
+    assert.ok(initial.graderModels.includes('claude-haiku-5-5'));
+    assert.deepEqual(await resolveGraderSettings(env, { storeFile }), env);
+
+    for (const body of [{ graderSampleRate: 1.5 }, { graderSampleRate: -0.1 }, { graderSampleRate: '0.5' }, { graderModel: 'gpt-6.1-sol' }]) {
+      const response = await put(body);
+      assert.equal(response.statusCode, 400, JSON.stringify(body));
+      assert.match(response.json().error, /grader(SampleRate|Model) must be/);
+    }
+
+    const saved = await put({ graderSampleRate: 0.5, graderModel: 'claude-haiku-5-5' });
+    assert.equal(saved.statusCode, 200);
+    assert.equal(saved.json().graderSampleRate, 0.5);
+    assert.equal(saved.json().claudeEnabled, true, 'other preferences are kept');
+    await app.close();
+
+    // A fresh read of the store file sees the saved values, which win over env.
+    assert.equal((await getAgentProviderPreferences({ storeFile })).graderModel, 'claude-haiku-5-5');
+    assert.deepEqual(await resolveGraderSettings(env, { storeFile }), { sampleRate: 0.5, model: 'claude-haiku-5-5' });
+    await updateAgentProviderPreferences({ graderSampleRate: 0 }, { storeFile });
+    assert.equal((await resolveGraderSettings(env, { storeFile })).sampleRate, 0, 'a saved 0 turns grading off despite env');
+    await updateAgentProviderPreferences({ graderSampleRate: null, graderModel: null }, { storeFile });
+    assert.deepEqual(await resolveGraderSettings(env, { storeFile }), env, 'null falls back to env');
   });
 });

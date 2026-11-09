@@ -2221,6 +2221,19 @@ describe('scheduled agents routes', () => {
     assert.equal(idle.json().step.spawned, 0);
     assert.equal(idle.json().step.tasks[0].action, 'skippedNoFailures');
     assert.equal(launches.length, 1);
+
+    // Settings turns it off through the generic cancel and back on through setup.
+    const cancelled = await app.inject({ method: 'POST', url: '/api/agents/scheduled/sched_session_improve_daily/cancel' });
+    assert.equal(cancelled.json().status, 'canceled');
+    ledger = [{ repo: 'o/r', number: 5, grade: failing, gradedAt: new Date(nowMs).toISOString() }];
+    nowMs += 2 * day;
+    assert.equal((await app.inject({ method: 'POST', url: '/api/agents/scheduled/step-now' })).json().spawned, 0, 'a cancelled improver never runs');
+    const enabled = (await app.inject({ method: 'POST', url: '/api/fleet/session-improve/setup' })).json();
+    assert.equal(enabled.status, 'active');
+    assert.equal(enabled.nextRunAtEpochMs, nowMs + day, 're-enabling schedules a day out instead of running at once');
+    assert.equal((await app.inject({ method: 'POST', url: '/api/agents/scheduled/step-now' })).json().spawned, 0);
+    const listed = (await app.inject({ method: 'GET', url: '/api/agents/scheduled' })).json().tasks.find((task) => task.id === 'sched_session_improve_daily');
+    assert.equal(listed.nextRunAtEpochMs, nowMs + day);
     await app.close();
   });
 });

@@ -8,11 +8,12 @@ const creator = { kind: 'pi', sessionId: 'pi-1' };
 const successor = { kind: 'deepseek', sessionId: 'deepseek-1' };
 const participants = [{ kind: 'claude', sessionId: 'claude-1' }, { kind: 'codex', sessionId: 'codex-1' }];
 
-async function setup(t) {
+async function setup(t, config = { enabled: false }) {
   process.env.INTERNAL_BYPASS_TOKEN = 'pr-watch-test';
   let now = Date.now();
   let store;
   let poller;
+  let preferencesFile;
   const commands = [];
   const calls = [];
   let pr = { state: 'open', merged: false, mergeable_state: 'clean', head: { sha: 'abcdef123' } };
@@ -23,7 +24,8 @@ async function setup(t) {
     const { githubAgentsPlugin } = await import('../modules/integrations/github-agents-plugin.mjs');
     store = buildGithubAgentRepoStore({ storeFile: join(dir, 'repos.json'), env: { APP_STATE_STORAGE: 'file' }, now: () => now });
     await store.upsertRepo({ owner: 'octo', repo: 'demo', authRef: 'TEST_GITHUB_TOKEN', prEnabled: false, issueEnabled: false });
-    await githubAgentsPlugin(app, { repoStore: store, config: { enabled: false },
+    preferencesFile = join(dir, 'agent-provider-preferences.json');
+    await githubAgentsPlugin(app, { repoStore: store, config, preferences: { storeFile: preferencesFile },
       enqueueSessionCommand: async (kind, sessionId, input) => commands.push({ kind, sessionId, ...input }) });
   } });
   t.after(async () => { await h.cleanup(); delete process.env.INTERNAL_BYPASS_TOKEN; });
@@ -46,7 +48,7 @@ async function setup(t) {
   };
   const thread = await h.store.createThread({ title: 'PR room', participants, createdBy: creator });
   const watch = (number = 1, thread_id = thread.id) => call('watch_pr', { repo: 'octo/demo', number, ...(thread_id ? { thread_id } : {}) });
-  return { h, store, call, requestImpl, poller, thread, watch, calls, commands,
+  return { h, store, preferencesFile, call, requestImpl, poller, thread, watch, calls, commands,
     setPr: (patch) => { pr = { ...pr, ...patch }; }, setReviews: (value) => { reviews = value; }, setChecks: (value) => { checks = value; }, advance: (ms) => { now += ms; } };
 }
 
@@ -314,8 +316,11 @@ test('merge records a durable session ledger entry with journal and hook rollups
   await reloaded.close();
 });
 
-async function gradingSetup(t, env, grading = { sampleRate: 1 }) {
-  const s = await setup(t);
+// saved: Settings values in the preferences store; config: the env defaults they override.
+async function gradingSetup(t, env, saved = { graderSampleRate: 1 }, config = {}) {
+  const s = await setup(t, { enabled: false, graderModel: 'claude-sonnet-5-5', ...config });
+  const { updateAgentProviderPreferences } = await import('../modules/agent/provider-preferences.mjs');
+  await updateAgentProviderPreferences(saved, { storeFile: s.preferencesFile });
   const { buildHookSessionPaths, registerHookSessionRegistry } = await import('../modules/agent/hook-events.mjs');
   const workDir = join(s.h.stateDir, 'tmux-work');
   t.after(registerHookSessionRegistry('codex', () => new Map(['tmux-1', 'tmux-2'].map((id) => [id, { workDir }]))));
@@ -328,7 +333,7 @@ async function gradingSetup(t, env, grading = { sampleRate: 1 }) {
   const statuses = new Map();
   const terminated = [];
   s.poller.config = { ...s.poller.config, workDir: s.h.stateDir, repoPaths: { 'octo/demo': '/operator/checkout/demo' }, env: { ...s.poller.config.env, ...env } };
-  s.poller.grading = { ...s.poller.grading, ...grading, model: 'claude-sonnet-5-5', terminate: (task) => terminated.push(task.taskId), tasks: () => ({
+  s.poller.grading = { ...s.poller.grading, terminate: (task) => terminated.push(task.taskId), tasks: () => ({
     spawn: async (parentTaskId, taskKey, spec) => {
       spawns.push({ parentTaskId, taskKey, spec });
       statuses.set(`task-${spawns.length}`, { state: 'working', result: null });
@@ -340,7 +345,7 @@ async function gradingSetup(t, env, grading = { sampleRate: 1 }) {
 }
 
 test('merged sessions with a transcript get one grader task whose JSON grade lands on the ledger entry', async (t) => {
-  const { s, spawns, statuses, terminated } = await gradingSetup(t, { CADRE_ALLOW_SIDE_EFFECTS: '1' });
+  const { s, spawns, statuses, terminated } = await gradingSetup(t, { CADRE_ALLOW_SIDE_EFFECTS: '1' }, { graderSampleRate: 1, graderModel: 'claude-haiku-5-5' });
   await s.call('watch_pr', { repo: 'octo/demo', number: 1 }, { kind: 'codex', sessionId: 'tmux-1' });
   await s.call('watch_pr', { repo: 'octo/demo', number: 2 }, { kind: 'codex', sessionId: 'tmux-2' });
   await s.watch(3);
@@ -351,7 +356,7 @@ test('merged sessions with a transcript get one grader task whose JSON grade lan
   const { spec } = spawns[0];
   assert.equal(spawns[0].parentTaskId, null);
   assert.equal(spec.provider, 'claude');
-  assert.equal(spec.model, 'claude-sonnet-5-5');
+  assert.equal(spec.model, 'claude-haiku-5-5', 'the model saved in Settings overrides the env default');
   assert.match(spec.workDir, /scratch\/octo-demo\/grade-1-/);
   assert.ok(spawns.every((item) => !item.spec.workDir.startsWith('/operator/checkout')), 'never the configured clone');
   assert.match(spec.initialPrompt, /contents\/AGENTS\.md\?ref=/);
@@ -360,7 +365,7 @@ test('merged sessions with a transcript get one grader task whose JSON grade lan
   assert.match(spec.initialPrompt, /gh pr diff 1 -R octo\/demo/);
   const ledger = async () => Object.fromEntries((await s.store.listLedger()).map((entry) => [entry.number, entry]));
   assert.equal((await ledger())[1].gradeTaskId, 'task-1');
-  assert.equal((await ledger())[1].graderModel, 'claude-sonnet-5-5');
+  assert.equal((await ledger())[1].graderModel, 'claude-haiku-5-5');
   assert.equal((await ledger())[3].gradeTaskId, undefined);
 
   await s.poller.pollOnce();
@@ -384,9 +389,13 @@ test('merged sessions with a transcript get one grader task whose JSON grade lan
   assert.deepEqual(trend.days, [{ day: '2026-11-08', rubrics: { efficiency: { count: 1, passRate: 0, meanScore: 0.5 } } }]);
 });
 
-for (const [name, env, grading] of [['side-effect loops are suppressed', { PORT: '4511' }, { sampleRate: 1 }], ['no sample rate is configured', { CADRE_ALLOW_SIDE_EFFECTS: '1' }, {}]]) {
+for (const [name, env, saved, config] of [
+  ['side-effect loops are suppressed', { PORT: '4511' }, { graderSampleRate: 1 }],
+  ['no sample rate is configured', { CADRE_ALLOW_SIDE_EFFECTS: '1' }, {}],
+  ['Settings saves a rate of 0 over an env rate of 1', { CADRE_ALLOW_SIDE_EFFECTS: '1' }, { graderSampleRate: 0 }, { graderSampleRate: 1 }],
+]) {
   test(`merged sessions are not graded while ${name}`, async (t) => {
-    const { s, spawns } = await gradingSetup(t, env, grading);
+    const { s, spawns } = await gradingSetup(t, env, saved, config);
     await s.call('watch_pr', { repo: 'octo/demo', number: 1 }, { kind: 'codex', sessionId: 'tmux-1' });
     s.setPr({ merged: true, state: 'closed', merge_commit_sha: 'merge123', merged_at: '2026-11-08T00:00:00Z' });
     await s.poller.pollOnce();
