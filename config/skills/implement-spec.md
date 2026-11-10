@@ -32,7 +32,7 @@ Default tracker: GitHub issues in the current repo via `gh`. Read the full issue
 
 The tickets are a **task graph**, not a list of steps. Work the **frontier**: tickets whose blockers are all complete.
 
-Communicate with subagents primarily through **context pointers** to the spec, tickets, research notes, and previous commits. Run implementers in the background where the harness supports it.
+Start every subagent with a fresh context window, not a fork of yours. Communicate with subagents primarily through **context pointers** to the spec, tickets, research notes, and previous commits. Run implementers in the background where the harness supports it.
 
 ## Steps
 
@@ -42,7 +42,7 @@ Communicate with subagents primarily through **context pointers** to the spec, t
 
 3. Create the integration branch. If work closes through PRs, or the user asks for one, open a draft PR after the first ticket merge (an empty branch cannot open one). Reference the spec and tickets with closing keywords; use the `pr` fleet skill (config/skills/pr.md) for the body.
 
-4. Dispatch **implementer subagents** for frontier tickets, each on its own branch in an isolated worktree. Use Cadre-managed worktrees when available; otherwise create worktrees with git. Each implementer:
+4. Dispatch a fresh **implementer subagent** per frontier ticket, each on its own branch in an isolated worktree. Use Cadre-managed worktrees when available; otherwise create worktrees with git. Each implementer:
    - confirms its branch is based on the integration branch before starting; correct a wrong base without discarding existing work;
    - reads the `tdd` fleet skill (config/skills/tdd.md) and builds the ticket through its red-green loop;
    - merges the current integration tip into its branch and verifies the result before reporting done.
@@ -51,10 +51,10 @@ Communicate with subagents primarily through **context pointers** to the spec, t
 
 6. Recompute the frontier and dispatch newly unblocked tickets. Keep independent tickets running concurrently where supported.
 
-7. Once all tickets are complete, review the full integration diff against the spec, acceptance criteria, and repository coding standards. Use the harness's review agent when available. Have one implementer fix the findings, then verify the fixes and required checks.
+7. Once all tickets are complete, review the full integration diff against the spec, acceptance criteria, and repository coding standards. Use the harness's review agent when available. Have one fresh implementer fix the findings, then verify the fixes and required checks.
 
 8. Mark an existing draft PR ready for review. Otherwise resolve tickets through the tracker's established workflow and report the integration branch. Merging to the integration branch does not mean the work has landed on `main` or been deployed; follow the `ship` fleet skill (config/skills/ship.md) when authorized to integrate further.
 
 9. Clean up only worktrees created for this run once their work is safely integrated and their trees are clean. Leave Cadre-managed worktrees to the fleet; never force-remove modified or untracked work.
 
-<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/implement-spec/SKILL.md -->
+<!-- upstream: mattpocock/skills@4ae2317 skills/engineering/implement-spec/SKILL.md -->
