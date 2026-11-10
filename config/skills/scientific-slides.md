@@ -83,4 +83,4 @@ Slide copy is design material. Errors of density come from writing slides like p
 - [ ] Rendered deck reviewed slide-by-slide at presentation size
 - [ ] Results occupy 40-50% of the talk
 
-<!-- upstream: adapted from K-Dense-AI/claude-scientific-writer@0c72606 skills/scientific-slides (Nano-Banana generation dropped; assertion-evidence spine and md→render fleet workflow added) -->
+<!-- upstream: adapted from K-Dense-AI/claude-scientific-writer@9820740 skills/scientific-slides (Nano-Banana generation dropped; assertion-evidence spine and md→render fleet workflow added) -->

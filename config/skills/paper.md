@@ -67,4 +67,4 @@ For prose quality, apply the `unslop` fleet skill (config/skills/unslop.md): pla
 
 When the output is LaTeX, the `technote` fleet skill (config/skills/technote.md) carries the document process, and `latex-math` (config/skills/latex-math.md) the equation, notation, and figure standards. For dimensional sanity on every result, the configured `units` fleet skill.
 
-<!-- upstream: adapted from K-Dense-AI/claude-scientific-writer@0c72606 skills/scientific-writing (evidence-binding + no-fabrication principles; manifest/CLI apparatus dropped, claim-cite-falsify spine kept) -->
+<!-- upstream: adapted from K-Dense-AI/claude-scientific-writer@9820740 skills/scientific-writing (evidence-binding + no-fabrication principles; manifest/CLI apparatus dropped, claim-cite-falsify spine kept) -->

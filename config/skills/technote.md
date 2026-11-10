@@ -38,6 +38,8 @@ Decide the mode before writing:
 
 When in doubt, ask which one.
 
+**URL input.** If the user supplies a link as the source, fetch it first with whatever web-fetch tool is available, drop page chrome, and treat the cleaned content as if it had been pasted. If the fetch fails (paywall, login, error), say so and ask for the content; never write from guessed content. Mark partial fetches with `\todo{}`. Record the source as a `% Source: <URL>` comment (Beamer: a `{\tiny\url{<URL>}}` on the title slide), paraphrase prose rather than copying it, and preserve the mathematics exactly. arXiv PDFs need to be uploaded; fetch only the abstract page.
+
 ## Process for a note
 
 ### 1. Preamble
@@ -67,7 +69,7 @@ Load-bearing points, so the note is readable and not just correct:
 
 ### 4. Claims and citations
 
-A technical note still makes claims. Apply the `paper` fleet skill (config/skills/paper.md): each nontrivial claim is stated in one sentence, marked as derivation / cited / speculation, and (where empirical) paired with what would falsify it. Cite precisely, naming the specific result used (`\citet[Theorem~2.1]{engl1996}`), never a vague "as shown in [3]". For bibliography setup (self-contained `thebibliography` vs BibTeX vs BibLaTeX), see the reference section of the `latex-math` skill's source note; pick one workflow and do not mix them.
+A technical note still makes claims. Apply the `paper` fleet skill (config/skills/paper.md): each nontrivial claim is stated in one sentence, marked as derivation / cited / speculation, and (where empirical) paired with what would falsify it. Cite precisely, naming the specific result used (`\citet[Theorem~2.1]{engl1996}`), never a vague "as shown in [3]". For the bibliography, default to a self-contained `thebibliography` without asking; switch to BibTeX/BibLaTeX only when the user mentions a `.bib` file or a journal style, and never mix the two. Every `\bibitem` carries a natbib label, `\bibitem[Surname and Surname(Year)]{key}`, or `\citet{}` prints "(author?)"; with BibTeX use a natbib-aware style (`plainnat`, `abbrvnat`, `unsrtnat`). Supply an entry only when every field is known with certainty; never guess a volume, page range, or year, and use `\bibitem[TODO(0000)]{key}\todo{...}` otherwise.
 
 ### 5. Compile and verify
 
@@ -77,4 +79,4 @@ Before declaring the note done, run the pre-output checklist from `latex-math`: 
 
 The math standards ban contractions, exclamation marks, and rhetorical questions, and that is right for a formal note. But readable is the goal, not stilted: write in complete declarative sentences that each carry one step, prefer active voice ("we derive an upper bound"), quantify instead of intensifying ("grows as $\bigO{h^{-2}}$", not "grows very fast"), and cut the AI-tell vocabulary the `unslop` fleet skill (config/skills/unslop.md) targets. A note that is correct but unreadable has failed half its job.
 
-<!-- upstream: hameefy/claude-latex-skill@c594f5a SKILL.md (split into latex-preamble/latex-math; EIT-specific defaults dropped; fleet paper/unslop/verify pointers added) -->
+<!-- upstream: hameefy/claude-latex-skill@2ea88ee SKILL.md (split into latex-preamble/latex-math; EIT-specific defaults dropped; fleet paper/unslop/verify pointers added) -->

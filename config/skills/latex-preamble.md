@@ -26,7 +26,9 @@ SOFTWARE.
 
 # Standard Article Preamble
 
-Use the preamble below verbatim. Do not improvise or abbreviate it.
+Use the preamble below verbatim: do not improvise, abbreviate, or reorder the package
+list (`hyperref` must precede `cleveref`). Macros that a document does not use may stay
+in the preamble; they are harmless. Add any further macros after the existing block.
 
 ```latex
 \documentclass[11pt,a4paper]{article}
@@ -36,7 +38,6 @@ Use the preamble below verbatim. Do not improvise or abbreviate it.
 % ---------------------------------------------------------------
 \usepackage{amsmath, amssymb, amsthm, mathtools}
 \usepackage{bm}            % bold math symbols
-\usepackage{dsfont}        % indicator function \mathds{1}
 
 % ---------------------------------------------------------------
 % Algorithms
@@ -50,7 +51,7 @@ Use the preamble below verbatim. Do not improvise or abbreviate it.
 \usepackage{tikz}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
-\usepackage{subfigure}     % side-by-side figures
+\usepackage{subcaption}    % subfigure environment for side-by-side figures
 \usepackage{adjustbox}     % fallback rescaling for wide TikZ diagrams
 
 % ---------------------------------------------------------------
@@ -160,4 +161,4 @@ Use the preamble below verbatim. Do not improvise or abbreviate it.
 
 ---
 
-<!-- upstream: hameefy/claude-latex-skill@c594f5a SKILL.md (Step 2) -->
+<!-- upstream: hameefy/claude-latex-skill@2ea88ee SKILL.md (Step 2) -->
