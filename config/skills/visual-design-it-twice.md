@@ -52,8 +52,8 @@ Give one recommendation. Explain the specific reason it is stronger. Propose a c
 
 Do not merge, replace a production route, or deploy without explicit user authorization.
 
-{{skill:frontend-design}}
+On Claude, apply the built-in frontend-design skill for aesthetic direction.
 
 {{skill:web-design-review}}
 
-<!-- fleet-native: visual exploration workflow using the frontend-design and web-design-review Fleet skills -->
+<!-- fleet-native: visual exploration workflow using the web-design-review Fleet skill -->

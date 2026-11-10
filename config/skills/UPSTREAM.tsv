@@ -34,7 +34,6 @@ condition-based-waiting	obra/superpowers	skills/systematic-debugging/condition-b
 verify	obra/superpowers	skills/verification-before-completion/SKILL.md	b36e082
 plan	obra/superpowers	skills/writing-plans/SKILL.md	b36e082	fleet scope-first header added
 ship	obra/superpowers	skills/finishing-a-development-branch/SKILL.md	b36e082	fleet merge/deploy invariants
-frontend-design	anthropics/skills	skills/frontend-design/SKILL.md	2c5958e
 web-design-review	vercel-labs/web-interface-guidelines	command.md	434b7f9	adapted; fixed local rules, no runtime fetch
 e2e	anthropics/skills	skills/webapp-testing/SKILL.md	0a64e39
 with-server	anthropics/skills	skills/webapp-testing/scripts/with_server.py	0a64e39
