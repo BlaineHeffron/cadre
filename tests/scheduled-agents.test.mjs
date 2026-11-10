@@ -1742,6 +1742,57 @@ describe('scheduled agents routes', () => {
     assert.equal((await start({ enabled: false })).status.task, null);
   });
 
+  it('keeps fan-out leftovers pending, reruns a day later, and skips groups with an open PR', async () => {
+    const launches = [];
+    let nowMs = 10_000;
+    let openBranches = [];
+    const changed = [
+      { local: 'a1', repo: 'acme/a', path: 'a1.md', headSha: 'ha' },
+      { local: 'a2', repo: 'acme/a', path: 'a2.md', headSha: 'ha' },
+      { local: 'b1', repo: 'acme/b', path: 'b1.md', headSha: 'hb' },
+    ];
+    const app = await buildScheduledRoutesApp({
+      now: () => nowMs,
+      rootConfig: { skillsUpstream: { repoPath: '/repo/fleet', maxFanout: 1 }, fleet: { repoPaths: {} }, githubAgents: { repoPaths: {} } },
+      lsRemoteRunner: async (repo) => (repo === 'acme/a' ? 'ha' : 'hb'),
+      readUpstreamManifest: async () => 'a1\tacme/a\ta1.md\t1\nb1\tacme/b\tb1.md\t1',
+      detectSkillsUpstream: async () => ({ changed }),
+      listOpenPrBranches: async () => openBranches,
+      createSkillsUpstreamWorktree: async (input) => ({ worktreePath: `/wt/${input.displayName}` }),
+      sessionLauncher: async (input) => {
+        launches.push(input);
+        return { id: `sess_${launches.length}` };
+      },
+    });
+    const DAY = 86_400_000;
+    const first = (await app.inject({ method: 'POST', url: '/api/fleet/skills-upstream/run-now' })).json();
+    assert.deepEqual(launches.map((launch) => launch.displayName), ['skill-sync a1']);
+    assert.deepEqual(first.task.metadata.pendingUpstreamRepos, ['acme/a', 'acme/b']);
+    assert.equal(first.task.nextRunAtEpochMs, nowMs + DAY);
+
+    // Heads unchanged, but leftovers are pending; a1's PR is still open, so a2 goes next.
+    openBranches = ['dueno-fleet/skill-sync/skill-sync-a1-abc'];
+    nowMs += DAY;
+    const second = (await app.inject({ method: 'POST', url: '/api/fleet/skills-upstream/run-now' })).json();
+    assert.equal(second.step.spawned, 1);
+    assert.equal(launches[1].displayName, 'skill-sync a2');
+    assert.deepEqual(second.task.metadata.pendingUpstreamRepos, ['acme/b']);
+
+    openBranches.push('dueno-fleet/skill-sync/skill-sync-a2-abd');
+    nowMs += DAY;
+    const third = (await app.inject({ method: 'POST', url: '/api/fleet/skills-upstream/run-now' })).json();
+    assert.equal(launches[2].displayName, 'skill-sync b1');
+    assert.deepEqual(third.task.metadata.pendingUpstreamRepos, []);
+    assert.equal(third.task.nextRunAtEpochMs > nowMs + DAY, true);
+
+    // Nothing pending and no head moved: the gate skips.
+    nowMs += DAY;
+    const fourth = (await app.inject({ method: 'POST', url: '/api/fleet/skills-upstream/run-now' })).json();
+    assert.equal(fourth.step.tasks[0].action, 'skippedNoUpstreamChanges');
+    assert.equal(launches.length, 3);
+    await app.close();
+  });
+
   it('asks only the first rea group in a tick to bump rea-agents', async () => {
     const launches = [];
     const app = await buildScheduledRoutesApp({
@@ -2342,6 +2393,7 @@ async function buildScheduledRoutesApp({
   lsRemoteRunner,
   readUpstreamManifest,
   detectSkillsUpstream,
+  listOpenPrBranches,
   createSkillsUpstreamWorktree,
   createRepoQualityWorktree,
   removeRepoQualityWorktree,
@@ -2372,6 +2424,7 @@ async function buildScheduledRoutesApp({
     lsRemoteRunner,
     readUpstreamManifest,
     detectSkillsUpstream,
+    listOpenPrBranches,
     createSkillsUpstreamWorktree,
     createRepoQualityWorktree,
     removeRepoQualityWorktree,

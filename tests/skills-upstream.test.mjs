@@ -106,6 +106,46 @@ describe('skills upstream helpers', () => {
     assert.match(report.changed[0].diff, /\+upstream line/);
   });
 
+  it('compares release-tagged upstreams against their latest release tag, not HEAD', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'skills-upstream-tag-'));
+    const git = (cwd, ...args) => {
+      const result = spawnSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trim();
+    };
+    const upstream = join(root, 'upstream');
+    await mkdir(upstream);
+    git(upstream, 'init', '-q', '-b', 'main');
+    const commit = async (body, message) => {
+      await writeFile(join(upstream, 'SKILL.md'), body);
+      git(upstream, 'add', '.');
+      git(upstream, 'commit', '-qm', message);
+      return git(upstream, 'rev-parse', 'HEAD');
+    };
+    const pinned = await commit('v1\n', 'pinned');
+    await commit('v2\n', 'release 2.9');
+    git(upstream, 'tag', '-a', 'rea-agents-2.9.0', '-m', 'r');
+    const release = await commit('v3\n', 'release 2.10');
+    git(upstream, 'tag', 'rea-agents-2.10.0');
+    await commit('v4\n', 'unreleased');
+    const cache = join(root, 'cache');
+    await mkdir(cache);
+    git(cache, 'clone', '-q', '--no-checkout', upstream, join(cache, 'morluto__rea'));
+    const repo = join(root, 'fleet');
+    await mkdir(join(repo, 'config/skills'), { recursive: true });
+    await writeFile(join(repo, 'config/skills/UPSTREAM.tsv'), `rea\tmorluto/rea\tSKILL.md\t${pinned.slice(0, 7)}\n`);
+
+    const result = spawnSync(process.execPath, ['scripts/skills-upstream-check.mjs', '--json', '--repo', repo], {
+      encoding: 'utf8',
+      env: { ...process.env, SKILLS_UPSTREAM_CACHE: cache },
+    });
+    const [row] = JSON.parse(result.stdout).results;
+    assert.equal(row.status, 'changed');
+    assert.equal(row.headSha, release);
+    assert.equal(row.commits.length, 2);
+    assert.doesNotMatch(row.commits.join('\n'), /unreleased/);
+  });
+
   it('asks only rea groups that opt in to bump rea-agents', () => {
     const group = { locals: ['reverse-engineer-anything'], repo: 'morluto/rea', path: 'skills/reverse-engineer-anything/SKILL.md' };
     assert.match(buildSkillsUpstreamIntegrationPrompt(group, { bumpReaAgents: true }), /npm install --save-exact rea-agents@/);
