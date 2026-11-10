@@ -2,6 +2,7 @@ import { AgentBusStore } from './store.mjs';
 import { createAgentAdapters } from './adapters.mjs';
 import { config } from '../../config.mjs';
 import { getAgentProviderPreferencesSync } from '../agent/provider-preferences.mjs';
+import { defaultClaudeEffort } from '../agent/hook-events.mjs';
 import { getProductionControlRegistry } from '../ops/production-controls.mjs';
 import { createAgentBusParticipants } from './participants.mjs';
 import { createAgentBusDelivery } from './delivery.mjs';
@@ -101,7 +102,7 @@ export async function agentBusPlugin(app, { wsManager, productionControls = getP
 
   const participants = createAgentBusParticipants({ app, store, adapters,
     readProviderPreferences: () => getAgentProviderPreferencesSync(), isAgentRef, participantKey,
-    defaultThinkingLevelForKind: () => 'medium' });
+    defaultThinkingLevelForKind: (kind, model) => defaultClaudeEffort('', model) || 'medium' });
 
   async function enrichThread(thread, snapshot = store.getThread(thread.id), runtimeCache = new Map()) {
     const next = structuredClone(thread);

@@ -22,7 +22,7 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
       ? 'Unless your task says otherwise: after approval and the project\'s gates pass, the reviewer merges the PR, then reports; do not delete the remote branch.'
       : 'Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges.',
     'Wait on background jobs by exact PID (`wait <pid>`, `kill -0 <pid>`) or your harness\'s background-task tool; wait on a long command with one call and a long timeout, not repeated sleeps; never find or kill processes by matching their full command line with `pgrep`/`pkill`, since that can hit other agents.',
-    'For your own bounded reading, searching, and checks, use built-in subagents when available: Haiku (model: "haiku") on Claude, GPT-6 Luna (gpt-6-luna) on Codex; reserve Cadre sessions for cross-provider work, isolation, persistence, or interaction.',
+    'When a read, search, or check is large enough to crowd your context, delegate it to a built-in subagent when available: Haiku (model: "haiku") on Claude, GPT-6 Luna (gpt-6-luna) on Codex; otherwise do it yourself. Cadre sessions and rooms are for collaboration between agents or work the operator interacts with separately.',
     'To wait on a teammate, end your turn; Cadre delivers room messages when you are idle. Do not sleep or poll room_context for replies.',
     'Use the `dueno` MCP server for room communication; its tool descriptions cover rooms, DMs, paging and ownership.',
     `Context: room_context(thread_id="${threadId}")`,

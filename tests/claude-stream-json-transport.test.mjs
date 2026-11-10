@@ -224,6 +224,9 @@ describe('ClaudeStreamJsonTransport', () => {
     ]);
     const effort = buildClaudeStreamJsonArgs({ sessionId: '11111111-2222-4333-8444-555555555555', resume: true, thinkingLevel: 'high' });
     assert.equal(effort[effort.indexOf('--effort') + 1], 'high');
+    const fable = (thinkingLevel) => buildClaudeStreamJsonArgs({ sessionId: '11111111-2222-4333-8444-555555555555', model: 'claude-fable-5-2', thinkingLevel });
+    assert.equal(fable('')[fable('').indexOf('--effort') + 1], 'high');
+    assert.equal(fable('low')[fable('low').indexOf('--effort') + 1], 'low');
     assert.throws(() => buildClaudeStreamJsonArgs({
       sessionId: '11111111-2222-4333-8444-555555555555', permissionMode: 'mystery',
     }), (error) => error.code === 'unsupported_permission_mode');

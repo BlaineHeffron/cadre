@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { CLAUDE_FLEET_PLUGIN_DIR } from './hook-events.mjs';
+import { CLAUDE_FLEET_PLUGIN_DIR, defaultClaudeEffort } from './hook-events.mjs';
 
 const HARNESS_ALIASES = Object.freeze({
   anthropic: 'claude',
@@ -172,7 +172,8 @@ class ClaudeRuntimeHarness extends AgentRuntimeHarness {
     const sessionId = String(cliSessionId || '').trim();
     if (sessionId) nextArgs.push('--session-id', sessionId);
     if (model) nextArgs.push('--model', model);
-    if (thinkingLevel) nextArgs.push('--effort', thinkingLevel);
+    const effort = defaultClaudeEffort(thinkingLevel, model);
+    if (effort) nextArgs.push('--effort', effort);
     return [...nextArgs, ...args];
   }
 
