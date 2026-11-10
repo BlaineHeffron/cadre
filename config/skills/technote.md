@@ -34,7 +34,7 @@ Decide the mode before writing:
 
 - **Note (default)**: a standalone `\documentclass{article}` document, preamble through `\end{document}`, for a derivation, convergence/complexity result, method writeup, or technical memo. Use the process below.
 - **Snippet**: a single equation, algorithm, table, or TikZ figure to drop into someone else's document. Deliver raw body content, no preamble, as a labelled code block. Pull the relevant standards from the `latex-math` fleet skill (config/skills/latex-math.md).
-- **Talk**: slides. Use the `scientific-slides` fleet skill (config/skills/scientific-slides.md) for structure and the `slides-beamer` skill (config/skills/slides-beamer.md) for the Beamer preamble.
+- **Talk**: slides. Use the `slides-beamer` skill (config/skills/slides-beamer.md) for the Beamer preamble.
 
 When in doubt, ask which one.
 
@@ -69,7 +69,7 @@ Load-bearing points, so the note is readable and not just correct:
 
 ### 4. Claims and citations
 
-A technical note still makes claims. Apply the `paper` fleet skill (config/skills/paper.md): each nontrivial claim is stated in one sentence, marked as derivation / cited / speculation, and (where empirical) paired with what would falsify it. Cite precisely, naming the specific result used (`\citet[Theorem~2.1]{engl1996}`), never a vague "as shown in [3]". For the bibliography, default to a self-contained `thebibliography` without asking; switch to BibTeX/BibLaTeX only when the user mentions a `.bib` file or a journal style, and never mix the two. Every `\bibitem` carries a natbib label, `\bibitem[Surname and Surname(Year)]{key}`, or `\citet{}` prints "(author?)"; with BibTeX use a natbib-aware style (`plainnat`, `abbrvnat`, `unsrtnat`). Supply an entry only when every field is known with certainty; never guess a volume, page range, or year, and use `\bibitem[TODO(0000)]{key}\todo{...}` otherwise.
+A technical note still makes claims. State each nontrivial claim in one sentence, mark it derivation / cited / speculation, and (where empirical) pair it with what would falsify it. Cite precisely, naming the specific result used (`\citet[Theorem~2.1]{engl1996}`), never a vague "as shown in [3]". For the bibliography, default to a self-contained `thebibliography` without asking; switch to BibTeX/BibLaTeX only when the user mentions a `.bib` file or a journal style, and never mix the two. Every `\bibitem` carries a natbib label, `\bibitem[Surname and Surname(Year)]{key}`, or `\citet{}` prints "(author?)"; with BibTeX use a natbib-aware style (`plainnat`, `abbrvnat`, `unsrtnat`). Supply an entry only when every field is known with certainty; never guess a volume, page range, or year, and use `\bibitem[TODO(0000)]{key}\todo{...}` otherwise.
 
 ### 5. Compile and verify
 

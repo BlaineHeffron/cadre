@@ -31,6 +31,6 @@ Record these the moment the run finishes, while the state is still recoverable:
 
 One run, one record. Do not invent a full methods paper around a single run, and do not let a run go unrecorded because it "didn't work": a failed or null run is data, and its record is what stops you repeating it. Distinguish a preregistered (confirmatory) run from an exploratory one in the record, and do not relabel exploratory results as if you predicted them.
 
-For units and order-of-magnitude sanity on every measured quantity, the configured `units` fleet skill. When a run becomes a written claim, the `paper` fleet skill (config/skills/paper.md) carries claim-cite-falsify.
+For units and order-of-magnitude sanity on every measured quantity, the configured `units` fleet skill. When a run becomes a written claim, state each claim in one sentence, mark it derivation, cited, or speculation, and pair it with what would falsify it.
 
 <!-- fleet-native: reproducibility + preregistration discipline (no single upstream) -->
