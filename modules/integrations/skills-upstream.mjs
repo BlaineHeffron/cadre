@@ -80,7 +80,7 @@ export function groupChangedByUpstreamPath(changed = []) {
   return groups;
 }
 
-export function buildSkillsUpstreamIntegrationPrompt(group = {}, { deferredCount = 0 } = {}) {
+export function buildSkillsUpstreamIntegrationPrompt(group = {}, { deferredCount = 0, bumpReaAgents = false } = {}) {
   const locals = Array.isArray(group.locals) ? group.locals.filter(Boolean) : [];
   const names = locals.join(', ') || 'unknown';
   const primary = locals[0] || 'skill';
@@ -102,6 +102,9 @@ export function buildSkillsUpstreamIntegrationPrompt(group = {}, { deferredCount
     `5. Open ONE PR from this worktree branch titled "chore(skills): sync ${primary} with upstream"${locals.length > 1 ? ` covering ${names}` : ''}, listing the commits folded in and anything skipped with why. Do not merge to main yourself.`,
     'If the upstream restructured the skill so the delta cannot be folded mechanically, open a draft PR describing the divergence and re-pin nothing.',
     'Never modify the fleet-native skills (experiment, custody, client-update, bootstrap, visual-design-it-twice); they have no upstream.',
+    bumpReaAgents
+      ? 'Also keep Cadre on the latest rea release in this same PR: if `npm view rea-agents version` is newer than package.json, run `npm install --save-exact rea-agents@<that version>` to update package.json and package-lock.json, adapt any Cadre code or config the release notes require, and run npm test -- tests/mcp-remote-servers.test.mjs before opening the PR.'
+      : '',
     deferred,
   ].join('\n');
 }

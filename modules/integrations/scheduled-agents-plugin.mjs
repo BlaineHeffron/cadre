@@ -8,6 +8,7 @@ import {
   stepDue,
 } from './scheduled-agents.mjs';
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -336,10 +337,17 @@ function configuredRepoQualityWorktreeBase(config = appConfig) {
   );
 }
 
+// The checkout this server runs from; under scripts/server.sh that is `<dev clone>-live` at origin/main.
+const OWN_CHECKOUT = fileURLToPath(new URL('../..', import.meta.url)).replace(/\/+$/, '');
+
+// Worktrees branch from the dev clone; `<dev clone>-live` maps back to it.
+export function defaultSkillsUpstreamRepoPath(ownCheckout = OWN_CHECKOUT) {
+  const devClone = ownCheckout.replace(/-live$/, '');
+  return existsSync(resolve(devClone, SKILLS_UPSTREAM_MANIFEST_REL)) ? devClone : '';
+}
+
 function configuredSkillsUpstreamRepoPath(config = appConfig) {
-  const explicit = normalizeText(config?.skillsUpstream?.repoPath);
-  if (explicit) return explicit;
-  return configuredRepoPaths(config)[0] || '';
+  return normalizeText(config?.skillsUpstream?.repoPath) || defaultSkillsUpstreamRepoPath();
 }
 
 function skillsUpstreamRepoProblem(repoPath = '') {
@@ -805,10 +813,10 @@ async function shouldLaunchSkillsUpstreamTask(task = {}, {
   };
 }
 
-async function defaultReadUpstreamManifest(workDir) {
+// Pins come from the deployed checkout (origin/main), not the dev clone's possibly stale working tree.
+async function defaultReadUpstreamManifest() {
   const { readFile } = await import('node:fs/promises');
-  const { join } = await import('node:path');
-  return readFile(join(normalizeText(workDir) || process.cwd(), SKILLS_UPSTREAM_MANIFEST_REL), 'utf8');
+  return readFile(resolve(OWN_CHECKOUT, SKILLS_UPSTREAM_MANIFEST_REL), 'utf8');
 }
 
 function buildShouldLaunchDispatcher({ rootConfig, gitRunner, lsRemoteRunner, readManifest, logger } = {}) {
@@ -838,23 +846,13 @@ function buildShouldLaunchDispatcher({ rootConfig, gitRunner, lsRemoteRunner, re
   };
 }
 
-async function defaultDetectSkillsUpstream(workDir) {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const execFileAsync = promisify(execFile);
-  const repo = normalizeText(workDir);
-  const script = joinPath(repo, 'scripts/skills-upstream-check.mjs');
-  const { stdout } = await execFileAsync('node', [script, '--json', '--repo', repo], {
-    cwd: repo || undefined,
+async function defaultDetectSkillsUpstream() {
+  const script = resolve(OWN_CHECKOUT, 'scripts/skills-upstream-check.mjs');
+  const { stdout } = await execFileAsync('node', [script, '--json'], {
+    cwd: OWN_CHECKOUT,
     maxBuffer: 32 * 1024 * 1024,
   });
   return JSON.parse(String(stdout || '{}'));
-}
-
-function joinPath(root, rel) {
-  const prefix = normalizeText(root);
-  if (!prefix) return rel;
-  return `${prefix.replace(/\/+$/, '')}/${rel}`;
 }
 
 async function defaultCreateSkillsUpstreamWorktree({ repoPath, baseDir, displayName, nowMs } = {}) {
@@ -915,7 +913,11 @@ function buildSkillsUpstreamLauncher({
         continue;
       }
       const session = await inner({
-        prompt: buildSkillsUpstreamIntegrationPrompt(group, { deferredCount: i === 0 ? deferredCount : 0 }),
+        prompt: buildSkillsUpstreamIntegrationPrompt(group, {
+          deferredCount: i === 0 ? deferredCount : 0,
+          // One rea-agents bump per tick: only the first morluto/rea group carries it.
+          bumpReaAgents: group.repo === 'morluto/rea' && !selected.slice(0, i).some((prior) => prior.repo === group.repo),
+        }),
         workDir,
         provider: input.provider,
         model: input.model,
@@ -1256,7 +1258,27 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
     stepNow: (at = now()) => stepDue(at, stepDeps),
   });
 
+  async function setupSkillsUpstreamTask(existing) {
+    const input = buildSkillsUpstreamTaskInput(rootConfig, { nowMs: now() });
+    return existing
+      ? store.update(SKILLS_UPSTREAM_TASK_ID, {
+        ...input,
+        status: 'active',
+        nextRunAtEpochMs: existing.nextRunAtEpochMs || input.nextRunAtEpochMs,
+        metadata: {
+          ...input.metadata,
+          upstreamHeads: existing.metadata?.upstreamHeads || input.metadata.upstreamHeads,
+        },
+      })
+      : store.register(input);
+  }
+
   await store.list();
+  // Self-enable the skills upstream watch on a side-effect server; an operator-cancelled task stays cancelled.
+  if (sourceConfig.enabled === true && !skillsUpstreamRepoProblem(configuredSkillsUpstreamRepoPath(rootConfig))) {
+    const existing = await store.get(SKILLS_UPSTREAM_TASK_ID);
+    if (!existing || existing.status === 'active') await setupSkillsUpstreamTask(existing);
+  }
   loop.start();
 
   app.addHook('onClose', async () => {
@@ -1369,20 +1391,7 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
         error: { code: problem.code, message: problem.message },
       });
     }
-    const input = buildSkillsUpstreamTaskInput(rootConfig, { nowMs: now() });
-    const existing = await store.get(SKILLS_UPSTREAM_TASK_ID);
-    const task = existing
-      ? await store.update(SKILLS_UPSTREAM_TASK_ID, {
-        ...input,
-        status: 'active',
-        nextRunAtEpochMs: existing.nextRunAtEpochMs || input.nextRunAtEpochMs,
-        metadata: {
-          ...input.metadata,
-          upstreamHeads: existing.metadata?.upstreamHeads || input.metadata.upstreamHeads,
-        },
-      })
-      : await store.register(input);
-    return safeSkillsUpstreamStatus(task, rootConfig);
+    return safeSkillsUpstreamStatus(await setupSkillsUpstreamTask(await store.get(SKILLS_UPSTREAM_TASK_ID)), rootConfig);
   });
 
   app.post('/api/fleet/skills-upstream/run-now', async (_req, reply) => {

@@ -164,13 +164,14 @@ async function main() {
       errored,
       results,
     }, null, 2)}\n`);
-    process.exit(0);
+    // process.exit() would truncate output still queued for a pipe (>64KB with --diff).
+    return;
   }
 
   console.log(`Checked ${results.length} ported skills across ${repos.length} upstreams.\n`);
   if (changed.length === 0 && errored.length === 0) {
     console.log('All in sync. Nothing to integrate.');
-    process.exit(0);
+    return;
   }
   for (const r of changed) {
     console.log(`CHANGED  ${r.local}  (${r.repo} ${r.path})`);
@@ -189,7 +190,7 @@ async function main() {
   if (changed.length > 0) {
     console.log('To integrate: see docs/skills-upstream-integration.md');
   }
-  process.exit(changed.length > 0 ? 1 : 0);
+  process.exitCode = changed.length > 0 ? 1 : 0;
 }
 
 main().catch((err) => {

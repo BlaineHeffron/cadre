@@ -1,9 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   buildSkillsUpstreamIntegrationPrompt,
   groupChangedByUpstreamPath,
@@ -68,5 +68,47 @@ describe('skills upstream helpers', () => {
     ], { encoding: 'utf8' });
     assert.equal(result.status, 2);
     assert.match(result.stderr, /manifest not found/);
+  });
+
+  it('emits parseable --json through a pipe even when the report exceeds the pipe buffer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'skills-upstream-json-'));
+    const git = (cwd, ...args) => {
+      const result = spawnSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trim();
+    };
+    const upstream = join(root, 'upstream');
+    await mkdir(upstream);
+    git(upstream, 'init', '-q', '-b', 'main');
+    await writeFile(join(upstream, 'SKILL.md'), 'v1\n');
+    git(upstream, 'add', '.');
+    git(upstream, 'commit', '-qm', 'pin');
+    const pinned = git(upstream, 'rev-parse', '--short', 'HEAD');
+    await writeFile(join(upstream, 'SKILL.md'), `${'upstream line\n'.repeat(8000)}`);
+    git(upstream, 'commit', '-qam', 'big change');
+    const cache = join(root, 'cache');
+    await mkdir(cache);
+    git(cache, 'clone', '-q', '--no-checkout', upstream, join(cache, 'acme__skills'));
+    const repo = join(root, 'fleet');
+    await mkdir(join(repo, 'config/skills'), { recursive: true });
+    await writeFile(join(repo, 'config/skills/UPSTREAM.tsv'), `big\tacme/skills\tSKILL.md\t${pinned}\n`);
+
+    const child = spawn(process.execPath, ['scripts/skills-upstream-check.mjs', '--json', '--diff', '--repo', repo], {
+      env: { ...process.env, SKILLS_UPSTREAM_CACHE: cache },
+    });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    const code = await new Promise((resolve) => child.on('close', resolve));
+    assert.equal(code, 0);
+    assert.ok(stdout.length > 65536);
+    const report = JSON.parse(stdout);
+    assert.deepEqual(report.changed.map((row) => row.local), ['big']);
+    assert.match(report.changed[0].diff, /\+upstream line/);
+  });
+
+  it('asks only rea groups that opt in to bump rea-agents', () => {
+    const group = { locals: ['reverse-engineer-anything'], repo: 'morluto/rea', path: 'skills/reverse-engineer-anything/SKILL.md' };
+    assert.match(buildSkillsUpstreamIntegrationPrompt(group, { bumpReaAgents: true }), /npm install --save-exact rea-agents@/);
+    assert.doesNotMatch(buildSkillsUpstreamIntegrationPrompt(group), /rea-agents/);
   });
 });

@@ -6,7 +6,9 @@ The fleet's launch skills in `config/skills/` are ported from public skill repos
 
 The `skills_upstream_watch` scheduled task (in `scheduled-agents-plugin.mjs`) is gated on an `ls-remote` HEAD snapshot, so it only fires when a watched upstream moved. When it fires the scheduler — not an LLM dispatcher — runs the detector, groups changed locals by `(repo, upstream_path)`, and fans out **one isolated worktree agent per group**, capped at `config.skillsUpstream.maxFanout` (default 3). Shared-path slices (the LaTeX skills, etc.) get one agent, not one per local file. Each child inherits the task provider/model (the github-watch default, currently xai/grok-4.6, unless `DM_SKILLS_UPSTREAM_PROVIDER` / `DM_SKILLS_UPSTREAM_MODEL` override). Running the steps below by hand collapses both tiers into one session, which is fine for a manual sync.
 
-The watcher refuses the live deploy checkout (`cadre-live`). Set `DM_SKILLS_UPSTREAM_REPO_PATH` to a non-live clone, or configure a fleet/githubAgents repo path.
+The service registers the task itself at startup when side-effect loops are on (port 4310 or `CADRE_ALLOW_SIDE_EFFECTS=1`) and the repo is usable; `POST /api/fleet/skills-upstream/setup` and `/run-now` still work by hand. A cancelled task stays cancelled across restarts. Worktrees branch from `DM_SKILLS_UPSTREAM_REPO_PATH`, else the dev clone behind the live checkout (`<dev clone>-live` → `<dev clone>`, when it has `config/skills/UPSTREAM.tsv`). The live checkout itself is refused. Drift detection reads pins from the deployed checkout (origin/main), not the dev clone's working tree.
+
+The `morluto/rea` group also keeps Cadre on the latest rea release: the first rea group in a tick bumps `rea-agents` in `package.json`/`package-lock.json` to the newest published version (and adapts Cadre if the release requires it) in the same PR.
 
 ## The pin manifest
 
