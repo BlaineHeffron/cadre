@@ -62,6 +62,7 @@ Review the supplied files and the rendered interface when a browser is available
 - Let user input interrupt animation.
 - Add pause controls for motion that continues longer than five seconds beside other content.
 - Provide a click and keyboard alternative for drag, swipe, pinch, or path gestures.
+- To suppress page rubber-banding, set `overscroll-behavior: none` on `<html>` inside `@media (pointer: fine)` and keep coarse-pointer defaults for pull-to-refresh. Test hybrid touch devices: `pointer` describes only the primary input, and `none` also disables scroll chaining and native swipe navigation.
 - Use `autoFocus` only when one desktop input clearly needs it.
 - Make hover, active, and focus states more visible than the resting state.
 
@@ -120,4 +121,4 @@ Group findings by file. Use `file:line` locations. State the observed defect and
 
 Separate code findings from browser findings. State any viewport or interaction that you could not test. Do not report a rule without evidence.
 
-<!-- upstream: vercel-labs/web-interface-guidelines@e3d624b command.md; adapted and fixed locally, no runtime network fetch -->
+<!-- upstream: vercel-labs/web-interface-guidelines@434b7f9 command.md; adapted and fixed locally, no runtime network fetch -->
