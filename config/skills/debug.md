@@ -111,11 +111,11 @@ You MUST complete each phase before proceeding to the next.
    ```bash
    # Layer 1: Workflow
    echo "=== Secrets available in workflow: ==="
-   echo "IDENTITY: ${IDENTITY:+SET}${IDENTITY:-UNSET}"
+   echo "IDENTITY: $([ -n "${IDENTITY:-}" ] && echo SET || echo UNSET)"
 
    # Layer 2: Build script
    echo "=== Env vars in build script: ==="
-   env | grep IDENTITY || echo "IDENTITY not in environment"
+   printenv IDENTITY >/dev/null 2>&1 && echo "IDENTITY in environment" || echo "IDENTITY not in environment"
 
    # Layer 3: Signing script
    echo "=== Keychain state: ==="
@@ -305,4 +305,4 @@ These techniques are part of systematic debugging, each its own fleet skill:
 - **`defense-in-depth`** (config/skills/defense-in-depth.md) - Add validation at multiple layers after finding root cause
 - **`condition-based-waiting`** (config/skills/condition-based-waiting.md) - Replace arbitrary timeouts with condition polling
 
-<!-- upstream: obra/superpowers@b36e082 skills/systematic-debugging/SKILL.md -->
+<!-- upstream: obra/superpowers@22f0b46 skills/systematic-debugging/SKILL.md -->
