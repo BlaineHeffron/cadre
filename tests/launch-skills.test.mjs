@@ -341,6 +341,11 @@ describe('launch skill authoring', () => {
     assert.equal(ids.has('session-improve'), true);
   });
 
+  it('discovers the talk grading loop skill', () => {
+    const ids = new Set(discoverLaunchSkills().map((skill) => skill.id));
+    assert.equal(ids.has('talk-grading-loop'), true);
+  });
+
   it('discovers reverse-engineer-anything and inlines every REA target guide', () => {
     const ids = new Set(discoverLaunchSkills().map((skill) => skill.id));
     assert.equal(ids.has('reverse-engineer-anything'), true);
