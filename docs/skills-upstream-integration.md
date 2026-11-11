@@ -12,7 +12,7 @@ Upstreams listed in `UPSTREAM_RELEASE_TAGS` (`modules/integrations/skills-upstre
 
 ## The pin manifest
 
-`config/skills/UPSTREAM.tsv` is the source of truth: one row per ported skill, tab-separated `local_skill  repo  upstream_path  pinned_sha  note`. The `pinned_sha` is the upstream commit the current fleet file was derived from. Fleet-native skills (`experiment`, `custody`, `client-update`, `bootstrap`, `visual-design-it-twice`, `session-grade`, `session-improve`) have no upstream and are not in the manifest; never touch them here.
+`config/skills/UPSTREAM.tsv` is the source of truth: one row per ported skill, tab-separated `local_skill  repo  upstream_path  pinned_sha  note`. The `pinned_sha` is the upstream commit the current fleet file was derived from. Fleet-native skills (`experiment`, `custody`, `client-update`, `bootstrap`, `visual-design-it-twice`, `session-grade`, `session-improve`, `talk-grading-loop`, `ui-ux-grading-loop`) have no upstream and are not in the manifest; never touch them here.
 
 Personal and share-alike skills live outside this repository. Their pins are kept in the private repository's `skills/UPSTREAM.tsv`, so this checker watches only files present in the public tree.
 
