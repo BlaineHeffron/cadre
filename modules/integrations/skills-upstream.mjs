@@ -7,6 +7,8 @@ export const DEFAULT_SKILLS_UPSTREAM_INTERVAL_SECONDS = 604800;
 export const DEFAULT_SKILLS_UPSTREAM_MAX_FANOUT = 3;
 export const DEFAULT_SKILLS_UPSTREAM_WORKTREE_BASE = '~/.dueno-fleet/agent-worktrees';
 export const LIVE_FLEET_CHECKOUT = join(homedir(), 'projects/cadre-live');
+// Upstreams tracked at their latest release tag instead of HEAD (HEAD documents unreleased work).
+export const UPSTREAM_RELEASE_TAGS = { 'morluto/rea': 'rea-agents-*' };
 
 function text(value) {
   return String(value || '').trim();
@@ -80,7 +82,7 @@ export function groupChangedByUpstreamPath(changed = []) {
   return groups;
 }
 
-export function buildSkillsUpstreamIntegrationPrompt(group = {}, { deferredCount = 0 } = {}) {
+export function buildSkillsUpstreamIntegrationPrompt(group = {}, { deferredCount = 0, bumpReaAgents = false } = {}) {
   const locals = Array.isArray(group.locals) ? group.locals.filter(Boolean) : [];
   const names = locals.join(', ') || 'unknown';
   const primary = locals[0] || 'skill';
@@ -102,6 +104,9 @@ export function buildSkillsUpstreamIntegrationPrompt(group = {}, { deferredCount
     `5. Open ONE PR from this worktree branch titled "chore(skills): sync ${primary} with upstream"${locals.length > 1 ? ` covering ${names}` : ''}, listing the commits folded in and anything skipped with why. Do not merge to main yourself.`,
     'If the upstream restructured the skill so the delta cannot be folded mechanically, open a draft PR describing the divergence and re-pin nothing.',
     'Never modify the fleet-native skills (experiment, custody, client-update, bootstrap, visual-design-it-twice); they have no upstream.',
+    bumpReaAgents
+      ? 'This upstream is tracked at its latest rea-agents-* release tag, so the HEAD above is that tag commit. Also keep Cadre on that release in this same PR: run `npm install --save-exact rea-agents@<tag version>` (confirm it matches `npm view rea-agents version`) to update package.json and package-lock.json, adapt any Cadre code or config the release notes require, and run npm test -- tests/mcp-remote-servers.test.mjs before opening the PR.'
+      : '',
     deferred,
   ].join('\n');
 }
