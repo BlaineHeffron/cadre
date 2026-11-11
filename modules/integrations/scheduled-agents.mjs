@@ -527,7 +527,7 @@ export async function stepDue(nowMs = Date.now(), {
         : normalizeText(session?.id || session?.sessionId || session?.participants?.[0]?.session_id) || null,
       lastSpawnAtEpochMs: nowMs,
       consecutiveSkips: 0,
-      nextRunAtEpochMs: advanceNextRunAt(task, nowMs),
+      nextRunAtEpochMs: Number(session?.nextRunAtEpochMs || 0) || advanceNextRunAt(task, nowMs),
       status,
       ...(task.type === 'inject' ? { tickLog: appendTick(task, nowMs, 'injected') } : {}),
       metadata: claimMetadata,

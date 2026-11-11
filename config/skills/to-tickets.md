@@ -79,7 +79,7 @@ Iterate until the user approves the breakdown.
 
 Publish the approved tickets. The tickets are the same either way, only the shape of the blocking edges changes:
 
-- **GitHub (default)** → publish one issue per ticket via `gh` in dependency order (blockers first) so each ticket's blocking edges can reference real issue numbers. Use native blocking / sub-issue relationships where available; otherwise set each ticket's "Blocked by" section to the blocking issues. Apply the `ready-for-agent` label unless instructed otherwise; the tickets are agent-grabbable by construction.
+- **GitHub (default)** → publish one issue per ticket via `gh` in dependency order (blockers first) so each ticket's blocking edges can reference real issue numbers. Use native blocking relationships where available; otherwise set each ticket's "Blocked by" section to the blocking issues. If the source was an existing issue, make each ticket its sub-issue (`gh api repos/<owner>/<repo>/issues/<parent>/sub_issues -F sub_issue_id=<child issue's numeric id>`). Apply the `ready-for-agent` label unless instructed otherwise; the tickets are agent-grabbable by construction.
 - **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below: one ticket per file, never a single combined file.
 
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
@@ -103,7 +103,7 @@ The end-to-end behaviour this ticket makes work, from the user's perspective, no
 
 ## Blocked by
 
-- A reference to each blocking ticket, or "None (can start immediately)".
+- A reference to each blocking ticket, or "None (can start immediately)". Omit this section when blockers were set as native edges.
 
 </issue-template>
 
@@ -124,4 +124,4 @@ The end-to-end behaviour this ticket makes work, from the user's perspective, no
 
 In either form, avoid specific file paths or code snippets: they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.
 
-<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/to-tickets/SKILL.md -->
+<!-- upstream: mattpocock/skills@4ae2317 skills/engineering/to-tickets/SKILL.md -->

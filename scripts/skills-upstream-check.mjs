@@ -31,6 +31,7 @@ import {
   groupChangedByUpstreamPath,
   parseUpstreamManifest,
   SKILLS_UPSTREAM_MANIFEST_REL,
+  UPSTREAM_RELEASE_TAGS,
 } from '../modules/integrations/skills-upstream.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -67,7 +68,7 @@ async function ensureRepo(repo) {
   const url = `https://github.com/${repo}.git`;
   if (existsSync(join(dir, 'HEAD')) || existsSync(join(dir, '.git'))) {
     try {
-      await git(dir, ['fetch', '--quiet', '--filter=blob:none', 'origin']);
+      await git(dir, ['fetch', '--quiet', '--tags', '--filter=blob:none', 'origin']);
     } catch (err) {
       const error = new Error(`fetch failed for ${repo}: ${err.message || err}`);
       error.code = 'git_fetch_failed';
@@ -83,15 +84,21 @@ async function ensureRepo(repo) {
   return dir;
 }
 
-function headRef(dir) {
+async function headRef(dir, repo) {
+  const tagPattern = UPSTREAM_RELEASE_TAGS[repo];
+  if (tagPattern) {
+    const latest = (await git(dir, ['tag', '--list', tagPattern, '--sort=-v:refname']) || '').split('\n')[0].trim();
+    if (!latest) throw new Error(`no ${tagPattern} release tag in ${repo}`);
+    return `refs/tags/${latest}`;
+  }
   // Prefer the remote default branch; fall back to FETCH_HEAD / HEAD.
   return git(dir, ['rev-parse', 'origin/HEAD'], { allowFail: true })
     .then((out) => (out ? 'origin/HEAD' : 'HEAD'));
 }
 
 async function checkRow(row, repoDir) {
-  const ref = await headRef(repoDir);
-  const headSha = (await git(repoDir, ['rev-parse', ref], { allowFail: true }) || '').trim();
+  const ref = await headRef(repoDir, row.repo);
+  const headSha = (await git(repoDir, ['rev-parse', `${ref}^{commit}`], { allowFail: true }) || '').trim();
   // Does the pinned sha exist in this clone? (Short shas resolve fine.)
   const pinnedResolved = (await git(repoDir, ['rev-parse', '--verify', `${row.sha}^{commit}`], { allowFail: true }) || '').trim();
   if (!pinnedResolved) {
@@ -164,13 +171,14 @@ async function main() {
       errored,
       results,
     }, null, 2)}\n`);
-    process.exit(0);
+    // process.exit() would truncate output still queued for a pipe (>64KB with --diff).
+    return;
   }
 
   console.log(`Checked ${results.length} ported skills across ${repos.length} upstreams.\n`);
   if (changed.length === 0 && errored.length === 0) {
     console.log('All in sync. Nothing to integrate.');
-    process.exit(0);
+    return;
   }
   for (const r of changed) {
     console.log(`CHANGED  ${r.local}  (${r.repo} ${r.path})`);
@@ -189,7 +197,7 @@ async function main() {
   if (changed.length > 0) {
     console.log('To integrate: see docs/skills-upstream-integration.md');
   }
-  process.exit(changed.length > 0 ? 1 : 0);
+  process.exitCode = changed.length > 0 ? 1 : 0;
 }
 
 main().catch((err) => {

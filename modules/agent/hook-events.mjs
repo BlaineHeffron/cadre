@@ -361,3 +361,8 @@ export async function readHookEventsSince({ workDir = '', provider = '', session
     return { events: [], cursor: 0, path: paths.eventsPath };
   }
 }
+
+/** Fable-class models default to high effort; other models keep the caller's or CLI default. */
+export function defaultClaudeEffort(thinkingLevel = '', model = '') {
+  return thinkingLevel || (/fable/i.test(String(model)) ? 'high' : '');
+}

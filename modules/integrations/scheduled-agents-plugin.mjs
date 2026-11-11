@@ -8,6 +8,7 @@ import {
   stepDue,
 } from './scheduled-agents.mjs';
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -30,6 +31,7 @@ import {
   parseUpstreamManifestRepos,
   SKILLS_UPSTREAM_MANIFEST_REL,
   SKILLS_UPSTREAM_TASK_ID,
+  UPSTREAM_RELEASE_TAGS,
 } from './skills-upstream.mjs';
 import {
   buildRepoQualityFixPrompt,
@@ -63,6 +65,7 @@ const JOB_OPPORTUNITIES_TASK_ID = 'sched_job_opportunities_daily';
 const DEFAULT_JOB_OPPORTUNITIES_INTERVAL_SECONDS = 86400;
 const SESSION_IMPROVE_TASK_ID = 'sched_session_improve_daily';
 const DAY_MS = 86_400_000;
+const SKILLS_UPSTREAM_BRANCH_PREFIX = 'dueno-fleet/skill-sync';
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -336,10 +339,17 @@ function configuredRepoQualityWorktreeBase(config = appConfig) {
   );
 }
 
+// The checkout this server runs from; under scripts/server.sh that is `<dev clone>-live` at origin/main.
+const OWN_CHECKOUT = fileURLToPath(new URL('../..', import.meta.url)).replace(/\/+$/, '');
+
+// Worktrees branch from the dev clone; `<dev clone>-live` maps back to it.
+export function defaultSkillsUpstreamRepoPath(ownCheckout = OWN_CHECKOUT) {
+  const devClone = ownCheckout.replace(/-live$/, '');
+  return existsSync(resolve(devClone, SKILLS_UPSTREAM_MANIFEST_REL)) ? devClone : '';
+}
+
 function configuredSkillsUpstreamRepoPath(config = appConfig) {
-  const explicit = normalizeText(config?.skillsUpstream?.repoPath);
-  if (explicit) return explicit;
-  return configuredRepoPaths(config)[0] || '';
+  return normalizeText(config?.skillsUpstream?.repoPath) || defaultSkillsUpstreamRepoPath();
 }
 
 function skillsUpstreamRepoProblem(repoPath = '') {
@@ -744,7 +754,9 @@ async function runGit(cwd, args = []) {
 
 async function defaultLsRemoteRunner(repo) {
   const url = `https://github.com/${repo}.git`;
-  const result = await exec('git', ['ls-remote', url, 'HEAD'], { timeout: 120000 });
+  const tag = UPSTREAM_RELEASE_TAGS[repo];
+  const args = tag ? ['ls-remote', '--tags', '--sort=-v:refname', url, `refs/tags/${tag}`] : ['ls-remote', url, 'HEAD'];
+  const result = await exec('git', args, { timeout: 120000 });
   if (result.code !== 0) {
     const error = new Error('git_ls_remote_failed');
     error.code = 'git_ls_remote_failed';
@@ -796,7 +808,8 @@ async function shouldLaunchSkillsUpstreamTask(task = {}, {
   };
   const hasPrior = Object.keys(priorHeads).length > 0;
   const changed = Object.entries(snapshot.upstreamHeads).some(([repo, sha]) => priorHeads[repo] !== sha);
-  if (!hasPrior || changed) return { launch: true, metadata };
+  const pending = Array.isArray(task.metadata?.pendingUpstreamRepos) && task.metadata.pendingUpstreamRepos.length > 0;
+  if (!hasPrior || changed || pending) return { launch: true, metadata };
 
   return {
     launch: false,
@@ -805,10 +818,10 @@ async function shouldLaunchSkillsUpstreamTask(task = {}, {
   };
 }
 
-async function defaultReadUpstreamManifest(workDir) {
+// Pins come from the deployed checkout (origin/main), not the dev clone's possibly stale working tree.
+async function defaultReadUpstreamManifest() {
   const { readFile } = await import('node:fs/promises');
-  const { join } = await import('node:path');
-  return readFile(join(normalizeText(workDir) || process.cwd(), SKILLS_UPSTREAM_MANIFEST_REL), 'utf8');
+  return readFile(resolve(OWN_CHECKOUT, SKILLS_UPSTREAM_MANIFEST_REL), 'utf8');
 }
 
 function buildShouldLaunchDispatcher({ rootConfig, gitRunner, lsRemoteRunner, readManifest, logger } = {}) {
@@ -838,23 +851,13 @@ function buildShouldLaunchDispatcher({ rootConfig, gitRunner, lsRemoteRunner, re
   };
 }
 
-async function defaultDetectSkillsUpstream(workDir) {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const execFileAsync = promisify(execFile);
-  const repo = normalizeText(workDir);
-  const script = joinPath(repo, 'scripts/skills-upstream-check.mjs');
-  const { stdout } = await execFileAsync('node', [script, '--json', '--repo', repo], {
-    cwd: repo || undefined,
+async function defaultDetectSkillsUpstream() {
+  const script = resolve(OWN_CHECKOUT, 'scripts/skills-upstream-check.mjs');
+  const { stdout } = await execFileAsync('node', [script, '--json'], {
+    cwd: OWN_CHECKOUT,
     maxBuffer: 32 * 1024 * 1024,
   });
   return JSON.parse(String(stdout || '{}'));
-}
-
-function joinPath(root, rel) {
-  const prefix = normalizeText(root);
-  if (!prefix) return rel;
-  return `${prefix.replace(/\/+$/, '')}/${rel}`;
 }
 
 async function defaultCreateSkillsUpstreamWorktree({ repoPath, baseDir, displayName, nowMs } = {}) {
@@ -862,7 +865,7 @@ async function defaultCreateSkillsUpstreamWorktree({ repoPath, baseDir, displayN
     repoPath,
     baseDir,
     displayName,
-    branchPrefix: 'dueno-fleet/skill-sync',
+    branchPrefix: SKILLS_UPSTREAM_BRANCH_PREFIX,
     nowMs,
   });
 }
@@ -870,6 +873,7 @@ async function defaultCreateSkillsUpstreamWorktree({ repoPath, baseDir, displayN
 function buildSkillsUpstreamLauncher({
   inner,
   detectSkillsUpstream,
+  listOpenPrBranches,
   createWorktree,
   worktreeBaseDir,
   maxFanout,
@@ -890,13 +894,18 @@ function buildSkillsUpstreamLauncher({
       report = await detect(input.workDir);
     } catch (error) {
       if (logger?.warn) logger.warn({ err: error }, 'Skills upstream detect failed');
-      return { id: null };
+      // Forget the recorded heads so the next tick retries.
+      return { id: null, metadata: { upstreamHeads: {} } };
     }
-    const groups = groupChangedByUpstreamPath(report?.changed || []);
-    if (groups.length === 0) return { id: null };
+    const openBranches = await (listOpenPrBranches || defaultListOpenPrBranches)(input.workDir).catch(() => []);
+    const branchPrefix = (group) => `${SKILLS_UPSTREAM_BRANCH_PREFIX}/${skillsUpstreamDisplayName(group).slice(0, 48)}-`;
+    // A group whose PR from an earlier run is still open is already handled.
+    const groups = groupChangedByUpstreamPath(report?.changed || [])
+      .filter((group) => !openBranches.some((branch) => branch.startsWith(branchPrefix(group))));
 
     const selected = groups.slice(0, maxFanout);
     const deferredCount = Math.max(0, groups.length - selected.length);
+    const pending = groups.slice(maxFanout);
     const create = createWorktree || defaultCreateSkillsUpstreamWorktree;
     let first = null;
     for (let i = 0; i < selected.length; i += 1) {
@@ -906,16 +915,21 @@ function buildSkillsUpstreamLauncher({
         const worktree = await create({
           repoPath: input.workDir,
           baseDir: worktreeBaseDir,
-          displayName: `skill-sync-${group.locals[0] || 'skill'}`,
+          displayName: skillsUpstreamDisplayName(group),
           nowMs: (typeof now === 'function' ? now() : Date.now()) + i,
         });
         workDir = normalizeText(worktree?.worktreePath) || workDir;
       } catch (error) {
         if (logger?.warn) logger.warn({ err: error, locals: group.locals }, 'Skills upstream worktree create failed');
+        pending.push(group);
         continue;
       }
       const session = await inner({
-        prompt: buildSkillsUpstreamIntegrationPrompt(group, { deferredCount: i === 0 ? deferredCount : 0 }),
+        prompt: buildSkillsUpstreamIntegrationPrompt(group, {
+          deferredCount: i === 0 ? deferredCount : 0,
+          // One rea-agents bump per tick: only the first morluto/rea group carries it.
+          bumpReaAgents: group.repo === 'morluto/rea' && !selected.slice(0, i).some((prior) => prior.repo === group.repo),
+        }),
         workDir,
         provider: input.provider,
         model: input.model,
@@ -924,8 +938,25 @@ function buildSkillsUpstreamLauncher({
       });
       if (!first) first = session;
     }
-    return first || { id: null };
+    // Upstreams with undispatched groups stay pending: the gate relaunches for them a day later.
+    const pendingUpstreamRepos = [...new Set(pending.map((group) => group.repo))];
+    return {
+      ...(first || { id: null }),
+      metadata: { pendingUpstreamRepos },
+      ...(pendingUpstreamRepos.length > 0 ? { nextRunAtEpochMs: (typeof now === 'function' ? now() : Date.now()) + DAY_MS } : {}),
+    };
   };
+}
+
+function skillsUpstreamDisplayName(group) {
+  return `skill-sync-${group.locals[0] || 'skill'}`;
+}
+
+async function defaultListOpenPrBranches(repoPath) {
+  const { stdout } = await execFileAsync('gh', ['pr', 'list', '--state', 'open', '--limit', '200', '--json', 'headRefName', '--jq', '.[].headRefName'], {
+    cwd: normalizeText(repoPath) || undefined,
+  });
+  return String(stdout || '').split('\n').filter(Boolean);
 }
 
 // Runs in the fleet clone used for skill syncs; the launcher moves each run into a fresh worktree.
@@ -1206,6 +1237,7 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
         now,
       }),
       detectSkillsUpstream: opts.detectSkillsUpstream,
+      listOpenPrBranches: opts.listOpenPrBranches,
       createWorktree: opts.createSkillsUpstreamWorktree,
       worktreeBaseDir: configuredSkillsUpstreamWorktreeBase(rootConfig),
       maxFanout: configuredSkillsUpstreamMaxFanout(rootConfig),
@@ -1256,7 +1288,27 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
     stepNow: (at = now()) => stepDue(at, stepDeps),
   });
 
+  async function setupSkillsUpstreamTask(existing) {
+    const input = buildSkillsUpstreamTaskInput(rootConfig, { nowMs: now() });
+    return existing
+      ? store.update(SKILLS_UPSTREAM_TASK_ID, {
+        ...input,
+        status: 'active',
+        nextRunAtEpochMs: existing.nextRunAtEpochMs || input.nextRunAtEpochMs,
+        metadata: {
+          ...input.metadata,
+          upstreamHeads: existing.metadata?.upstreamHeads || input.metadata.upstreamHeads,
+        },
+      })
+      : store.register(input);
+  }
+
   await store.list();
+  // Self-enable the skills upstream watch on a side-effect server; an operator-cancelled task stays cancelled.
+  if (sourceConfig.enabled === true && !skillsUpstreamRepoProblem(configuredSkillsUpstreamRepoPath(rootConfig))) {
+    const existing = await store.get(SKILLS_UPSTREAM_TASK_ID);
+    if (!existing || existing.status === 'active') await setupSkillsUpstreamTask(existing);
+  }
   loop.start();
 
   app.addHook('onClose', async () => {
@@ -1369,20 +1421,7 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
         error: { code: problem.code, message: problem.message },
       });
     }
-    const input = buildSkillsUpstreamTaskInput(rootConfig, { nowMs: now() });
-    const existing = await store.get(SKILLS_UPSTREAM_TASK_ID);
-    const task = existing
-      ? await store.update(SKILLS_UPSTREAM_TASK_ID, {
-        ...input,
-        status: 'active',
-        nextRunAtEpochMs: existing.nextRunAtEpochMs || input.nextRunAtEpochMs,
-        metadata: {
-          ...input.metadata,
-          upstreamHeads: existing.metadata?.upstreamHeads || input.metadata.upstreamHeads,
-        },
-      })
-      : await store.register(input);
-    return safeSkillsUpstreamStatus(task, rootConfig);
+    return safeSkillsUpstreamStatus(await setupSkillsUpstreamTask(await store.get(SKILLS_UPSTREAM_TASK_ID)), rootConfig);
   });
 
   app.post('/api/fleet/skills-upstream/run-now', async (_req, reply) => {
