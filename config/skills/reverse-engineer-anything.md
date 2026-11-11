@@ -58,13 +58,15 @@ needs Ghidra or Hopper, which the fleet host does not install, so native tools
 report unavailable; report that limitation rather than installing an engine.
 Use the connected server's actual tool list and input schemas. Inspect
 `binary_session` with `{}` and its `result.tool_availability` for availability
-reasons; do not call an unadvertised tool.
+reasons; do not call an unadvertised tool. If tools are missing, a call is
+blocked, or a provider is unavailable, follow the connection and recovery guide
+below rather than retrying the unchanged call.
 
 For an operator-supplied JavaScript tree or ASAR without the MCP server, the
 pinned CLI returns the same Evidence record directly:
 
 ```bash
-npx -y rea-agents@4.1.0 analyze-javascript-application /absolute/path/to/app --json
+npx -y rea-agents@6.8.0 analyze-javascript-application /absolute/path/to/app --json
 ```
 
 ## Route the target first
@@ -75,9 +77,9 @@ explicit path or endpoint and do not need it.
 
 - ASAR or extracted JavaScript/Electron tree:
   `analyze_javascript_application`.
-- Archive/package member inventory (ZIP/APK/IPA/MSIX/AppX or DMG):
-  `open_binary` with the supplied local path; use `inspect_artifact` when its
-  graph and findings help answer the question.
+- Archive/package member inventory (ZIP/APK/IPA/MSIX/AppX, DMG, or a
+  PyInstaller executable): `open_binary` with the supplied local path; use
+  `inspect_artifact` when its graph and findings help answer the question.
 - Android APK code, classes, methods, or incoming references:
   `inspect_android_package`, then focused Android tools when advertised.
   Archive member inventory still uses the archive route above.
@@ -88,7 +90,15 @@ explicit path or endpoint and do not need it.
   Linux; see the [firmware guide](https://github.com/morluto/rea/blob/main/docs/firmware-analysis.md).
 - .NET NativeAOT PE/ELF: native Ghidra analysis; see the NativeAOT section in
   the native guide below.
-- User-owned browser page already open: `list_browser_targets`.
+- A single-format file (Go, Rust, PE tables, ELF notes, IL2CPP, `.pyc`, BEAM,
+  WASM, SQLite, model files, APK signatures, Apple resources): the engine-free
+  inspector listed in the native guide.
+- Native program behavior, live calls, or instrumentation: the native runtime
+  section of the runtime guide. Static tools never observe execution.
+- User-owned browser page already open: `list_browser_targets`. A browser action
+  the agent must perform: `capture_browser_scenario` with declared actions.
+- Retained HAR/SAZ/qlog capture: `inspect_web_network_capture`; it never fetches
+  recorded URLs.
 - User-owned Electron runtime already open: `list_electron_targets`.
 - Native executable, library, or analysis database: `open_binary`, then
   use focused analysis tools directly; call `binary_overview` when metadata or
@@ -101,7 +111,13 @@ ambiguous. Never choose an example app on the user's behalf.
 ## Work summary-first
 
 Start with the default result and use its inline Evidence and graph context.
-Do not repeat an identical tool call. Make a focused follow-up only when the
+For a target of unknown or large size, request `detail: "summary"` where
+advertised and page the returned `parent_evidence_id` with
+`inspect_analysis_view`. Over MCP, `analyze_function` already replies with a
+summary. When the parent ID is unknown, `get_evidence_bundle` with
+`detail: "summary"` and exact filters finds it. A client-truncated reply is
+incomplete: page the retained parent or export it, never parse the preview or
+rerun the producer. Do not repeat an identical tool call. Make a focused follow-up only when the
 returned result leaves a specific question unanswered.
 
 Every conclusion must distinguish observations, inferences, and unknowns. Cite
@@ -128,7 +144,8 @@ For requests that span multiple features or subsystems, use a staged workflow:
    infer behavior from filenames, strings, or layout alone.
 5. Corroborate a conclusion with the evidence type it requires. Use runtime
    observation only when static evidence cannot answer the question and the
-   required host runtime and OS access are available.
+   required host runtime and OS access are available. For JavaScript behavior,
+   probe the actual app through the browser, Electron, or process workflow.
 6. Decompose work into independent questions. When parallel workers are
    available and the questions do not depend on one another, assign distinct
    scopes, point workers to existing evidence, and ask them to return sources,
@@ -163,4 +180,6 @@ The guides below are inlined; read only the one for your target.
 
 {{skill:rea-evidence-workflows}}
 
-<!-- upstream: morluto/rea@d2aed17 skills/reverse-engineer-anything/SKILL.md -->
+{{skill:rea-connection-and-recovery}}
+
+<!-- upstream: morluto/rea@160d821 .agents/skills/reverse-engineer-anything/SKILL.md -->

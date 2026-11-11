@@ -357,8 +357,9 @@ describe('launch skill authoring', () => {
       /# Native, managed, and packaged artifacts/,
       /# JavaScript and Electron application artifacts/,
       /# Android application artifacts/,
-      /# Passive browser and Electron observation/,
+      /# Runtime observation/,
       /# Evidence, comparison, and verification workflows/,
+      /# Connection and task recovery/,
     ]) assert.match(expanded, heading);
   });
 
