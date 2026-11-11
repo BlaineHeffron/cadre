@@ -321,17 +321,15 @@ describe('launch skill authoring', () => {
     );
   });
 
-  it('discovers visual exploration skills and expands nested frontend review tokens', () => {
+  it('discovers visual exploration skills and expands nested design review tokens', () => {
     const skills = discoverLaunchSkills();
     const ids = new Set(skills.map((skill) => skill.id));
 
-    assert.equal(ids.has('frontend-design'), true);
     assert.equal(ids.has('visual-design-it-twice'), true);
     assert.equal(ids.has('web-design-review'), true);
 
     const expanded = expandSkillTokens('{{skill:visual-design-it-twice}}');
     assert.equal(expanded.includes('{{skill:'), false);
-    assert.match(expanded, /# Frontend Design/);
     assert.match(expanded, /# Web Design Review/);
   });
 

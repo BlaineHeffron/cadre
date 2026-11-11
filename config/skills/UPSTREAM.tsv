@@ -34,15 +34,14 @@ condition-based-waiting	obra/superpowers	skills/systematic-debugging/condition-b
 verify	obra/superpowers	skills/verification-before-completion/SKILL.md	b36e082
 plan	obra/superpowers	skills/writing-plans/SKILL.md	22f0b46	fleet scope-first header added
 ship	obra/superpowers	skills/finishing-a-development-branch/SKILL.md	b36e082	fleet merge/deploy invariants
-frontend-design	anthropics/skills	skills/frontend-design/SKILL.md	0a64e39
-web-design-review	vercel-labs/web-interface-guidelines	command.md	e3d624b	adapted; fixed local rules, no runtime fetch
+web-design-review	vercel-labs/web-interface-guidelines	command.md	434b7f9	adapted; fixed local rules, no runtime fetch
 e2e	anthropics/skills	skills/webapp-testing/SKILL.md	0a64e39
 with-server	anthropics/skills	skills/webapp-testing/scripts/with_server.py	0a64e39
 technote	hameefy/claude-latex-skill	SKILL.md	2ea88ee	adapted; EIT defaults dropped
 latex-preamble	hameefy/claude-latex-skill	SKILL.md	2ea88ee	Step 2 slice
 latex-math	hameefy/claude-latex-skill	SKILL.md	2ea88ee	Steps 3,6,7 slice
 slides-beamer	hameefy/claude-latex-skill	SKILL.md	2ea88ee	Steps 2B,3B slice
-unslop	kentnielsen-droid/cursor-skills	pstack/skills/unslop/SKILL.md	60c641e
+unslop	kentnielsen-droid/cursor-skills	pstack/skills/unslop/SKILL.md	df58112
 reverse-engineer-anything	morluto/rea	.agents/skills/reverse-engineer-anything/SKILL.md	160d821	synced to rea-agents-6.8.0 release; fleet connection rules
 rea-native-and-artifacts	morluto/rea	.agents/skills/reverse-engineer-anything/references/native-and-artifacts.md	160d821	synced to rea-agents-6.8.0 release; condensed
 rea-javascript-applications	morluto/rea	.agents/skills/reverse-engineer-anything/references/javascript-applications.md	160d821	synced to rea-agents-6.8.0 release; condensed
