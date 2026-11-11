@@ -401,6 +401,7 @@ export class TelegramRelayLoop {
     this.lastSuccessAt = null;
     this.lastCanonicalStateById = new Map();
     this.pingedTurns = new Set();
+    this.silentTurns = new Set();
     this.stepInProgress = false;
     this.skippedOverlappingTicks = 0;
   }
@@ -567,16 +568,26 @@ export class TelegramRelayLoop {
       });
     }
     const route = this.routeFor(routedSession, busThread);
-    // Mid-turn output arrives silently; the first delta that lands once the turn is over pings.
+    // Mid-turn output arrives silently. A finished turn pings once: on the first delta after it
+    // ends, or, when its final text was already relayed mid-turn, on a short done note.
+    const id = routedSession.id;
     const turnOver = TURN_OVER_STATUSES.has(state?.status);
-    if (!turnOver) this.pingedTurns.delete(routedSession.id);
+    if (!turnOver) this.pingedTurns.delete(id);
+    const ping = turnOver && !this.pingedTurns.has(id);
     const delivered = await this.deliverTranscriptDelta(routedSession, {
       route,
       liveTenantCount,
       orphaned,
-      ping: turnOver && !this.pingedTurns.has(routedSession.id),
+      ping,
     });
-    if (turnOver && delivered) this.pingedTurns.add(routedSession.id);
+    if (!turnOver && delivered) this.silentTurns.add(id);
+    if (ping && (delivered || this.silentTurns.has(id))) {
+      if (!delivered) {
+        await this.sender.deliver({ route, header: sessionHeader({ short: String(id).slice(0, 8), tmux_session: routedSession.tmuxSession, backend: routedSession.runtime || '' }), text: '✓ done', ping: true });
+      }
+      this.pingedTurns.add(id);
+      this.silentTurns.delete(id);
+    }
     if (state?.status === 'blocked' && state.relayable) {
       await this.deliverInteraction(routedSession, { state, route });
     } else if (state && (wasBlocked || this.sentStore.get(routedSession.id)?.last_interaction_key)) {

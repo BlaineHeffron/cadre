@@ -90,6 +90,8 @@ function buildLoop({
   const store = bindingStore || buildBindingStore({ stateDir, now });
   const sender = senderOverride || {
     async deliver(payload) {
+      // Turn-end done notes are asserted with the real sender in the ping test.
+      if (payload.text === '✓ done') return { msgId: 0, threadId: 177, topicKey: payload.route?.key || '' };
       await beforeDeliver?.(payload);
       deliveries.push({
         ...(payload.route || {}),
@@ -162,6 +164,57 @@ async function readJson(path) {
 }
 
 describe('telegram relay loop', () => {
+  it('pings once when a turn finishes after its final text was already relayed mid-turn', async () => {
+    await withTempDir(async (stateDir) => {
+      await writeFile(join(stateDir, 'config.env'), 'TELEGRAM_BOT_TOKEN="t"\nTELEGRAM_CHAT_ID=-100123\n');
+      let clock = 1_000_000;
+      const sends = [];
+      const sender = new TelegramSender({
+        stateDir,
+        now: () => clock,
+        logger: { warn() {} },
+        fetchImpl: async (url, options = {}) => {
+          const body = JSON.parse(options.body || '{}');
+          if (url.endsWith('/createForumTopic')) return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_thread_id: 177, name: body.name } }) };
+          sends.push(body);
+          return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: sends.length } }) };
+        },
+      });
+      const path = join(stateDir, 'rollout.jsonl');
+      const bindingStore = buildBindingStore({ stateDir });
+      await bindingStore.load();
+      await bindingStore.bind('session-123456', { path, anchor: 'identity', ino: 1, runtime: 'codex', workDir: '/tmp/project' });
+      // Output exists at these offsets only: the first turn's final text, then the second turn's.
+      const output = { 0: 'final answer', 5: 'second turn answer' };
+      let available = 5;
+      const loop = buildLoop({
+        stateDir,
+        sessions: [session()],
+        deliveries: [],
+        bindingStore,
+        sender,
+        now: () => clock,
+        transcriptDeltas: { [path]: (offset) => (offset < available ? { text: output[offset] || '', nextOffset: available, path } : { text: '', nextOffset: offset, path }) },
+        states: { 'session-123456': ['working', 'waiting_for_input', 'waiting_for_input', 'working', 'waiting_for_input', 'waiting_for_input'] },
+      });
+      // Telegram plays a sound unless disable_notification is set.
+      const sent = () => sends.map((body) => [body.text.split('\n').at(-1), body.disable_notification !== true]);
+
+      await loop.step();
+      assert.deepEqual(sent(), [['final answer', false]], 'the final text lands while the status still says working');
+      await loop.step();
+      await loop.step();
+      assert.deepEqual(sent().slice(1), [['✓ done', true]], 'the status flip pings exactly once');
+
+      clock += 30_000;
+      await loop.step();
+      available = 15;
+      await loop.step();
+      await loop.step();
+      assert.deepEqual(sent().slice(2), [['second turn answer', true]], 'output that lands after the flip pings itself, with no extra done note');
+    });
+  });
+
   it('pings once per finished turn or blocked prompt, never for mid-turn output, with one cooldown across topics', async () => {
     await withTempDir(async (stateDir) => {
       await writeFile(join(stateDir, 'config.env'), 'TELEGRAM_BOT_TOKEN="t"\nTELEGRAM_CHAT_ID=-100123\n');
