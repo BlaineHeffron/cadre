@@ -27,12 +27,12 @@ writing-for-agents	mattpocock/skills	skills/productivity/writing-for-agents/SKIL
 pr	mattpocock/skills	skills/engineering/pr/SKILL.md	24fe0ef
 retro	mattpocock/skills	skills/engineering/retro/SKILL.md	24fe0ef
 implement-spec	mattpocock/skills	skills/engineering/implement-spec/SKILL.md	4ae2317
-debug	obra/superpowers	skills/systematic-debugging/SKILL.md	b36e082
-root-cause-tracing	obra/superpowers	skills/systematic-debugging/root-cause-tracing.md	b36e082
+debug	obra/superpowers	skills/systematic-debugging/SKILL.md	22f0b46
+root-cause-tracing	obra/superpowers	skills/systematic-debugging/root-cause-tracing.md	22f0b46
 defense-in-depth	obra/superpowers	skills/systematic-debugging/defense-in-depth.md	b36e082
 condition-based-waiting	obra/superpowers	skills/systematic-debugging/condition-based-waiting.md	b36e082
 verify	obra/superpowers	skills/verification-before-completion/SKILL.md	b36e082
-plan	obra/superpowers	skills/writing-plans/SKILL.md	b36e082	fleet scope-first header added
+plan	obra/superpowers	skills/writing-plans/SKILL.md	22f0b46	fleet scope-first header added
 ship	obra/superpowers	skills/finishing-a-development-branch/SKILL.md	b36e082	fleet merge/deploy invariants
 frontend-design	anthropics/skills	skills/frontend-design/SKILL.md	0a64e39
 web-design-review	vercel-labs/web-interface-guidelines	command.md	e3d624b	adapted; fixed local rules, no runtime fetch

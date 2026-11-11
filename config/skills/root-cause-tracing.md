@@ -127,7 +127,7 @@ If something appears during tests but you don't know which test:
 Use the bisection script `find-polluter.sh` in this directory:
 
 ```bash
-./find-polluter.sh '.git' 'src/**/*.test.ts'
+bash ./find-polluter.sh '.git' 'src/**/*.test.ts'
 ```
 
 Runs tests one-by-one, stops at first polluter. See script for usage.
@@ -194,4 +194,4 @@ From debugging session (2025-10-03):
 - Added 4 layers of defense
 - 1847 tests passed, zero pollution
 
-<!-- upstream: obra/superpowers@b36e082 skills/systematic-debugging/root-cause-tracing.md -->
+<!-- upstream: obra/superpowers@22f0b46 skills/systematic-debugging/root-cause-tracing.md -->
