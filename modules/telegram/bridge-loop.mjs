@@ -603,7 +603,7 @@ export class TelegramBridgeLoop {
     if (item.status !== 'open') return null;
     const { threadId } = await this.sender.resolveTopic(QUEUE_ROUTE);
     if (!this.running) return null;
-    messages[item.id] = await this.sender.sendMessage(text, { threadId, buttons });
+    messages[item.id] = await this.sender.sendMessage(text, { threadId, buttons, ping: true });
     // The queue keeps at most 200 items.
     await writeJsonAtomic(this.queueMessagesPath(), Object.fromEntries(Object.entries(messages).slice(-200)));
     return messages[item.id];

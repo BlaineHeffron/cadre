@@ -18,6 +18,7 @@ const DEFAULT_AGENT_BUS_STATE_PATHS = [
 ];
 const OPERATOR_QUESTION_CLOSED_EVENTS = new Set(['UserPromptSubmit', 'PostToolUse', 'Stop', 'SessionEnd']);
 const LEGACY_RELAYABLE_STATUSES = new Set(['ready', 'blocked']);
+const TURN_OVER_STATUSES = new Set(['ready', 'ended']);
 const DEFAULT_ORPHAN_DRAIN_SEC = 120;
 const sentStoreWriteQueues = new Map();
 const jsonFileCache = new Map();
@@ -399,6 +400,7 @@ export class TelegramRelayLoop {
     this.errorCount = 0;
     this.lastSuccessAt = null;
     this.lastCanonicalStateById = new Map();
+    this.pingedTurns = new Set();
     this.stepInProgress = false;
     this.skippedOverlappingTicks = 0;
   }
@@ -565,11 +567,16 @@ export class TelegramRelayLoop {
       });
     }
     const route = this.routeFor(routedSession, busThread);
-    await this.deliverTranscriptDelta(routedSession, {
+    // Mid-turn output arrives silently; the first delta that lands once the turn is over pings.
+    const turnOver = TURN_OVER_STATUSES.has(state?.status);
+    if (!turnOver) this.pingedTurns.delete(routedSession.id);
+    const delivered = await this.deliverTranscriptDelta(routedSession, {
       route,
       liveTenantCount,
       orphaned,
+      ping: turnOver && !this.pingedTurns.has(routedSession.id),
     });
+    if (turnOver && delivered) this.pingedTurns.add(routedSession.id);
     if (state?.status === 'blocked' && state.relayable) {
       await this.deliverInteraction(routedSession, { state, route });
     } else if (state && (wasBlocked || this.sentStore.get(routedSession.id)?.last_interaction_key)) {
@@ -578,7 +585,7 @@ export class TelegramRelayLoop {
     }
   }
 
-  async deliverTranscriptDelta(session, { route, liveTenantCount = 1, orphaned = false } = {}) {
+  async deliverTranscriptDelta(session, { route, liveTenantCount = 1, orphaned = false, ping = false } = {}) {
     const runtime = String(session.runtime || '').toLowerCase();
     const previousBinding = this.bindingStore.get(session.id);
     const binding = await this.resolveBinding(session, {
@@ -650,6 +657,7 @@ export class TelegramRelayLoop {
         backend: session.runtime || '',
       }),
       text: body,
+      ping,
     });
     const hash = transcriptHash(session.id, body);
     await this.sentStore.set(session.id, {
@@ -738,6 +746,7 @@ export class TelegramRelayLoop {
       }),
       text: body,
       buttons,
+      ping: true,
     });
 
     await this.sentStore.set(session.id, {

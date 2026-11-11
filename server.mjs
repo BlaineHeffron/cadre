@@ -638,6 +638,13 @@ function scheduleTelegramBridgeRestart(delayMs = 5000) {
   return true;
 }
 
+// The bridge and the relay share one sender so its ping cooldown spans every Telegram message.
+let sharedTelegramSender = null;
+function telegramSender() {
+  sharedTelegramSender ||= buildTelegramSender({ stateDir: join(homedir(), '.claude/telegram'), logger: app.log, ttsAvailable: speechSynthesisAvailable });
+  return sharedTelegramSender;
+}
+
 function startTelegramBridge() {
   if (sideEffectLoopsSuppressed) {
     telegramBridgeEnabled = false;
@@ -648,7 +655,7 @@ function startTelegramBridge() {
   const stateDir = join(homedir(), '.claude/telegram');
   telegramBridge = buildTelegramBridgeLoop({
     stateDir,
-    sender: buildTelegramSender({ stateDir, logger: app.log, ttsAvailable: speechSynthesisAvailable }),
+    sender: telegramSender(),
     listSessions: listTelegramSessions,
     requestImpl: internalRequest,
     watchQueue: onHumanQueueChange,
@@ -701,7 +708,7 @@ function buildTelegramRelayLoop() {
   const stateDir = join(homedir(), '.claude/telegram');
   return new TelegramRelayLoop({
     config: config.telegramRelay,
-    sender: buildTelegramSender({ stateDir, logger: app.log, ttsAvailable: speechSynthesisAvailable }),
+    sender: telegramSender(),
     sentStore: buildSentStore({ stateDir }),
     bindingStore: buildBindingStore({ stateDir }),
     listSessions: listTelegramSessions,

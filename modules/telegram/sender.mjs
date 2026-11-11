@@ -11,6 +11,7 @@ const DEFAULT_STATE_DIR = join(homedir(), '.claude/telegram');
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_RETRY_BASE_MS = 500;
 const DEFAULT_MAX_ROUTE_RECORDS = 100_000;
+const PING_COOLDOWN_MS = 30_000;
 const stateWriteQueues = new Map();
 const jsonFileCache = new Map();
 
@@ -162,6 +163,16 @@ export class TelegramSender {
     this.maxRouteRecords = maxRouteRecords;
     this.logger = logger;
     this.mathToUnicode = mathToUnicode;
+    this.lastPingAt = -Infinity;
+  }
+
+  // Telegram plays a sound for every sendMessage unless disable_notification is set (edits never
+  // ping). Only callers that ask to ping do, and one cooldown across all topics keeps several busy
+  // sessions from pinging constantly.
+  claimPing(ping) {
+    if (!ping || this.now() - this.lastPingAt < PING_COOLDOWN_MS) return false;
+    this.lastPingAt = this.now();
+    return true;
   }
 
   topicsPath() {
@@ -360,6 +371,7 @@ export class TelegramSender {
     form.set('chat_id', String(chatIdValue(config.chatId)));
     if (threadId != null) form.set('message_thread_id', String(Number(threadId)));
     if (replyToMessageId != null) form.set('reply_to_message_id', String(Number(replyToMessageId)));
+    form.set('disable_notification', 'true');
     form.set('voice', new Blob([voice], { type: 'audio/ogg' }), 'voice.ogg');
     const response = await this.fetchImpl(`${TELEGRAM_API_BASE}/bot${config.botToken}/sendVoice`, {
       method: 'POST',
@@ -380,12 +392,12 @@ export class TelegramSender {
     return body.result || {};
   }
 
-  async sendMessage(text, { threadId, buttons } = {}) {
-    const result = await this.sendMessagePages(text, { threadId, buttons });
+  async sendMessage(text, { threadId, buttons, ping = false } = {}) {
+    const result = await this.sendMessagePages(text, { threadId, buttons, ping });
     return result.lastMessageId;
   }
 
-  async sendMessagePages(text, { threadId, buttons, header = '' } = {}) {
+  async sendMessagePages(text, { threadId, buttons, header = '', ping = false } = {}) {
     const config = await this.loadConfig();
     const messageIds = [];
     const cleanHeader = String(header || '').trim();
@@ -401,8 +413,10 @@ export class TelegramSender {
       : config.maxMsgLength;
     const pages = pagedMessages(readableText, bodyLimit);
     const inlineKeyboard = telegramButtons(buttons);
+    const pinged = this.claimPing(ping);
     for (const [index, page] of pages.entries()) {
-      const payload = { text: cleanHeader ? `${cleanHeader}\n${page}` : page };
+      // A paged message pings once, on its last page.
+      const payload = { text: cleanHeader ? `${cleanHeader}\n${page}` : page, disable_notification: !(pinged && index === pages.length - 1) };
       if (threadId != null) payload.message_thread_id = Number(threadId);
       if (inlineKeyboard && index === pages.length - 1) {
         payload.reply_markup = { inline_keyboard: inlineKeyboard };
@@ -544,7 +558,7 @@ export class TelegramSender {
     });
   }
 
-  async deliver({ route, text, buttons, header = '' } = {}) {
+  async deliver({ route, text, buttons, header = '', ping = false } = {}) {
     let resolved = await this.resolveTopic(route);
     let includeTtsButton = false;
     try {
@@ -558,11 +572,11 @@ export class TelegramSender {
     ];
     let sent;
     try {
-      sent = await this.sendMessagePages(text, { threadId: resolved.threadId, buttons: allButtons, header });
+      sent = await this.sendMessagePages(text, { threadId: resolved.threadId, buttons: allButtons, header, ping });
     } catch (error) {
       if (!isMissingThreadError(error)) throw error;
       resolved = await this.resolveTopic(route, { recreate: true });
-      sent = await this.sendMessagePages(text, { threadId: resolved.threadId, buttons: allButtons, header });
+      sent = await this.sendMessagePages(text, { threadId: resolved.threadId, buttons: allButtons, header, ping });
     }
     for (const msgId of sent.messageIds) {
       await this.recordMessage(msgId, {

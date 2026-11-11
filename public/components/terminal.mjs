@@ -38,6 +38,13 @@ function linkifyHtml(text = '') {
   );
 }
 
+// Live output follows only a view that is effectively at the bottom (sub-pixel rounding aside):
+// a reader who scrolled up even a line keeps their place.
+export function readScrollSnapshot({ scrollTop, scrollHeight, clientHeight }) {
+  const distanceFromBottom = Math.max(0, scrollHeight - scrollTop - clientHeight);
+  return { scrollTop, scrollHeight, clientHeight, distanceFromBottom, atBottom: distanceFromBottom <= 2 };
+}
+
 export function Terminal({
   content,
   maxHeight = '500px',
@@ -64,17 +71,6 @@ export function Terminal({
     distanceFromBottom: 0,
     atBottom: true,
   });
-
-  function readScrollSnapshot(el) {
-    const distanceFromBottom = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
-    return {
-      scrollTop: el.scrollTop,
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-      distanceFromBottom,
-      atBottom: distanceFromBottom < 40,
-    };
-  }
 
   function rememberScrollPosition(el = ref.current) {
     if (!el) return scrollSnapshot.current;
