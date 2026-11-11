@@ -44,7 +44,7 @@ Show this to the user, then immediately proceed to Step 2. The user reads and th
 
 ### 2. Spawn sub-agents
 
-Spawn 3+ sub-agents in parallel. Each must produce a **radically different** interface for the deepened module.
+When the work is large enough to benefit, spawn 3+ sub-agents in parallel, each with a fresh context window (not a fork of yours); otherwise draft the designs yourself, keeping each independent of the others. Each must produce a **radically different** interface for the deepened module.
 
 Prompt each sub-agent with a separate technical brief (file paths, coupling details, dependency category, what sits behind the seam). The brief is independent of the user-facing problem-space explanation in Step 1. Give each agent a different design constraint:
 
@@ -69,4 +69,4 @@ Present designs sequentially so the user can absorb each one, then compare them 
 
 After comparing, give your own recommendation: which design you think is strongest and why. If elements from different designs would combine well, propose a hybrid. Be opinionated: the user wants a strong read, not a menu.
 
-<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/codebase-design/DESIGN-IT-TWICE.md -->
+<!-- upstream: mattpocock/skills@4ae2317 skills/engineering/codebase-design/DESIGN-IT-TWICE.md -->
