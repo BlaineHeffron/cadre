@@ -108,6 +108,7 @@ function codexReasoningLevels(model = '') {
 }
 
 function defaultThinkingLevelFor(provider = '', model = '') {
+  if (/fable/i.test(String(model))) return 'high';
   return normalizeProvider(provider) === 'codex' && isCodexSolModel(model)
     ? 'low'
     : DEFAULT_THINKING_LEVEL;

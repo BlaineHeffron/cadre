@@ -333,7 +333,7 @@ export function createAgentBusParticipants({
           ? participant.thinkingLevel.trim()
           : (typeof createDefaults.thinkingLevel === 'string' && createDefaults.thinkingLevel.trim()
               ? createDefaults.thinkingLevel.trim()
-              : defaultThinkingLevelForKind(participant.kind)),
+              : defaultThinkingLevelForKind(participant.kind, resolvedSelection.model)),
         displayName: typeof participant.displayName === 'string' && participant.displayName.trim()
           ? participant.displayName.trim()
           : (typeof createDefaults.displayName === 'string' ? createDefaults.displayName.trim() : ''),

@@ -5,7 +5,7 @@ import {
   createTransportEvent,
   questionInteraction,
 } from './agent-transport.mjs';
-import { CLAUDE_FLEET_PLUGIN_DIR } from './hook-events.mjs';
+import { CLAUDE_FLEET_PLUGIN_DIR, defaultClaudeEffort } from './hook-events.mjs';
 import { mapPromptBlocksForClaude } from './prompt-blocks.mjs';
 import { ProcessSupervisor } from './process-supervisor.mjs';
 import { buildAgentScopeLaunch, stopAgentScope } from './session-scope.mjs';
@@ -28,7 +28,8 @@ export function buildClaudeStreamJsonArgs({
     '--permission-prompt-tool', 'stdio',
   ];
   if (model) args.push('--model', String(model));
-  if (thinkingLevel) args.push('--effort', String(thinkingLevel));
+  const effort = defaultClaudeEffort(thinkingLevel, model);
+  if (effort) args.push('--effort', String(effort));
   if (permissionMode === 'danger-full-access') args.push('--dangerously-skip-permissions');
   else if (permissionMode === 'read-only' || permissionMode === 'plan') args.push('--permission-mode', 'plan');
   else if (permissionMode === 'workspace-write') args.push('--permission-mode', 'acceptEdits');

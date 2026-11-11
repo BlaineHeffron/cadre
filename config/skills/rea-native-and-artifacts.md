@@ -26,94 +26,113 @@ SOFTWARE.
 
 # Native, managed, and packaged artifacts
 
+## Engine-free format inspectors
+
+These take an explicit local path, need no `open_binary`, engine, or target
+execution, and most accept `detail: "summary"` with retained
+`inspect_analysis_view` pages. Pick the one matching the supplied file from the
+connected tool list:
+
+- Go build/module metadata `inspect_go_binary`; Rust cargo-auditable crates
+  `inspect_rust_binary`; Unity `global-metadata.dat` `inspect_il2cpp_metadata`.
+- PE: `inspect_pe_imports`, `inspect_pe_certificates` (signatures not verified),
+  `inspect_pe_load_config` (TLS callbacks, CFG), `inspect_pe_resources`.
+- ELF: `inspect_elf_notes`, `inspect_kernel_module`, `inspect_binary_layout`
+  (caller-supplied pwntools), `inspect_recorded_crash` (x86-64 core).
+- PE/ELF exports `inspect_native_exports`; Mach-O `inspect_macho` (use summary,
+  then `view: {kind: "macho", facet: "exports", ...}` on large frameworks).
+- Other formats: `inspect_python_pyc`, `inspect_erlang_beam`,
+  `inspect_wasm_artifact`, `inspect_sqlite_database`, `inspect_model_artifact`
+  (GGUF/safetensors), `inspect_apk_signature`, `inspect_evm_interface`,
+  `inspect_apple_ips`, `inspect_desktop_application` (unknown install dirs).
+- Apple app resources: `open_bundle_resources`, then `inspect_plist`,
+  `decode_interface_builder`, `inspect_asset_catalog`, or `inspect_keyed_archive`.
+
+A missing table or section is observed absence of that declaration, not proof
+the artifact never carried it. Declared metadata is not authenticated, and
+recovered identities stay scoped to the artifact SHA-256.
+
 ## Native targets
 
 After `open_binary`, use focused search, procedure, or function tools directly.
-Use `binary_overview` when target metadata or inventory context helps answer the
-question. Prefer literal search, names, decompilation, callers, callees, and
-cross-references. Addresses and recovered pseudocode are analysis observations,
-not original source. Provider unavailability and unsupported metadata remain
-unknown rather than false.
+Use `binary_overview` when metadata or inventory context helps. Prefer literal
+search, names, decompilation, callers, callees, and cross-references. Addresses
+and pseudocode are analysis observations, not original source. Provider
+unavailability and unsupported metadata remain unknown rather than false.
 
-Use `binary_session` with no arguments to check the open target, selected
-provider, and alignment. Its default `result.tool_availability` includes the
-complete tool inventory with availability reasons and remediation. When choosing
-a tool, use its entry in that result; `tools/list` retains the complete catalog
-when the target or provider state changes.
+Over MCP, `analyze_function` replies with a summary; its
+`normalized_result.parent_evidence_id` is the retained dossier. Page facets with
+`view: {kind: "native", facet: "value_flow_operations", offset: 0, limit: 32}`
+(also pseudocode, assembly, basic blocks, callers/callees, references, strings).
+Null counts mark facets the provider did not record.
 
-## DOS MZ with Ghidra
+`binary_session` with `{}` reports the open target, selected provider, and
+`result.tool_availability` grouped by shared facts: expand each group's `names`,
+inheriting inventory-level requirements unless overridden; listed effect and
+annotation flags are true, omitted known flags false. Candidate capabilities
+describe possible providers; `analysis_provider_binding` names the selected one.
 
-For an admitted DOS MZ target, use `inspect_native_load_image` to check measured
-loaded bytes, file mappings, relocations and the entry against the immutable
-snapshot. Keep `mismatch` and `unsupported` explicit. Verified import covers the
-reported static image, not runtime DOS or PC-98 hardware behavior.
+For release comparisons, export `list_procedures` Evidence from each target
+before closing it, then `match_native_functions` (unique exact names, optional
+body bytes). Pass an `analyze_function` summary as its `parent_evidence_id`
+reference. Unpaired observations do not prove additions or removals; analyze
+only the chosen pairs with `compare_functions`.
 
-Use `read_bytes` for initialized analysis memory and `address_to_file_offset` to
-anchor one observed address to original file bytes. Loader fixups can change a
-word; a source offset does not imply byte equality. Complete function body ranges
-use inclusive ends and can contain gaps. Do not treat the enclosing span as code.
-For packed targets, retain the original and separately derived artifact identities;
-decompiling an unpacking stub does not recover the unpacked program.
+Ghidra: a first-query `provider_timeout` covers import and auto-analysis
+(default 330000 ms); when the error names `ghidra.startup_timeout_ms` or
+`ghidra.decompile_timeout_seconds`, raise it with `update_analysis_settings` and
+retry. A timeout never establishes absence of code. `read_bytes` reads
+initialized analysis memory, not a running process; check `returned_bytes` and
+`complete`, and never zero-fill an incomplete read. `address_to_file_offset`
+anchors one address, not a whole table; loader fixups can differ from file bytes.
+
+## DOS MZ, COM, and raw images
+
+For an admitted DOS MZ target, use `inspect_native_load_image` to check loaded
+bytes, file mappings, relocations and the entry; keep `mismatch` and
+`unsupported` explicit. Headerless DOS COM opens with `format: "dos-com"`.
+Other headerless firmware opens with `format: "raw-binary"`, `architecture`, and
+`entry_point` (Ghidra only). Ghidra pseudocode also accepts
+`procedure: "file-offset:0x..."`; never assume an offset plus image base is an
+analysis address. Function body ranges use inclusive ends and can contain gaps.
+For packed targets, retain both identities; decompiling an unpacking stub does
+not recover the unpacked program.
 
 ## Managed PE/CLI
 
-Start with `inspect_managed_artifact`. REA's canonical managed inspection is
-execution-free: do not claim it loaded, reflected, executed, or resolved the
-assembly. Keep managed/native boundaries and unavailable reconstruction facts
-explicit. A bring-your-own reconstruction oracle is separate from the canonical
-parser and must not become an implicit setup dependency.
+Start with `inspect_managed_artifact`; it is execution-free, so never claim it
+loaded, reflected, executed, or resolved the assembly. For large assemblies use
+`detail: "summary"`, then `view: {kind: "managed", collection: "attributes", ...}`
+(`references`, `resources`, `attributes`). For one type, call
+`inspect_managed_members` with `detail: "summary"` and `type_names`, then page
+`kind: "managed-members"` collections. Returned-row exhaustion does not prove
+complete metadata.
 
 ### .NET NativeAOT
 
-NativeAOT binaries contain native machine code, so ordinary CIL decompilers
-cannot recover the original method bodies. When managed metadata/CIL is absent,
-classify that as a native-analysis route rather than claiming source recovery.
-Open the native image with the selected deep provider and inspect functions,
-strings, calls, and references; describe decompiler output as pseudocode and
-inference.
-
-NativeAOT images can be PE/COFF, ELF, or Mach-O executables and shared
-libraries. Use file bytes and loader metadata rather than suffixes to identify
-them. For packaged apps, inventory/extract with REA's artifact tools and retain
-the exact contained image identity. PDB, ELF debug, or dSYM sidecars are
-additional evidence only when the provider accepts and matches them.
-
-For deeper type recovery, the optional third-party
-[Ghidra NativeAOT analyzer](https://github.com/Washi1337/ghidra-nativeaot)
-rehydrates ReadyToRun metadata and can recover method tables, type relationships,
-frozen objects, and strings. This is a Ghidra extension with its own install and
-interactive workflow; it is not currently part of REA's managed parser or
-headless Ghidra bridge. Treat its annotations as analysis evidence, retain the
-binary identity, and do not present recovered types as original source. Header
-discovery may require a symbol or analyst identification of the ReadyToRun
-header, depending on the binary and analyzer version.
+NativeAOT binaries contain native machine code, so CIL decompilers cannot
+recover method bodies. When managed metadata is absent, route to native analysis
+rather than claiming source recovery, and describe output as pseudocode. Identify
+images (PE, ELF, or Mach-O) by bytes and loader metadata, not suffixes. REA has
+a built-in read-only parser for x64 PE with .NET 8 RTR 9.1 metadata; read frozen
+literals from its report, since `search_strings` omits them. Recovered types are
+not original C# source.
 
 ## Packages and extraction
 
-Use `inspect_artifact` for application bundles, archives, ZIP/APK/IPA/MSIX/AppX,
-ASAR, or DMG inputs when the artifact graph and findings help answer the
-question. It returns the complete artifact graph inline. Cite graph manifest
-IDs when using them.
+Use `inspect_artifact` for bundles, archives, ZIP/APK/IPA/MSIX/AppX, ASAR, DMG,
+PyInstaller executables, or Godot PCK when the graph and findings help; request
+`detail: "summary"` for large inventories and cite graph manifest IDs. For an
+IPA or macOS `.app`, `project_apple_application_graph` reports nested bundles by
+path convention (read the listed plists to confirm), and `trace_dylib_resolution`
+follows `@rpath` loads after `open_binary`.
 
-Use `extract_artifact` when materialized files are needed. It takes no arguments
-and materializes all regular files into a fresh temporary directory chosen by
-REA. Symlinks and encrypted entries are inventory facts, not extractable files.
-The result reports the materialized directory; callers do not choose the
-destination. No separate permission grant is needed.
+`extract_artifact` materializes the active target's regular files into a fresh
+REA-chosen temporary directory; symlinks and encrypted entries stay inventory
+facts. DMG extraction is unavailable, and DMG traversal mounts read-only only on
+macOS. Use `inspect_byte_entropy` to triage ranges before extraction.
 
-Native DMG traversal automatically uses a read-only mount on supported macOS
-hosts, with an owned temporary mount directory and cleanup. It needs no approval
-flag. Unsupported hosts or mount failures remain explicit limitations; do not
-claim child inventory when only root identity is available. Extraction is a
-separate filesystem-writing operation.
+`annotate_native_function` (and `set_address_name`) edit the Ghidra session only:
+original bytes are unchanged and edits invalidate immutable snapshots.
 
-For headerless DOS COM, explicitly open with `format: "dos-com"` (CLI
-`--target-format dos-com`). Inspect the load image before trusting function
-analysis: the entry is `0x10100`, file offset zero, with imposed real-mode segment
-context. PSP/stack/device state remains unmodeled. See [DOS guide](https://github.com/morluto/rea/blob/main/docs/ghidra-dos.md).
-
-### Function annotations in Ghidra
-
-Use `annotate_native_function` for one function name and/or entry comments, with at least one explicit change. Review its annotation readback and refreshed dossier inline. Changes are atomic and session-scoped; empty comments clear them, omitted fields preserve them. Later MCP calls observe edits until close. CLI `annotate-native-function` returns the updated analysis before discarding the session. Original executable bytes are unchanged; edits invalidate immutable snapshots. Windows P0 does not admit database mutations.
-
-<!-- upstream: morluto/rea@d2aed17 skills/reverse-engineer-anything/references/native-and-artifacts.md -->
+<!-- upstream: morluto/rea@160d821 .agents/skills/reverse-engineer-anything/references/native-and-artifacts.md -->
