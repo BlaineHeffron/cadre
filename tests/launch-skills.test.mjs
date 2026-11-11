@@ -344,6 +344,11 @@ describe('launch skill authoring', () => {
     assert.equal(ids.has('talk-grading-loop'), true);
   });
 
+  it('discovers the UI/UX grading loop skill', () => {
+    const ids = new Set(discoverLaunchSkills().map((skill) => skill.id));
+    assert.equal(ids.has('ui-ux-grading-loop'), true);
+  });
+
   it('discovers reverse-engineer-anything and inlines every REA target guide', () => {
     const ids = new Set(discoverLaunchSkills().map((skill) => skill.id));
     assert.equal(ids.has('reverse-engineer-anything'), true);
