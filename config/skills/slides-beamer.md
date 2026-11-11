@@ -36,6 +36,9 @@ standard theme (e.g., `Berlin`, `AnnArbor`, `Warsaw`, `Copenhagen`, `Frankfurt`,
 `Singapore`, `Boadilla`, `CambridgeUS`), substitute it in `\usetheme{}`. Never invent
 custom themes; use only named Beamer built-in themes.
 
+**Author and institute:** replace the placeholders in the metadata block with the user's
+details when they are known; otherwise leave the placeholders in place.
+
 **Color theme:** Default is `default` (matching the chosen outer theme's palette). If the
 user requests a specific color theme (e.g., `dolphin`, `beaver`, `crane`, `orchid`,
 `rose`, `seagull`, `seahorse`, `whale`, `wolverine`), apply it with `\usecolortheme{}`.
@@ -45,7 +48,7 @@ user requests a specific color theme (e.g., `dolphin`, `beaver`, `crane`, `orchi
 % aspectratio=169 gives 16:9 widescreen; use 43 for 4:3 if user requests it.
 
 % ---------------------------------------------------------------
-% Theme — change \usetheme{} to any standard Beamer theme name
+% Theme: change \usetheme{} to any standard Beamer theme name
 % ---------------------------------------------------------------
 \usetheme{Madrid}
 % \usecolortheme{dolphin}   % Uncomment and change to apply a colour theme
@@ -57,14 +60,13 @@ user requests a specific color theme (e.g., `dolphin`, `beaver`, `crane`, `orchi
 \usepackage{bm}
 
 % ---------------------------------------------------------------
-% Algorithms — use ONE of the two options below; comment out the other
+% Algorithms: use ONE of the two options below; comment out the other
 % ---------------------------------------------------------------
 % OPTION A: algorithm2e (recommended for pseudocode with line numbers)
 \usepackage[ruled,vlined,linesnumbered]{algorithm2e}
 
-% OPTION B: algorithmicx + algpseudocode (uncomment if preferred)
-% \usepackage{algorithmic}
-% \usepackage{algorithmicx}
+% OPTION B: algpseudocode (it loads algorithmicx itself). Never load it together
+% with algorithmic or algorithm2e: these packages define the same commands.
 % \usepackage{algpseudocode}
 
 % ---------------------------------------------------------------
@@ -74,7 +76,6 @@ user requests a specific color theme (e.g., `dolphin`, `beaver`, `crane`, `orchi
 \usepackage{tikz}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
-\usepackage{subfigure}
 
 % ---------------------------------------------------------------
 % Tables
@@ -83,10 +84,10 @@ user requests a specific color theme (e.g., `dolphin`, `beaver`, `crane`, `orchi
 \usepackage{tabularx}
 
 % ---------------------------------------------------------------
-% Theorem-like blocks — configurable style
+% Theorem-like blocks: configurable style
 % ---------------------------------------------------------------
 % Beamer provides: theorem, lemma, corollary, proof, definition,
-% example, block, alertblock, exampleblock — all built-in.
+% example, block, alertblock, exampleblock; all are built in.
 %
 % For coloured framed boxes (tcolorbox style), uncomment below:
 % \usepackage{tcolorbox}
@@ -96,7 +97,7 @@ user requests a specific color theme (e.g., `dolphin`, `beaver`, `crane`, `orchi
 % ---------------------------------------------------------------
 % Footnote citation control
 % ---------------------------------------------------------------
-\usepackage{perpage}   % resets footnote counter on each slide
+\usepackage{perpage}   % restarts footnote numbers on each slide (needs two runs)
 \MakePerPage{footnote}
 
 % ---------------------------------------------------------------
@@ -104,6 +105,13 @@ user requests a specific color theme (e.g., `dolphin`, `beaver`, `crane`, `orchi
 % ---------------------------------------------------------------
 \usepackage{xcolor}
 \usepackage{multicol}  % for two-column slides
+
+% ---------------------------------------------------------------
+% Placeholder marker: \todo{...} prints a red [TODO: ...] in text or math.
+% (todonotes is not loaded: its margin notes do not work in beamer.)
+% ---------------------------------------------------------------
+\DeclareRobustCommand{\todo}[1]{%
+  \textcolor{red}{\ifmmode\text{[TODO: #1]}\else[TODO: #1]\fi}}
 
 % ---------------------------------------------------------------
 % Notation macros (shared with article mode for consistency)
@@ -125,16 +133,15 @@ user requests a specific color theme (e.g., `dolphin`, `beaver`, `crane`, `orchi
 \newcommand{\bJ}{\mathbf{J}}
 
 % ---------------------------------------------------------------
-% Presentation metadata — fill in before \begin{document}
+% Presentation metadata: fill in before \begin{document}
 % ---------------------------------------------------------------
 \title[Short Title]{Full Title of the Presentation}
 \subtitle{Subtitle or Paper Title (if applicable)}
-\author[H.~Mohammad]{Hassan Mohammad}
-\institute[BUK]{%
-  Numerical Optimisation Research Group\\
-  Department of Mathematical Sciences\\
-  Faculty of Physical Sciences\\
-  Bayero University, Kano, Nigeria
+\author[A.~Surname]{Author Name}
+\institute[Short Inst.]{%
+  Research Group or Department\\
+  Faculty or School\\
+  University, City, Country
 }
 \date{\today}
 ```
@@ -166,35 +173,59 @@ populate each section from the manuscript, preserving mathematical notation exac
 
 ### 3B.2 Footnote Citations
 
-Beamer uses `\footnotemark` / `\footnotetext{}` pairs exclusively. There is NO
-reference section at the end of the presentation; every cited source appears as a
-footnote on the slide where it is first cited.
+Beamer cites sources in footnotes. There is NO reference section at the end of the
+presentation; every cited source appears as a footnote on the slide where it is cited.
 
-**Citation pattern — use verbatim:**
+**Default pattern: `\footnote[frame]{...}` at the point of citation.**
 
 ```latex
-% Within slide body text, place the mark:
-...as shown by La Cruz et al.\footnotemark{}...
+\begin{frame}{Related Work}
+  \begin{itemize}
+    \item Spectral residual methods\footnote[frame]{W.~La Cruz, J.~M.~Mart\'{\i}nez, and
+      M.~Raydan, ``Spectral residual method without gradient information for solving
+      large-scale nonlinear systems of equations,'' \textit{Math.\ Comp.}, vol.~75,
+      no.~255, pp.~1429--1448, 2006.} require no derivative information.
+  \end{itemize}
+\end{frame}
+```
 
-% Immediately before \end{frame}, place the text:
-\footnotetext{W.~La Cruz, J.~Mart\'{\i}nez, and M.~Raydan,
-  ``Spectral residual method without gradient information for solving large-scale
-  nonlinear systems of equations,''
-  \textit{Math.\ Comp.}, vol.~75, no.~255, pp.~1429--1448, 2006.}
+The mark and text come from one command, so their numbers cannot disagree. `[frame]` puts
+the text at the bottom of the slide even inside `columns`, a `block`, or a theorem
+environment. `\MakePerPage{footnote}` restarts numbering per slide through the `.aux`
+file, so compile the deck twice.
+
+**Fallback: `\footnotemark` with `\footnotetext[N]{...}`**, only where `\footnote` cannot
+be placed (inside `\caption{}` or a `tabular` cell): put `\footnotemark{}` there and the
+`\footnotetext` after the environment, in the same frame. A bare `\footnotetext{...}`
+prints the counter's current value, so with two or more marks on a slide every text would
+carry the last number: the file compiles and the labels are silently wrong. With two or
+more marks, every `\footnotetext` carries the explicit number of its mark:
+
+```latex
+\begin{frame}{Comparison}
+  \begin{tabular}{ll}
+    \toprule
+    Method A\footnotemark{} & description of A \\
+    Method B\footnotemark{} & description of B \\
+    \bottomrule
+  \end{tabular}
+  \footnotetext[1]{Author A, ``Title A,'' \textit{Journal}, vol., pp., Year.}
+  \footnotetext[2]{Author B, ``Title B,'' \textit{Journal}, vol., pp., Year.}
+\end{frame}
 ```
 
 Rules for footnote citations:
-1. Every `\footnotemark` must have a matching `\footnotetext` within the same `frame`.
-2. Use `\MakePerPage{footnote}` (already in the preamble) so the counter resets per slide.
-3. If more than two references appear on one slide, consider splitting the slide or using
-   a smaller font for the `\footnotetext` entries: `{\tiny \footnotetext{...}}`.
-4. Format: Author(s), ``Title,'' \textit{Journal/Proceedings}, vol., no., pp., Year.
+1. Each citation footnote appears on the frame where the source is cited.
+2. In the fallback, every `\footnotemark` has exactly one `\footnotetext` in the same
+   `frame`, and no `\footnotetext` appears without its mark.
+3. Format: Author(s), ``Title,'' \textit{Journal/Proceedings}, vol., no., pp., Year.
    For books: Author(s), \textit{Title}, Publisher, Year.
-5. Never list a reference in a `\footnotetext` that does not have a corresponding
-   `\footnotemark` on the same slide.
-6. If the user provides BibTeX keys without full details, supply the correct bibliographic
-   entry from knowledge of the standard literature. If genuinely ambiguous, insert:
-   `\footnotetext{\todo{Fill in full bibliographic details.}}`
+4. If more than three references appear on one slide, reduce the size *inside* the
+   footnote text: `\footnote[frame]{\tiny ...}`. Wrapping the command, as in
+   `{\tiny \footnotetext{...}}`, has no effect.
+5. If the user provides BibTeX keys without full details, supply the entry only when every
+   field is known with certainty. Never guess a volume, page range, or year. Otherwise
+   insert `\footnote[frame]{\todo{Fill in full bibliographic details.}}`.
 
 ### 3B.3 Theorem-like Blocks
 
@@ -211,7 +242,6 @@ Beamer styles these automatically with coloured headers matching the chosen them
       \lim_{k \to \infty} \|F(x_k)\| = 0.
     \]
   \end{theorem}
-  \footnotetext{\todo{Citation if theorem is from a paper.}}
 \end{frame}
 ```
 
@@ -235,11 +265,13 @@ coloured framed boxes.
 
 ### 3B.4 Algorithm Pseudocode on Slides
 
-Use `algorithm2e` (already loaded) inside a `frame` with `[fragile]` option, because
-verbatim-like environments require it.
+Use `algorithm2e` (already loaded) with the `[H]` placement specifier; floating
+algorithms are not available inside frames. The `[fragile]` frame option is not needed for
+`algorithm2e` or `algpseudocode`; reserve it for frames that contain `verbatim` or
+`listings` content.
 
 ```latex
-\begin{frame}[fragile]{Algorithm: Name of Algorithm}
+\begin{frame}{Algorithm: Name of Algorithm}
   \begin{algorithm}[H]
   \caption{AlgorithmName}\label{alg:main}
   \KwIn{Initial point $x_0 \in \R^n$, tolerance $\varepsilon > 0$}
@@ -256,10 +288,10 @@ verbatim-like environments require it.
 \end{frame}
 ```
 
-If using `algorithmicx` instead, the frame must also be `[fragile]`:
+If the user prefers `algpseudocode` (Option B in the preamble):
 
 ```latex
-\begin{frame}[fragile]{Algorithm: Name}
+\begin{frame}{Algorithm: Name}
   \begin{algorithmic}[1]
     \Require $x_0$, $\varepsilon > 0$
     \Ensure $x^*$
@@ -274,10 +306,13 @@ If using `algorithmicx` instead, the frame must also be `[fragile]`:
 ### 3B.5 Performance Profile and Numerical Results Slides
 
 For numerical experiments, use a two-column layout to show profiles and tables side by
-side:
+side. `\includegraphics` requires the figure files to exist; when the user has not
+supplied them, use a boxed placeholder such as
+`\fbox{\parbox[c][0.45\linewidth][c]{0.9\linewidth}{\centering\todo{Insert fig\_iterations.pdf}}}`
+instead of a file name.
 
 ```latex
-\begin{frame}{Numerical Results — Performance Profiles}
+\begin{frame}{Numerical Results: Performance Profiles}
   \begin{columns}[T]
     \begin{column}{0.48\textwidth}
       \begin{figure}
@@ -300,7 +335,7 @@ side:
 For tables of numerical results:
 
 ```latex
-\begin{frame}{Numerical Results — Comparison Table}
+\begin{frame}{Numerical Results: Comparison Table}
   \begin{table}
     \centering
     \small
@@ -323,15 +358,15 @@ For tables of numerical results:
    form of `\begin{frame}{Title}`).
 2. Never overload a single frame; limit each slide to one main idea, result, or algorithm
    step. If content overflows, split into multiple frames with the same section and a
-   subtitle distinguishing them (e.g., "Proof — Part I", "Proof — Part II").
+   subtitle distinguishing them (e.g., "Proof: Part I", "Proof: Part II").
 3. Use `\pause` sparingly; prefer complete slides for printed handouts.
 4. Use `\alert{}` to highlight a single key term or result per frame, not multiple items.
 5. Use `\begin{itemize}` / `\begin{enumerate}` with no more than five items per frame.
    Sub-items are allowed but limit nesting to two levels.
 6. Equations on slides must be display-style whenever they span more than a short inline
    fragment. Prefer `\[ ... \]` over inline `$ ... $` for anything non-trivial.
-7. Every frame that cites a source must have at least one `\footnotemark` and its
-   matching `\footnotetext` (see Section 3B.2).
+7. Every frame that cites a source carries the citation as a footnote on that frame
+   (see Section 3B.2).
 
 ### 3B.7 Table of Contents Slide
 
@@ -355,4 +390,4 @@ with the current section highlighted.
 
 ---
 
-<!-- upstream: hameefy/claude-latex-skill@c594f5a SKILL.md (Steps 2B, 3B) -->
+<!-- upstream: hameefy/claude-latex-skill@2ea88ee SKILL.md (Steps 2B, 3B) -->

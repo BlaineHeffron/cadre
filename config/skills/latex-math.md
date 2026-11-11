@@ -60,11 +60,17 @@ Example with full proof scaffold:
 \end{theorem}
 
 \begin{proof}
-  By $L$-smoothness (\cref{ass:smoothness}), the descent lemma gives
+  By $L$-smoothness (\cref{ass:smoothness}), the descent lemma applied to
+  $x_{k+1} = x_k - \alpha \grad f(x_k)$ with $\alpha \leq 1/L$ gives
   \[
-    f(x_{k+1}) \leq f(x_k) - \frac{1}{2L}\norm{\grad f(x_k)}^2.
+    f(x_{k+1})
+    \leq f(x_k) - \alpha\Bigl(1 - \frac{L\alpha}{2}\Bigr)\norm{\grad f(x_k)}^2
+    \leq f(x_k) - \frac{\alpha}{2}\norm{\grad f(x_k)}^2.
   \]
-  Summing from $k = 0$ to $K-1$ and dividing by $K$ yields \cref{eq:gd-rate}.
+  Summing from $k = 0$ to $K-1$ and using $f(x_K) \geq f^*$ yields
+  $\frac{\alpha}{2}\sum_{k=0}^{K-1}\norm{\grad f(x_k)}^2 \leq f(x_0) - f^*$.
+  Since the minimum of the summands does not exceed their average,
+  \cref{eq:gd-rate} follows.
 \end{proof}
 ```
 
@@ -101,8 +107,9 @@ otherwise.
 | Object | Notation |
 |---|---|
 | Scalars | $\alpha, \beta, \lambda \in \R$ (lowercase italic) |
-| Vectors | $\bx, \by \in \R^n$ (bold lowercase) |
-| Matrices / linear operators | $\bA, \bJ \in \R^{m \times n}$ (bold uppercase) |
+| Vectors | $x, d, g \in \R^n$ (plain lowercase italic, as in the optimisation literature) |
+| Matrices / linear operators | $A, B_k, H_k \in \R^{n \times n}$ (plain uppercase italic) |
+| Bold variants | $\bx$, $\bA$ only when the user's source uses bold; then set every vector and matrix in bold |
 | Function spaces | $\Lp{2}(\Omega)$, $\Sob{1}{\Omega}$, $\SobZ{1}{\Omega}$ |
 | Gradient | $\grad f(x)$ |
 | Hessian | $\Hess f(x)$ |
@@ -110,7 +117,7 @@ otherwise.
 | Objective / loss | $f$, $\mathcal{L}$, or $F$ following the user's choice |
 | Step size | $\alphak$ or $\etak$; do not mix |
 | Regularisation parameter | $\lambda$ or $\mu$ (not $\alpha$ if that is the step size) |
-| Frobenius norm | $\normF{\bA}$ |
+| Frobenius norm | $\normF{A}$ |
 | Expectation | $\E[\cdot]$ |
 | Probability | $\Prob(\cdot)$ |
 
@@ -121,20 +128,22 @@ whenever the proof or analysis refers to specific steps. Add inline comments wit
 
 ```latex
 \begin{algorithm}[H]
-\caption{Iteratively Regularised Gauss--Newton (IRGN)}\label{alg:irgn}
-\KwIn{Initial guess $\sigma^{(0)}$; data $\mathbf{V}$;
-      regularisation parameters $\{\lambda_k\}$; tolerance $\varepsilon > 0$}
-\KwOut{Approximate solution $\sigma^{(K)}$}
+\caption{Descent method with backtracking line search}\label{alg:descent}
+\KwIn{Initial point $x_0 \in \R^n$; parameters $\sigma, \rho \in (0,1)$;
+      tolerance $\varepsilon > 0$}
+\KwOut{Approximate stationary point $x_k$}
 Set $k \leftarrow 0$\;
-\While{$\norm{\sigma^{(k+1)} - \sigma^{(k)}} > \varepsilon$}{
-  Compute Jacobian $\bJ_k \leftarrow \Forward'(\sigma^{(k)})$\;
-  \tcp{Solve the linearised regularised subproblem}
-  $\sigma^{(k+1)} \leftarrow \arg\min_{\sigma}
-    \bigl\|\bJ_k(\sigma - \sigma^{(k)}) - (\mathbf{V} - \Forward(\sigma^{(k)}))\bigr\|^2
-    + \lambda_k \Reg(\sigma)$\;
+\While{$\norm{\grad f(x_k)} > \varepsilon$}{
+  Compute a descent direction $d_k$, that is, $\grad f(x_k)^\top d_k < 0$\;
+  \tcp{Armijo backtracking}
+  Set $\alphak \leftarrow 1$\;
+  \While{$f(x_k + \alphak d_k) > f(x_k) + \sigma\alphak \grad f(x_k)^\top d_k$}{
+    $\alphak \leftarrow \rho\,\alphak$\;
+  }
+  $x_{k+1} \leftarrow x_k + \alphak d_k$\;
   $k \leftarrow k + 1$\;
 }
-\Return{$\sigma^{(k)}$}\;
+\Return{$x_k$}\;
 \end{algorithm}
 ```
 
@@ -150,7 +159,7 @@ Rules (apply without exception):
    - Wide (5-7 cols): `tabularx` with `\linewidth`
    - Very wide (8+ cols): `\resizebox{\linewidth}{!}{...}`
 
-Prefer `tabularx` over `\resizebox` wherever possible — rescaling reduces font size relative
+Prefer `tabularx` over `\resizebox` wherever possible: rescaling reduces font size relative
 to surrounding text.
 
 See Section 3.5 examples below:
@@ -159,13 +168,14 @@ See Section 3.5 examples below:
 % Narrow table
 \begin{table}[ht]
 \centering
-\caption{Relative reconstruction error. Bold indicates the lowest error.}\label{tab:relerr}
+\caption{Final gradient norm (mean $\pm$ standard deviation over ten starting points).
+  Bold indicates the lowest value.}\label{tab:gradnorm}
 \begin{tabular}{lccc}
 \toprule
-Method & $\delta = 0.01$ & $\delta = 0.05$ & $\delta = 0.10$ \\
+Method & $n = 10^3$ & $n = 10^4$ & $n = 10^5$ \\
 \midrule
-Tikhonov ($\ell^2$) & $0.142 \pm 0.008$ & $0.231 \pm 0.011$ & $0.318 \pm 0.014$ \\
-TV regularisation   & $\mathbf{0.103 \pm 0.006}$ & $\mathbf{0.187 \pm 0.009}$ & $0.274 \pm 0.013$ \\
+Method A & $0.142 \pm 0.008$ & $0.231 \pm 0.011$ & $0.318 \pm 0.014$ \\
+Method B & $\mathbf{0.103 \pm 0.006}$ & $\mathbf{0.187 \pm 0.009}$ & $\mathbf{0.274 \pm 0.013}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -173,10 +183,10 @@ TV regularisation   & $\mathbf{0.103 \pm 0.006}$ & $\mathbf{0.187 \pm 0.009}$ & 
 % Wide table
 \begin{table}[ht]
 \centering
-\caption{Performance metrics across five noise levels.}\label{tab:perf}
+\caption{Number of iterations across five problem dimensions.}\label{tab:perf}
 \begin{tabularx}{\linewidth}{l *{5}{>{\centering\arraybackslash}X}}
 \toprule
-Method & $\delta_1$ & $\delta_2$ & $\delta_3$ & $\delta_4$ & $\delta_5$ \\
+Method & $n_1$ & $n_2$ & $n_3$ & $n_4$ & $n_5$ \\
 \midrule
 Method A & val & val & val & val & val \\
 \bottomrule
@@ -200,6 +210,10 @@ explicit width using a relative length. Never use absolute `cm` or `pt` values.
 | Three in a row | `\linewidth` inside a `0.32\textwidth` subfigure |
 | Inset or thumbnail | `0.40\textwidth` |
 
+Side-by-side figures use the `subfigure` *environment* of the `subcaption` package (loaded
+in the standard preamble). Never load the obsolete `subfigure` package or `subfig`: their
+`\subfigure{}` and `\subfloat{}` commands are incompatible with `subcaption`.
+
 ```latex
 % Standard convergence plot
 \begin{figure}[ht]
@@ -220,6 +234,22 @@ explicit width using a relative length. Never use absolute `cm` or `pt` values.
 \end{semilogyaxis}
 \end{tikzpicture}
 \caption{Convergence comparison. Vertical axis in logarithmic scale.}\label{fig:convergence}
+\end{figure}
+
+% Two side-by-side subfigures (subcaption package)
+\begin{figure}[ht]
+\centering
+\begin{subfigure}{0.48\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{fig_iterations.pdf}
+  \caption{Number of iterations.}\label{fig:profile-iter}
+\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{fig_fevals.pdf}
+  \caption{Function evaluations.}\label{fig:profile-fevals}
+\end{subfigure}
+\caption{Performance profiles of the compared methods.}\label{fig:profiles}
 \end{figure}
 
 % Wide diagram fallback
@@ -244,7 +274,7 @@ complete grammatical sentence. Treat the equation as part of the sentence with a
 punctuation.
 
 Define every symbol before or at its first use. When citing a result, state precisely which
-part of the cited work is being used (e.g., `\citet[Theorem~2.1]{engl1996}`). Avoid vague
+part of the cited work is being used (e.g., `\citet[Theorem~3.2]{nocedal2006}`). Avoid vague
 attributions such as "as shown in [3]".
 
 Place quantitative conditions in numbered `assumption` environments rather than burying them
@@ -253,7 +283,7 @@ inside theorem statements, whenever those conditions are reusable across multipl
 ### 6.4 Consistency Checks
 
 Before outputting any document, verify:
-1. Every symbol introduced in the preamble is used at least once in the body; remove unused macros.
+1. Every macro used in the body is defined in the preamble. Unused macros of the standard preamble may remain.
 2. The same physical quantity uses the same symbol throughout; no silent switching.
 3. All theorem environments are closed; all proofs end with `\end{proof}`.
 4. Every `\begin{}` has a matching `\end{}`.
@@ -270,7 +300,7 @@ Run through all items below before producing the final output.
 - Every `\begin{}` has a matching `\end{}`.
 - No undefined control sequences.
 - All required packages loaded in the preamble.
-- No package conflicts.
+- No package conflicts. `subcaption` is loaded; the obsolete `subfigure` package is not.
 
 ### Label Consistency
 - Every numbered environment has a `\label{}`.
@@ -289,7 +319,7 @@ Run through all items below before producing the final output.
 - Proof steps follow logically from stated assumptions.
 
 ### Bibliography Completeness
-- **Option A:** Every `\cite{}` key has a fully populated `\bibitem{}`; no orphan entries.
+- **Option A:** Every `\cite{}` key has a fully populated `\bibitem{}` with its `[Authors(Year)]` label; no orphan entries.
 - **Option B1:** Every cited key exists in the `.bib` file; `\bibliographystyle{}` and `\bibliography{}` present; `biblatex` not loaded.
 - **Option B2:** Every cited key in the `.bib` file; `\printbibliography` present; no `\bibliographystyle{}` or `\bibliography{}`; `natbib` not loaded.
 
@@ -308,4 +338,4 @@ Run through all items below before producing the final output.
 
 ---
 
-<!-- upstream: hameefy/claude-latex-skill@c594f5a SKILL.md (Steps 3, 6.3-6.4, 7) -->
+<!-- upstream: hameefy/claude-latex-skill@2ea88ee SKILL.md (Steps 3, 6.3-6.4, 7) -->

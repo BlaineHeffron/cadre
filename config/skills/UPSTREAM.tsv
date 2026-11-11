@@ -38,15 +38,10 @@ frontend-design	anthropics/skills	skills/frontend-design/SKILL.md	0a64e39
 web-design-review	vercel-labs/web-interface-guidelines	command.md	e3d624b	adapted; fixed local rules, no runtime fetch
 e2e	anthropics/skills	skills/webapp-testing/SKILL.md	0a64e39
 with-server	anthropics/skills	skills/webapp-testing/scripts/with_server.py	0a64e39
-scientific-slides	K-Dense-AI/claude-scientific-writer	skills/scientific-slides/SKILL.md	0c72606	heavily adapted
-slides-structure	K-Dense-AI/claude-scientific-writer	skills/scientific-slides/references/presentation_structure.md	0c72606
-slides-dataviz	K-Dense-AI/claude-scientific-writer	skills/scientific-slides/references/data_visualization_slides.md	0c72606
-slides-design	K-Dense-AI/claude-scientific-writer	skills/scientific-slides/references/slide_design_principles.md	0c72606
-paper	K-Dense-AI/claude-scientific-writer	skills/scientific-writing/SKILL.md	0c72606	adapted; spine kept
-technote	hameefy/claude-latex-skill	SKILL.md	c594f5a	adapted; EIT defaults dropped
-latex-preamble	hameefy/claude-latex-skill	SKILL.md	c594f5a	Step 2 slice
-latex-math	hameefy/claude-latex-skill	SKILL.md	c594f5a	Steps 3,6,7 slice
-slides-beamer	hameefy/claude-latex-skill	SKILL.md	c594f5a	Steps 2B,3B slice
+technote	hameefy/claude-latex-skill	SKILL.md	2ea88ee	adapted; EIT defaults dropped
+latex-preamble	hameefy/claude-latex-skill	SKILL.md	2ea88ee	Step 2 slice
+latex-math	hameefy/claude-latex-skill	SKILL.md	2ea88ee	Steps 3,6,7 slice
+slides-beamer	hameefy/claude-latex-skill	SKILL.md	2ea88ee	Steps 2B,3B slice
 unslop	kentnielsen-droid/cursor-skills	pstack/skills/unslop/SKILL.md	60c641e
 reverse-engineer-anything	morluto/rea	.agents/skills/reverse-engineer-anything/SKILL.md	160d821	synced to rea-agents-6.8.0 release; fleet connection rules
 rea-native-and-artifacts	morluto/rea	.agents/skills/reverse-engineer-anything/references/native-and-artifacts.md	160d821	synced to rea-agents-6.8.0 release; condensed
