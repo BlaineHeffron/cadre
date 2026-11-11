@@ -18,6 +18,7 @@ const DEFAULT_AGENT_BUS_STATE_PATHS = [
 ];
 const OPERATOR_QUESTION_CLOSED_EVENTS = new Set(['UserPromptSubmit', 'PostToolUse', 'Stop', 'SessionEnd']);
 const LEGACY_RELAYABLE_STATUSES = new Set(['ready', 'blocked']);
+const TURN_OVER_STATUSES = new Set(['ready', 'ended']);
 const DEFAULT_ORPHAN_DRAIN_SEC = 120;
 const sentStoreWriteQueues = new Map();
 const jsonFileCache = new Map();
@@ -399,6 +400,8 @@ export class TelegramRelayLoop {
     this.errorCount = 0;
     this.lastSuccessAt = null;
     this.lastCanonicalStateById = new Map();
+    this.pingedTurns = new Set();
+    this.silentTurns = new Set();
     this.stepInProgress = false;
     this.skippedOverlappingTicks = 0;
   }
@@ -565,11 +568,26 @@ export class TelegramRelayLoop {
       });
     }
     const route = this.routeFor(routedSession, busThread);
-    await this.deliverTranscriptDelta(routedSession, {
+    // Mid-turn output arrives silently. A finished turn pings once: on the first delta after it
+    // ends, or, when its final text was already relayed mid-turn, on a short done note.
+    const id = routedSession.id;
+    const turnOver = TURN_OVER_STATUSES.has(state?.status);
+    if (!turnOver) this.pingedTurns.delete(id);
+    const ping = turnOver && !this.pingedTurns.has(id);
+    const delivered = await this.deliverTranscriptDelta(routedSession, {
       route,
       liveTenantCount,
       orphaned,
+      ping,
     });
+    if (!turnOver && delivered) this.silentTurns.add(id);
+    if (ping && (delivered || this.silentTurns.has(id))) {
+      if (!delivered) {
+        await this.sender.deliver({ route, header: sessionHeader({ short: String(id).slice(0, 8), tmux_session: routedSession.tmuxSession, backend: routedSession.runtime || '' }), text: '✓ done', ping: true });
+      }
+      this.pingedTurns.add(id);
+      this.silentTurns.delete(id);
+    }
     if (state?.status === 'blocked' && state.relayable) {
       await this.deliverInteraction(routedSession, { state, route });
     } else if (state && (wasBlocked || this.sentStore.get(routedSession.id)?.last_interaction_key)) {
@@ -578,7 +596,7 @@ export class TelegramRelayLoop {
     }
   }
 
-  async deliverTranscriptDelta(session, { route, liveTenantCount = 1, orphaned = false } = {}) {
+  async deliverTranscriptDelta(session, { route, liveTenantCount = 1, orphaned = false, ping = false } = {}) {
     const runtime = String(session.runtime || '').toLowerCase();
     const previousBinding = this.bindingStore.get(session.id);
     const binding = await this.resolveBinding(session, {
@@ -650,6 +668,7 @@ export class TelegramRelayLoop {
         backend: session.runtime || '',
       }),
       text: body,
+      ping,
     });
     const hash = transcriptHash(session.id, body);
     await this.sentStore.set(session.id, {
@@ -738,6 +757,7 @@ export class TelegramRelayLoop {
       }),
       text: body,
       buttons,
+      ping: true,
     });
 
     await this.sentStore.set(session.id, {
