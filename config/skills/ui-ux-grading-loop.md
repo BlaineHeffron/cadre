@@ -30,7 +30,7 @@ If 1, 2, 6 or 7 is missing, file one queue item asking for it and wait. Fill the
 |---|---|---|
 | **Director** (you) | coordinator profile | Contract, rubric freeze, competitor pick, bar, round decisions, stop decision, queue items, report. |
 | **Design/capture worker** | One Claude Opus session (`spawn_session`, provider `claude`, model `claude-opus-5-5`, `returnResults: true`), kept for the whole run in its own worktree | Owns the browser profile and the capture harness. Sources competitors, captures and masks the target, builds each round's blind inputs, and runs the CSS/markup iteration loop. |
-| **Grading sub-coordinator** | Claude Haiku 5.5 (`claude`, `claude-haiku-5-5`, `returnResults: true`), fresh each round | Spawns three fresh graders, waits on their files, validates, ends them, returns one result. Never reads or interprets scores. |
+| **Grading sub-coordinator** | Claude Haiku 5.5 (`claude`, `claude-haiku-5-5`, `returnResults: true`, `mcpProfile: "dueno-full"`), fresh each round | Spawns three fresh graders, waits on their files, validates, ends them, returns one result. Never reads or interprets scores. |
 | **Graders** (3 per round, fresh each round) | Opus 5.5 (`claude`, `claude-opus-5-5`), Grok 4.7 (`xai`, `grok-4.7`), Gemini 4 Argon (`antigravity`, `gemini-4-argon-high`) | Score every lettered site on the rubric, from screenshots only, blind to each other. |
 | **Port-and-PR pair** | `spawn_collab_session`: implementer and reviewer in one room, the profile's default pairing | Port the worker's final design diff onto a fresh branch from the contract's base, open the PR, review it. |
 
@@ -50,11 +50,11 @@ Check the model ids against `monitor_list_agent_providers` before the first spaw
 ## Steps
 
 1. **Contract and run folder.** Write `contract.md`, the run-folder layout below and `ledger.md`. Done when every contract field is filled or queued.
-2. **Freeze the rubric.** Copy the default rubric below into `rubric.md`, adapting only the product noun and widths, unless the contract supplies one. Write `grader-brief.md` and `subcoord-brief.md` from the briefs below. Record `sha256sum rubric.md > rubric.sha256`.
+2. **Freeze the rubric.** Copy the default rubric below into `rubric.md`, adapting only the product noun and widths, unless the contract supplies one. Write `grader-brief.md` and `subcoord-brief.md` from the briefs below, and `blind.py` and `scorecard.py` from the code below. Record `sha256sum rubric.md > rubric.sha256`.
 3. **Spawn the design/capture worker** with the contract, the worker brief below and its first job: build the capture harness, capture the unmodified target at every width (masked), and shortlist six competitors with `sources.tsv` rows. End your turn and wait for its result.
 4. **Pick three competitors** from the shortlist: closest in product category and audience, with official screenshots of the equivalent screens at desktop and mobile. Check each `sources.tsv` row is a public URL with a `kind`. The worker freezes their images in `calibration/competitors/<name>/`; they are never re-captured. If fewer than three qualify, queue the choice.
 5. **Round 0.** Tell the worker to build `rounds/r0/inputs/` and `keys/r0-key.tsv` (blind build below). Check the file counts and that no name appears in any path under `rounds/`. Spawn a fresh grading sub-coordinator with the filled-in brief. End your turn and wait.
-6. **Scorecard.** Run the scorecard below for round N. The bar for a category is the pooled mean of the three competitors across every grader in rounds 0..N; the target's score is its mean across this round's graders. A category passes when the target is at or above the bar. Write `rounds/rN/scorecard.tsv`. Read the per-grader spread before naming a gap: one grader alone can hold a category down.
+6. **Scorecard.** Run `python3 <run>/scorecard.py N` from `<run>`. The bar for a category is the pooled mean of the three competitors across every grader in rounds 0..N; the target's score is its mean across this round's graders. A category passes when the target is at or above the bar. Write `rounds/rN/scorecard.tsv`. Read the per-grader spread before naming a gap: one grader alone can hold a category down.
 7. **Iterate.** Send the worker the scorecard path, the failing categories with gaps, and the merged suggestions for the target's letter (`suggestions-*.md`). It makes one coherent change targeting the largest gaps, desktop and mobile together, captures it, and returns `candidate <sha> ready`. If a category drops from the previous round, ask the worker what in its diff caused it before the next round.
 8. **Rescore** (steps 5–6 with N+1, a fresh sub-coordinator and fresh graders, the same frozen competitor images and rubric). Repeat 7–8 until every category passes.
 9. **Round cap.** Default 5 rounds after round 0. At the cap with categories still failing, queue one decision: stop and report, or one **escalation round** (one more iteration on the remaining gaps, graded by six graders: two fresh sessions per model). After the escalation round, go to step 10 whatever the result.
@@ -67,6 +67,7 @@ Check the model ids against `monitor_list_agent_providers` before the first spaw
 <run>/
   contract.md  ledger.md  report.md
   rubric.md  rubric.sha256  grader-brief.md  subcoord-brief.md
+  blind.py  scorecard.py
   calibration/sources.tsv
   calibration/competitors/<name>/<page>-<width>.png   frozen after step 4
   captures/rN/<page>-<width>.png                      target, masked
@@ -88,7 +89,7 @@ Check the model ids against `monitor_list_agent_providers` before the first spaw
 
 ## Blind build
 
-The worker runs this from `<run>` as `python3 blind.py N <competitor> <competitor> <competitor>`:
+`<run>/blind.py`; the worker runs it from `<run>` as `python3 blind.py N <competitor> <competitor> <competitor>`:
 
 ```python
 import random, shutil, sys
@@ -106,7 +107,7 @@ Path(f'keys/r{N}-key.tsv').write_text(''.join(f'{l}\t{n}\n' for l, n in key.item
 
 ## Scorecard
 
-You run this from `<run>` as `python3 scorecard.py N`:
+`<run>/scorecard.py`; you run it from `<run>` as `python3 scorecard.py N`:
 
 ```python
 import csv, glob, statistics as st, sys
@@ -134,12 +135,12 @@ print(open(f'rounds/r{N}/scorecard.tsv').read())
 > - **Capture harness.** A headless Chromium script (playwright-core) that captures every contract page at every width into a given folder. Fixed viewport, light theme, fixed locale and timezone; dismiss cookie banners and pop-ups the same way every time; wait for the page to settle and re-shoot until two frames match. Log gaps and dismissals. Two runs on one commit must look identical. If the app's state needs a login, use fixtures or a demo account from the contract, never a real one.
 > - **Masking.** Box over PII (names, emails, phones, addresses, account ids, real customer data) in every target capture before it leaves `captures/`.
 > - **Competitors.** Public pages only: official screenshots on marketing, help-center and app-store pages, or live public pages. No accounts, logins or trials. Crop to the app screen, scale to each width without upscaling past the source, name files `<page>-<width>.png`, and write one `sources.tsv` row per image.
-> - **Blind build.** Run the blind build from the skill for the round the director names.
+> - **Blind build.** From `<run>`, run `python3 blind.py N <competitor> <competitor> <competitor>` for the round the director names.
 > - **Iteration.** Make one coherent design change per round targeting the failing categories and the recurring suggestions, desktop and mobile together. Design only; copy, content and data stay as they are, and any fix that needs new copy or assets goes in your result as a question. Commit to your design branch, capture the candidate into `captures/rN/`, and return `candidate <sha> ready` with the categories it targets.
 
 ## Grading sub-coordinator brief (Haiku)
 
-Spawn it with `spawn_session` (`claude`, `claude-haiku-5-5`, `returnResults: true`, workDir `<run>/rounds/rN`) and this brief, filled in:
+Spawn it with `spawn_session` (`claude`, `claude-haiku-5-5`, `returnResults: true`, `mcpProfile: "dueno-full"`, workDir `<run>/rounds/rN`) and this brief, filled in:
 
 > You run grading for round N of a UI/UX grading loop. You never grade, read scores or interpret them.
 > 1. Check `monitor_list_agent_providers`. For each seat, spawn one fresh grader with `spawn_session` (no `returnResults`, no `parentThreadId`, workDir `<run>/rounds/rN`): antigravity `gemini-4-argon-high` (argon), xai `grok-4.7` (grok), claude `claude-opus-5-5` (opus). If a provider is disabled, spawn claude `claude-opus-5-5` in that seat and say so in your result. Each initialPrompt: "Read <run>/grader-brief.md and follow it. INPUTS=<run>/rounds/rN/inputs. RUBRIC=<run>/rubric.md (sha256 <sha>). Letters: <letters>. SCORES=<run>/rounds/rN/scores-<grader>.tsv. SUGGESTIONS=<run>/rounds/rN/suggestions-<grader>.md." Tell them nothing else.
@@ -186,5 +187,5 @@ Write `<run>/report.md` and send its path and a one-paragraph summary to whoever
 - Scores for frozen competitor images drifted up to 0.7 between rounds. Grading the competitors every round and pooling them is what keeps the bar steady and the letters meaningful.
 - One strict grader can hold a category down for many rounds (Opus on polish). Check the spread before spending a round on a gap.
 - Capture harnesses break when a redesign renames the control they click. Have the worker check its capture log every round.
-- `monitor_run_agent_task` failed for Claude sessions; use `spawn_session`. Spawned sessions often lack `monitor_*` tools; plan to end their children yourself.
+- `monitor_run_agent_task` failed for Claude sessions; use `spawn_session`. Spawned sessions get only the agent-bus tools (rooms, DMs, tasks) unless spawned with `mcpProfile: "dueno-full"`, so a sub-coordinator on the default profile can't spawn or end graders. You have full tools under the coordinator profile.
 - Workers and reviewers left local servers running. Make stopping them part of each job.
