@@ -55,7 +55,7 @@ export function ThreatsPage() {
     <div class="page">
       <div class="card-header">
         <h1 class="page-title">Threat Alerts</h1>
-        <div style="display:flex; gap:8px; align-items:center">
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center">
           <select
             value=${filterSeverity.value}
             onChange=${e => { filterSeverity.value = e.target.value; loadAlerts(loading, filterSeverity, filterCategory); }}

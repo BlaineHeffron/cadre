@@ -145,6 +145,8 @@ html, body {
   font-size: var(--fs-base);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  /* Long URLs, paths and IDs break instead of widening the page on a phone. */
+  overflow-wrap: break-word;
 }
 
 #app {
@@ -388,6 +390,7 @@ html, body {
 
 .settings-shell {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   /* Setting rows read as label-and-switch pairs, not across a 1400px line. */
   max-width: 960px;
@@ -514,6 +517,7 @@ html, body {
 .card-title {
   font-size: var(--fs-base);
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 /* Explanatory text people actually read: one size and tone for card notes and form hints, at
@@ -1559,6 +1563,7 @@ input[type="checkbox"]:not(.switch) {
 /* Fleet */
 .fleet-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -1594,6 +1599,14 @@ input[type="checkbox"]:not(.switch) {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* These rows wrap, so a badge only breaks inside when its value alone is wider than the row. */
+.fleet-status-row,
+.fleet-chip-row,
+.fleet-incident-title,
+.recording-chip-row {
+  overflow-wrap: anywhere;
 }
 
 .fleet-chip-row {
@@ -1660,6 +1673,7 @@ input[type="checkbox"]:not(.switch) {
 /* Audio recordings */
 .recordings-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -1689,6 +1703,7 @@ input[type="checkbox"]:not(.switch) {
 
 .recording-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -2569,6 +2584,7 @@ input[type="checkbox"]:not(.switch) {
 
 .approval-prompt-title {
   display: flex;
+  overflow-wrap: anywhere;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
@@ -3814,7 +3830,7 @@ input[type="checkbox"]:not(.switch) {
   }
 
   .grid-2, .grid-3, .grid-4 {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .recordings-head,
@@ -3871,7 +3887,7 @@ input[type="checkbox"]:not(.switch) {
 
   .dashboard-action-row,
   .dashboard-result-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .dashboard-row-actions {
@@ -4031,8 +4047,8 @@ input[type="checkbox"]:not(.switch) {
   }
 }
 
-/* The narrowest phones need the brand's width for Settings. */
-@media (max-width: 359px) {
+/* Phones under 375px need the brand's width for Settings and the More badge. */
+@media (max-width: 374px) {
   .nav-brand {
     display: none;
   }
@@ -4754,6 +4770,7 @@ p.new-agent-hint {
 
   .skill-row {
     flex-direction: column;
+    align-items: stretch;
   }
 }
 

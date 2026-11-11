@@ -72,7 +72,7 @@ export function MachinesCard() {
         ${link.value ? html`<input readonly class="input" style="width:100%; margin-top:8px" value=${link.value} onFocus=${(e) => e.target.select()} aria-label="Machine pairing link" />` : null}
       ` : html`
         ${data.machines.map((machine) => html`
-          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:var(--fs-sm); margin-bottom:6px">
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; overflow-wrap:anywhere; font-size:var(--fs-sm); margin-bottom:6px">
             <span class="badge badge-low">${machine.id}</span>
             <span>${machine.label}</span>
             <span style="color:var(--text-muted)">${machine.os || 'unknown OS'}</span>
