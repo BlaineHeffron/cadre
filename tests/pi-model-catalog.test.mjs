@@ -168,7 +168,7 @@ describe('Pi model catalog', () => {
         'qwen3.7-plus',
         'qwen3.8-max',
       ],
-      openrouter: ['z-ai/glm-5.3-flash'],
+      openrouter: ['google/gemini-4-carbon', 'z-ai/glm-5.3-flash'],
       antigravity: ['gemini-4-argon-high'],
     });
     await assert.rejects(
