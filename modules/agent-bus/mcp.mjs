@@ -464,7 +464,7 @@ export function buildAgentBusMcpServer({
   const tools = [
     ...TASK_TOOLS,
     ...['watch_pr', 'unwatch_pr'].map((name) => ({ name,
-      description: name === 'watch_pr' ? 'Watch a configured repo PR for reviews, conflicts, failed CI checks on the head, merge or close; notifies only. Cadre never merges. Returns repo, number and status.' : 'Remove a PR watch. Returns repo, number and status.',
+      description: name === 'watch_pr' ? 'Watch a configured repo PR for reviews, conflicts, CI result on each head (failed checks or success), merge or close; notifies only. Cadre never merges. Returns repo, number and status.' : 'Remove a PR watch. Returns repo, number and status.',
       inputSchema: { type: 'object', properties: { repo: { type: 'string' }, number: { type: 'integer', minimum: 1 },
         ...(name === 'watch_pr' ? { thread_id: { type: 'string' } } : {}) }, required: ['repo', 'number'], additionalProperties: false },
     })),

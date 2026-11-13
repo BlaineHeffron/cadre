@@ -824,16 +824,17 @@ export class GithubAgentPoller {
           await notify(pr.merged ? `merged (${String(pr.merge_commit_sha || pr.head?.sha || '').slice(0, 7)})` : 'closed without merge');
           await this.repoStore.updateWatch(repo.id, watch.number);
         } else {
-          // One rollup call covers check runs and commit statuses; skipped once this head's failure was notified.
+          // One rollup call covers check runs and commit statuses; skipped once this head's CI notice was sent.
           const sha = pr.head?.sha;
           const nodes = sha && !String(watch.ciNotified || '').startsWith(`${sha}:`) ? (await fetchGithubJson(this.fetchImpl, 'https://api.github.com/graphql', { ...options,
             body: { query: CHECK_ROLLUP_QUERY, variables: { owner: repo.owner, repo: repo.repo, sha } } }))?.data?.repository?.object?.statusCheckRollup?.contexts?.nodes || [] : [];
-          const failed = nodes.some((node) => node.status ? node.status !== 'COMPLETED' : ['PENDING', 'EXPECTED'].includes(node.state)) ? []
-            : nodes.filter((node) => FAILED_CHECK_STATES.has(node.conclusion || node.state));
+          const pending = nodes.some((node) => node.status ? node.status !== 'COMPLETED' : ['PENDING', 'EXPECTED'].includes(node.state));
+          const failed = nodes.filter((node) => FAILED_CHECK_STATES.has(node.conclusion || node.state));
           if (pr.mergeable_state === 'dirty' && watch.mergeableState !== 'dirty') await notify('has merge conflict');
-          const ciNotified = failed.length ? `${sha}:${failed.map((node) => node.name || node.context).sort().join(',')}` : watch.ciNotified;
+          // One notice per head once every check is final: the failure details, or success.
+          const ciNotified = !nodes.length || pending ? watch.ciNotified : `${sha}:${failed.map((node) => node.name || node.context).sort().join(',') || 'ok'}`;
           if (ciNotified !== watch.ciNotified) {
-            await notify(`checks failed on head ${sha}\nCI failed on your PR head: fix it, push, and keep watching.${failed.map((node) => {
+            await notify(!failed.length ? `checks success on ${sha.slice(0, 7)}` : `checks failed on head ${sha}\nCI failed on your PR head: fix it, push, and keep watching.${failed.map((node) => {
               const note = [node.title, node.summary || node.description].filter(Boolean).join(': ').replace(/\s+/g, ' ').trim().slice(0, 300);
               return `\n- ${node.name || node.context} (${String(node.conclusion || node.state).toLowerCase()}) ${node.detailsUrl || node.targetUrl || ''}${note ? ` ${note}` : ''}`;
             }).join('')}`);

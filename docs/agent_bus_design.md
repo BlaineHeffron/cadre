@@ -203,8 +203,8 @@ Room metadata and a marker in git metadata preserve the path, repo, branch, base
 room id, cleanup and merge policies, disposable globs and ignored-file baseline.
 
 A PR merge or close never ends a room; `watch_pr` only notifies the watch owner
-(reviews, conflicts, merge or close, and failed CI checks on the PR head, once
-per head and failed-check set).
+(reviews, conflicts, merge or close, and one CI notice per PR head once every
+check is final: failed checks with links and summaries, or success).
 The owner ends the room with `room_end` after the work lands, and the end
 response reports `worktree: removed` or `worktree: kept (<reason>)`.
 Cleanup keeps worktrees when cleanup is off; metadata is missing or invalid;

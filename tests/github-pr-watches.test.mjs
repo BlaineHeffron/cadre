@@ -234,7 +234,7 @@ const rollup = (...nodes) => ({ data: { repository: { object: { statusCheckRollu
 const run = (name, status, conclusion = null, extra = {}) => ({ name, status, conclusion, detailsUrl: `https://ci.example/${name}`, title: null, summary: null, ...extra });
 const status = (context, state) => ({ context, state, targetUrl: `https://ci.example/${context}`, description: `${context} ${state.toLowerCase()}` });
 
-test('failed head checks notify once per head with names, links and summaries; pending and passing stay silent', async (t) => {
+test('head checks notify once per head when final: failure details or success; pending and fail-then-pass stay silent', async (t) => {
   const s = await setup(t);
   await s.watch();
   const texts = () => s.commands.map((item) => item.text);
@@ -254,6 +254,9 @@ CI failed on your PR head: fix it, push, and keep watching.
   await s.poller.pollOnce();
   assert.equal(texts().length, 1, 'a repeated poll does not notify again');
   assert.equal(rollupCalls(), callsAfterFailure, 'a notified head is not re-fetched');
+  s.setChecks(rollup(run('test', 'COMPLETED', 'SUCCESS'), run('lint', 'COMPLETED', 'SUCCESS'), status('deploy', 'SUCCESS')));
+  await s.poller.pollOnce();
+  assert.equal(texts().length, 1, 'fail then pass on the same head sends only the failure notice');
 
   s.setPr({ head: { sha: 'bbb222' } });
   s.setChecks(rollup(run('test', 'COMPLETED', 'CANCELLED')));
@@ -265,13 +268,15 @@ CI failed on your PR head: fix it, push, and keep watching.
   s.setPr({ head: { sha: 'ccc333' } });
   s.setChecks(rollup(run('test', 'QUEUED')));
   await s.poller.pollOnce();
+  assert.equal(texts().length, 2, 'queued checks wait');
   s.setChecks(rollup(run('test', 'COMPLETED', 'SUCCESS'), status('deploy', 'SUCCESS')));
   await s.poller.pollOnce();
-  assert.equal(texts().length, 2, 'checks passing after a failure send nothing');
+  await s.poller.pollOnce();
+  assert.deepEqual(texts().slice(2), ['[PR_WATCH] PR octo/demo#1 checks success on ccc333'], 'a green head sends one success notice');
 
   const { buildGithubAgentRepoStore } = await import('../modules/integrations/github-agents.mjs');
   const reloaded = buildGithubAgentRepoStore({ storeFile: join(s.h.stateDir, 'repos.json'), env: { APP_STATE_STORAGE: 'file' } });
-  assert.equal((await reloaded.listWatches())[0].ciNotified, 'bbb222:test', 'the notified key persists across restarts');
+  assert.equal((await reloaded.listWatches())[0].ciNotified, 'ccc333:ok', 'the notified key persists across restarts');
   await reloaded.close();
 });
 
