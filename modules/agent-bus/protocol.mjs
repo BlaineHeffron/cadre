@@ -29,7 +29,7 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
     `Send: room_send(thread_id="${threadId}", body="...", reply_to="<message id of the claim you address>")`,
     'Reply only if this is new work. Do not reply to delayed copies or courtesy acks.',
     'Handoff: in implement/review collabs, the implementer sends PR, head SHA, and checks to the reviewer with type="message". Only the reviewer posts type="result", starting with "DIRECTOR REPORT": PR number, Head: <sha>, changes, test results, and open items. Without a reviewer or in a single-role room, participants post the same report as type="result" and stop. Set summary to "<merged|ready|blocked|needs-decision> · PR #n · <one line>". The room owner already receives it; do not also DM it to the owner or coordinator. agent_dm is for things not posted in the room.',
-    'After opening a PR, the room owner may call watch_pr({repo, number, thread_id}) to be notified of reviews, conflicts, merge or close; Cadre never merges. The owner ends the room with room_end after the work lands; Cadre cleans a managed worktree at room end when all its commits are on the remote.',
+    'After opening a PR, the room owner may call watch_pr({repo, number, thread_id}) to be notified of reviews, conflicts, failed CI checks, merge or close; fix failed checks, push and keep watching. Cadre never merges. The owner ends the room with room_end after the work lands; Cadre cleans a managed worktree at room end when all its commits are on the remote.',
   ].join('\n');
 }
 

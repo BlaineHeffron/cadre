@@ -18,7 +18,7 @@ async function setup(t, config = { enabled: false }) {
   const calls = [];
   let pr = { state: 'open', merged: false, mergeable_state: 'clean', head: { sha: 'abcdef123' } };
   let reviews = [];
-  let checks = { total_count: 0, check_runs: [] };
+  let checks = { data: { repository: { object: { statusCheckRollup: null } } } };
   const h = await createAgentBusHarness({ pollMs: 60000, beforeReady: async (app, dir) => {
     const { buildGithubAgentRepoStore } = await import('../modules/integrations/github-agents.mjs');
     const { githubAgentsPlugin } = await import('../modules/integrations/github-agents-plugin.mjs');
@@ -41,10 +41,15 @@ async function setup(t, config = { enabled: false }) {
   poller = h.app.githubAgents.poller;
   poller.config = { enabled: true, env: { TEST_GITHUB_TOKEN: 'test-only' } };
   poller.now = () => now;
-  poller.fetchImpl = async (url) => {
+  poller.fetchImpl = async (url, init) => {
     calls.push(url);
     const path = new URL(url).pathname;
-    return new Response(JSON.stringify(path.endsWith('/reviews') ? reviews : path.endsWith('/check-runs') ? checks : pr), { status: 200 });
+    if (path === '/graphql') {
+      const { variables } = JSON.parse(init.body);
+      assert.deepEqual(variables, { owner: 'octo', repo: 'demo', sha: pr.head.sha });
+      return new Response(JSON.stringify(checks), { status: 200 });
+    }
+    return new Response(JSON.stringify(path.endsWith('/reviews') ? reviews : pr), { status: 200 });
   };
   const thread = await h.store.createThread({ title: 'PR room', participants, createdBy: creator });
   const watch = (number = 1, thread_id = thread.id) => call('watch_pr', { repo: 'octo/demo', number, ...(thread_id ? { thread_id } : {}) });
@@ -121,7 +126,7 @@ test('pollRepo reviews a moved trusted head once, after the live reviewer ends, 
   });
   s.poller.config.workDir = '/tmp/github-agents';
   const list = s.poller.fetchImpl;
-  s.poller.fetchImpl = async (url) => (new URL(url).pathname.endsWith('/pulls') ? new Response(JSON.stringify([await (await list(`${url}/1`)).json()])) : list(url));
+  s.poller.fetchImpl = async (url, init) => (new URL(url).pathname.endsWith('/pulls') ? new Response(JSON.stringify([await (await list(`${url}/1`)).json()])) : list(url, init));
   const poll = async (lastSeenPrNumber = 5) => {
     await s.store.updateRepo('octo/demo', { lastSeenPrNumber });
     const result = await s.poller.pollRepo(await s.store.getRepo('octo/demo'));
@@ -167,7 +172,7 @@ test('pollRepo ends an idle reviewer after a new review or a moved head, and onl
     sessionLauncher: async (input) => { launches.push(input.metadata.github_number); return { sessionId: `sess_${launches.length}` }; },
   });
   const list = s.poller.fetchImpl;
-  s.poller.fetchImpl = async (url) => (new URL(url).pathname.endsWith('/pulls') ? new Response(JSON.stringify([await (await list(`${url}/1`)).json()])) : list(url));
+  s.poller.fetchImpl = async (url, init) => (new URL(url).pathname.endsWith('/pulls') ? new Response(JSON.stringify([await (await list(`${url}/1`)).json()])) : list(url, init));
   const poll = async () => {
     await s.poller.pollRepo(await s.store.getRepo('octo/demo'));
     return [(await s.store.listWatches())[0].headSha, deleted.length, launches.length];
@@ -224,33 +229,50 @@ test('reviews and conflicts notify once, re-arm, ignore comments, and follow roo
   assert.equal(s.commands.length, 4);
 });
 
-// Check-run payload shape recorded from GitHub for an Actions-only repo (the combined status endpoint reports pending with zero statuses there).
-const checkRuns = (sha, ...runs) => ({ total_count: runs.length, check_runs: runs.map(([status, conclusion]) => ({ name: 'check-and-test', head_sha: sha, status, conclusion })) });
+// GraphQL statusCheckRollup shape: check runs carry status/conclusion, commit statuses carry state.
+const rollup = (...nodes) => ({ data: { repository: { object: { statusCheckRollup: { contexts: { nodes } } } } } });
+const run = (name, status, conclusion = null, extra = {}) => ({ name, status, conclusion, detailsUrl: `https://ci.example/${name}`, title: null, summary: null, ...extra });
+const status = (context, state) => ({ context, state, targetUrl: `https://ci.example/${context}`, description: `${context} ${state.toLowerCase()}` });
 
-test('head check state notifies once on pending to success or failure, never on an unchanged state', async (t) => {
+test('failed head checks notify once per head with names, links and summaries; pending and passing stay silent', async (t) => {
   const s = await setup(t);
   await s.watch();
   const texts = () => s.commands.map((item) => item.text);
-  s.setChecks(checkRuns('abcdef123', ['in_progress', null]));
+  const rollupCalls = () => s.calls.filter((url) => url.endsWith('/graphql')).length;
+  s.setChecks(rollup(run('test', 'IN_PROGRESS'), run('lint', 'COMPLETED', 'FAILURE'), status('deploy', 'PENDING')));
   await s.poller.pollOnce();
+  assert.deepEqual(texts(), [], 'pending checks wait until every check is final');
+  s.setChecks(rollup(run('test', 'COMPLETED', 'TIMED_OUT', { title: 'Tests  timed out', summary: `${'x'.repeat(400)}\n` }), run('lint', 'COMPLETED', 'FAILURE'),
+    run('build', 'COMPLETED', 'SUCCESS'), status('deploy', 'ERROR')));
   await s.poller.pollOnce();
-  assert.deepEqual(texts(), []);
-  s.setChecks(checkRuns('abcdef123', ['completed', 'success'], ['completed', 'success']));
+  assert.deepEqual(texts(), [`[PR_WATCH] PR octo/demo#1 checks failed on head abcdef123
+CI failed on your PR head: fix it, push, and keep watching.
+- test (timed_out) https://ci.example/test Tests timed out: ${'x'.repeat(283)}
+- lint (failure) https://ci.example/lint
+- deploy (error) https://ci.example/deploy deploy error`]);
+  const callsAfterFailure = rollupCalls();
   await s.poller.pollOnce();
-  await s.poller.pollOnce();
-  assert.deepEqual(texts(), ['[PR_WATCH] PR octo/demo#1 checks success on abcdef1']);
+  assert.equal(texts().length, 1, 'a repeated poll does not notify again');
+  assert.equal(rollupCalls(), callsAfterFailure, 'a notified head is not re-fetched');
+
   s.setPr({ head: { sha: 'bbb222' } });
-  s.setChecks(checkRuns('bbb222', ['completed', 'failure']));
+  s.setChecks(rollup(run('test', 'COMPLETED', 'CANCELLED')));
   await s.poller.pollOnce();
-  assert.equal(texts().length, 1);
+  await s.poller.pollOnce();
+  assert.equal(texts().length, 2, 'a new head with a failure notifies again');
+  assert.match(texts()[1], /checks failed on head bbb222\n.*\n- test \(cancelled\) https:\/\/ci\.example\/test$/);
+
   s.setPr({ head: { sha: 'ccc333' } });
-  s.setChecks(checkRuns('ccc333', ['queued', null], ['completed', 'success']));
+  s.setChecks(rollup(run('test', 'QUEUED')));
   await s.poller.pollOnce();
-  s.setChecks(checkRuns('ccc333', ['completed', 'failure'], ['completed', 'success']));
+  s.setChecks(rollup(run('test', 'COMPLETED', 'SUCCESS'), status('deploy', 'SUCCESS')));
   await s.poller.pollOnce();
-  await s.poller.pollOnce();
-  assert.deepEqual(texts().slice(1), ['[PR_WATCH] PR octo/demo#1 checks failure on ccc333']);
-  assert.ok(s.calls.includes('https://api.github.com/repos/octo/demo/commits/ccc333/check-runs?per_page=100'));
+  assert.equal(texts().length, 2, 'checks passing after a failure send nothing');
+
+  const { buildGithubAgentRepoStore } = await import('../modules/integrations/github-agents.mjs');
+  const reloaded = buildGithubAgentRepoStore({ storeFile: join(s.h.stateDir, 'repos.json'), env: { APP_STATE_STORAGE: 'file' } });
+  assert.equal((await reloaded.listWatches())[0].ciNotified, 'bbb222:test', 'the notified key persists across restarts');
+  await reloaded.close();
 });
 
 test('merge notifies the room owner, leaves the room open and removes the watch', async (t) => {
@@ -482,9 +504,9 @@ test('reviews advance one page per tick so reviews beyond the first 100 are seen
   await s.watch();
   const reviews = Array.from({ length: 101 }, (_, index) => ({ id: index + 1, state: 'COMMENTED', body: `Review ${index + 1}` }));
   const fetch = s.poller.fetchImpl;
-  s.poller.fetchImpl = async (url) => {
+  s.poller.fetchImpl = async (url, init) => {
     const parsed = new URL(url);
-    if (!parsed.pathname.endsWith('/reviews')) return fetch(url);
+    if (!parsed.pathname.endsWith('/reviews')) return fetch(url, init);
     s.calls.push(url);
     assert.equal(parsed.searchParams.get('per_page'), '100');
     const page = Number(parsed.searchParams.get('page'));

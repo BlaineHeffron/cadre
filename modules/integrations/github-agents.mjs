@@ -22,6 +22,10 @@ const ORPHAN_WORKTREE_GRACE_MS = 10 * 60_000;
 const USER_AGENT = 'dueno-fleet';
 // Public repos accept issues and PRs from anyone; only these authors spawn agents.
 const TRUSTED_AUTHOR_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+// Check-run conclusions and commit-status states that end a check as failed.
+const FAILED_CHECK_STATES = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR']);
+const CHECK_ROLLUP_QUERY = `query($owner: String!, $repo: String!, $sha: GitObjectID!) { repository(owner: $owner, name: $repo) { object(oid: $sha) { ... on Commit {
+  statusCheckRollup { contexts(first: 100) { nodes { ... on CheckRun { name status conclusion detailsUrl title summary } ... on StatusContext { context state targetUrl description } } } } } } } }`;
 const GITHUB_API_VERSION = '2022-11-28';
 const GITHUB_ACCEPT = 'application/vnd.github+json';
 
@@ -820,14 +824,22 @@ export class GithubAgentPoller {
           await notify(pr.merged ? `merged (${String(pr.merge_commit_sha || pr.head?.sha || '').slice(0, 7)})` : 'closed without merge');
           await this.repoStore.updateWatch(repo.id, watch.number);
         } else {
-          // Actions report check runs, not commit statuses, so the combined status stays pending; derive the head's state from the runs.
-          const runs = pr.head?.sha ? (await fetchGithubJson(this.fetchImpl, `${repoUrl}/commits/${pr.head.sha}/check-runs?per_page=100`, options))?.check_runs || [] : [];
-          const ci = !runs.length ? null : runs.some((run) => run.status !== 'completed') ? 'pending'
-            : runs.every((run) => run.conclusion === 'success') ? 'success' : 'failure';
+          // One rollup call covers check runs and commit statuses; skipped once this head's failure was notified.
+          const sha = pr.head?.sha;
+          const nodes = sha && !String(watch.ciNotified || '').startsWith(`${sha}:`) ? (await fetchGithubJson(this.fetchImpl, 'https://api.github.com/graphql', { ...options,
+            body: { query: CHECK_ROLLUP_QUERY, variables: { owner: repo.owner, repo: repo.repo, sha } } }))?.data?.repository?.object?.statusCheckRollup?.contexts?.nodes || [] : [];
+          const failed = nodes.some((node) => node.status ? node.status !== 'COMPLETED' : ['PENDING', 'EXPECTED'].includes(node.state)) ? []
+            : nodes.filter((node) => FAILED_CHECK_STATES.has(node.conclusion || node.state));
           if (pr.mergeable_state === 'dirty' && watch.mergeableState !== 'dirty') await notify('has merge conflict');
-          if (ci && ci !== 'pending' && watch.ciState === `${pr.head.sha}:pending`) await notify(`checks ${ci} on ${pr.head.sha.slice(0, 7)}`);
+          const ciNotified = failed.length ? `${sha}:${failed.map((node) => node.name || node.context).sort().join(',')}` : watch.ciNotified;
+          if (ciNotified !== watch.ciNotified) {
+            await notify(`checks failed on head ${sha}\nCI failed on your PR head: fix it, push, and keep watching.${failed.map((node) => {
+              const note = [node.title, node.summary || node.description].filter(Boolean).join(': ').replace(/\s+/g, ' ').trim().slice(0, 300);
+              return `\n- ${node.name || node.context} (${String(node.conclusion || node.state).toLowerCase()}) ${node.detailsUrl || node.targetUrl || ''}${note ? ` ${note}` : ''}`;
+            }).join('')}`);
+          }
           if (repo.prEnabled && TRUSTED_AUTHOR_ASSOCIATIONS.has(pr.author_association) && watch.headSha && pr.head?.sha && pr.head.sha !== watch.headSha) moved.push({ ...normalizeGithubItem(pr), headSha: pr.head.sha });
-          await this.repoStore.updateWatch(repo.id, watch.number, { mergeableState: pr.mergeable_state, headSha: watch.headSha || pr.head?.sha, ciState: ci && `${pr.head.sha}:${ci}` });
+          await this.repoStore.updateWatch(repo.id, watch.number, { mergeableState: pr.mergeable_state, headSha: watch.headSha || pr.head?.sha, ciNotified });
         }
       } catch (error) {
         this.log?.warn?.({ repoId: repo.id, number: watch.number, code: sanitizedError(error) }, 'PR watch poll failed');
@@ -1330,14 +1342,15 @@ async function fetchGithubList(fetchImpl, url, options) {
   return Array.isArray(payload) ? payload : [];
 }
 
-async function fetchGithubJson(fetchImpl, url, { token = '', timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+async function fetchGithubJson(fetchImpl, url, { token = '', timeoutMs = DEFAULT_TIMEOUT_MS, body } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(url, {
-      method: 'GET',
+      method: body ? 'POST' : 'GET',
       headers: githubHeaders(token),
       signal: controller.signal,
+      ...(body ? { body: JSON.stringify(body) } : {}),
     });
     if (!response || typeof response.status !== 'number') {
       const error = new Error('malformed response');
