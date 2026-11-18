@@ -44,7 +44,7 @@ slides-beamer	hameefy/claude-latex-skill	SKILL.md	2ea88ee	Steps 2B,3B slice
 unslop	kentnielsen-droid/cursor-skills	pstack/skills/unslop/SKILL.md	df58112
 reverse-engineer-anything	morluto/rea	.agents/skills/reverse-engineer-anything/SKILL.md	160d821	synced to rea-agents-6.8.0 release; fleet connection rules
 rea-native-and-artifacts	morluto/rea	.agents/skills/reverse-engineer-anything/references/native-and-artifacts.md	160d821	synced to rea-agents-6.8.0 release; condensed
-rea-javascript-applications	morluto/rea	.agents/skills/reverse-engineer-anything/references/javascript-applications.md	160d821	synced to rea-agents-6.8.0 release; condensed
+rea-javascript-applications	morluto/rea	.agents/skills/reverse-engineer-anything/references/javascript-applications.md	d74549e	synced to rea-agents-6.9.0 release; condensed
 rea-android-applications	morluto/rea	.agents/skills/reverse-engineer-anything/references/android-applications.md	160d821	synced to rea-agents-6.8.0 release; condensed
 rea-runtime-observation	morluto/rea	.agents/skills/reverse-engineer-anything/references/runtime-observation.md	160d821	synced to rea-agents-6.8.0 release; condensed
 rea-evidence-workflows	morluto/rea	.agents/skills/reverse-engineer-anything/references/evidence-workflows.md	160d821	synced to rea-agents-6.8.0 release; condensed
