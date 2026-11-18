@@ -101,6 +101,7 @@ export function projectClaudeStreamJsonSession(session, kind = 'claude') {
     attempts: session.attempts, turns: session.turns, negotiated: session.negotiated,
     mcpCapabilities: session.mcpCapabilities,
     handoffFrom: session.metadata?.handoffFrom || null, handoffTo: session.metadata?.handoffTo || null,
+    spawner: session.metadata?.spawner || session.metadata?.spawnedBy || null,
   };
 }
 

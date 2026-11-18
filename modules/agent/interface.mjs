@@ -543,6 +543,13 @@ export function buildAgentInterface({
   async function handoffSession(sessionId, input = {}) {
     const id = normalizeText(sessionId);
     const { kind, detail } = await findHandoffSource(id);
+    // An agent may hand off only a session it spawned; the operator (UI, token) may hand off any.
+    const principal = input._serverAuthContext?.principal;
+    if (principal?.type === 'agent' && !(detail.spawner?.kind === String(principal.kind) && detail.spawner?.sessionId === String(principal.sessionId))) {
+      throw Object.assign(new Error(`Session ${id} was not spawned by this agent; an agent may hand off only sessions it spawned`), {
+        statusCode: 403, code: 'handoff_not_owner',
+      });
+    }
     const status = String(detail?.state?.status || '');
     if (BUSY_ONE_OFF_STATUSES.has(status) || status === 'blocked') {
       throw Object.assign(new Error(`Session ${id} is mid-turn (${status}); wait for it to finish or interrupt it before handing off`), {

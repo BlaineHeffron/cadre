@@ -1834,6 +1834,7 @@ function sessionLaunchSelection(meta = {}) {
     skills: meta.skills || [],
     handoffFrom: meta.metadata?.handoffFrom || null,
     handoffTo: meta.metadata?.handoffTo || null,
+    spawner: meta.metadata?.spawner || meta.metadata?.spawnedBy || null,
   };
 }
 
