@@ -254,10 +254,11 @@ export function coordinatorOwnerMetadata(policy) {
 export const SPAWN_RESULT_NOTE = 'Cadre returns your final message of each turn with no background work or returnResults workers outstanding to your spawner. End with your answer. Do not message your spawner any other way (native SendMessage or cross-session messages, agent_dm, room_send); Cadre already delivers the turn. If you are only acknowledging or holding, end the turn with no closing message. When a read, search, or check is large enough to crowd your context, delegate it to a built-in subagent when available: Haiku (model: "haiku") on Claude, GPT-6 Luna (gpt-6-luna) on Codex; otherwise do it yourself. Reply only if this is new work. Do not reply to delayed copies or courtesy acks.';
 
 // The agent bus returns each finished turn of a spawn_session child to this authenticated spawner.
-// The caller only opts in; the identity always comes from the credential.
+// The caller only opts in; the identity always comes from the credential. `spawner` records an
+// agent spawner either way, so only it may hand the child off.
 export function spawnerMetadata(principal, metadata = {}) {
-  return { spawnedBy: principal?.type === 'agent' && metadata?.returnToSpawner === true
-    ? { kind: String(principal.kind), sessionId: String(principal.sessionId) } : undefined };
+  const spawner = principal?.type === 'agent' ? { kind: String(principal.kind), sessionId: String(principal.sessionId) } : undefined;
+  return { spawnedBy: metadata?.returnToSpawner === true ? spawner : undefined, spawner };
 }
 
 // Spawn authority comes only from the caller's credential; the hub runs this for local and remote spawns.

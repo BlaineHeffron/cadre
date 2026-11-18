@@ -61,6 +61,14 @@ function openInteraction(session) {
   return session.interactions.find((interaction) => interaction.status === 'open') || null;
 }
 
+// The visible conversation, text only: prompts and committed replies (tool calls and reasoning are not text blocks).
+function conversationMessages(session) {
+  const textOf = (entry) => (entry.blocks || []).filter((block) => block.type === 'text').map((block) => block.text).join('\n').trim();
+  return session.transcript
+    .filter((entry) => ['user.message', 'message.committed'].includes(entry.type) && textOf(entry))
+    .map((entry) => ({ role: entry.type === 'user.message' ? 'user' : 'assistant', text: textOf(entry) }));
+}
+
 function content(session) {
   let value = '';
   const deltaTurns = new Set(session.transcript.filter((entry) => entry.type === 'message.delta').map((entry) => entry.turnId));
@@ -92,6 +100,8 @@ export function projectClaudeStreamJsonSession(session, kind = 'claude') {
     canResume, nonResumable: !canResume && session.nonResumable, endedWithHistory: session.endedWithHistory, attachCommand: '',
     attempts: session.attempts, turns: session.turns, negotiated: session.negotiated,
     mcpCapabilities: session.mcpCapabilities,
+    handoffFrom: session.metadata?.handoffFrom || null, handoffTo: session.metadata?.handoffTo || null,
+    spawner: session.metadata?.spawner || session.metadata?.spawnedBy || null,
   };
 }
 
@@ -454,7 +464,14 @@ export async function claudeStreamJsonSessionsPlugin(app, {
   app.get(`/api/${kind}/sessions/:id/transcript`, async (req, reply) => {
     try {
       const session = requireSession(req.params.id);
-      return { text: content(session), entries: session.transcript, source: TRANSCRIPT[kind].source, transcriptGrade: 'committed_text' };
+      return { text: content(session), entries: session.transcript, messages: conversationMessages(session), source: TRANSCRIPT[kind].source, transcriptGrade: 'committed_text' };
+    } catch (error) { return errorReply(reply, error); }
+  });
+  app.put(`/api/${kind}/sessions/:id`, async (req, reply) => {
+    try {
+      if (!req.body?.handoffTo) return reply.code(409).send({ error: `Only handoffTo can be set on a structured ${kind} session`, code: 'unsupported_for_structured_session' });
+      await service.updateMetadata(requireSession(req.params.id).id, { handoffTo: req.body.handoffTo });
+      return { ok: true, id: req.params.id };
     } catch (error) { return errorReply(reply, error); }
   });
   app.get(`/api/${kind}/sessions/:id/events`, async (req, reply) => {
@@ -536,7 +553,7 @@ export async function hybridSessionsPlugin(app, { tmuxPlugin, ...options }) {
   const routes = new Map();
   const record = (method) => (url, handler) => { routes.set(`${method} ${url}`, handler); };
   const { service } = await claudeStreamJsonSessionsPlugin({
-    log: app.log, addHook: app.addHook.bind(app), get: record('GET'), post: record('POST'), delete: record('DELETE'),
+    log: app.log, addHook: app.addHook.bind(app), get: record('GET'), post: record('POST'), put: record('PUT'), delete: record('DELETE'),
   }, { ...options, wsManager: wsFor('structured') });
   // Ids stay structured after delete so they 404 instead of reaching tmux.
   const known = new Set();

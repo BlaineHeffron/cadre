@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useEffect, useMemo } from 'preact/hooks';
+import { useEffect, useMemo, useRef } from 'preact/hooks';
 import { route } from 'preact-router';
 import { providerDescriptor } from '../app/providers.mjs';
 import { useSignal } from '../app/use-signal.mjs';
@@ -28,6 +28,7 @@ import { TerminalKeys } from '../components/terminal-keys.mjs';
 import { RenderedTranscript } from '../components/rendered-transcript.mjs';
 import { MachineChip } from '../components/machines.mjs';
 import { closeMenuOnChoice } from '../components/session-card.mjs';
+import { ProviderModelFields, defaultThinkingLevelFor, loadModelCatalog } from '../components/provider-model-picker.mjs';
 
 function isActiveThread(thread) {
   if (!thread) return false;
@@ -107,6 +108,15 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
   // the CLI's already-rendered TUI output, which destroys LaTeX delimiters, so
   // the rendered view must not be built from it.
   const transcriptRaw = useSignal({ status: 'idle', text: '', error: '' });
+  // Hand off…: the target { provider, model, thinkingLevel } while its dialog is open.
+  const handoff = useSignal(null);
+  const handingOff = useSignal(false);
+  const modelCatalog = useSignal({ providers: [], models: {} });
+  const modelCatalogLoading = useSignal(false);
+  const handoffDialog = useRef(null);
+  useEffect(() => {
+    if (handoff.value && handoffDialog.current && !handoffDialog.current.open) handoffDialog.current.showModal();
+  }, [Boolean(handoff.value)]);
 
   useEffect(() => {
     let cancelled = false;
@@ -242,6 +252,8 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         canResume: data.canResume === true,
         resumeBlockedReason: data.resumeBlockedReason || '',
         machine: data.machine || null,
+        handoffFrom: data.handoffFrom || null,
+        handoffTo: data.handoffTo || null,
       };
     } catch (e) {
       if (!shouldApply()) return;
@@ -462,6 +474,30 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
     }
   }
 
+  function openHandoff() {
+    // Claude and Codex sessions report their runtime's provider (anthropic, openai); a pi session's is its agent provider.
+    const provider = descriptor.kind === 'pi' ? sessionInfo.value.provider || 'pi' : descriptor.kind;
+    const model = sessionInfo.value.model || '';
+    handoff.value = { provider, model, thinkingLevel: defaultThinkingLevelFor(provider, model) };
+    if (!modelCatalogLoading.value && !modelCatalog.value.providers.length) loadModelCatalog(modelCatalog, modelCatalogLoading);
+  }
+
+  async function submitHandoff(event) {
+    event.preventDefault();
+    if (handingOff.value) return;
+    handingOff.value = true;
+    try {
+      const data = await api.post(`/agents/sessions/${encodeURIComponent(id)}/handoff`, handoff.value);
+      addToast(`Handed off to ${data.sessionName || data.id}${data.dropped?.length ? ' (without the selections the new provider refused)' : ''}`, 'success');
+      handoffDialog.current?.close();
+      route(`/${data.backendType}/${data.id}`);
+    } catch (e) {
+      addToast(`Hand off failed: ${e.message}`, 'error');
+    } finally {
+      handingOff.value = false;
+    }
+  }
+
   async function resumeSession() {
     try {
       const data = await api.post(`${descriptor.apiBase}/sessions/${id}/resume`);
@@ -654,6 +690,12 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         h('span', { class: 'session-title', title: id }, headerTitle),
         isRustManagedReadOnly ? h('span', { class: 'badge badge-low' }, 'rust-managed / read-only') : null,
         h(MachineChip, { machine: sessionInfo.value.machine }),
+        sessionInfo.value.handoffFrom
+          ? h('a', { class: 'badge', href: `/${sessionInfo.value.handoffFrom.kind}/${sessionInfo.value.handoffFrom.sessionId}` }, `Continued from ${sessionInfo.value.handoffFrom.sessionId}`)
+          : null,
+        sessionInfo.value.handoffTo
+          ? h('a', { class: 'badge', href: `/${sessionInfo.value.handoffTo.kind}/${sessionInfo.value.handoffTo.sessionId}` }, `Handed off to ${sessionInfo.value.handoffTo.sessionId}`)
+          : null,
       ),
       h('div', { class: 'session-header-actions' },
         // A remote session's pane lives on its worker; its own UI (and AUTH_TOKEN) attaches there.
@@ -686,6 +728,9 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
               },
               title: 'Toggle a rendered Markdown and math view built from the model session log. Raw terminal content remains unchanged.',
             }, 'Rendered transcript'),
+            !isRustManagedReadOnly && ['claude', 'codex', 'pi'].includes(descriptor.kind)
+              ? h('button', { class: 'btn', onClick: openHandoff, title: 'Start a new session on another provider or model from a brief of this one; this session stays as it is' }, 'Hand off…')
+              : null,
             h('button', { class: 'btn', onClick: copySessionId }, 'Copy ID'),
             (!machine && sessionInfo.value.sessionName && sessionInfo.value.attachCommand && sessionInfo.value.source !== 'bare-process')
               ? h('button', { class: 'btn mobile-hidden', onClick: copyAttachCommand }, 'Copy Attach')
@@ -705,6 +750,19 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         ),
       ),
     ),
+    handoff.value ? h('dialog', {
+      ref: handoffDialog, class: 'new-agent-dialog', 'aria-labelledby': 'handoff-title',
+      onClose: () => { handoff.value = null; },
+    }, h('form', { class: 'card new-agent-form', onSubmit: submitHandoff },
+      h('div', { class: 'card-header' },
+        h('span', { class: 'card-title', id: 'handoff-title' }, 'Hand off to another model'),
+        h('button', { class: 'btn', type: 'button', onClick: () => handoffDialog.current?.close() }, 'Cancel')),
+      h('p', { class: 'new-agent-hint' }, `A new session starts in ${sessionInfo.value.workDir || 'the same workdir'} with a text-only brief of this one (first task, recent messages, git status). This session is left as it is.`),
+      h('div', { class: 'new-agent-setup-grid' },
+        h(ProviderModelFields, { catalog: modelCatalog.value, value: handoff.value, onChange: (next) => { handoff.value = next; } })),
+      h('div', { class: 'new-agent-footer' },
+        h('button', { class: 'btn btn-primary', type: 'submit', disabled: handingOff.value }, handingOff.value ? 'Handing off…' : 'Hand off'),
+        modelCatalogLoading.value ? h('span', { class: 'new-agent-hint' }, 'Loading models...') : null))) : null,
     renderedTranscript.value
       ? h('div', { class: 'rendered-transcript-wrap', style: 'flex:1; min-height:0; overflow:auto' },
         transcriptRaw.value.status === 'loading'

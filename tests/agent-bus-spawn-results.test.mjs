@@ -464,11 +464,14 @@ test('sessions without a spawner return nothing', async (t) => {
 
 test('only an authenticated agent that opts in becomes the spawner', () => {
   const agent = { type: 'agent', kind: 'claude', sessionId: 'parent-1' };
-  assert.deepEqual(spawnerMetadata(agent, { returnToSpawner: true }), { spawnedBy: { kind: 'claude', sessionId: 'parent-1' } });
-  assert.equal(spawnerMetadata(agent, {}).spawnedBy, undefined);
-  assert.equal(spawnerMetadata({ type: 'ui', kind: 'dashboard', sessionId: 'browser' }, { returnToSpawner: true }).spawnedBy, undefined);
+  const parent = { kind: 'claude', sessionId: 'parent-1' };
+  assert.deepEqual(spawnerMetadata(agent, { returnToSpawner: true }), { spawnedBy: parent, spawner: parent });
+  // Without the opt-in no results return, but the agent is still recorded as the spawner (handoff ownership).
+  assert.deepEqual(spawnerMetadata(agent, {}), { spawnedBy: undefined, spawner: parent });
+  assert.deepEqual(spawnerMetadata({ type: 'ui', kind: 'dashboard', sessionId: 'browser' }, { returnToSpawner: true }), { spawnedBy: undefined, spawner: undefined });
   // A caller cannot name its own spawner.
-  assert.equal({ spawnedBy: { kind: 'claude', sessionId: 'victim' }, ...spawnerMetadata(null, {}) }.spawnedBy, undefined);
+  const spoofed = { spawnedBy: { kind: 'claude', sessionId: 'victim' }, spawner: { kind: 'claude', sessionId: 'victim' }, ...spawnerMetadata(null, {}) };
+  assert.deepEqual([spoofed.spawnedBy, spoofed.spawner], [undefined, undefined]);
 });
 
 for (const [name, args, count] of [['omitted', {}, 0], ['false', { returnResults: false }, 0], ['true', { returnResults: true }, 2]]) {
