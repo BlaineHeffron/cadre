@@ -35,29 +35,23 @@ import { AgentSessionDetailPage } from './agent-session-detail.mjs';
 import { settleWithConcurrency } from '../app/async-pool.mjs';
 import { sessionTitle } from '../app/agent-bus-ui.mjs';
 import { MachineChip, RunOnSelect } from '../components/machines.mjs';
+import {
+  DEFAULT_THINKING_LEVEL,
+  ProviderModelFields,
+  codexReasoningLevels,
+  defaultModelForProvider,
+  defaultThinkingLevelFor,
+  loadModelCatalog,
+  providerLabel,
+  sessionKindForProvider,
+} from '../components/provider-model-picker.mjs';
 
 const PROVIDER_OPTIONS = [
   { id: 'all', label: 'All providers' },
   { id: 'codex', label: 'Codex' },
   { id: 'claude', label: 'Claude' },
 ];
-const FALLBACK_PROVIDER_MODELS = Object.freeze({
-  codex: 'gpt-6.1-sol',
-  claude: 'claude-opus-5-5',
-});
-const DEFAULT_THINKING_LEVEL = 'medium';
 const DEFAULT_WORKDIR_PLACEHOLDER = '/path/to/project';
-const CODEX_REASONING_LEVELS = Object.freeze([
-  { id: 'low', label: 'Low', description: 'Fast responses with lighter reasoning' },
-  { id: 'medium', label: 'Medium', description: 'Balances speed and reasoning depth' },
-  { id: 'high', label: 'High', description: 'Greater reasoning depth for complex problems' },
-  { id: 'xhigh', label: 'Extra high', description: 'Extra high reasoning depth for complex problems' },
-]);
-const SOL_REASONING_LEVELS = Object.freeze([
-  ...CODEX_REASONING_LEVELS,
-  { id: 'max', label: 'Max', description: 'Maximum reasoning depth for the hardest problems' },
-  { id: 'ultra', label: 'Ultra', description: 'Maximum reasoning with automatic task delegation' },
-]);
 const STATE_FILTERS = [
   { id: 'needs-approval', label: 'Needs attention' },
   { id: 'prompt-ready', label: 'Idle' },
@@ -66,62 +60,12 @@ const STATE_FILTERS = [
   { id: 'ended', label: 'Ended' },
 ];
 const DESKTOP_AGENTS_QUERY = '(min-width: 981px)';
-function providerLabel(provider = '') {
-  const normalized = normalizeProvider(provider);
-  if (normalized === 'codex') return 'Codex';
-  if (normalized === 'claude') return 'Claude';
-  return normalized || 'Agent';
-}
-
-function sessionKindForProvider(provider = '', modelCatalog = null) {
-  const normalized = normalizeProvider(provider);
-  const entry = (modelCatalog?.providers || [])
-    .find((item) => normalizeProvider(item?.id) === normalized);
-  if (entry?.sessionKind || entry?.backendType) return String(entry.sessionKind || entry.backendType);
-  if (normalized === 'codex' || normalized === 'claude') return normalized;
-  return '';
-}
 
 function runtimeForProvider(provider = '', modelCatalog = null) {
   const normalized = normalizeProvider(provider);
   const entry = (modelCatalog?.providers || [])
     .find((item) => normalizeProvider(item?.id) === normalized);
   return String(entry?.runtime || entry?.backendType || entry?.sessionKind || normalized).trim();
-}
-
-function defaultModelForProvider(provider = '', modelCatalog = null) {
-  const normalizedProvider = normalizeProvider(provider);
-  const providerCatalog = modelCatalog?.providers || [];
-  const catalogEntry = providerCatalog.find((entry) => normalizeProvider(entry?.id) === normalizedProvider) || null;
-  const discoveredDefault = String(catalogEntry?.defaultModel || '').trim();
-  if (discoveredDefault) return discoveredDefault;
-  return FALLBACK_PROVIDER_MODELS[normalizedProvider] || '';
-}
-
-function isCodexSolModel(model = '') {
-  const id = String(model || '').trim().toLowerCase();
-  return id === 'gpt-6.1-sol' || id === 'gpt-5.6-sol';
-}
-
-function codexReasoningLevels(model = '') {
-  return isCodexSolModel(model) ? SOL_REASONING_LEVELS : CODEX_REASONING_LEVELS;
-}
-
-function defaultThinkingLevelFor(provider = '', model = '') {
-  if (/fable/i.test(String(model))) return 'high';
-  return normalizeProvider(provider) === 'codex' && isCodexSolModel(model)
-    ? 'low'
-    : DEFAULT_THINKING_LEVEL;
-}
-
-function withDefaultModelChoice(provider = '', choices = [], modelCatalog = null) {
-  const defaultModel = defaultModelForProvider(provider, modelCatalog);
-  const normalizedChoices = Array.isArray(choices) ? choices : [];
-  if (!defaultModel) return normalizedChoices;
-  if (normalizedChoices.some((entry) => (entry?.id || entry) === defaultModel)) {
-    return normalizedChoices;
-  }
-  return [{ id: defaultModel, label: defaultModel }, ...normalizedChoices];
 }
 
 function previewKey(session = {}) {
@@ -221,28 +165,6 @@ function handleRailArrowKeys(event) {
   target?.focus();
 }
 
-async function loadModelCatalog(modelCatalogState, modelCatalogLoading) {
-  modelCatalogLoading.value = true;
-  try {
-    const [data, providerData] = await Promise.all([
-      api.get('/agent-bus/model-catalog'),
-      api.get('/agents/providers'),
-    ]);
-    const enabled = new Set((providerData?.providers || [])
-      .filter((entry) => entry?.enabled !== false)
-      .map((entry) => normalizeProvider(entry?.id)));
-    const providers = (data?.providers || []).filter((entry) => enabled.has(normalizeProvider(entry?.id)));
-    modelCatalogState.value = {
-      ...(data || {}),
-      providers,
-      models: Object.fromEntries(providers.map((entry) => [entry.id, data?.models?.[entry.id] || []])),
-    };
-  } catch (e) {
-    addToast(`Failed to load model catalog: ${e.message}`, 'error');
-  } finally {
-    modelCatalogLoading.value = false;
-  }
-}
 
 async function loadAgentSessions(loading, loadError) {
   loading.value = true;
@@ -436,11 +358,6 @@ export function AgentsPage({ focus = '' } = {}) {
     }))
     : PROVIDER_OPTIONS.filter((option) => option.id !== 'all');
 
-  const newModelChoices = withDefaultModelChoice(
-    newProvider.value,
-    modelCatalogState.value.models?.[normalizeProvider(newProvider.value)] || [],
-    modelCatalogState.value
-  );
   const codexThinkingLevels = codexReasoningLevels(newModel.value);
   const advancedNeedsAttention = newMcpWarning.value
     || newPromptProfile.value !== 'none'
@@ -896,59 +813,16 @@ export function AgentsPage({ focus = '' } = {}) {
           </div>
 
           <div class="new-agent-setup-grid">
-            <label class="new-agent-field">
-              <span>Provider</span>
-              <select
-                class="input"
-                value=${newProvider.value}
-                onInput=${e => {
-                  const provider = normalizeProvider(e.target.value);
-                  newProvider.value = provider;
-                  newMachine.value = '';
-                  newModel.value = defaultModelForProvider(provider, modelCatalogState.value);
-                  newThinkingLevel.value = defaultThinkingLevelFor(provider, newModel.value);
-                }}>
-                ${providerChoices.map((option) => html`
-                  <option value=${option.id}>${option.label}</option>
-                `)}
-              </select>
-            </label>
-            <${RunOnSelect} machines=${machines.value} provider=${normalizeProvider(newProvider.value)} value=${newMachine.value} onChange=${(id) => { newMachine.value = id; }} />
-            <label class="new-agent-field">
-              <span>Model</span>
-              <select
-                class="input"
-                value=${newModel.value}
-                onInput=${e => {
-                  newModel.value = e.target.value;
-                  newThinkingLevel.value = defaultThinkingLevelFor(newProvider.value, newModel.value);
-                }}>
-                ${newModelChoices.length === 0 ? html`
-                  <option value=${newModel.value}>${newModel.value || 'Loading models...'}</option>
-                ` : newModelChoices.map((model) => html`
-                  <option value=${model.id || model}>${model.label || model.id || model}</option>
-                `)}
-              </select>
-            </label>
-            <label class="new-agent-field">
-              <span>Thinking level</span>
-              ${normalizeProvider(newProvider.value) === 'codex' ? html`
-                <select
-                  class="input"
-                  value=${newThinkingLevel.value}
-                  onInput=${e => { newThinkingLevel.value = e.target.value; }}>
-                  ${codexThinkingLevels.map((level) => html`
-                    <option value=${level.id} title=${level.description}>${level.label}</option>
-                  `)}
-                </select>
-              ` : html`
-                <input
-                  class="input"
-                  placeholder=${DEFAULT_THINKING_LEVEL}
-                  value=${newThinkingLevel.value}
-                  onInput=${e => { newThinkingLevel.value = e.target.value; }} />
-              `}
-            </label>
+            <${ProviderModelFields}
+              catalog=${modelCatalogState.value}
+              value=${{ provider: newProvider.value, model: newModel.value, thinkingLevel: newThinkingLevel.value }}
+              onChange=${(next) => {
+                if (next.provider !== normalizeProvider(newProvider.value)) newMachine.value = '';
+                newProvider.value = next.provider;
+                newModel.value = next.model;
+                newThinkingLevel.value = next.thinkingLevel;
+              }}
+              afterProvider=${html`<${RunOnSelect} machines=${machines.value} provider=${normalizeProvider(newProvider.value)} value=${newMachine.value} onChange=${(id) => { newMachine.value = id; }} />`} />
           </div>
           ${codexThinkingHelp ? html`
             <p class="new-agent-hint">${codexThinkingHelp}</p>

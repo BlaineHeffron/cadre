@@ -503,6 +503,34 @@ export function buildMonitorMcpServer({ requestImpl }) {
       },
     },
     {
+      name: 'handoff_session',
+      description: 'Hand an idle session off to another provider or model: starts a new session in the same workDir (and MCP profile, prompt profile and skills where the target accepts them) with a bounded text-only brief of the source, and links the two. The source is left idle and resumable; a source mid-turn is refused. Returns the new session id and the links.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string', minLength: 1, pattern: '\\S', description: 'Source session id.' },
+          provider: MCP_PROVIDER_SCHEMA,
+          model: MCP_AGENT_MODEL_SCHEMA,
+          thinkingLevel: { type: 'string', description: 'Optional reasoning/effort level for the new session' },
+        },
+        required: ['session_id', 'provider'],
+        additionalProperties: false,
+      },
+      handler: async ({ session_id, provider, model, thinkingLevel }) => {
+        assertMcpProviderModel(provider, model);
+        const result = await request(`/api/agents/sessions/${encodeURIComponent(String(session_id).trim())}/handoff`, {
+          method: 'POST',
+          // Automated handoff: the structured runtime serves it when CADRE_STRUCTURED_AUTOMATED_SPAWNS is on.
+          body: { provider, model, thinkingLevel, structured: true },
+        });
+        return {
+          session_id: result.id, provider: result.provider, backendType: result.backendType,
+          handoffFrom: result.handoffFrom, handoffTo: result.handoffTo,
+          ...(result.dropped?.length ? { dropped: result.dropped } : {}), ...(result.linkError ? { warnings: [result.linkError] } : {}),
+        };
+      },
+    },
+    {
       name: 'monitor_terminate_session',
       description: 'Terminate and verify an existing agent session by session id. Returns session_id and status: terminated, already_gone, refused, failed, or not_found without laundering failures as success.',
       inputSchema: {
@@ -1456,6 +1484,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     'monitor_list_codex_sessions',
     'monitor_list_pi_sessions',
     'spawn_session',
+    'handoff_session',
     'monitor_terminate_session',
     'monitor_list_agent_providers',
     'monitor_list_mcp_servers',

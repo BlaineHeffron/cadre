@@ -10,11 +10,16 @@ import { publicLaunchSkills } from '../integrations/launch-skills.mjs';
 import { createAgentSessionWorktree } from '../fleet/git-worktree.mjs';
 import { expandHomePath } from '../sessions/workdir.mjs';
 import { buildInProcessFastifyRequest } from '../agent-bus/in-process-mcp.mjs';
+import { buildHandoffPrompt, readGitSummary, visibleMessages } from '../sessions/handoff.mjs';
 
 const DEFAULT_TASK_TIMEOUT_MS = 180000;
 const DEFAULT_TASK_POLL_INTERVAL_MS = 1000;
 const DEFAULT_TASK_LINES = 400;
 const BUSY_ONE_OFF_STATUSES = new Set(['working', 'thinking', 'awaiting_response']);
+const HANDOFF_SOURCE_KINDS = ['claude', 'codex', 'pi'];
+const HANDOFF_RECENT_MESSAGES = 40;
+// Selections a target provider may refuse; the handoff then starts without them and says so.
+const HANDOFF_DROPPABLE_ERROR = /^(mcp_|prompt_profile_|launch_skill_)/;
 const DEFAULT_IDEMPOTENCY_TTL_MS = 3_600_000;
 const DEFAULT_IDEMPOTENCY_STORE_FILE = runtimeStatePath('agent_session_idempotency.json');
 const LEGACY_IDEMPOTENCY_STORE_FILE = legacyRootStatePath('agent_session_idempotency.json');
@@ -207,6 +212,7 @@ export function buildAgentInterface({
   worktreeCreator = null,
   worktreeBaseDir = '~/.dueno-fleet/agent-worktrees',
   machineWorktree = null,
+  gitSummary = readGitSummary,
 } = {}) {
   if (!requestImpl) throw new Error('requestImpl is required');
 
@@ -522,12 +528,85 @@ export function buildAgentInterface({
     }
   }
 
+  async function findHandoffSource(sessionId) {
+    for (const kind of HANDOFF_SOURCE_KINDS) {
+      const listed = await request(sessionBasePath(kind)).catch(() => null);
+      if ((listed?.sessions || []).some((session) => session?.id === sessionId)) {
+        return { kind, detail: await request(`${sessionBasePath(kind)}/${encodeURIComponent(sessionId)}?lines=50`) };
+      }
+    }
+    throw Object.assign(new Error(`Session not found: ${sessionId}`), { statusCode: 404, code: 'session_not_found' });
+  }
+
+  // Starts a session on another provider or model from a text-only brief of this one. The source is left
+  // as it is (idle and resumable); a source mid-turn is refused rather than interrupted.
+  async function handoffSession(sessionId, input = {}) {
+    const id = normalizeText(sessionId);
+    const { kind, detail } = await findHandoffSource(id);
+    const status = String(detail?.state?.status || '');
+    if (BUSY_ONE_OFF_STATUSES.has(status) || status === 'blocked') {
+      throw Object.assign(new Error(`Session ${id} is mid-turn (${status}); wait for it to finish or interrupt it before handing off`), {
+        statusCode: 409, code: 'handoff_source_busy',
+      });
+    }
+    const transcript = `${sessionBasePath(kind)}/${encodeURIComponent(id)}/transcript`;
+    const [recent, earliest] = await Promise.all([
+      request(`${transcript}?limit=${HANDOFF_RECENT_MESSAGES}`).catch(() => ({})),
+      // The paged reader reads backward from `before`, so a page ending early in the log starts at the first task.
+      request(`${transcript}?limit=5000&before=262144`).catch(() => ({})),
+    ]);
+    const workDir = normalizeText(detail.workDir);
+    const machine = detail.machine?.id || '';
+    const initialPrompt = buildHandoffPrompt({
+      source: { id, provider: detail.provider || kind, model: detail.model },
+      firstTask: visibleMessages(earliest.messages).find((message) => message.role === 'user')?.text || '',
+      messages: (recent.messages || []).slice(-HANDOFF_RECENT_MESSAGES),
+      git: machine ? null : await gitSummary(workDir),
+      workDir,
+    });
+    const handoffFrom = { sessionId: id, kind, provider: detail.provider || kind, model: detail.model || '' };
+    const base = {
+      provider: input.provider,
+      model: input.model,
+      thinkingLevel: input.thinkingLevel,
+      workDir,
+      machine: machine || undefined,
+      displayName: detail.displayName ? `${detail.displayName} (handoff)` : undefined,
+      initialPrompt,
+      structured: input.structured,
+      metadata: { handoffFrom },
+      _serverAuthContext: input._serverAuthContext,
+    };
+    const selection = compactBody({
+      mcpProfile: detail.mcpCapabilities?.profileId,
+      mcpServers: detail.mcpCapabilities?.serverIds?.length ? { add: detail.mcpCapabilities.serverIds } : undefined,
+      promptProfile: detail.promptProfile,
+      skills: detail.skills?.length ? detail.skills : undefined,
+    });
+    let created;
+    const dropped = [];
+    try {
+      created = await createInteractiveSession({ ...base, ...selection });
+    } catch (error) {
+      const code = String(error.code || error.payload?.code || '');
+      if (!HANDOFF_DROPPABLE_ERROR.test(code) || !Object.keys(selection).length) throw error;
+      dropped.push({ selection, reason: error.message, code });
+      created = await createInteractiveSession(base);
+    }
+    const handoffTo = { sessionId: created.id, kind: created.backendType, provider: created.provider, model: input.model || '' };
+    let linkError = null;
+    await request(`${sessionBasePath(kind)}/${encodeURIComponent(id)}`, { method: 'PUT', body: { handoffTo } })
+      .catch((error) => { linkError = error.message; });
+    return { ...created, handoffFrom, handoffTo, dropped, ...(linkError ? { linkError } : {}), handoffPromptChars: initialPrompt.length };
+  }
+
   return {
     listProviders,
     listMcpServers,
     listPromptProfiles,
     listLaunchSkills,
     createInteractiveSession,
+    handoffSession,
     createInteractiveSessionIdempotent,
     runOneOffTask,
   };
@@ -572,6 +651,14 @@ export async function agentInterfacePlugin(app, opts = {}) {
         error: error.message,
         code: error.code || error.payload?.code || null,
       });
+    }
+  });
+
+  app.post('/api/agents/sessions/:id/handoff', async (req, reply) => {
+    try {
+      return await api.handoffSession(req.params.id, { ...(req.body || {}), _serverAuthContext: req.duenoAuth || null });
+    } catch (error) {
+      return reply.code(error.statusCode || 500).send({ error: error.message, code: error.code || error.payload?.code || null });
     }
   });
 

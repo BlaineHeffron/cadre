@@ -432,6 +432,40 @@ describe('structured automated spawns', () => {
     }
   });
 
+  it('hands a structured worker off through handoff_session, linking both and leaving the source idle', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, transports, request, mcp } = await buildApp();
+    try {
+      const busy = (await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, initialPrompt: 'long task: port the parser' })).participants[0].session_id;
+      // Mid-turn: refused, and nothing new starts.
+      await waitFor(() => typeof transports[0].finishTurn === 'function');
+      await assert.rejects(mcp.handleToolCall('handoff_session', { session_id: busy, provider: 'claude' }), /mid-turn/);
+      assert.equal(transports.length, 1);
+      transports[0].finishTurn();
+      await waitFor(async () => (await request('GET', `/api/claude/sessions/${busy}`)).json().state.status === 'ready');
+
+      const result = await mcp.handleToolCall('handoff_session', { session_id: busy, provider: 'claude', model: 'claude-sonnet-5-5' });
+      assert.equal(transports.length, 2);
+      const brief = transports[1].prompts[0][0].text;
+      assert.match(brief, new RegExp(`^Handoff from Cadre session ${busy} \\(provider claude`));
+      assert.match(brief, /## Original task\n\nlong task: port the parser/);
+      assert.match(brief, /### Assistant\n\nStructured reply/);
+      assert.equal(brief.includes('## Working tree'), false);
+      assert.match(brief, /Continue this work from here\. The previous session is paused; verify the working tree before acting\./);
+      assert.equal(transports[1].spec.workDir, workDir);
+      const source = (await request('GET', `/api/claude/sessions/${busy}`)).json();
+      const target = (await request('GET', `/api/claude/sessions/${result.session_id}`)).json();
+      assert.equal(target.model, 'claude-sonnet-5-5');
+      assert.deepEqual(source.handoffTo, { sessionId: result.session_id, kind: 'claude', provider: 'claude', model: 'claude-sonnet-5-5' });
+      assert.equal(target.handoffFrom.sessionId, busy);
+      assert.equal(source.state.status, 'ready');
+      assert.equal(source.sessionEnded, false);
+    } finally {
+      await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
   it('gives spawned agents only the agent-bus tools unless the operator, a coordinator profile or dueno-full launches them', async () => {
     const scopes = (store, id) => Object.values(store.state.credentials)
       .find((record) => record.status === 'active' && record.principal.sessionId === id)?.toolScopes || [];
