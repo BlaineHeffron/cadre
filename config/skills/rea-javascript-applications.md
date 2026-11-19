@@ -62,6 +62,15 @@ never establish reachability), `kind: "javascript"` with `projection:
 `where: {paths: [...]}` and selected `property_keys` for file and processing
 facts. Check `source_coverage` before any negative conclusion.
 
+`analyze_web_bundle` also pages captured endpoint observations and inferences:
+`view: {kind: "web-bundle", collection: "endpoints", limit: 32}` with `detail:
+"summary"`, then later `endpoints`, `inferences`, or `summary` pages from the
+retained parent. Filter before requesting detail; keep `source_index` with the
+parent ID and collection, and request `location` or `basis` when tracing
+sources. Page exhaustion is not producer completeness: check `completeness`,
+`source_unknowns`, and limitations. Endpoint candidates remain inferences, not
+confirmed network behavior.
+
 ## Trace only the remaining question
 
 Use `trace_application_feature` on the parent Evidence for one literal node ID,
@@ -69,6 +78,9 @@ route, string, API, IPC channel, module, or native export, with `incoming`,
 `outgoing`, or `both`. Traversal includes containment, so even a narrow seed can
 reach unrelated sibling modules; prefer a module item when it already answers
 the question, and do not treat every reached node as part of the feature.
+For a broad trace, pass `view: {kind: "feature-trace", collection: "paths"}` (or
+`summary`) to retain the complete trace and read terminal paths first; page
+`nodes` or `edges` with exact `where.node_ids` through `inspect_analysis_view`.
 Include Hopper or Ghidra Evidence only when its artifact digest matches exactly.
 
 ## Oversized results
@@ -105,8 +117,15 @@ stay unknown. This is static inference; for runtime semantics, probe the actual
 versions through the browser, Electron, or process workflows.
 
 Trace and compare tools accept complete inline Evidence or a retained reference
-for `application`, `left`, or `right`. Native observation arrays still take full
-Evidence. `close_binary` clears retained references; export a bundle first, or
-supply portable inline Evidence in another connection.
+for `application`, `left`, or `right`; from a summary or inspection reply, use
+the complete `normalized_result.parent_evidence_id`. Native observation arrays
+and runtime reconciliation's `static_layers[].analysis` and
+`runtime_observations[]` also accept exact references where advertised. CLI
+workflows advertising `--evidence-bundle` resolve them from that bundle.
+`close_binary` releases the engine but keeps retained references and Unknown
+history on the same connection; `reset_investigation` clears them (optional
+`save_path` checkpoints the bundle first). Import that bundle in another
+connection to restore its references. Retention is bounded and never silently
+evicted; `binary_session.investigation` reports the budget.
 
-<!-- upstream: morluto/rea@160d821 .agents/skills/reverse-engineer-anything/references/javascript-applications.md -->
+<!-- upstream: morluto/rea@d74549e .agents/skills/reverse-engineer-anything/references/javascript-applications.md -->
