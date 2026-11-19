@@ -349,7 +349,7 @@ export function createAgentBusParticipants({
           : (createDefaults.promptProfile !== undefined ? { promptProfile: createDefaults.promptProfile } : {})),
         ...(createDefaults.structured === true ? { structured: true } : {}),
         ...(createDefaults.sandbox !== undefined ? { sandbox: createDefaults.sandbox } : {}),
-        ...(resolvedSelection.backendType === 'claude' && createDefaults.codeMode !== undefined ? { codeMode: createDefaults.codeMode } : {}),
+        ...(participant.codeMode !== undefined ? { codeMode: participant.codeMode } : {}),
         ...(participant.machine ? { machine: String(participant.machine) } : {}),
       },
     };

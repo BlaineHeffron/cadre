@@ -234,7 +234,6 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
         mcpServers: req.body.mcpServers, codexPlugins: req.body.codexPlugins,
         promptProfile: req.body.promptProfile, requireDueno: true, structured: req.body.structured === true,
         ...(req.body.sandbox !== undefined ? { sandbox: req.body.sandbox } : {}),
-        ...(req.body.codeMode !== undefined ? { codeMode: req.body.codeMode } : {}),
       }));
       // One managed worktree per machine with a participant: the hub's own, and each remote one made on its worker.
       if (req.body.worktree && requested.some((p) => !p.machine)) worktree = await createManagedWorktree({ ...req.body.worktree, roomId, baseDir: managedWorktreeBaseDir });

@@ -176,21 +176,19 @@ test('bootstrap forwards an explicit sandbox only to Claude and Codex participan
   assert.equal(h.createdSessions.codex.length, 2);
 });
 
-test('bootstrap forwards codeMode to created Claude sessions only and warns for each that did not start in Code Mode', async (t) => {
+test('bootstrap forwards each participant codeMode and warns for each that did not start in Code Mode', async (t) => {
   const h = await createAgentBusHarness(); t.after(() => h.cleanup());
   const bootstrap = (payload) => h.app.inject({ method: 'POST', url: '/api/agent-bus/bootstrap', headers: h.authHeaders, payload });
-  const pair = [{ kind: 'codex', create: true }, { kind: 'claude', create: true }];
 
-  const plain = await bootstrap({ title: 'Plain', participants: pair });
+  const plain = await bootstrap({ title: 'Plain', participants: [{ kind: 'codex', create: true }, { kind: 'claude', create: true }] });
   assert.deepEqual([plain.statusCode, plain.json().warnings], [200, []]);
   assert.equal(Object.hasOwn(h.createdSessions.claude[0], 'codeMode'), false);
 
-  // This fixture Claude backend reports no Code Mode, as a structured Claude session does.
-  const coded = await bootstrap({ title: 'Code Mode', codeMode: true, participants: pair });
+  // This fixture Claude backend reports no Code Mode, as a structured Claude session does; Codex never has it.
+  const coded = await bootstrap({ title: 'Code Mode', participants: [{ kind: 'codex', create: true, codeMode: true }, { kind: 'claude', create: true, codeMode: true }] });
   assert.equal(coded.statusCode, 200, coded.body);
-  assert.deepEqual([Object.hasOwn(h.createdSessions.codex[1], 'codeMode'), h.createdSessions.claude[1].codeMode], [false, true]);
-  assert.deepEqual(coded.json().warnings.map((warning) => [warning.code, warning.message]),
-    [['code_mode_unsupported', 'codeMode applies only to Claude terminal (tmux) sessions; ignored.']]);
+  assert.equal(h.createdSessions.claude[1].codeMode, true);
+  assert.deepEqual(coded.json().warnings.map((warning) => warning.code), ['code_mode_unsupported', 'code_mode_unsupported']);
 });
 
 test('bootstrap failure cleans sessions created by the request', async (t) => {

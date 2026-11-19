@@ -1095,13 +1095,15 @@ describe('Monitor MCP server', () => {
         return { thread: { id: 'thr_cm' }, participants: [] };
       },
     });
-    const claude = { provider: 'claude' };
-    await server.handleToolCall('spawn_collab_session', { title: 'All Claude', codeMode: true, participants: [claude, claude] });
+    const claude = { provider: 'claude', codeMode: true };
+    await server.handleToolCall('spawn_collab_session', { title: 'All Claude', participants: [claude, { provider: 'claude' }] });
     // An attached session is not created, so it does not count.
-    await server.handleToolCall('spawn_collab_session', { title: 'Attached Codex', codeMode: true, participants: [claude, { provider: 'codex', session_id: 'codex-1' }] });
-    await server.handleToolCall('spawn_conference_session', { title: 'Mixed', codeMode: true, participants: [claude, claude, { provider: 'codex' }] });
-    await server.handleToolCall('spawn_collab_session', { title: 'No Code Mode', participants: [claude, claude] });
-    assert.deepEqual(bodies.map((body) => [body.codeMode, body.structured]), [[true, false], [true, false], [true, true], [undefined, true]]);
+    await server.handleToolCall('spawn_collab_session', { title: 'Attached Codex', participants: [claude, { provider: 'codex', session_id: 'codex-1' }] });
+    await server.handleToolCall('spawn_conference_session', { title: 'Mixed', participants: [claude, claude, { provider: 'codex' }] });
+    await server.handleToolCall('spawn_collab_session', { title: 'No Code Mode', participants: [{ provider: 'claude' }, { provider: 'claude' }] });
+    assert.deepEqual(bodies.map((body) => [body.participants.map((participant) => participant.codeMode), body.structured]), [
+      [[true, undefined], false], [[true, undefined], false], [[true, true, undefined], true], [[undefined, undefined], true],
+    ]);
   });
 
   it('deletes legacy loop and raw bootstrap tools', async () => {

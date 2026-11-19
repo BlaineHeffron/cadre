@@ -40,11 +40,13 @@ const CODEX_PLUGIN_SELECTION_SCHEMA = {
   properties: { add: CODEX_PLUGIN_LIST_SCHEMA, remove: CODEX_PLUGIN_LIST_SCHEMA },
   additionalProperties: false,
 };
-const CODE_MODE_SCHEMA = { type: 'boolean', description: 'Claude terminal Code Mode.' };
+const CODE_MODE_SCHEMA = { type: 'boolean', description: 'Claude Code Mode.' };
 // Code Mode needs the terminal, but only an all-Claude room leaves the structured runtime for it;
-// otherwise each Claude participant keeps its runtime and the bootstrap warns if it lost Code Mode.
-const collabStructured = (codeMode, participants) => !(codeMode === true
-  && participants.filter((participant) => participant.create).every((participant) => participant.kind === 'claude'));
+// otherwise each participant keeps its runtime and the bootstrap warns for each that lost Code Mode.
+const collabStructured = (participants) => {
+  const created = participants.filter((participant) => participant.create);
+  return !(created.some((participant) => participant.codeMode === true) && created.every((participant) => participant.kind === 'claude'));
+};
 const MCP_SELECTION_SCHEMA_PROPERTIES = {
   mcpProfile: { type: 'string', description: 'From monitor_list_mcp_servers.' },
   mcpServers: MCP_SERVERS_SELECTION_SCHEMA,
@@ -70,6 +72,7 @@ const PARTICIPANT_PROPERTIES = {
   work_dir: { type: 'string' },
   ...Object.fromEntries(Object.entries(MCP_SELECTION_SCHEMA_PROPERTIES).map(([key, schema]) => [key, undescribed(schema)])),
   codexPlugins: undescribed(CODEX_PLUGIN_SELECTION_SCHEMA),
+  codeMode: CODE_MODE_SCHEMA,
 };
 const QUEUE_OPTION_SCHEMA = {
   type: 'object',
@@ -176,6 +179,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       ...(participant.skills !== undefined
         ? { skills: participant.skills }
         : (defaults.skills !== undefined ? { skills: defaults.skills } : {})),
+      ...(typeof participant.codeMode === 'boolean' ? { codeMode: participant.codeMode } : {}),
     };
   }
 
@@ -1141,7 +1145,6 @@ export function buildMonitorMcpServer({ requestImpl }) {
           thinkingLevel: { type: 'string', description: 'Default for new participants.' },
           ...MCP_SELECTION_SCHEMA_PROPERTIES,
           codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
-          codeMode: CODE_MODE_SCHEMA,
           participants: {
             type: 'array',
             minItems: 2,
@@ -1160,7 +1163,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         required: ['title', 'participants'],
         additionalProperties: false,
       },
-      handler: async ({ title, projectKey, workDir, worktree, initialTask, model, thinkingLevel, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, codeMode, participants }) => {
+      handler: async ({ title, projectKey, workDir, worktree, initialTask, model, thinkingLevel, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, participants }) => {
         const normalizedParticipants = participants.map((participant) =>
           normalizeParticipant(participant, { model, thinkingLevel, displayName: title, workDir, mcpProfile, mcpServers, codexPlugins, promptProfile })
         );
@@ -1181,8 +1184,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
             ...(codexPlugins !== undefined ? { codexPlugins } : {}),
             ...(promptProfile !== undefined ? { promptProfile } : {}),
             participants: normalizedParticipants,
-            ...(codeMode !== undefined ? { codeMode } : {}),
-            structured: collabStructured(codeMode, normalizedParticipants),
+            structured: collabStructured(normalizedParticipants),
           },
         });
         return spawnResult(payload);
@@ -1203,7 +1205,6 @@ export function buildMonitorMcpServer({ requestImpl }) {
           thinkingLevel: { type: 'string', description: 'Default for new participants.' },
           ...MCP_SELECTION_SCHEMA_PROPERTIES,
           codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
-          codeMode: CODE_MODE_SCHEMA,
           participants: {
             type: 'array',
             minItems: 2,
@@ -1214,7 +1215,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         required: ['title', 'participants'],
         additionalProperties: false,
       },
-      handler: async ({ title, projectKey, workDir, worktree, initialTask, model, thinkingLevel, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, codeMode, participants }) => {
+      handler: async ({ title, projectKey, workDir, worktree, initialTask, model, thinkingLevel, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, participants }) => {
         const normalizedParticipants = participants.map((participant) =>
           normalizeParticipant(participant, { model, thinkingLevel, displayName: title, workDir, mcpProfile, mcpServers, codexPlugins, promptProfile })
         );
@@ -1235,8 +1236,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
             ...(codexPlugins !== undefined ? { codexPlugins } : {}),
             ...(promptProfile !== undefined ? { promptProfile } : {}),
             participants: normalizedParticipants,
-            ...(codeMode !== undefined ? { codeMode } : {}),
-            structured: collabStructured(codeMode, normalizedParticipants),
+            structured: collabStructured(normalizedParticipants),
           },
         });
         return spawnResult(payload);
