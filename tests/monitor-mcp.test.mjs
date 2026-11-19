@@ -537,7 +537,7 @@ describe('Monitor MCP server', () => {
     ]);
     const schema = server.listTools().find((tool) => tool.name === 'spawn_session').inputSchema.properties.codexPlugins;
     assert.equal(schema.additionalProperties, false);
-    assert.match(schema.description, /Separate from Fleet skills and mcpServers/);
+    assert.deepEqual(Object.keys(schema.properties), ['add', 'remove']);
 
     await server.handleToolCall('spawn_session', { provider: 'claude', codexPlugins });
     assert.equal(Object.hasOwn(requests[1].opts.body, 'codexPlugins'), false);
@@ -874,7 +874,7 @@ describe('Monitor MCP server', () => {
     assert.equal(server.listTools().some((tool) => tool.name === 'monitor_list_prompt_profiles'), true);
     const spawnTool = server.listTools().find((tool) => tool.name === 'spawn_session');
     assert.deepEqual(spawnTool.inputSchema.properties.promptProfile.enum.slice(0, 3), ['none', 'command-center', 'fleet-supervisor']);
-    assert.match(spawnTool.inputSchema.properties.promptProfile.description, /caveman/);
+    assert.ok(spawnTool.inputSchema.properties.promptProfile.enum.includes('caveman'));
     assert.doesNotMatch(JSON.stringify(spawnTool.inputSchema), /Reply in caveman mode/);
   });
 
