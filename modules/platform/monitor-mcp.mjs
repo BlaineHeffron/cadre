@@ -40,6 +40,7 @@ const CODEX_PLUGIN_SELECTION_SCHEMA = {
   properties: { add: CODEX_PLUGIN_LIST_SCHEMA, remove: CODEX_PLUGIN_LIST_SCHEMA },
   additionalProperties: false,
 };
+const CODE_MODE_SCHEMA = { type: 'boolean', description: 'Claude terminal Code Mode.' };
 const MCP_SELECTION_SCHEMA_PROPERTIES = {
   mcpProfile: { type: 'string', description: 'From monitor_list_mcp_servers.' },
   mcpServers: MCP_SERVERS_SELECTION_SCHEMA,
@@ -478,11 +479,12 @@ export function buildMonitorMcpServer({ requestImpl }) {
           machine: { type: 'string', description: 'Paired machine (Claude, Codex, Pi; not DeepSeek); workDir is a path there. Default hub.' },
           ...MCP_SELECTION_SCHEMA_PROPERTIES,
           codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
+          codeMode: CODE_MODE_SCHEMA,
         },
         required: ['provider'],
         additionalProperties: false,
       },
-      handler: async ({ provider, workDir, displayName, model, thinkingLevel, initialPrompt, parentThreadId, returnResults = false, machine, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills }) => {
+      handler: async ({ provider, workDir, displayName, model, thinkingLevel, initialPrompt, parentThreadId, returnResults = false, machine, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, codeMode }) => {
         assertMcpProviderModel(provider, model);
         const returnToSpawner = returnResults === true && provider === 'claude' && !parentThreadId;
         const result = await request('/api/agents/sessions', {
@@ -496,8 +498,10 @@ export function buildMonitorMcpServer({ requestImpl }) {
             ...(mcpServers !== undefined ? { mcpServers } : {}),
             ...(provider === 'codex' && codexPlugins !== undefined ? { codexPlugins } : {}),
             ...(promptProfile !== undefined ? { promptProfile } : {}),
+            ...(codeMode !== undefined ? { codeMode } : {}),
             // Automated spawn: the structured runtime serves it when CADRE_STRUCTURED_AUTOMATED_SPAWNS is on.
-            structured: true,
+            // Code Mode needs the terminal UI, so asking for it keeps the spawn on tmux.
+            structured: codeMode !== true,
           },
         });
         const sessionId = sessionIdFromResult(result);
@@ -1133,6 +1137,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
           thinkingLevel: { type: 'string', description: 'Default for new participants.' },
           ...MCP_SELECTION_SCHEMA_PROPERTIES,
           codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
+          codeMode: CODE_MODE_SCHEMA,
           participants: {
             type: 'array',
             minItems: 2,
@@ -1151,7 +1156,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         required: ['title', 'participants'],
         additionalProperties: false,
       },
-      handler: async ({ title, projectKey, workDir, worktree, initialTask, model, thinkingLevel, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, participants }) => {
+      handler: async ({ title, projectKey, workDir, worktree, initialTask, model, thinkingLevel, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, codeMode, participants }) => {
         const normalizedParticipants = participants.map((participant) =>
           normalizeParticipant(participant, { model, thinkingLevel, displayName: title, workDir, mcpProfile, mcpServers, codexPlugins, promptProfile })
         );
@@ -1172,7 +1177,8 @@ export function buildMonitorMcpServer({ requestImpl }) {
             ...(codexPlugins !== undefined ? { codexPlugins } : {}),
             ...(promptProfile !== undefined ? { promptProfile } : {}),
             participants: normalizedParticipants,
-            structured: true,
+            ...(codeMode !== undefined ? { codeMode } : {}),
+            structured: codeMode !== true,
           },
         });
         return spawnResult(payload);
@@ -1193,6 +1199,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
           thinkingLevel: { type: 'string', description: 'Default for new participants.' },
           ...MCP_SELECTION_SCHEMA_PROPERTIES,
           codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
+          codeMode: CODE_MODE_SCHEMA,
           participants: {
             type: 'array',
             minItems: 2,
@@ -1203,7 +1210,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
         required: ['title', 'participants'],
         additionalProperties: false,
       },
-      handler: async ({ title, projectKey, workDir, worktree, initialTask, model, thinkingLevel, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, participants }) => {
+      handler: async ({ title, projectKey, workDir, worktree, initialTask, model, thinkingLevel, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, codeMode, participants }) => {
         const normalizedParticipants = participants.map((participant) =>
           normalizeParticipant(participant, { model, thinkingLevel, displayName: title, workDir, mcpProfile, mcpServers, codexPlugins, promptProfile })
         );
@@ -1224,7 +1231,8 @@ export function buildMonitorMcpServer({ requestImpl }) {
             ...(codexPlugins !== undefined ? { codexPlugins } : {}),
             ...(promptProfile !== undefined ? { promptProfile } : {}),
             participants: normalizedParticipants,
-            structured: true,
+            ...(codeMode !== undefined ? { codeMode } : {}),
+            structured: codeMode !== true,
           },
         });
         return spawnResult(payload);

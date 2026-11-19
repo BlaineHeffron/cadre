@@ -24,6 +24,7 @@ const DEFAULT_PREFERENCES = Object.freeze({
   headroomEnabled: true,
   graderSampleRate: null,
   graderModel: null,
+  claudeCodeMode: false,
 });
 
 const GRADER_MODELS = ANTHROPIC_FALLBACK_MODELS.map((entry) => entry.id);
@@ -39,6 +40,7 @@ function normalizePreferences(input = {}) {
     // null falls back to the env defaults in config.githubAgents.
     graderSampleRate: validRate(input?.graderSampleRate) ? input.graderSampleRate : null,
     graderModel: GRADER_MODELS.includes(input?.graderModel) ? input.graderModel : null,
+    claudeCodeMode: input?.claudeCodeMode === true,
   };
   if (!normalized.claude && !normalized.codex && !normalized.deepseek && !normalized.pi) {
     throw new Error('At least one agent provider must remain enabled');
@@ -118,6 +120,9 @@ export async function getAgentProviderPreferences({ storeFile } = {}) {
 export async function updateAgentProviderPreferences(input = {}, { storeFile } = {}) {
   if (input.headroomEnabled !== undefined && typeof input.headroomEnabled !== 'boolean') {
     throw new TypeError('headroomEnabled must be a boolean');
+  }
+  if (input.claudeCodeMode !== undefined && typeof input.claudeCodeMode !== 'boolean') {
+    throw new TypeError('claudeCodeMode must be a boolean');
   }
   if (input.graderSampleRate != null && !validRate(input.graderSampleRate)) {
     throw new TypeError('graderSampleRate must be a number from 0 to 1, or null for the env default');

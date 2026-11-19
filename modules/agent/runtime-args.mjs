@@ -264,6 +264,16 @@ export function buildCodexLaunchArgs(options = {}) {
   return buildAgentRuntimeLaunchArgs({ runtime: 'codex', ...options });
 }
 
+// Claude Code's experimental Code Mode: env-only, interactive terminal only, and incompatible with Remote Control.
+export const CLAUDE_CODE_MODE_ENV = Object.freeze({ CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1' });
+
+// A spawn that asked for codeMode but did not get it (structured Claude, Codex, Pi, ...) warns instead of failing.
+export function codeModeWarnings(requested, created = {}) {
+  return requested === true && created?.codeMode !== true
+    ? [{ code: 'code_mode_unsupported', message: 'codeMode applies only to Claude terminal (tmux) sessions; ignored.' }]
+    : [];
+}
+
 export function buildClaudeLaunchArgs(options = {}) {
   return buildAgentRuntimeLaunchArgs({ runtime: 'claude', ...options });
 }

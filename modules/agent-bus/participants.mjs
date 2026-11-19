@@ -349,6 +349,7 @@ export function createAgentBusParticipants({
           : (createDefaults.promptProfile !== undefined ? { promptProfile: createDefaults.promptProfile } : {})),
         ...(createDefaults.structured === true ? { structured: true } : {}),
         ...(createDefaults.sandbox !== undefined ? { sandbox: createDefaults.sandbox } : {}),
+        ...(createDefaults.codeMode !== undefined ? { codeMode: createDefaults.codeMode } : {}),
         ...(participant.machine ? { machine: String(participant.machine) } : {}),
       },
     };
@@ -367,6 +368,7 @@ export function createAgentBusParticipants({
       displayName: created.displayName || plan.createArgs.displayName,
       mcpCapabilities: created.mcpCapabilities || null,
       mcpWarnings: plan.mcpWarnings.map((warning) => ({ ...warning })),
+      ...(created.codeMode ? { codeMode: true } : {}),
     };
   }
 

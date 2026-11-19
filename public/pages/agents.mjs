@@ -320,6 +320,7 @@ export function AgentsPage({ focus = '' } = {}) {
   const newPrompt = useMemo(() => signal(''), []);
   const newSkillInsert = useMemo(() => ({ current: null }), []);
   const newIsolatedWorktree = useMemo(() => signal(false), []);
+  const newCodeMode = useMemo(() => signal(false), []);
   const machines = useMemo(() => signal([]), []);
   const newMachine = useMemo(() => signal(''), []);
   const creatingSession = useMemo(() => signal(false), []);
@@ -386,6 +387,9 @@ export function AgentsPage({ focus = '' } = {}) {
     newAdvancedOpen.value = false;
     newPrompt.value = '';
     newIsolatedWorktree.value = false;
+    newCodeMode.value = false;
+    // Starts from the Settings default; whatever is checked at submit is sent explicitly.
+    api.get('/agent-provider-preferences').then((prefs) => { newCodeMode.value = prefs.claudeCodeMode === true; }, () => {});
     newMachine.value = '';
     api.get('/machines').then((data) => { machines.value = data.machines || []; }, () => {});
     if (!modelCatalogLoading.value && modelCatalogState.value.providers.length === 0) {
@@ -405,6 +409,7 @@ export function AgentsPage({ focus = '' } = {}) {
       model: newModel.value.trim(),
       thinkingLevel: newThinkingLevel.value.trim() || DEFAULT_THINKING_LEVEL,
       isolatedWorktree: newIsolatedWorktree.value,
+      ...(provider === 'claude' ? { codeMode: newCodeMode.value } : {}),
       ...(newMachine.value ? { machine: newMachine.value } : {}),
     };
     body.mcpProfile = newMcpSelection.value.mcpProfile;
@@ -864,6 +869,12 @@ export function AgentsPage({ focus = '' } = {}) {
                 onInput=${e => { newIsolatedWorktree.value = e.target.checked; }} />
               <span>Isolated git worktree<small class="new-agent-hint">Fresh branch from origin/main or origin/master</small></span>
             </label>
+            ${normalizeProvider(newProvider.value) === 'claude' ? html`
+              <label class="new-agent-check">
+                <input type="checkbox" checked=${newCodeMode.value} onInput=${e => { newCodeMode.value = e.target.checked; }} />
+                <span>Code mode<small class="new-agent-hint">Experimental; turns off Remote Control for this session</small></span>
+              </label>
+            ` : null}
           </div>
 
           <details

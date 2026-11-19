@@ -51,6 +51,8 @@ const { agentBusPlugin } = await import('../modules/agent-bus/index.mjs');
 const { knownSessions, recordHookPayload } = await import('../modules/agent/hook-events.mjs');
 const { pushPlugin } = await import('../modules/platform/push.mjs');
 const { addHumanQueueItem, commandCenterAIPlugin, serializeWorkQueue } = await import('../modules/integrations/command-center-ai.mjs');
+const { updateAgentProviderPreferences } = await import('../modules/agent/provider-preferences.mjs');
+const { sessionRollup } = await import('../modules/sessions/session-rollup.mjs');
 
 let failStart = () => false;
 class FakeTransport {
@@ -632,6 +634,52 @@ describe('structured automated spawns', () => {
       ({ app, request } = await buildApp({ queue: true, sessionRoot }));
       await waitFor(async () => (await items(interrupted))[0].status === 'dismissed');
       assert.equal((await items('tmux1'))[0].status, 'open');
+    } finally {
+      await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('starts tmux Claude spawns in Code Mode by explicit value over the Settings default, records it, and carries it through handoff', async () => {
+    delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    const { app, request, mcp } = await buildApp();
+    const stored = (id) => JSON.parse(readFileSync(join(root, 'state', 'claude_sessions.json'), 'utf8')).find((entry) => entry.id === id);
+    const spawn = (args = {}) => mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, mcpProfile: 'default', ...args });
+    try {
+      const results = [await spawn(), await spawn({ codeMode: true })];
+      await updateAgentProviderPreferences({ claudeCodeMode: true });
+      results.push(await spawn(), await spawn({ codeMode: false }));
+      await updateAgentProviderPreferences({ claudeCodeMode: false });
+      const ids = results.map((result) => result.participants[0].session_id);
+      assert.deepEqual(ids.map((id) => stored(id).codeMode === true), [false, true, true, false]);
+      assert.deepEqual(results.map((result) => result.warnings), [undefined, undefined, undefined, undefined]);
+
+      const coded = ids[1];
+      assert.equal((await request('GET', `/api/claude/sessions/${coded}`)).json().codeMode, true);
+      assert.equal((await request('GET', `/api/claude/sessions/${ids[0]}`)).json().codeMode, false);
+      assert.equal((await sessionRollup({ kind: 'claude', sessionId: coded })).codeMode, true);
+      assert.equal(Object.hasOwn(await sessionRollup({ kind: 'claude', sessionId: ids[0] }), 'codeMode'), false);
+
+      // The default is off again, so only the carried value can put the handoff target in Code Mode.
+      const handoff = await mcp.handleToolCall('handoff_session', { session_id: coded, provider: 'claude' });
+      assert.equal(stored(handoff.session_id).codeMode, true);
+    } finally { await app.close(); }
+  });
+
+  it('warns instead of failing when a structured Claude spawn asks for Code Mode, and spawn_session keeps such a spawn on tmux', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, transports, request, mcp } = await buildApp();
+    try {
+      const structured = await request('POST', '/api/agents/sessions', { payload: { provider: 'claude', workDir, structured: true, codeMode: true } });
+      assert.equal(structured.statusCode, 200, structured.body);
+      assert.equal(transports.length, 1);
+      assert.deepEqual(structured.json().warnings.map((warning) => warning.code), ['code_mode_unsupported']);
+
+      const spawned = await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, mcpProfile: 'default', codeMode: true });
+      assert.equal(transports.length, 1, 'Code Mode needs the terminal, so this spawn is not structured');
+      assert.equal(spawned.warnings, undefined);
+      const id = spawned.participants[0].session_id;
+      assert.equal(JSON.parse(readFileSync(join(root, 'state', 'claude_sessions.json'), 'utf8')).find((entry) => entry.id === id).codeMode, true);
     } finally {
       await app.close();
       delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;

@@ -7,6 +7,7 @@ import { DEFAULT_CLAUDE_MODEL, DEFAULT_CODEX_MODEL } from '../sessions/provider-
 import { renderCollabStartupPrompt } from './protocol.mjs';
 import { collectReplayEligibleDeliveriesFromStore } from './replay-eligible.mjs';
 import { isDurableTaskRecord } from '../sessions/task-record.mjs';
+import { codeModeWarnings } from '../agent/runtime-args.mjs';
 
 const ID_MAX = 240;
 const BODY_MAX = 200000;
@@ -233,6 +234,7 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
         mcpServers: req.body.mcpServers, codexPlugins: req.body.codexPlugins,
         promptProfile: req.body.promptProfile, requireDueno: true, structured: req.body.structured === true,
         ...(req.body.sandbox !== undefined ? { sandbox: req.body.sandbox } : {}),
+        ...(req.body.codeMode !== undefined ? { codeMode: req.body.codeMode } : {}),
       }));
       // One managed worktree per machine with a participant: the hub's own, and each remote one made on its worker.
       if (req.body.worktree && requested.some((p) => !p.machine)) worktree = await createManagedWorktree({ ...req.body.worktree, roomId, baseDir: managedWorktreeBaseDir });
@@ -296,7 +298,8 @@ export function registerAgentBusRoutes({ app, store, adapters, wsManager, produc
         messages.push(record.message); deliveries.push(delivery);
       }
       return { thread: normalizeThreadSummary(await enrichThread(thread, store.getThread(thread.id))), participants: created,
-        messages, deliveries, bootstrapOk: true, warnings: [] };
+        messages, deliveries, bootstrapOk: true,
+        warnings: created.flatMap((participant, index) => codeModeWarnings(plans[index].createArgs?.codeMode, participant)) };
     } catch (err) {
       if (thread) {
         await store.closeThread(thread.id, err.message);

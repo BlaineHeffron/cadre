@@ -422,6 +422,7 @@ export function SettingsPage({ section }) {
         </p>
         <div style="display:grid">
           <${SettingSwitch} label="Enable Claude-backed workflows" checked=${agentProviders.value.claudeEnabled} disabled=${agentProviders.value.loading} onChange=${(claudeEnabled) => saveAgentProviderPreferences({ claudeEnabled })} />
+          <${SettingSwitch} label="Code mode for new Claude terminal sessions" hint="Experimental. Turns off Remote Control for those sessions; a spawn can override it." checked=${agentProviders.value.claudeCodeMode === true} disabled=${agentProviders.value.loading} onChange=${(claudeCodeMode) => saveAgentProviderPreferences({ claudeCodeMode })} />
           <${SettingSwitch} label="Enable Codex-backed workflows" checked=${agentProviders.value.codexEnabled} disabled=${agentProviders.value.loading} onChange=${(codexEnabled) => saveAgentProviderPreferences({ codexEnabled })} />
           <${SettingSwitch} label="Enable DeepSeek Harness (ACP)" checked=${agentProviders.value.deepseekEnabled} disabled=${agentProviders.value.loading} onChange=${(deepseekEnabled) => saveAgentProviderPreferences({ deepseekEnabled })} />
           <${SettingSwitch} label="Enable Pi-backed providers" checked=${agentProviders.value.piEnabled} disabled=${agentProviders.value.loading} onChange=${(piEnabled) => saveAgentProviderPreferences({ piEnabled })} />
