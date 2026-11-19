@@ -5,6 +5,7 @@ import { buildAgentModelCatalog } from '../modules/agent-bus/routes.mjs';
 describe('agent-bus model catalog route data', () => {
   it('exposes Pi provider identities with one Pi backend/session kind', async () => {
     const catalog = await buildAgentModelCatalog({
+      listAgyModelsImpl: async () => [{ id: 'gemini-4-neon-medium', label: 'Gemini 4 Neon (Medium)' }],
       listCodexModelsImpl: async () => [{ id: 'gpt-5.5', label: 'GPT-5.5' }],
       listProviderModelsImpl: async (provider) => {
         assert.equal(provider, 'anthropic');
@@ -34,13 +35,17 @@ describe('agent-bus model catalog route data', () => {
     assert.deepEqual(catalog.providers.map((entry) => entry.id), [
       'codex',
       'claude',
+      'agy',
       'openai',
       'xai',
       'google',
       'opencode-go',
     ]);
     assert.equal(catalog.providers.find((entry) => entry.id === 'claude')?.defaultModel, 'claude-opus-5');
-    assert.deepEqual(catalog.providers.slice(2).map((entry) => ({
+    assert.deepEqual(catalog.providers[2], {
+      id: 'agy', label: 'Antigravity', backendType: 'agy', runtime: 'agy', sessionKind: 'agy', defaultModel: 'gemini-4-neon-medium',
+    });
+    assert.deepEqual(catalog.providers.slice(3).map((entry) => ({
       id: entry.id,
       backendType: entry.backendType,
       runtime: entry.runtime,
@@ -52,12 +57,13 @@ describe('agent-bus model catalog route data', () => {
       { id: 'google', backendType: 'pi', runtime: 'pi', sessionKind: 'pi', defaultModel: 'gemini-3.5-flash' },
       { id: 'opencode-go', backendType: 'pi', runtime: 'pi', sessionKind: 'pi', defaultModel: 'glm-5.2' },
     ]);
-    assert.deepEqual(Object.keys(catalog.models), ['codex', 'claude', 'openai', 'xai', 'google', 'opencode-go']);
+    assert.deepEqual(Object.keys(catalog.models), ['codex', 'claude', 'agy', 'openai', 'xai', 'google', 'opencode-go']);
   });
 
   it('keeps other provider results when one discovery source fails', async () => {
     const warnings = [];
     const catalog = await buildAgentModelCatalog({
+      listAgyModelsImpl: async () => [{ id: 'gemini-4-neon-medium', label: 'Gemini 4 Neon (Medium)' }],
       listCodexModelsImpl: async () => {
         throw new Error('codex unavailable');
       },
@@ -79,6 +85,7 @@ describe('agent-bus model catalog route data', () => {
 
   it('keeps known xAI launch candidates when fresh Pi discovery omits xAI', async () => {
     const catalog = await buildAgentModelCatalog({
+      listAgyModelsImpl: async () => [{ id: 'gemini-4-neon-medium', label: 'Gemini 4 Neon (Medium)' }],
       listCodexModelsImpl: async () => [],
       listProviderModelsImpl: async () => ({ models: [] }),
       listPiModelsImpl: async () => ({
@@ -99,6 +106,7 @@ describe('agent-bus model catalog route data', () => {
 
   it('prefers provider flagship defaults over alphabetically first catalog ids', async () => {
     const catalog = await buildAgentModelCatalog({
+      listAgyModelsImpl: async () => [{ id: 'gemini-4-neon-medium', label: 'Gemini 4 Neon (Medium)' }],
       listCodexModelsImpl: async () => [
         { id: 'gpt-5.4', label: 'GPT-5.4' },
         { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },

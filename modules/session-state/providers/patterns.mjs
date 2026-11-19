@@ -217,6 +217,18 @@ const PROVIDER_CONFIGS = {
     thinkingPatterns: SHARED_THINKING_PATTERNS,
     parkedPatterns: SHARED_PARKED_PATTERNS,
   },
+  // agy swaps its "? for shortcuts" hint for "esc to cancel" while a turn runs.
+  agy: {
+    stripArtifacts: (content) => content,
+    approvalDetail: 'Approval needed',
+    promptOnlyPatterns: SHARED_PROMPT_ONLY_PATTERNS,
+    promptWithTextPatterns: SHARED_PROMPT_WITH_TEXT_PATTERNS,
+    inputPatterns: SHARED_INPUT_PATTERNS,
+    workingPatterns: [/\besc to cancel\b/i, ...SHARED_WORKING_PATTERNS],
+    promptSuppressWorkPatterns: [],
+    thinkingPatterns: SHARED_THINKING_PATTERNS,
+    parkedPatterns: SHARED_PARKED_PATTERNS,
+  },
   pi: {
     stripArtifacts: (content) => content,
     approvalDetail: 'Approval needed',

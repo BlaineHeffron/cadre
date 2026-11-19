@@ -129,6 +129,12 @@ export function mcpClientConfigPath(backendType, sessionId) {
   return runtimeStatePath(`mcp_client_configs/${text(backendType)}-${text(sessionId)}.json`);
 }
 
+// agy reads MCP servers only from user or workspace config, so each session gets a private
+// workspace (`--add-dir`) holding `.agents/mcp_config.json`; the repo and user config stay untouched.
+export function agyMcpWorkspacePath(sessionId) {
+  return runtimeStatePath(`mcp_client_configs/agy-${text(sessionId)}`);
+}
+
 export function mcpClientCredentialPath(backendType, sessionId) {
   return runtimeStatePath(`mcp_client_configs/${text(backendType)}-${text(sessionId)}.token`);
 }
@@ -441,6 +447,7 @@ export async function prepareMcpCapabilityLaunch({
   const codexArgs = ['-c', 'mcp_servers={}'];
   const claudeServers = {};
   const piServers = {};
+  const agyServers = {};
   const codexEnv = {};
   const paths = researchProfilePaths(sourceConfig.researchWorkbench || {});
   let businessOsPrepared = false;
@@ -479,6 +486,10 @@ export async function prepareMcpCapabilityLaunch({
         };
         if (backendType === 'pi') piServers.dueno = {
           url,
+          ...(authorization ? { headers: { Authorization: authorization } } : {}),
+        };
+        if (backendType === 'agy') agyServers.dueno = {
+          serverUrl: url,
           ...(authorization ? { headers: { Authorization: authorization } } : {}),
         };
         const handshake = busCredential?.token
@@ -616,6 +627,10 @@ export async function prepareMcpCapabilityLaunch({
     const piConfigPath = backendType === 'pi' && serverIds.length > 0
       ? await writePiConfig(sessionId, piServers)
       : '';
+    const agyWorkspaceDir = backendType === 'agy' && serverIds.length > 0
+      ? dirname(dirname(await writePrivateFile(join(agyMcpWorkspacePath(sessionId), '.agents', 'mcp_config.json'),
+        `${JSON.stringify({ mcpServers: agyServers }, null, 2)}\n`)))
+      : '';
     const credentialPath = backendType === 'codex' && serverIds.includes('dueno') && busCredential?.token
       ? await writePrivateFile(mcpClientCredentialPath(backendType, sessionId), `${String(busCredential.token)}\n`)
       : '';
@@ -632,6 +647,7 @@ export async function prepareMcpCapabilityLaunch({
         codexArgs,
         claudeConfigPath: preparedClaudeConfigPath,
         piConfigPath,
+        agyWorkspaceDir,
         piExtensionPath: backendType === 'pi' && piConfigPath
           ? resolve(dirname(fileURLToPath(import.meta.url)), 'pi-mcp-extension.mjs')
           : '',
@@ -675,6 +691,7 @@ export async function cleanupMcpCapabilityLaunch({
   await Promise.all([
     rm(claudeConfigPath || mcpClientConfigPath(backendType, sessionId), { force: true }).catch(() => {}),
     rm(mcpClientEnvPath(backendType, sessionId), { force: true }).catch(() => {}),
+    ...(backendType === 'agy' ? [rm(agyMcpWorkspacePath(sessionId), { recursive: true, force: true }).catch(() => {})] : []),
     cleanupAgentBusCredentialLaunch({ backendType, sessionId, credentialProfile, credentialStore, reason }),
     ...(!selected || selected.includes('businessos')
       ? [clearBusinessOsMcpForSession({ backendType, sessionId, sourceConfig }).catch(() => {})] : []),

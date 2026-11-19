@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { CLAUDE_FLEET_PLUGIN_DIR, defaultClaudeEffort } from './hook-events.mjs';
 
 const HARNESS_ALIASES = Object.freeze({
+  agy: 'agy',
   anthropic: 'claude',
   claude: 'claude',
   codex: 'codex',
@@ -219,6 +220,30 @@ class PiRuntimeHarness extends AgentRuntimeHarness {
   }
 }
 
+// Google's unmodified interactive `agy`; the pane opens in the workDir, so it needs no --cd.
+// agy model ids carry the effort (`gemini-4-neon-medium`) and `--effort` would override it, so
+// thinkingLevel is not passed. `--settings` is session-only: it trusts the workDir (and the
+// private MCP workspace) for this run without writing the user's settings.json.
+class AgyRuntimeHarness extends AgentRuntimeHarness {
+  constructor() {
+    super({ id: 'agy' });
+  }
+
+  buildLaunchArgs({ args = [], model = '', workDir = '', mcpWorkspaceDir = '' } = {}) {
+    const trusted = [this.normalizeWorkDir(workDir), ...(mcpWorkspaceDir ? [mcpWorkspaceDir] : [])];
+    const nextArgs = ['--dangerously-skip-permissions', '--settings', JSON.stringify({ trustedWorkspaces: trusted })];
+    if (mcpWorkspaceDir) nextArgs.push('--add-dir', mcpWorkspaceDir);
+    if (model) nextArgs.push('--model', model);
+    return [...nextArgs, ...args];
+  }
+
+  // A known conversation id resumes exactly; otherwise the workDir's most recent conversation.
+  buildResumeArgs({ cliSessionId = '', ...options } = {}) {
+    const resumeId = String(cliSessionId || '').trim();
+    return [...this.buildLaunchArgs(options), ...(resumeId ? ['--conversation', resumeId] : ['--continue'])];
+  }
+}
+
 class DeepSeekRuntimeHarness extends AgentRuntimeHarness {
   constructor() {
     super({ id: 'deepseek' });
@@ -236,6 +261,7 @@ class DeepSeekRuntimeHarness extends AgentRuntimeHarness {
 }
 
 const HARNESSES = Object.freeze({
+  agy: new AgyRuntimeHarness(),
   claude: new ClaudeRuntimeHarness(),
   codex: new CodexRuntimeHarness(),
   deepseek: new DeepSeekRuntimeHarness(),

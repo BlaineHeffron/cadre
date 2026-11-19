@@ -303,6 +303,11 @@ export function createAgentAdapters() {
       detailPath: (sessionId) => `/api/pi/sessions/${encodeURIComponent(sessionId)}`,
       inputPath: (sessionId) => `/api/pi/sessions/${encodeURIComponent(sessionId)}/input`,
     }),
+    agy: buildAdapter({
+      kind: 'agy',
+      detailPath: (sessionId) => `/api/agy/sessions/${encodeURIComponent(sessionId)}`,
+      inputPath: (sessionId) => `/api/agy/sessions/${encodeURIComponent(sessionId)}/input`,
+    }),
     // DeepSeek is attachable to the solo-session thread Fleet creates for every
     // interactive session, but is omitted from collaboration model catalogs.
     deepseek: buildProtocolAdapter({

@@ -159,8 +159,17 @@ Current provider mapping:
 - `google` (`gemini` alias) -> backend `pi`, runtime `pi`, Pi provider `google`
 - `opencode-go` (`opencode` alias) -> backend `pi`, runtime `pi`, Pi provider `opencode-go`
 - `openrouter` -> backend `pi`, runtime `pi`, Pi provider `openrouter`
+- `agy` (`gemini-4-*` models) -> backend `agy`, runtime `agy`: Google's unmodified interactive
+  Antigravity CLI in tmux, enabled only when the binary is found (`PATH`, `~/.local/bin`, or `AGY_BIN`).
+  Models come from `agy models`; the id carries the effort (`gemini-4-neon-medium`), so
+  thinkingLevel is not passed. `--settings` trusts the workDir for that run only. Cadre's dueno MCP
+  (the only MCP server agy accepts) comes from a private `--add-dir` workspace holding
+  `.agents/mcp_config.json`; neither the repo nor `~/.gemini` is written. Resume uses `--continue`,
+  which agy scopes to the workDir's latest conversation. Prompt profiles warn and are skipped (no
+  system-prompt flag); the session is pane-only (no transcript); it does not join collaboration rooms.
+  Cadre never runs `agy -p` or `agy acp`.
 
-Gemini via subscription now goes through the `agy` provider (in progress); the retired `antigravity` Pi provider (local CLIProxyAPI) is gone, and sessions saved with it list as an unsupported provider and cannot be resumed.
+Gemini via subscription now goes through the `agy` provider; the retired `antigravity` Pi provider (local CLIProxyAPI) is gone, and sessions saved with it list as an unsupported provider and cannot be resumed.
 
 Pi provider and model are separate values. The server requires a compatible external
 Pi CLI (`pi`, version 0.84.0 or newer; override with `PI_BIN`). Canonical Node-based Pi

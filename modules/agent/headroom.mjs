@@ -46,6 +46,8 @@ export async function prepareHeadroomLaunch(provider, {
   preferences,
   baseUrl = HEADROOM_URL,
 } = {}) {
+  // agy talks to Google under its own sign-in; Headroom has no route for it.
+  if (provider === 'agy') return { env: {}, args: [] };
   // Smoke/test servers never connect their agents to the production proxy.
   if (shouldSuppressSideEffectLoops({ env })) return { env: {}, args: [] };
   const prefs = preferences || await getAgentProviderPreferences();

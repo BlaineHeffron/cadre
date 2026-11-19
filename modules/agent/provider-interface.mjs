@@ -1,6 +1,7 @@
 import { DEFAULT_CLAUDE_MODEL, DEFAULT_CODEX_MODEL } from '../sessions/provider-models.mjs';
 import { assertValidClaudeModel, isKnownClaudeModel, normalizeClaudeModel } from '../sessions/claude-models.mjs';
 import { assertValidCodexModel, isKnownCodexModel } from '../sessions/codex-models.mjs';
+import { AGY_DEFAULT_MODEL, assertAgyModel, findAgyBinarySync, isKnownAgyModel } from '../sessions/agy-models.mjs';
 import { assertPiProviderModel, isKnownPiProviderModel, PI_PROVIDER_DEFINITIONS } from '../sessions/pi-model-catalog.mjs';
 import { createBaseCapabilities } from './agent-transport.mjs';
 import { codexAppServerCapabilities } from './codex-app-server-transport.mjs';
@@ -149,6 +150,17 @@ const PROVIDER_DEFINITIONS = Object.freeze({
     defaultModel: PI_PROVIDER_DEFINITIONS.openrouter.defaultModel,
     get transportCapabilities() { return tmuxTransportCapabilities(); },
   }),
+  // Google's own interactive CLI; no Cadre MCP, so it cannot join collaboration rooms.
+  agy: Object.freeze({
+    id: 'agy',
+    label: 'Antigravity',
+    backendType: 'agy',
+    runtime: 'agy',
+    backendProvider: 'agy',
+    defaultModel: AGY_DEFAULT_MODEL,
+    supportsCollaboration: false,
+    get transportCapabilities() { return tmuxTransportCapabilities(); },
+  }),
 });
 
 export function normalizeAgentProvider(value = '') {
@@ -173,6 +185,8 @@ export function inferAgentProviderFromModel(model = '') {
     || normalized.includes('codex')
   ) return 'codex';
   if (normalized.startsWith('grok')) return 'xai';
+  // Gemini 4 is served through Google's Antigravity CLI.
+  if (normalized.startsWith('gemini-4')) return 'agy';
   if (normalized.startsWith('gemini')) return 'google';
   // DSH owns model selection in its profile configuration. DeepSeek model IDs
   // exposed by Pi remain OpenCode Go models rather than implying this harness.
@@ -229,7 +243,7 @@ export function resolveAgentProviderSelection({
 
   const definition = getAgentProviderDefinition(resolvedProvider);
   if (!definition) {
-    const error = new Error('provider must be claude, codex, codex-app-server, deepseek, xai, google, opencode-go, or openrouter');
+    const error = new Error('provider must be claude, codex, codex-app-server, deepseek, agy, xai, google, opencode-go, or openrouter');
     error.statusCode = 400;
     throw error;
   }
@@ -254,6 +268,7 @@ export function isModelCompatibleWithProvider(provider, model = '') {
   if (['codex', 'codex-app-server'].includes(definition.backendType)) return isKnownCodexModel(normalizedModel);
   if (definition.backendType === 'claude') return isKnownClaudeModel(normalizedModel);
   if (definition.backendType === 'deepseek') return definition.models.includes(normalizedModel);
+  if (definition.backendType === 'agy') return isKnownAgyModel(normalizedModel);
   return isKnownPiProviderModel(definition.id, normalizedModel);
 }
 
@@ -315,6 +330,8 @@ export async function assertAgentProviderModelPair(provider, model = '', options
       error.statusCode = 400;
       throw error;
     }
+  } else if (selection.backendType === 'agy') {
+    await assertAgyModel(selection.model);
   } else {
     await assertPiProviderModel(selection.provider, selection.model, options);
   }
@@ -327,6 +344,7 @@ export function buildAgentProviderCatalog(preferences = {}, {
   claudeStreamJsonE2eEvidence = null,
   codexAppServerEvidence = null,
   codexAppServerEnabled = false,
+  agyAvailable = Boolean(findAgyBinarySync()),
 } = {}) {
   const claudeE2eEvidence = claudeStreamJsonE2eEvidence || (claudeStreamJsonEnabled
     ? claudeStreamJsonBusE2eEvidence({ cliVersion: readClaudeStreamJsonVersionSync() })
@@ -339,6 +357,8 @@ export function buildAgentProviderCatalog(preferences = {}, {
       ? preferences?.deepseekEnabled === true || preferences?.deepseek === true
       : definition.id === 'codex-app-server'
         ? codexAppServerEnabled || preferences?.['codex-app-server'] === true
+      : definition.id === 'agy'
+        ? agyAvailable && preferences?.agy !== false
       : piEnabled && preferences?.[legacyKey] !== false && preferences?.[definition.id] !== false;
     const transportCapabilities = definition.id === 'deepseek'
       ? deepSeekTransportCapabilities(deepSeekE2eEvidence)

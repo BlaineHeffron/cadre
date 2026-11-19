@@ -2,7 +2,7 @@ import { exec as defaultExec } from '../../lib/exec.mjs';
 import { shellQuote } from '../platform/shell-quote.mjs';
 import { readEnv } from '../platform/cadre-env.mjs';
 
-const UNIT_RE = /^dueno-agent-(?:codex|claude|pi)-[a-z0-9][a-z0-9-]{0,63}\.scope$/u;
+const UNIT_RE = /^dueno-agent-(?:codex|claude|pi|agy)-[a-z0-9][a-z0-9-]{0,63}\.scope$/u;
 const MEMORY_LIMIT_RE = /^\d+(?:[KMGTPE])?$/iu;
 const TASK_LIMIT_RE = /^\d+$/u;
 
@@ -19,7 +19,7 @@ function boundedSetting(value, fallback, pattern) {
 export function agentScopeUnitName(kind, sessionId) {
   const provider = String(kind || '').trim().toLowerCase();
   const id = String(sessionId || '').trim().toLowerCase();
-  if (!['codex', 'claude', 'pi'].includes(provider) || !/^[a-z0-9][a-z0-9-]{0,63}$/u.test(id)) return '';
+  if (!['codex', 'claude', 'pi', 'agy'].includes(provider) || !/^[a-z0-9][a-z0-9-]{0,63}$/u.test(id)) return '';
   return `dueno-agent-${provider}-${id}.scope`;
 }
 

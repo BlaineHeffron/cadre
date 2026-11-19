@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { createManagedWorktree, cleanupManagedWorktree, sweepManagedWorktrees } from './managed-worktrees.mjs';
 import { listCodexModels } from '../sessions/codex-models.mjs';
 import { listProviderModels } from '../sessions/model-catalog.mjs';
+import { AGY_DEFAULT_MODEL, listAgyModels } from '../sessions/agy-models.mjs';
 import { listPiModels, PI_FALLBACK_MODELS, PI_PROVIDER_DEFINITIONS } from '../sessions/pi-model-catalog.mjs';
 import { DEFAULT_CLAUDE_MODEL, DEFAULT_CODEX_MODEL } from '../sessions/provider-models.mjs';
 import { renderCollabStartupPrompt } from './protocol.mjs';
@@ -20,16 +21,17 @@ const limit = { anyOf: [{ type: 'integer', minimum: 0, maximum: 500 }, { type: '
 const query = (properties, required = []) => ({ type: 'object', additionalProperties: false, required, properties });
 
 export async function buildAgentModelCatalog({ listCodexModelsImpl = listCodexModels,
-  listProviderModelsImpl = listProviderModels, listPiModelsImpl = listPiModels, logger = null } = {}) {
-  const [codex, claude, pi] = await Promise.allSettled([
-    listCodexModelsImpl(), listProviderModelsImpl('anthropic'), listPiModelsImpl(),
+  listProviderModelsImpl = listProviderModels, listPiModelsImpl = listPiModels, listAgyModelsImpl = listAgyModels, logger = null } = {}) {
+  const [codex, claude, pi, agy] = await Promise.allSettled([
+    listCodexModelsImpl(), listProviderModelsImpl('anthropic'), listPiModelsImpl(), listAgyModelsImpl(),
   ]);
   const failures = [codex, claude, pi].filter((item) => item.status === 'rejected').map((item) => item.reason?.message || 'discovery failed');
   if (failures.length) logger?.warn?.(`agent-bus model catalog partial failure: ${failures.join('; ')}`);
   const codexModels = codex.status === 'fulfilled' ? codex.value || [] : [];
   const claudeModels = claude.status === 'fulfilled' ? claude.value?.models || [] : [];
   const piCatalog = pi.status === 'fulfilled' ? pi.value || {} : {};
-  const models = { codex: codexModels, claude: claudeModels, ...(piCatalog.models || {}) };
+  const agyModels = agy.status === 'fulfilled' ? agy.value || [] : [];
+  const models = { codex: codexModels, claude: claudeModels, agy: agyModels, ...(piCatalog.models || {}) };
   const providers = [...(piCatalog.providers || [])];
   const xai = PI_PROVIDER_DEFINITIONS.xai;
   if (!models.xai?.length) models.xai = [...PI_FALLBACK_MODELS.xai];
@@ -42,6 +44,7 @@ export async function buildAgentModelCatalog({ listCodexModelsImpl = listCodexMo
   return { providers: [
     { id: 'codex', label: 'Codex', backendType: 'codex', runtime: 'codex', sessionKind: 'codex', defaultModel: defaultModel(codexModels, DEFAULT_CODEX_MODEL) },
     { id: 'claude', label: 'Claude', backendType: 'claude', runtime: 'claude', sessionKind: 'claude', defaultModel: defaultModel(claudeModels, DEFAULT_CLAUDE_MODEL) },
+    { id: 'agy', label: 'Antigravity', backendType: 'agy', runtime: 'agy', sessionKind: 'agy', defaultModel: defaultModel(agyModels, AGY_DEFAULT_MODEL) },
     ...providers.map((item) => ({ ...item, backendType: 'pi', runtime: 'pi', sessionKind: 'pi',
       defaultModel: defaultModel(models[item.id] || [], item.defaultModel) })),
   ], models };

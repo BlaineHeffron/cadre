@@ -27,6 +27,8 @@ import {
 import { observeClaudePane } from '../session-state/providers/claude.mjs';
 import { observeCodexPane } from '../session-state/providers/codex.mjs';
 import { observePiPane } from '../session-state/providers/pi.mjs';
+import { detectPaneObservations } from '../session-state/providers/detector.mjs';
+import { assertAgyModel } from './agy-models.mjs';
 import { observeTranscriptFile } from '../session-state/providers/transcript.mjs';
 import { createTmuxPaneProbe, observeProcessLiveness } from '../session-state/providers/process.mjs';
 import { latestFreshPaneExecution, nextTranscriptIdleSince, shouldAutoCloseSession } from './auto-close.mjs';
@@ -41,6 +43,7 @@ import { createTmuxCommandExecutor, sessionCommandGate } from '../session-state/
 import { shouldSuppressSideEffectLoops } from '../platform/side-effect-loops.mjs';
 import {
   buildAgentRuntimeLaunchArgs,
+  buildAgentRuntimeResumeArgs,
   buildClaudeLaunchArgs,
   CLAUDE_CODE_MODE_ENV,
   normalizeCodexPluginSelection,
@@ -237,6 +240,8 @@ const PROVIDER_CONFIGS = {
     startupDelayMs: 180,
     initialPromptDelayMs: 350,
     bufferPrefix: 'dueno-codex',
+    // Codex reads a first prompt only from argv, so it is typed into the pane after launch.
+    typesInitialPrompt: true,
     assertModel: assertValidCodexModel,
     normalizeRuntime(provider = '', runtime = '') {
       const normalizedRuntime = String(runtime || '').trim().toLowerCase();
@@ -426,6 +431,46 @@ const PROVIDER_CONFIGS = {
       return envPrefix ? `${envPrefix}; ${command}` : command;
     },
   },
+  // Google's unmodified interactive Antigravity CLI. MCP comes from a private `--add-dir` workspace
+  // (see agyMcpWorkspacePath). It has no system-prompt flag and no hook reporter, so prompt
+  // profiles are not applied and the session is pane-only.
+  agy: {
+    id: 'agy',
+    displayName: 'Antigravity',
+    tmuxPrefix: 'agy',
+    binaryName: 'agy',
+    binaryEnv: 'AGY_BIN',
+    strictBinary: true,
+    readNativeHookState: false,
+    supportsPromptProfiles: false,
+    // The first prompt is typed into the pane, as for Codex, so it never enters argv.
+    typesInitialPrompt: true,
+    // No captured conversation id: resume continues the workDir's most recent conversation.
+    resumesWithoutCliSessionId: true,
+    defaultProvider: 'agy',
+    defaultRuntime: 'agy',
+    stateFile: 'agy_sessions.json',
+    storageEnv: 'AGY_SESSIONS_STORAGE',
+    stripContent: (text = '') => String(text || ''),
+    startupDelayMs: 300,
+    initialPromptDelayMs: 800,
+    launchVerifyMs: 1500,
+    bufferPrefix: 'dueno-agy',
+    assertModel: (model = '', { piBin = '' } = {}) => assertAgyModel(model, piBin ? { binary: piBin } : {}),
+    normalizeRuntime(provider = '', runtime = '') {
+      if ([provider, runtime].some((value) => !['', 'agy'].includes(String(value || '').trim().toLowerCase()))) {
+        throw Object.assign(new Error('provider must be agy'), { statusCode: 400 });
+      }
+      return { provider: 'agy', runtime: 'agy', launchRuntime: 'agy' };
+    },
+    buildArgs: ({ mcpLaunch = {}, ...options } = {}) => buildAgentRuntimeLaunchArgs({ ...options, mcpWorkspaceDir: mcpLaunch.agyWorkspaceDir, runtime: 'agy' }),
+    buildResumeArgs: ({ mcpLaunch = {}, ...options } = {}) => buildAgentRuntimeResumeArgs({ ...options, mcpWorkspaceDir: mcpLaunch.agyWorkspaceDir, runtime: 'agy' }),
+    shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, workDir }) {
+      const baseCommand = [sessionBinary, ...allArgs].map(shellQuote).join(' ');
+      const command = launchLogPath ? `${baseCommand} 2> >(tee -a ${shellQuote(launchLogPath)} >&2)` : baseCommand;
+      return [buildLaunchEnvPrefix(sessionId, provider, workDir), command].filter(Boolean).join('; ');
+    },
+  },
 };
 
 export function renderAgentSessionLaunch({
@@ -564,6 +609,7 @@ export function createAgentSessionsProvider(providerId) {
 function paneObservations(content, options = {}) {
   if (config.id === 'codex') return observeCodexPane(content, options);
   if (config.id === 'pi') return observePiPane(content, options);
+  if (config.id === 'agy') return detectPaneObservations({ provider: 'agy', content, ...options });
   return observeClaudePane(content, options);
 }
 
@@ -1112,13 +1158,15 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
   if (sandboxMode === 'nono') assertNonoSupported({ researchSafeRuntime, codexPlugins: selectedCodexPlugins, serverIds: resolvedMcp.serverIds });
   const selectedSkills = sanitizedSkillSnapshot(skills);
   resolveLaunchSkills({ skillIds: selectedSkills });
-  resolvePromptProfile({ promptProfile });
+  const promptWarnings = config.supportsPromptProfiles === false && resolvePromptProfile({ promptProfile }).body
+    ? [{ code: 'prompt_profile_unsupported', message: `${config.displayName} has no system-prompt flag; the prompt profile was not applied.` }]
+    : [];
 
   const id = sessionId || generateId();
   if (typeof id !== 'string' || !/^[a-f0-9]{8,32}$/.test(id) || sessions.has(id)) throw Object.assign(new Error('Invalid or duplicate sessionId'), { statusCode: 400 });
   const launchPrompt = resolveHarnessUserText(initialPrompt);
-  // Codex reads a first prompt only from argv, so it is typed into the pane after launch instead.
-  const initialPromptFile = launchPrompt && config.id !== 'codex' ? initialPromptPath(id) : '';
+  // Codex and agy read a first prompt only from argv, so it is typed into the pane after launch instead.
+  const initialPromptFile = launchPrompt && !config.typesInitialPrompt ? initialPromptPath(id) : '';
   if (launchPrompt.includes('\0') || Buffer.byteLength(launchPrompt, 'utf8') >= 128 * 1024) {
     throw Object.assign(new Error('Initial prompt must be under 128 KiB and contain no NUL'), { statusCode: 400 });
   }
@@ -1229,7 +1277,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     ...(mcpToolScope === 'bus' ? { mcpToolScope } : {}),
     ...(selectedCodexPlugins ? { codexPlugins: selectedCodexPlugins } : {}),
     ...(codeMode ? { codeMode } : {}),
-    promptProfile: sanitizedPromptSnapshot(promptPreparation.resolved),
+    promptProfile: { ...sanitizedPromptSnapshot(promptPreparation.resolved), ...(promptWarnings.length ? { attached: false } : {}) },
     skills: selectedSkills,
     autoCloseMode: String(autoCloseMode || 'never').trim() || 'never',
     autoCloseAfterMs: Number.isFinite(Number(autoCloseAfterMs)) ? Number(autoCloseAfterMs) : 0,
@@ -1254,24 +1302,24 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
   if (_registerSession) _registerSession(id, meta);
 
   let initialPromptError = null;
-  if (config.id === 'codex' && launchPrompt) {
+  if (config.typesInitialPrompt && launchPrompt) {
     try {
-      if (!_enqueueSessionCommand) throw new Error('codex session command gate is not ready');
+      if (!_enqueueSessionCommand) throw new Error(`${config.id} session command gate is not ready`);
       await waitForStartupPane(exec, sessionName, launchLogPath);
       // The pane opens on a login shell; the gate would read that wrapper as a dead agent.
       for (let tries = 0; ; tries += 1) {
-        const [evidence] = await observeProcessLiveness({ sessionName, now: Date.now(), execFn: exec, expectedCli: 'codex', paneProbe: createTmuxPaneProbe(exec) });
+        const [evidence] = await observeProcessLiveness({ sessionName, now: Date.now(), execFn: exec, expectedCli: config.id, paneProbe: createTmuxPaneProbe(exec) });
         if (evidence?.value?.lifecycle === 'running') break;
-        if (tries >= 40) throw new Error(`Codex did not start in ${sessionName}`);
+        if (tries >= 40) throw new Error(`${config.displayName} did not start in ${sessionName}`);
         await sleep(250);
       }
-      const delivered = await _enqueueSessionCommand(id, { source: 'codex_initial_prompt', operation: 'startup', text: launchPrompt, enter: true });
-      if (delivered?.submissionConfirmed === false) throw new Error('Codex did not confirm the initial prompt was submitted');
+      const delivered = await _enqueueSessionCommand(id, { source: `${config.id}_initial_prompt`, operation: 'startup', text: launchPrompt, enter: true });
+      if (delivered?.submissionConfirmed === false) throw new Error(`${config.displayName} did not confirm the initial prompt was submitted`);
     } catch (error) {
       initialPromptError = error.message;
     }
   }
-  return { id, sessionName, mcpCapabilities: meta.mcpCapabilities, ...(codeMode ? { codeMode } : {}), ...(initialPromptError ? { initialPromptError } : {}) };
+  return { id, sessionName, mcpCapabilities: meta.mcpCapabilities, ...(codeMode ? { codeMode } : {}), ...(initialPromptError ? { initialPromptError } : {}), ...(promptWarnings.length ? { warnings: promptWarnings } : {}) };
 }
 
 async function refreshSessionCliMetadata(id, meta = {}, targetSessions = sessions) {
@@ -1321,7 +1369,7 @@ async function checkResumable(id, { onWorker = false } = {}) {
   await refreshSessionCliMetadata(id, meta);
   const refreshed = sessions.get(id) || meta;
   const cliSessionId = normalizeText(refreshed.cliSessionId || refreshed.sessionId || refreshed.metadata?.cliSessionId);
-  if (!cliSessionId) {
+  if (!cliSessionId && !config.resumesWithoutCliSessionId) {
     const err = new Error('Cannot resume: CLI session id is unknown. Start a fresh session in the same workdir.');
     err.statusCode = 409;
     err.code = 'cli_session_id_unknown';

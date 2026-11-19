@@ -505,7 +505,7 @@ describe('Monitor MCP server', () => {
         type: 'gsd',
         sessionId: 'agent_1',
       }),
-      /provider must be claude, codex, codex-app-server, deepseek, xai, google, opencode-go, or openrouter/,
+      /provider must be claude, codex, codex-app-server, deepseek, agy, xai, google, opencode-go, or openrouter/,
     );
     assert.deepEqual(requests, []);
   });

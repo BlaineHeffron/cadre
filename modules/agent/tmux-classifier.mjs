@@ -10,6 +10,7 @@ export function classifyExecutableArgs(args = '') {
     const name = basename(stripQuotes(token)).toLowerCase();
     if (name === 'claude') return { cli: 'claude', provider: 'anthropic', runtime: 'claude' };
     if (name === 'codex') return { cli: 'codex', provider: 'openai', runtime: 'codex' };
+    if (name === 'agy') return { cli: 'agy', provider: 'agy', runtime: 'agy' };
     if (name === 'pi') return { cli: 'pi', provider: piProviderFromArgs(tokens.slice(index + 1)), runtime: 'pi' };
   }
 

@@ -38,7 +38,8 @@ through structured runtimes.
 - Node.js >= 22.19.0 (see `.node-version`; `npm run check:node` verifies it)
 - `tmux` on `PATH`
 - The provider CLIs you plan to use, installed and logged in: `claude`
-  (Claude Code), `codex`, and/or `pi` (override the Pi binary with `PI_BIN`)
+  (Claude Code), `codex`, `pi` (override the Pi binary with `PI_BIN`), and/or Google's
+  Antigravity CLI `agy` (found on `PATH` or in `~/.local/bin`; override with `AGY_BIN`)
 - Linux with systemd user services if you want to run it as a service
 
 ## Quick start
