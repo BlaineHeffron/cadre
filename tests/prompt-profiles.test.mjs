@@ -80,7 +80,6 @@ describe('prompt profile catalog', () => {
     const schema = buildPromptProfileFieldSchema();
     assert.ok(schema.enum.includes('caveman'));
     assert.ok(schema.enum.includes('asd-ste100'));
-    assert.match(schema.description, /asd-ste100/);
     assert.doesNotMatch(JSON.stringify(schema), /Reply in caveman mode/);
     assert.doesNotMatch(JSON.stringify(schema), /Keep procedural sentences/);
     assert.doesNotMatch(JSON.stringify(schema), /subject-verb-object/);

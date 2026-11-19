@@ -294,13 +294,9 @@ export function buildPromptProfileCatalog({ sourceConfig = config } = {}) {
   });
 }
 
-export function buildPromptProfileFieldSchema(description = 'Optional style prompt profile ID. Default none. Prompt bodies are not included; call monitor_list_prompt_profiles for labels.') {
-  const catalog = getPublicPromptProfileCatalog();
-  return {
-    type: 'string',
-    enum: catalog.profiles.map((entry) => entry.id),
-    description: `${description} Options: ${catalog.profiles.map((entry) => `${entry.id} (${entry.description})`).join('; ')}`,
-  };
+// The enum carries the IDs; monitor_list_prompt_profiles describes them, so the schema does not repeat that.
+export function buildPromptProfileFieldSchema(description = 'From monitor_list_prompt_profiles. Default none.') {
+  return { type: 'string', enum: getPublicPromptProfileCatalog().profiles.map((entry) => entry.id), description };
 }
 
 export function getPublicPromptProfileCatalog(options = {}) {

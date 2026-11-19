@@ -39,11 +39,25 @@ test('meterTranscript attributes the startup prefix and carries coordination tra
 
 test('meterStatic lists the dueno tools each credential profile can discover', async () => {
   const result = await meterStatic();
-  const agent = result.mcp['operator / coordinator'];
+  const agent = result.mcp['dueno-full'];
   const busOnly = result.mcp['agent-bus scopes only'];
   assert.ok(agent.tools > busOnly.tools && busOnly.tools > 0);
-  assert.deepEqual(result.mcp['spawned agent (default)'], busOnly);
+  assert.deepEqual(result.mcp.dueno, busOnly);
+  assert.equal(Object.keys(result.servers.monitor.perTool).length + Object.keys(result.servers['agent-bus'].perTool).length, agent.tools);
   assert.ok(agent.schemaTokens > agent.nameTokens * 10);
   assert.ok(result.largestTools.length === 10 && result.largestTools[0].tokens >= result.largestTools[9].tokens);
   assert.ok(result.collabWrapperTokens > 0 && result.launchSkills.count > 0);
+});
+
+// Codex and pi load every schema at startup, so tool definitions are a per-session token cost.
+// Lower a cap when a change shrinks a total; never raise one to fit a longer description.
+test('MCP tool schemas should not grow', async () => {
+  const { mcp, servers } = await meterStatic();
+  const caps = {
+    'monitor server': [servers.monitor.bytes, 28361],
+    'agent-bus server': [servers['agent-bus'].bytes, 9459],
+    'dueno profile': [mcp.dueno.bytes, 23497],
+    'dueno-full profile': [mcp['dueno-full'].bytes, 37819],
+  };
+  for (const [name, [bytes, cap]] of Object.entries(caps)) assert.ok(bytes <= cap, `${name} tools/list is ${bytes} bytes, cap ${cap}`);
 });

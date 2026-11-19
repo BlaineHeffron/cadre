@@ -2,7 +2,7 @@
 // Token meter for Cadre-run agent sessions.
 //   node scripts/token-meter.mjs                    static seams from this checkout
 //   node scripts/token-meter.mjs --transcripts [N]  also the last N Claude transcripts that loaded dueno
-//   --json prints raw numbers instead of tables.
+//   --json prints raw numbers instead of tables; --tools adds bytes per tool for each server and profile.
 // Tokens are estimated as chars / CHARS_PER_TOKEN. The ratio is calibrated against Claude's own
 // `usage` on 297 real first requests (median 2.97 JSON chars per token, range 2.91–3.02).
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -119,6 +119,7 @@ export function meterTranscripts(files) {
 export async function meterStatic() {
   const { buildMonitorMcpServer } = await import('../modules/platform/monitor-mcp.mjs');
   const { buildInProcessAgentBusMcpServer } = await import('../modules/agent-bus/in-process-mcp.mjs');
+  const { buildAgentBusMcpServer } = await import('../modules/agent-bus/mcp.mjs');
   const { AGENT_BUS_AGENT_TOOL_SCOPES } = await import('../modules/agent-bus/mcp-auth.mjs');
   const { FLEET_SUPERVISOR_MCP_TOOL_SCOPES, launchMcpToolScope, mcpToolScopesFor } = await import('../modules/integrations/mcp-launch-preflight.mjs');
   const { renderCollabStartupPrompt } = await import('../modules/agent-bus/protocol.mjs');
@@ -126,9 +127,10 @@ export async function meterStatic() {
   const { discoverLaunchSkills } = await import('../modules/integrations/launch-skills.mjs');
 
   const requestImpl = async () => ({});
+  const monitorMcp = buildMonitorMcpServer({ requestImpl });
   const server = buildInProcessAgentBusMcpServer({
     requestImpl,
-    monitorMcp: buildMonitorMcpServer({ requestImpl }),
+    monitorMcp,
     credentialStore: { recordRejectedCall: async () => {} },
   });
   const listTools = async (toolScopes) => (await server.handleRequest(
@@ -137,9 +139,10 @@ export async function meterStatic() {
   )).result.tools;
   // The full agent credential is ['*', ...agent scopes]; a spawn gets what launchMcpToolScope decides for an agent caller.
   const fullAgentScopes = ['*', ...AGENT_BUS_AGENT_TOOL_SCOPES];
+  const profileTools = async (mcpProfile) => listTools(mcpToolScopesFor(launchMcpToolScope({ auth: { principal: { type: 'agent' } }, mcpProfile })) || fullAgentScopes);
   const profiles = {
-    'spawned agent (default)': await listTools(mcpToolScopesFor(launchMcpToolScope({ auth: { principal: { type: 'agent' } } })) || fullAgentScopes),
-    'operator / coordinator': await listTools(fullAgentScopes),
+    dueno: await profileTools('dueno'),
+    'dueno-full': await profileTools('dueno-full'),
     'fleet-supervisor': await listTools([...FLEET_SUPERVISOR_MCP_TOOL_SCOPES]),
     'agent-bus scopes only': await listTools([...AGENT_BUS_AGENT_TOOL_SCOPES]),
   };
@@ -147,8 +150,14 @@ export async function meterStatic() {
     tools: tools.length,
     nameTokens: tokens(tools.map((tool) => `${DUENO}${tool.name}`).join('\n')),
     schemaTokens: tokens(tools),
+    ...toolBytes(tools),
   }]));
-  const largestTools = profiles['operator / coordinator']
+  // Each server on its own, as tools/list serializes it: monitor tools without handlers, agent-bus without monitor tools.
+  const servers = {
+    monitor: toolBytes(monitorMcp.listTools()),
+    'agent-bus': toolBytes(buildAgentBusMcpServer({ requestImpl, credentialStore: null }).tools),
+  };
+  const largestTools = profiles['dueno-full']
     .map((tool) => ({ name: tool.name, tokens: tokens(tool) }))
     .sort((a, b) => b.tokens - a.tokens).slice(0, 10);
 
@@ -168,6 +177,7 @@ export async function meterStatic() {
   const skills = discoverLaunchSkills({ sourceConfig: { launchSkills: { dir: repoSkills, localDir: join(repoSkills, '.none') } } }).map((skill) => tokens(skill.body || '')).sort((a, b) => a - b);
   return {
     mcp,
+    servers,
     largestTools,
     collabWrapperTokens: tokens(collabWrapper),
     collaborationGuidanceTokens: tokens(guidance.result?.messages ?? ''),
@@ -179,6 +189,11 @@ export async function meterStatic() {
       totalTokens: skills.reduce((sum, value) => sum + value, 0),
     },
   };
+}
+
+function toolBytes(tools) {
+  const perTool = Object.fromEntries(tools.map((tool) => [tool.name, JSON.stringify(tool).length]).sort((a, b) => b[1] - a[1]));
+  return { bytes: JSON.stringify(tools).length, perTool };
 }
 
 function recentTranscripts(dir, limit) {
@@ -201,10 +216,17 @@ function table(title, header, rows) {
   return [`\n### ${title}`, line(header), `|${widths.map((width, index) => `${index ? '' : ':'}${'-'.repeat(width + 1)}${index ? ':' : ''}`).join('|')}|`, ...rows.map(line)].join('\n');
 }
 
-function render(staticResult, live) {
+function render(staticResult, live, { perTool = false } = {}) {
   const out = [`Token meter — estimate: chars / ${CHARS_PER_TOKEN} (calibrated on Claude usage)`];
-  out.push(table('Static: dueno MCP tools/list per credential profile', ['profile', 'tools', 'names only', 'full schemas'],
-    Object.entries(staticResult.mcp).map(([id, row]) => [id, row.tools, fmt(row.nameTokens), fmt(row.schemaTokens)])));
+  out.push(table('Static: dueno MCP tools/list per credential profile', ['profile', 'tools', 'names only', 'full schemas', 'bytes'],
+    Object.entries(staticResult.mcp).map(([id, row]) => [id, row.tools, fmt(row.nameTokens), fmt(row.schemaTokens), fmt(row.bytes)])));
+  out.push(table('Static: MCP server tools/list', ['server', 'tools', 'bytes'],
+    Object.entries(staticResult.servers).map(([id, row]) => [id, Object.keys(row.perTool).length, fmt(row.bytes)])));
+  if (perTool) {
+    for (const [id, row] of [...Object.entries(staticResult.servers), ...Object.entries(staticResult.mcp)]) {
+      out.push(table(`Static: bytes per tool — ${id}`, ['tool', 'bytes'], Object.entries(row.perTool).map(([name, bytes]) => [name, fmt(bytes)])));
+    }
+  }
   out.push(table('Static: largest dueno tool schemas', ['tool', 'tokens'], staticResult.largestTools.map((row) => [row.name, fmt(row.tokens)])));
   out.push(table('Static: injected startup text', ['seam', 'tokens'], [
     ['collab startup wrapper (no task)', fmt(staticResult.collabWrapperTokens)],
@@ -235,5 +257,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.env.CLAUDE_PROJECTS_DIR || join(homedir(), '.claude', 'projects'),
     Number(args[at + 1]) || 200,
   ));
-  console.log(args.includes('--json') ? JSON.stringify({ static: staticResult, live }, null, 2) : render(staticResult, live));
+  console.log(args.includes('--json') ? JSON.stringify({ static: staticResult, live }, null, 2) : render(staticResult, live, { perTool: args.includes('--tools') }));
 }
