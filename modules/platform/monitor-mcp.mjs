@@ -41,6 +41,10 @@ const CODEX_PLUGIN_SELECTION_SCHEMA = {
   additionalProperties: false,
 };
 const CODE_MODE_SCHEMA = { type: 'boolean', description: 'Claude terminal Code Mode.' };
+// Code Mode needs the terminal, but only an all-Claude room leaves the structured runtime for it;
+// otherwise each Claude participant keeps its runtime and the bootstrap warns if it lost Code Mode.
+const collabStructured = (codeMode, participants) => !(codeMode === true
+  && participants.filter((participant) => participant.create).every((participant) => participant.kind === 'claude'));
 const MCP_SELECTION_SCHEMA_PROPERTIES = {
   mcpProfile: { type: 'string', description: 'From monitor_list_mcp_servers.' },
   mcpServers: MCP_SERVERS_SELECTION_SCHEMA,
@@ -1178,7 +1182,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
             ...(promptProfile !== undefined ? { promptProfile } : {}),
             participants: normalizedParticipants,
             ...(codeMode !== undefined ? { codeMode } : {}),
-            structured: codeMode !== true,
+            structured: collabStructured(codeMode, normalizedParticipants),
           },
         });
         return spawnResult(payload);
@@ -1232,7 +1236,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
             ...(promptProfile !== undefined ? { promptProfile } : {}),
             participants: normalizedParticipants,
             ...(codeMode !== undefined ? { codeMode } : {}),
-            structured: codeMode !== true,
+            structured: collabStructured(codeMode, normalizedParticipants),
           },
         });
         return spawnResult(payload);

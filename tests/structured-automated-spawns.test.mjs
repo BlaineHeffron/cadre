@@ -1,6 +1,7 @@
 import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,7 +14,10 @@ mkdirSync(workDir);
 writeFileSync(join(bin, 'tmux'), [
   '#!/bin/sh',
   'case "$1" in',
-  `  list-sessions) printf 'claude-tmux1\\t1700000000\\t0\\t\\t${workDir}\\n' ;;`,
+  `  list-sessions) printf 'claude-tmux1\\t1700000000\\t0\\t\\t${workDir}\\n'; cat '${join(root, 'live-tmux')}' 2>/dev/null ;;`,
+  // A test may give every pane a live pid; while it does, new sessions are listed as they start.
+  `  list-panes) [ "$2" = "-s" ] && cat '${join(root, 'live-pane')}' 2>/dev/null ;;`,
+  `  new-session) [ -f '${join(root, 'live-pane')}' ] && printf '%s\\t1700000000\\t0\\t\\t%s\\n' "$4" '${workDir}' >> '${join(root, 'live-tmux')}' ;;`,
   '  capture-pane) printf "> " ;;',
   'esac',
   'exit 0',
@@ -682,6 +686,52 @@ describe('structured automated spawns', () => {
       assert.equal(JSON.parse(readFileSync(join(root, 'state', 'claude_sessions.json'), 'utf8')).find((entry) => entry.id === id).codeMode, true);
     } finally {
       await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('returns each turn of a tmux Code Mode returnResults worker to its spawner, as structured spawns do', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, transports, request, mcp } = await buildApp({ agentBus: true });
+    const defaultAgent = PRINCIPALS.agent;
+    let paneProcess = null;
+    try {
+      // The spawner is a live structured session, so a result has somewhere to go.
+      const parent = (await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, initialPrompt: 'hi' } })).json();
+      // Nested in-process requests carry no test header, so the default agent principal is the parent here.
+      PRINCIPALS.agent = { authenticated: true, principal: { type: 'agent', kind: 'claude', sessionId: parent.id } };
+      // Panes run a process named claude (a sleep) from the start, and the worker is listed from launch,
+      // so it is never seen as exited.
+      mkdirSync(join(root, 'fake-claude'), { recursive: true });
+      if (!existsSync(join(root, 'fake-claude', 'claude'))) symlinkSync('/bin/sleep', join(root, 'fake-claude', 'claude'));
+      paneProcess = spawn(join(root, 'fake-claude', 'claude'), ['600'], { stdio: 'ignore' });
+      writeFileSync(join(root, 'live-pane'), `${paneProcess.pid}\n`);
+      const spawned = await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, mcpProfile: 'default', returnResults: true, codeMode: true });
+      const id = spawned.participants[0].session_id;
+      assert.equal(transports.length, 1, 'the worker is on tmux');
+      const stored = JSON.parse(readFileSync(join(root, 'state', 'claude_sessions.json'), 'utf8')).find((entry) => entry.id === id);
+      assert.deepEqual([stored.codeMode, stored.metadata.spawnedBy], [true, { kind: 'claude', sessionId: parent.id }]);
+
+      const hook = (payload) => recordHookPayload({ session_id: id, cwd: workDir, ...payload }, { provider: 'claude', duenoSessionId: id, workDir });
+      const results = async () => {
+        const threads = (await request('GET', '/api/agent-bus/threads', { principal: 'ui' })).json().threads;
+        const messages = await Promise.all(threads.map(async (thread) => (await request('GET', `/api/agent-bus/threads/${thread.id}`, { principal: 'ui' })).json().messages
+          .map((message) => ({ ...message, to: thread.participants.map((participant) => participant.sessionId).filter((sessionId) => sessionId !== id) }))));
+        return messages.flat().filter((message) => message.type === 'result' && message.from.sessionId === id);
+      };
+      for (const answer of ['First answer', 'Second answer']) {
+        await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' });
+        await hook({ hook_event_name: 'Stop', last_assistant_message: answer });
+        await waitFor(async () => (await results()).some((message) => message.body === answer), 10000);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      assert.deepEqual((await results()).map((message) => [message.body, message.to]),
+        [['First answer', [parent.id]], ['Second answer', [parent.id]]]);
+    } finally {
+      await app.close();
+      PRINCIPALS.agent = defaultAgent;
+      paneProcess?.kill();
+      for (const name of ['live-tmux', 'live-pane']) rmSync(join(root, name), { force: true });
       delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
     }
   });
