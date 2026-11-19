@@ -13,6 +13,7 @@ import { notifyPush } from '../platform/push.mjs';
 import { saveImageToWorkspace, buildAgentImagePrompt, buildImageAttachmentResult } from './image-handoff.mjs';
 import { AttachmentStore } from '../agent/attachment-store.mjs';
 import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
+import { getAgentProviderPreferences } from '../agent/provider-preferences.mjs';
 import { readHookEventsSince, recordRuntimeHookEvent, registerHookSessionRegistry, removeSessionHookFiles } from '../agent/hook-events.mjs';
 import { readHookDerivedState, readHookSessionMetadata } from '../session-state/providers/hook.mjs';
 import { canonicalSessionStateId, projectCompatibility } from '../session-state/contract.mjs';
@@ -41,6 +42,7 @@ import { shouldSuppressSideEffectLoops } from '../platform/side-effect-loops.mjs
 import {
   buildAgentRuntimeLaunchArgs,
   buildClaudeLaunchArgs,
+  CLAUDE_CODE_MODE_ENV,
   normalizeCodexPluginSelection,
 } from '../agent/runtime-args.mjs';
 import { buildLaunchEnvPrefix } from '../agent/launch-env.mjs';
@@ -308,23 +310,23 @@ const PROVIDER_CONFIGS = {
       }
       return { provider: 'anthropic', runtime: 'claude', launchRuntime: 'claude' };
     },
-    buildArgs({ args = [], model = '', thinkingLevel = '', workDir = '', mcpLaunch = {}, promptLaunch = {}, cliSessionId = '' } = {}) {
+    buildArgs({ args = [], model = '', thinkingLevel = '', workDir = '', mcpLaunch = {}, promptLaunch = {}, cliSessionId = '', codeMode = false } = {}) {
       return [
         ...buildClaudeLaunchArgs({
           args, model, thinkingLevel, workDir, cliSessionId,
-          remoteControl: appConfig.agentInterface.claudeRemoteControlEnabled,
+          remoteControl: appConfig.agentInterface.claudeRemoteControlEnabled && !codeMode,
         }),
         ...(mcpLaunch.claudeConfigPath ? ['--mcp-config', mcpLaunch.claudeConfigPath, '--strict-mcp-config'] : []),
         ...buildPromptLaunchArgs({ runtime: 'claude', promptLaunch }),
       ];
     },
-    buildResumeArgs({ cliSessionId = '', model = '', thinkingLevel = '', workDir = '', mcpLaunch = {}, promptLaunch = {} } = {}) {
+    buildResumeArgs({ cliSessionId = '', model = '', thinkingLevel = '', workDir = '', mcpLaunch = {}, promptLaunch = {}, codeMode = false } = {}) {
       const resumeId = String(cliSessionId || '').trim();
       if (!resumeId) throw new Error('Claude resume requires a CLI session id');
       return [
         ...buildClaudeLaunchArgs({
           args: [], model, thinkingLevel, workDir,
-          remoteControl: appConfig.agentInterface.claudeRemoteControlEnabled,
+          remoteControl: appConfig.agentInterface.claudeRemoteControlEnabled && !codeMode,
         }),
         ...(mcpLaunch.claudeConfigPath ? ['--mcp-config', mcpLaunch.claudeConfigPath, '--strict-mcp-config'] : []),
         ...buildPromptLaunchArgs({ runtime: 'claude', promptLaunch }),
@@ -444,7 +446,8 @@ export function renderAgentSessionLaunch({
     ? providerConfig.buildResumeArgs(buildOptions)
     : providerConfig.buildArgs(buildOptions);
   allArgs.unshift(...headroom.args);
-  const envPrefix = Object.entries({ ...headroom.env, ...sandbox?.env }).map(([key, value]) => `export ${key}=${shellQuote(value)}`).join('; ');
+  const codeModeEnv = backendType === 'claude' && buildOptions.codeMode ? CLAUDE_CODE_MODE_ENV : {};
+  const envPrefix = Object.entries({ ...headroom.env, ...sandbox?.env, ...codeModeEnv }).map(([key, value]) => `export ${key}=${shellQuote(value)}`).join('; ');
   const tokenExport = sandbox?.tokenFile ? `export CADRE_SANDBOX_GH_TOKEN="$(< ${shellQuote(sandbox.tokenFile)})"` : '';
   return {
     allArgs,
@@ -1076,7 +1079,8 @@ async function launchTmuxSession({ sessionName, workDir = '', sessionBinary = ''
   await verifyLaunchedSession(sessionName, launchLogPath, Math.max(Number(config.launchVerifyMs || 0), sandboxed ? 1000 : 0));
 }
 
-async function createSession({ sessionId, initialPrompt = '', workDir, args, model = '', provider = config.id, runtime = '', thinkingLevel = '', source = 'external', displayName = '', autoCloseMode = 'never', autoCloseAfterMs = 0, metadata = {}, coordinatorPolicy = null, loopRegistrationPolicy = null, mcpProfile, mcpServers, mcpCredentialProfile = 'agent', codexPlugins, promptProfile, skills, sandbox, githubToken = '', busCredential = null, duenoUrl = '', mcpToolScope = launchMcpToolScope({ promptProfile, mcpProfile, coordinatorPolicy }) } = {}) {
+async function createSession({ sessionId, initialPrompt = '', workDir, args, model = '', provider = config.id, runtime = '', thinkingLevel = '', source = 'external', displayName = '', autoCloseMode = 'never', autoCloseAfterMs = 0, metadata = {}, coordinatorPolicy = null, loopRegistrationPolicy = null, mcpProfile, mcpServers, mcpCredentialProfile = 'agent', codexPlugins, promptProfile, skills, sandbox, codeMode = false, githubToken = '', busCredential = null, duenoUrl = '', mcpToolScope = launchMcpToolScope({ promptProfile, mcpProfile, coordinatorPolicy }) } = {}) {
+  codeMode = config.id === 'claude' && codeMode === true;
   const storeOptions = credentialStoreOptions(busCredential);
   const sessionRuntime = config.normalizeRuntime(provider, runtime);
   const sandboxMode = resolveSandbox(sandbox);
@@ -1179,6 +1183,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
         initialPromptFile,
         researchSafeRuntime,
         codexPlugins: selectedCodexPlugins,
+        codeMode,
       },
     });
     const { allArgs, paneCommand } = renderedLaunch;
@@ -1223,6 +1228,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     mcpCredentialProfile,
     ...(mcpToolScope === 'bus' ? { mcpToolScope } : {}),
     ...(selectedCodexPlugins ? { codexPlugins: selectedCodexPlugins } : {}),
+    ...(codeMode ? { codeMode } : {}),
     promptProfile: sanitizedPromptSnapshot(promptPreparation.resolved),
     skills: selectedSkills,
     autoCloseMode: String(autoCloseMode || 'never').trim() || 'never',
@@ -1265,7 +1271,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
       initialPromptError = error.message;
     }
   }
-  return { id, sessionName, mcpCapabilities: meta.mcpCapabilities, ...(initialPromptError ? { initialPromptError } : {}) };
+  return { id, sessionName, mcpCapabilities: meta.mcpCapabilities, ...(codeMode ? { codeMode } : {}), ...(initialPromptError ? { initialPromptError } : {}) };
 }
 
 async function refreshSessionCliMetadata(id, meta = {}, targetSessions = sessions) {
@@ -1455,6 +1461,7 @@ async function resumeSession(id, { loopRegistrationPolicy = null, busCredential 
         promptLaunch: promptPreparation.prepared,
         researchSafeRuntime: config.id === 'codex' && hasResearchWorkbenchLaunchProfile(refreshed.metadata),
         codexPlugins: refreshed.codexPlugins,
+        codeMode: refreshed.codeMode === true,
       },
     });
     scopeLaunch = buildAgentScopeLaunch(paneCommand, { kind: config.id, sessionId: id });
@@ -1832,6 +1839,7 @@ function sessionLaunchSelection(meta = {}) {
     mcpCapabilities: meta.mcpCapabilities ? { profileId: meta.mcpCapabilities.profileId, serverIds: meta.mcpCapabilities.serverIds } : null,
     promptProfile: meta.promptProfile?.profileId || '',
     skills: meta.skills || [],
+    codeMode: meta.codeMode === true,
     handoffFrom: meta.metadata?.handoffFrom || null,
     handoffTo: meta.metadata?.handoffTo || null,
     spawner: meta.metadata?.spawner || meta.metadata?.spawnedBy || null,
@@ -2707,6 +2715,8 @@ async function sessionsPlugin(app, {
         promptProfile,
         skills,
         sandbox,
+        // An explicit per-spawn value wins over the Settings default.
+        codeMode: config.id === 'claude' && (typeof body.codeMode === 'boolean' ? body.codeMode : (await getAgentProviderPreferences()).claudeCodeMode),
         mcpToolScope: launchMcpToolScope({ auth: req.duenoAuth, promptProfile, mcpProfile, coordinatorPolicy: trust.coordinatorPolicy }),
       });
       const injection = { injected: Boolean(launchSourcePrompt) && !result.initialPromptError, error: result.initialPromptError || null,

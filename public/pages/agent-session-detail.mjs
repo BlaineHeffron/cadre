@@ -254,6 +254,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         machine: data.machine || null,
         handoffFrom: data.handoffFrom || null,
         handoffTo: data.handoffTo || null,
+        codeMode: data.codeMode === true,
       };
     } catch (e) {
       if (!shouldApply()) return;
@@ -690,6 +691,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
         h('span', { class: 'session-title', title: id }, headerTitle),
         isRustManagedReadOnly ? h('span', { class: 'badge badge-low' }, 'rust-managed / read-only') : null,
         h(MachineChip, { machine: sessionInfo.value.machine }),
+        sessionInfo.value.codeMode ? h('span', { class: 'badge', title: 'Claude Code Mode (no Remote Control)' }, 'Code mode') : null,
         sessionInfo.value.handoffFrom
           ? h('a', { class: 'badge', href: `/${sessionInfo.value.handoffFrom.kind}/${sessionInfo.value.handoffFrom.sessionId}` }, `Continued from ${sessionInfo.value.handoffFrom.sessionId}`)
           : null,

@@ -55,5 +55,5 @@ export async function sessionRollup({ kind, sessionId } = {}) {
     ? await readFile((await buildHookSessionPaths({ workDir: session.workDir, provider: kind, sessionId })).eventsPath, 'utf8').then(rollupHookEvents, () => null)
     : null;
   const rollup = Object.fromEntries(FIELDS.map((key) => [key, journaled?.[key] ?? hooks?.[key] ?? null]));
-  return { ...rollup, transcriptPath: rollup.transcriptPath || session?.transcriptPath || null };
+  return { ...rollup, transcriptPath: rollup.transcriptPath || session?.transcriptPath || null, ...(session?.codeMode ? { codeMode: true } : {}) };
 }

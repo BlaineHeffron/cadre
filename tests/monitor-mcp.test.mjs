@@ -1086,6 +1086,26 @@ describe('Monitor MCP server', () => {
     assert.equal(result.thread_id, 'thr_conf');
   });
 
+  it('leaves the structured runtime for Code Mode only when every created collab participant is Claude', async () => {
+    const bodies = [];
+    const server = buildMonitorMcpServer({
+      async requestImpl(path, opts = {}) {
+        if (path === '/api/agents/providers') return { providers: [{ id: 'codex', enabled: true }, { id: 'claude', enabled: true }] };
+        bodies.push(opts.body);
+        return { thread: { id: 'thr_cm' }, participants: [] };
+      },
+    });
+    const claude = { provider: 'claude', codeMode: true };
+    await server.handleToolCall('spawn_collab_session', { title: 'All Claude', participants: [claude, { provider: 'claude' }] });
+    // An attached session is not created, so it does not count.
+    await server.handleToolCall('spawn_collab_session', { title: 'Attached Codex', participants: [claude, { provider: 'codex', session_id: 'codex-1' }] });
+    await server.handleToolCall('spawn_conference_session', { title: 'Mixed', participants: [claude, claude, { provider: 'codex' }] });
+    await server.handleToolCall('spawn_collab_session', { title: 'No Code Mode', participants: [{ provider: 'claude' }, { provider: 'claude' }] });
+    assert.deepEqual(bodies.map((body) => [body.participants.map((participant) => participant.codeMode), body.structured]), [
+      [[true, undefined], false], [[true, undefined], false], [[true, true, undefined], true], [[undefined, undefined], true],
+    ]);
+  });
+
   it('deletes legacy loop and raw bootstrap tools', async () => {
     const requests = [];
     const server = buildMonitorMcpServer({ async requestImpl(path, opts = {}) {

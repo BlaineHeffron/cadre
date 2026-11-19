@@ -13,7 +13,10 @@ mkdirSync(workDir);
 writeFileSync(join(bin, 'tmux'), [
   '#!/bin/sh',
   'case "$1" in',
-  `  list-sessions) printf 'claude-tmux1\\t1700000000\\t0\\t\\t${workDir}\\n' ;;`,
+  `  list-sessions) printf 'claude-tmux1\\t1700000000\\t0\\t\\t${workDir}\\n'; cat '${join(root, 'live-tmux')}' 2>/dev/null ;;`,
+  // A test may give every pane a live pid; while it does, new sessions are listed as they start.
+  `  list-panes) [ "$2" = "-s" ] && cat '${join(root, 'live-pane')}' 2>/dev/null ;;`,
+  `  new-session) [ -f '${join(root, 'live-pane')}' ] && printf '%s\\t1700000000\\t0\\t\\t%s\\n' "$4" '${workDir}' >> '${join(root, 'live-tmux')}' ;;`,
   '  capture-pane) printf "> " ;;',
   'esac',
   'exit 0',
@@ -51,6 +54,8 @@ const { agentBusPlugin } = await import('../modules/agent-bus/index.mjs');
 const { knownSessions, recordHookPayload } = await import('../modules/agent/hook-events.mjs');
 const { pushPlugin } = await import('../modules/platform/push.mjs');
 const { addHumanQueueItem, commandCenterAIPlugin, serializeWorkQueue } = await import('../modules/integrations/command-center-ai.mjs');
+const { updateAgentProviderPreferences } = await import('../modules/agent/provider-preferences.mjs');
+const { sessionRollup } = await import('../modules/sessions/session-rollup.mjs');
 
 let failStart = () => false;
 class FakeTransport {
@@ -634,6 +639,93 @@ describe('structured automated spawns', () => {
       assert.equal((await items('tmux1'))[0].status, 'open');
     } finally {
       await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('starts tmux Claude spawns in Code Mode by explicit value over the Settings default, records it, and carries it through handoff', async () => {
+    delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    const { app, request, mcp } = await buildApp();
+    const stored = (id) => JSON.parse(readFileSync(join(root, 'state', 'claude_sessions.json'), 'utf8')).find((entry) => entry.id === id);
+    const spawn = (args = {}) => mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, mcpProfile: 'default', ...args });
+    try {
+      const results = [await spawn(), await spawn({ codeMode: true })];
+      await updateAgentProviderPreferences({ claudeCodeMode: true });
+      results.push(await spawn(), await spawn({ codeMode: false }));
+      await updateAgentProviderPreferences({ claudeCodeMode: false });
+      const ids = results.map((result) => result.participants[0].session_id);
+      assert.deepEqual(ids.map((id) => stored(id).codeMode === true), [false, true, true, false]);
+      assert.deepEqual(results.map((result) => result.warnings), [undefined, undefined, undefined, undefined]);
+
+      const coded = ids[1];
+      assert.equal((await request('GET', `/api/claude/sessions/${coded}`)).json().codeMode, true);
+      assert.equal((await request('GET', `/api/claude/sessions/${ids[0]}`)).json().codeMode, false);
+      assert.equal((await sessionRollup({ kind: 'claude', sessionId: coded })).codeMode, true);
+      assert.equal(Object.hasOwn(await sessionRollup({ kind: 'claude', sessionId: ids[0] }), 'codeMode'), false);
+
+      // The default is off again, so only the carried value can put the handoff target in Code Mode.
+      const handoff = await mcp.handleToolCall('handoff_session', { session_id: coded, provider: 'claude' });
+      assert.equal(stored(handoff.session_id).codeMode, true);
+    } finally { await app.close(); }
+  });
+
+  it('warns instead of failing when a structured Claude spawn asks for Code Mode, and spawn_session keeps such a spawn on tmux', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, transports, request, mcp } = await buildApp();
+    try {
+      const structured = await request('POST', '/api/agents/sessions', { payload: { provider: 'claude', workDir, structured: true, codeMode: true } });
+      assert.equal(structured.statusCode, 200, structured.body);
+      assert.equal(transports.length, 1);
+      assert.deepEqual(structured.json().warnings.map((warning) => warning.code), ['code_mode_unsupported']);
+
+      const spawned = await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, mcpProfile: 'default', codeMode: true });
+      assert.equal(transports.length, 1, 'Code Mode needs the terminal, so this spawn is not structured');
+      assert.equal(spawned.warnings, undefined);
+      const id = spawned.participants[0].session_id;
+      assert.equal(JSON.parse(readFileSync(join(root, 'state', 'claude_sessions.json'), 'utf8')).find((entry) => entry.id === id).codeMode, true);
+    } finally {
+      await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('returns each turn of a tmux Code Mode returnResults worker to its spawner, as structured spawns do', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, transports, request, mcp } = await buildApp({ agentBus: true });
+    const defaultAgent = PRINCIPALS.agent;
+    try {
+      // The spawner is a live structured session, so a result has somewhere to go.
+      const parent = (await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, initialPrompt: 'hi' } })).json();
+      // Nested in-process requests carry no test header, so the default agent principal is the parent here.
+      PRINCIPALS.agent = { authenticated: true, principal: { type: 'agent', kind: 'claude', sessionId: parent.id } };
+      // Every pane's pid is this live, non-shell test process, which /proc liveness reads as a running agent,
+      // and the worker is listed from launch, so it is never seen as exited.
+      writeFileSync(join(root, 'live-pane'), `${process.pid}\n`);
+      const spawned = await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, mcpProfile: 'default', returnResults: true, codeMode: true });
+      const id = spawned.participants[0].session_id;
+      assert.equal(transports.length, 1, 'the worker is on tmux');
+      const stored = JSON.parse(readFileSync(join(root, 'state', 'claude_sessions.json'), 'utf8')).find((entry) => entry.id === id);
+      assert.deepEqual([stored.codeMode, stored.metadata.spawnedBy], [true, { kind: 'claude', sessionId: parent.id }]);
+
+      const hook = (payload) => recordHookPayload({ session_id: id, cwd: workDir, ...payload }, { provider: 'claude', duenoSessionId: id, workDir });
+      const results = async () => {
+        const threads = (await request('GET', '/api/agent-bus/threads', { principal: 'ui' })).json().threads;
+        const messages = await Promise.all(threads.map(async (thread) => (await request('GET', `/api/agent-bus/threads/${thread.id}`, { principal: 'ui' })).json().messages
+          .map((message) => ({ ...message, to: thread.participants.map((participant) => participant.sessionId).filter((sessionId) => sessionId !== id) }))));
+        return messages.flat().filter((message) => message.type === 'result' && message.from.sessionId === id);
+      };
+      for (const answer of ['First answer', 'Second answer']) {
+        await hook({ hook_event_name: 'UserPromptSubmit', prompt: 'work' });
+        await hook({ hook_event_name: 'Stop', last_assistant_message: answer });
+        await waitFor(async () => (await results()).some((message) => message.body === answer), 10000);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      assert.deepEqual((await results()).map((message) => [message.body, message.to]),
+        [['First answer', [parent.id]], ['Second answer', [parent.id]]]);
+    } finally {
+      await app.close();
+      PRINCIPALS.agent = defaultAgent;
+      for (const name of ['live-tmux', 'live-pane']) rmSync(join(root, name), { force: true });
       delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
     }
   });

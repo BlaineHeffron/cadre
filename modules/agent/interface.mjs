@@ -2,6 +2,7 @@ import { config } from '../../config.mjs';
 import { buildInternalBypassHeaders } from '../platform/auth.mjs';
 import { buildAgentProviderCatalog, resolveAgentProviderSelection } from './provider-interface.mjs';
 import { getAgentProviderPreferences } from './provider-preferences.mjs';
+import { codeModeWarnings } from './runtime-args.mjs';
 import { buildPostgresJsonStore } from '../ops/postgres-json-store.mjs';
 import { legacyRootStatePath, runtimeStatePath } from '../ops/runtime-state.mjs';
 import { getPublicMcpCapabilityCatalog } from '../integrations/mcp-server-catalog.mjs';
@@ -308,6 +309,7 @@ export function buildAgentInterface({
         mcpProfile: input.mcpProfile,
         mcpServers: input.mcpServers,
         ...(selection.backendType === 'codex' ? { codexPlugins: input.codexPlugins } : {}),
+        ...(selection.backendType === 'claude' ? { codeMode: input.codeMode } : {}),
         promptProfile: input.promptProfile,
         skills: input.skills,
         initialPrompt: input.initialPrompt,
@@ -327,6 +329,7 @@ export function buildAgentInterface({
       }),
     });
 
+    const warnings = [...(result.warnings || []), ...codeModeWarnings(input.codeMode, result)];
     try {
       const injection = {
         injected: result.initialPromptInjected === true,
@@ -354,6 +357,7 @@ export function buildAgentInterface({
         runtime: selection.runtime,
         executionMode: 'interactive_session',
         thread: null,
+        ...(warnings.length ? { warnings } : {}),
       });
     } catch (error) {
       try {
@@ -581,6 +585,9 @@ export function buildAgentInterface({
       displayName: detail.displayName ? `${detail.displayName} (handoff)` : undefined,
       initialPrompt,
       structured: input.structured,
+      // Claude to Claude only; elsewhere it would just warn.
+      ...(kind === 'claude' && typeof detail.codeMode === 'boolean' && (await getSelection(input)).selection.backendType === 'claude'
+        ? { codeMode: detail.codeMode } : {}),
       metadata: { handoffFrom },
       _serverAuthContext: input._serverAuthContext,
     };
