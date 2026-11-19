@@ -9,7 +9,6 @@ import { assertDistinctAuthSecrets, config, loadTlsOptions } from './config.mjs'
 import { authPlugin, buildInternalBypassHeaders, evaluateInternalBypass, InternalQuietLogController, trustProxyHop, verifyBrowserSessionRequest, verifyToken } from './modules/platform/auth.mjs';
 import { summarizeReadiness } from './modules/ops/health-controls.mjs';
 import { createDependencyHealthProbe } from './modules/ops/dependency-health.mjs';
-import { remoteMcpAvailability } from './modules/integrations/mcp-remote-servers.mjs';
 import { WsManager } from './modules/platform/ws-manager.mjs';
 import { tmuxPlugin } from './modules/platform/tmux.mjs';
 import { threatPlugin } from './modules/platform/threat.mjs';
@@ -419,7 +418,7 @@ async function getStorageHealth() {
   }
 }
 
-const getDependencyHealth = createDependencyHealthProbe({ imageGenEnabled: remoteMcpAvailability('image-gen')?.configured === true });
+const getDependencyHealth = createDependencyHealthProbe();
 
 async function getReadinessReport() {
   const [storage, agentBusMcp, piProvider, deepseekProvider, dependencies] = await Promise.all([

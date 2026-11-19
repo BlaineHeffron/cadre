@@ -572,14 +572,11 @@ describe('MCP launch preflight', () => {
     assert.ok(result.preflight.rea.toolCount > 0);
   });
 
-  it('launches the owned subscription image server with key-file path and output dir', { timeout: 60000 }, async () => {
+  it('launches the owned subscription image server with its output dir', { timeout: 60000 }, async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'dueno-image-preflight-'));
     tempDirs.push(stateDir);
     process.env.CADRE_STATE_DIR = stateDir;
-    const expected = {
-      IMAGE_GEN_PROXY_KEY_FILE: '/proxy/key-file',
-      DEFAULT_OUTPUT_DIR: '/work/tree/generated-images',
-    };
+    const expected = { DEFAULT_OUTPUT_DIR: '/work/tree/generated-images' };
     for (const backendType of ['codex', 'pi', 'claude']) {
       // Real initialize + tools/list; generation is never invoked.
       const result = await prepareMcpCapabilityLaunch({
@@ -589,16 +586,13 @@ describe('MCP launch preflight', () => {
         workDir: '/work/tree',
         sourceConfig: sourceConfig(),
         credentialStore: credentialStore(),
-        stdioEnv: { IMAGE_GEN_PROXY_KEY_FILE: '/proxy/key-file', OPENAI_API_KEY: 'not-forwarded' },
+        stdioEnv: { OPENAI_API_KEY: 'not-forwarded' },
       });
       assert.deepEqual(result.preflight['image-gen'], { state: 'ready', toolCount: 1 });
       if (backendType === 'codex') {
-        const { IMAGE_GEN_PROXY_KEY_FILE, ...inline } = expected;
-        const env = Object.entries(inline).map(([key, value]) => `${key}="${value}"`).join(', ');
+        const env = Object.entries(expected).map(([key, value]) => `${key}="${value}"`).join(', ');
         assert.equal(result.prepared.codexArgs.includes(`mcp_servers.image-gen.env={${env}}`), true);
-        assert.equal(result.prepared.codexArgs.includes('mcp_servers.image-gen.env_vars=["IMAGE_GEN_PROXY_KEY_FILE"]'), true);
         assert.equal(JSON.stringify(result.prepared.codexArgs).includes('not-forwarded'), false);
-        assert.deepEqual(result.codexEnv, { IMAGE_GEN_PROXY_KEY_FILE });
       } else {
         const path = backendType === 'pi' ? result.prepared.piConfigPath : result.prepared.claudeConfigPath;
         const configFile = JSON.parse(await readFile(path, 'utf8'));

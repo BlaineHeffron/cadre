@@ -294,7 +294,6 @@ const DEFINITIONS = Object.freeze({
     command: process.execPath,
     args: [new URL('../../scripts/image-gen-mcp.mjs', import.meta.url).pathname],
     outputDirEnv: 'DEFAULT_OUTPUT_DIR',
-    envKeys: ['IMAGE_GEN_PROXY_KEY_FILE'],
   }),
   pixellab: remote({
     url: 'https://api.pixellab.ai/mcp',

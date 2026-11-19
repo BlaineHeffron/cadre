@@ -31,7 +31,7 @@ If 1, 2, 6 or 7 is missing, file one queue item asking for it and wait. Fill the
 | **Director** (you) | coordinator profile | Contract, rubric freeze, competitor pick, bar, round decisions, stop decision, queue items, report. |
 | **Design/capture worker** | One Claude Opus session (`spawn_session`, provider `claude`, model `claude-opus-5-5`, `returnResults: true`), kept for the whole run in its own worktree | Owns the browser profile and the capture harness. Sources competitors, captures and masks the target, builds each round's blind inputs, and runs the CSS/markup iteration loop. |
 | **Grading sub-coordinator** | Claude Haiku 5.5 (`claude`, `claude-haiku-5-5`, `returnResults: true`, `mcpProfile: "dueno-full"`), fresh each round | Spawns three fresh graders, waits on their files, validates, ends them, returns one result. Never reads or interprets scores. |
-| **Graders** (3 per round, fresh each round) | Opus 5.5 (`claude`, `claude-opus-5-5`), Grok 4.7 (`xai`, `grok-4.7`), Gemini 4 Argon (`antigravity`, `gemini-4-argon-high`) | Score every lettered site on the rubric, from screenshots only, blind to each other. |
+| **Graders** (3 per round, fresh each round) | Opus 5.5 (`claude`, `claude-opus-5-5`), Grok 4.7 (`xai`, `grok-4.7`), Gemini 4 Carbon (`openrouter`, `google/gemini-4-carbon`) | Score every lettered site on the rubric, from screenshots only, blind to each other. |
 | **Port-and-PR pair** | `spawn_collab_session`: implementer and reviewer in one room, the profile's default pairing | Port the worker's final design diff onto a fresh branch from the contract's base, open the PR, review it. |
 
 Check the model ids against `monitor_list_agent_providers` before the first spawn. If a provider is disabled, use Claude Opus for that grader seat and note it in the ledger and report.
@@ -77,7 +77,7 @@ Check the model ids against `monitor_list_agent_providers` before the first spaw
   rounds/rN/scorecard.tsv
 ```
 
-`<grader>` is `opus`, `grok` or `argon` (`-1`/`-2` suffixes in an escalation round). The target's name in keys is `target`.
+`<grader>` is `opus`, `grok` or `gemini` (`-1`/`-2` suffixes in an escalation round). The target's name in keys is `target`.
 
 **`sources.tsv`**, tab-separated, header `name	width	file	source_url	kind	notes`. `kind` is `official-screenshot`, `marketing-page` or `live-public-page`. `notes` says what the image shows, the source resolution, and any crop or downscale.
 
@@ -143,8 +143,8 @@ print(open(f'rounds/r{N}/scorecard.tsv').read())
 Spawn it with `spawn_session` (`claude`, `claude-haiku-5-5`, `returnResults: true`, `mcpProfile: "dueno-full"`, workDir `<run>/rounds/rN`) and this brief, filled in:
 
 > You run grading for round N of a UI/UX grading loop. You never grade, read scores or interpret them.
-> 1. Check `monitor_list_agent_providers`. For each seat, spawn one fresh grader with `spawn_session` (no `returnResults`, no `parentThreadId`, workDir `<run>/rounds/rN`): antigravity `gemini-4-argon-high` (argon), xai `grok-4.7` (grok), claude `claude-opus-5-5` (opus). If a provider is disabled, spawn claude `claude-opus-5-5` in that seat and say so in your result. Each initialPrompt: "Read <run>/grader-brief.md and follow it. INPUTS=<run>/rounds/rN/inputs. RUBRIC=<run>/rubric.md (sha256 <sha>). Letters: <letters>. SCORES=<run>/rounds/rN/scores-<grader>.tsv. SUGGESTIONS=<run>/rounds/rN/suggestions-<grader>.md." Tell them nothing else.
-> 2. **Don't wait for grader messages;** the xai and antigravity graders can't send them. Start one background Bash loop (`run_in_background`) that checks every 5 minutes until all three score files exist and kept the same size across one check, with a 90-minute cap, then exits. End your turn; you are woken when it exits. Never poll in the foreground.
+> 1. Check `monitor_list_agent_providers`. For each seat, spawn one fresh grader with `spawn_session` (no `returnResults`, no `parentThreadId`, workDir `<run>/rounds/rN`): openrouter `google/gemini-4-carbon` (gemini), xai `grok-4.7` (grok), claude `claude-opus-5-5` (opus). If a provider is disabled, spawn claude `claude-opus-5-5` in that seat and say so in your result. Each initialPrompt: "Read <run>/grader-brief.md and follow it. INPUTS=<run>/rounds/rN/inputs. RUBRIC=<run>/rubric.md (sha256 <sha>). Letters: <letters>. SCORES=<run>/rounds/rN/scores-<grader>.tsv. SUGGESTIONS=<run>/rounds/rN/suggestions-<grader>.md." Tell them nothing else.
+> 2. **Don't wait for grader messages;** the xai and openrouter graders can't send them. Start one background Bash loop (`run_in_background`) that checks every 5 minutes until all three score files exist and kept the same size across one check, with a 90-minute cap, then exits. End your turn; you are woken when it exits. Never poll in the foreground.
 > 3. Validate each scores file: header exactly `site	category	score	reason`; one row per letter × category (<category keys>); integer scores 1–10; a non-empty reason. For a file missing or invalid at the cap, end that grader, spawn a fresh one in its seat once, and run one more background wait with a 45-minute cap.
 > 4. End every grader you spawned with `monitor_terminate_session`, only after step 3 is finished. If you can't, list their ids.
 > 5. Your final message is returned to the director: per-file status (valid, or invalid and why), row counts, grader session ids and providers, anything substituted or re-spawned, termination results. Then stop.

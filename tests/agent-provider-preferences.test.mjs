@@ -56,7 +56,7 @@ describe('agent provider preferences', () => {
     assert.equal(updated.piEnabled, true);
     assert.deepEqual(
       updated.providerCatalog.filter((entry) => entry.backendType === 'pi').map((entry) => entry.id),
-      ['xai', 'google', 'opencode-go', 'openrouter', 'antigravity'],
+      ['xai', 'google', 'opencode-go', 'openrouter'],
     );
   });
 
@@ -69,7 +69,7 @@ describe('agent provider preferences', () => {
       piEnabled: true,
     }, { storeFile });
     assert.deepEqual(updated.availableSpawnTypes, ['pi', 'collab']);
-    assert.deepEqual(updated.availableProviders, ['xai', 'google', 'opencode-go', 'openrouter', 'antigravity']);
+    assert.deepEqual(updated.availableProviders, ['xai', 'google', 'opencode-go', 'openrouter']);
     assert.equal(updated.preferredSingleAgent, 'pi');
     assert.equal(updated.preferredSingleProvider, 'xai');
     assert.equal(updated.collabEnabled, true);

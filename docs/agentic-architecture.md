@@ -158,6 +158,9 @@ Current provider mapping:
 - `xai` (`grok` models; `openai`/`chatgpt`/`openai-codex` aliases normalize to `codex`) -> backend `pi`, runtime `pi`, Pi provider `xai`
 - `google` (`gemini` alias) -> backend `pi`, runtime `pi`, Pi provider `google`
 - `opencode-go` (`opencode` alias) -> backend `pi`, runtime `pi`, Pi provider `opencode-go`
+- `openrouter` -> backend `pi`, runtime `pi`, Pi provider `openrouter`
+
+Gemini via subscription now goes through the `agy` provider (in progress); the retired `antigravity` Pi provider (local CLIProxyAPI) is gone, and sessions saved with it list as an unsupported provider and cannot be resumed.
 
 Pi provider and model are separate values. The server requires a compatible external
 Pi CLI (`pi`, version 0.84.0 or newer; override with `PI_BIN`). Canonical Node-based Pi

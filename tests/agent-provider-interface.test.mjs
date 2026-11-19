@@ -102,26 +102,15 @@ describe('Agent provider interface', () => {
         model: 'z-ai/glm-5.3-flash',
       },
     );
-    assert.deepEqual(
-      pickProviderFields(resolveAgentProviderSelection({ provider: 'antigravity', model: 'gemini-4-argon-high' })),
-      {
-        provider: 'antigravity',
-        backendType: 'pi',
-        runtime: 'pi',
-        backendProvider: 'antigravity',
-        model: 'gemini-4-argon-high',
-      },
-    );
-    assert.equal(resolveAgentProviderSelection({ provider: 'antigravity' }).model, 'gemini-4-argon-high');
-    assert.equal(isModelCompatibleWithProvider('antigravity', 'gemini-4-argon-high'), true);
-    assert.equal(inferAgentProviderFromModel('gemini-4-argon-high'), 'antigravity');
+    assert.throws(() => resolveAgentProviderSelection({ provider: 'antigravity' }), /or openrouter$/);
+    assert.equal(isModelCompatibleWithProvider('antigravity', 'gemini-4-argon-high'), false);
     assert.equal(inferAgentProviderFromModel('gemini-3.5-flash'), 'google');
     assert.equal(inferAgentProviderFromModel('glm-5.2'), 'opencode-go');
     assert.equal(inferAgentProviderFromModel('kimi-k3'), 'opencode-go');
   });
 
   it('separates backend types from provider ids', () => {
-    assert.deepEqual(agentProvidersForBackendType('pi'), ['xai', 'google', 'opencode-go', 'openrouter', 'antigravity']);
+    assert.deepEqual(agentProvidersForBackendType('pi'), ['xai', 'google', 'opencode-go', 'openrouter']);
     assert.deepEqual(agentProvidersForBackendType('claude'), ['claude']);
     assert.deepEqual(agentProvidersForBackendType('gsd'), []);
 
@@ -132,13 +121,13 @@ describe('Agent provider interface', () => {
     assert.equal(resolveAgentBackendType('gsd'), '');
 
     // `pi` stays an invalid provider id: it names a backend, not one of its providers.
-    assert.throws(() => resolveAgentProviderSelection({ provider: 'pi' }), /deepseek, xai, google, opencode-go, openrouter, or antigravity/);
+    assert.throws(() => resolveAgentProviderSelection({ provider: 'pi' }), /deepseek, xai, google, opencode-go, or openrouter/);
   });
 
   it('rejects unknown Pi provider typos', () => {
     assert.throws(
       () => resolveAgentProviderSelection({ provider: 'gooogle', model: 'gemini-3.5-flash' }),
-      (error) => error?.statusCode === 400 && /openrouter, or antigravity/.test(error.message),
+      (error) => error?.statusCode === 400 && /opencode-go, or openrouter/.test(error.message),
     );
   });
 
@@ -171,7 +160,7 @@ describe('Agent provider interface', () => {
 
   it('publishes tmux image references as an honest degraded prompt capability', () => {
     const catalog = buildAgentProviderCatalog();
-    for (const provider of ['codex', 'claude', 'xai', 'google', 'opencode-go', 'openrouter', 'antigravity']) {
+    for (const provider of ['codex', 'claude', 'xai', 'google', 'opencode-go', 'openrouter']) {
       const descriptor = catalog.find((entry) => entry.id === provider);
       assert.equal(descriptor.transportCapabilities.delivery, 'keystroke');
       assert.equal(descriptor.transportCapabilities.promptCapabilities.deliveryMode, 'reference');
@@ -209,7 +198,6 @@ describe('Agent provider interface', () => {
         { id: 'google', backendType: 'pi', sessionKind: 'pi', runtime: 'pi', backendProvider: 'google' },
         { id: 'opencode-go', backendType: 'pi', sessionKind: 'pi', runtime: 'pi', backendProvider: 'opencode-go' },
         { id: 'openrouter', backendType: 'pi', sessionKind: 'pi', runtime: 'pi', backendProvider: 'openrouter' },
-        { id: 'antigravity', backendType: 'pi', sessionKind: 'pi', runtime: 'pi', backendProvider: 'antigravity' },
       ],
     );
     assert.equal(buildAgentProviderCatalog({ pi: false }).every((entry) => entry.backendType !== 'pi' || !entry.enabled), true);

@@ -49,8 +49,6 @@ async function modelPresent(env) {
 
 export function createDependencyHealthProbe({
   env = process.env,
-  imageGenEnabled = true,
-  proxyUrl = 'http://127.0.0.1:8317/',
   timeoutMs = 2000,
   cacheMs = 180_000,
 } = {}) {
@@ -71,15 +69,6 @@ export function createDependencyHealthProbe({
       if (env.FLEET_TRANSCRIBE_ENGINE === 'faster-whisper') {
         const present = await modelPresent(env);
         data.transcriptionModel = { status: present ? 'ok' : 'degraded', detail: present ? 'model_present' : 'model_missing' };
-      }
-      if (imageGenEnabled) {
-        try {
-          const response = await fetch(proxyUrl, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
-          await response.body?.cancel();
-          data.cliProxyApi = { status: 'ok', detail: `http_${response.status}` };
-        } catch {
-          data.cliProxyApi = { status: 'degraded', detail: 'proxy_unreachable' };
-        }
       }
       const warnings = Object.keys(data).filter((name) => data[name].status === 'degraded');
       return { status: warnings.length ? 'degraded' : 'ok', detail: warnings.length ? `degraded dependencies: ${warnings.join(', ')}` : 'dependencies_ready', data };

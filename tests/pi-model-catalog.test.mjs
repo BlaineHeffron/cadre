@@ -35,13 +35,13 @@ async function cacheFile() {
 }
 
 describe('Pi model catalog', () => {
-  it('parses provider/model tuples and excludes Anthropic and OpenAI harness providers', () => {
+  it('parses provider/model tuples and excludes Anthropic, OpenAI harness, and retired Antigravity providers', () => {
     const models = parsePiModelList(PI_OUTPUT);
     assert.deepEqual(models.xai.map((entry) => entry.id), ['grok-4.3', 'grok-4.6', 'grok-4.7']);
     assert.deepEqual(models.google.map((entry) => entry.id), ['gemini-3.5-flash']);
     assert.deepEqual(models['opencode-go'].map((entry) => entry.id), ['glm-5.2', 'kimi-k3']);
     assert.deepEqual(models.openrouter.map((entry) => entry.id), ['z-ai/glm-5.3-flash']);
-    assert.deepEqual(models.antigravity.map((entry) => entry.id), ['gemini-4-argon-high']);
+    assert.equal(Object.hasOwn(models, 'antigravity'), false);
     assert.equal(Object.hasOwn(models, 'anthropic'), false);
     assert.equal(Object.hasOwn(models, 'openai'), false);
     assert.equal(Object.hasOwn(models, 'openai-codex'), false);
@@ -71,8 +71,8 @@ describe('Pi model catalog', () => {
     });
 
     assert.equal(first.source, 'pi');
-    assert.deepEqual(first.providers.map((entry) => entry.id), ['xai', 'google', 'opencode-go', 'openrouter', 'antigravity']);
-    assert.deepEqual(first.providers.map((entry) => entry.defaultModel), ['grok-4.6', 'gemini-3.5-flash', 'glm-5.2', 'z-ai/glm-5.3-flash', 'gemini-4-argon-high']);
+    assert.deepEqual(first.providers.map((entry) => entry.id), ['xai', 'google', 'opencode-go', 'openrouter']);
+    assert.deepEqual(first.providers.map((entry) => entry.defaultModel), ['grok-4.6', 'gemini-3.5-flash', 'glm-5.2', 'z-ai/glm-5.3-flash']);
     assert.equal(second.source, 'pi');
     assert.equal(calls.length, 1);
     assert.equal(calls[0][0], 'pi');
@@ -169,7 +169,6 @@ describe('Pi model catalog', () => {
         'qwen3.8-max',
       ],
       openrouter: ['google/gemini-4-carbon', 'z-ai/glm-5.3-flash'],
-      antigravity: ['gemini-4-argon-high'],
     });
     await assert.rejects(
       () => assertPiProviderModel('xai', 'grok-4.6', {
@@ -206,15 +205,12 @@ describe('Pi model catalog', () => {
       }),
       (error) => error?.code === 'pi_model_unsupported' && error?.statusCode === 400,
     );
-    assert.equal(await assertPiProviderModel('antigravity', 'gemini-4-argon-high', {
-      cacheFile: unsupportedFile,
-      env: {},
-      execImpl: async () => ({ code: 0, stdout: PI_OUTPUT, stderr: '' }),
-    }), 'gemini-4-argon-high');
-    await assert.rejects(
-      () => assertPiProviderModel('gooogle', 'gemini-3.5-flash', { cacheFile: unsupportedFile }),
-      (error) => error?.code === 'pi_provider_unsupported' && error?.statusCode === 400,
-    );
+    for (const [provider, model] of [['gooogle', 'gemini-3.5-flash'], ['antigravity', 'gemini-4-argon-high']]) {
+      await assert.rejects(
+        () => assertPiProviderModel(provider, model, { cacheFile: unsupportedFile }),
+        (error) => error?.code === 'pi_provider_unsupported' && error?.statusCode === 400 && /or openrouter$/.test(error.message),
+      );
+    }
 
     const providerMissingFile = await cacheFile();
     const partialDiscovery = {

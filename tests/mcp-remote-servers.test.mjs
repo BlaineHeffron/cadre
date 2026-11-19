@@ -366,9 +366,9 @@ describe('image generation server', () => {
     assert.deepEqual(remoteMcpAvailability('image-gen', { sourceConfig, env: {} }), { configured: true });
     assert.deepEqual(remoteMcpStdioEnv(server, { env: {
       XAI_API_KEY: 'not-forwarded', OPENAI_API_KEY: 'not-forwarded', GOOGLE_API_KEY: 'not-forwarded',
-      DM_MCP_OPENAI_API_KEY: 'not-forwarded', IMAGE_GEN_PROXY_KEY_FILE: '/proxy/key-file',
+      DM_MCP_OPENAI_API_KEY: 'not-forwarded',
     }, workDir: '/work/tree' }), {
-      IMAGE_GEN_PROXY_KEY_FILE: '/proxy/key-file', DEFAULT_OUTPUT_DIR: '/work/tree/generated-images',
+      DEFAULT_OUTPUT_DIR: '/work/tree/generated-images',
     });
     assert.deepEqual(remoteMcpStdioEnv(server, { env: {} }), {
       DEFAULT_OUTPUT_DIR: runtimeStatePath('generated-images'),
