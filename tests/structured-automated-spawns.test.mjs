@@ -1,7 +1,6 @@
 import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { chmodSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -694,18 +693,14 @@ describe('structured automated spawns', () => {
     process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
     const { app, transports, request, mcp } = await buildApp({ agentBus: true });
     const defaultAgent = PRINCIPALS.agent;
-    let paneProcess = null;
     try {
       // The spawner is a live structured session, so a result has somewhere to go.
       const parent = (await request('POST', '/api/claude/sessions', { payload: { structured: true, workDir, initialPrompt: 'hi' } })).json();
       // Nested in-process requests carry no test header, so the default agent principal is the parent here.
       PRINCIPALS.agent = { authenticated: true, principal: { type: 'agent', kind: 'claude', sessionId: parent.id } };
-      // Panes run a process named claude (a sleep) from the start, and the worker is listed from launch,
-      // so it is never seen as exited.
-      mkdirSync(join(root, 'fake-claude'), { recursive: true });
-      if (!existsSync(join(root, 'fake-claude', 'claude'))) symlinkSync('/bin/sleep', join(root, 'fake-claude', 'claude'));
-      paneProcess = spawn(join(root, 'fake-claude', 'claude'), ['600'], { stdio: 'ignore' });
-      writeFileSync(join(root, 'live-pane'), `${paneProcess.pid}\n`);
+      // Every pane's pid is this live, non-shell test process, which /proc liveness reads as a running agent,
+      // and the worker is listed from launch, so it is never seen as exited.
+      writeFileSync(join(root, 'live-pane'), `${process.pid}\n`);
       const spawned = await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, mcpProfile: 'default', returnResults: true, codeMode: true });
       const id = spawned.participants[0].session_id;
       assert.equal(transports.length, 1, 'the worker is on tmux');
@@ -730,7 +725,6 @@ describe('structured automated spawns', () => {
     } finally {
       await app.close();
       PRINCIPALS.agent = defaultAgent;
-      paneProcess?.kill();
       for (const name of ['live-tmux', 'live-pane']) rmSync(join(root, name), { force: true });
       delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
     }
