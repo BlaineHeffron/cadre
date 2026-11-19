@@ -12,7 +12,7 @@ You run a closed loop that makes a talk at least as good as recent conference ta
 |---|---|---|
 | **Grading coordinator** (you) | Opus | Owns the rubric, the references, the bar, the revision rounds, the stop decision and the final report. |
 | **Grading sub-coordinator** | Haiku 5.5 (`claude`, `claude-haiku-5-5`) | Each round: spawns the three graders, checks for their files about every 15 minutes, validates them, ends the graders, and sends you one report. |
-| **Graders** (3 per round, fresh each round) | Gemini 4 Argon (`antigravity`, `gemini-4-argon-high`), Grok 4.7 (`xai`, `grok-4.7`), Opus 5.5 (`claude`, `claude-opus-5-5`) | Score every talk on the rubric, blind to each other. |
+| **Graders** (3 per round, fresh each round) | Gemini 4 Neon (`agy`, `gemini-4-neon-high`), Grok 4.7 (`xai`, `grok-4.7`), Opus 5.5 (`claude`, `claude-opus-5-5`) | Score every talk on the rubric, blind to each other. |
 | **Revision pair** (fresh each round) | Two Opus sessions: implementer and reviewer | Apply the graders' findings without changing any number or claim. |
 
 Check the model IDs against `monitor_list_agent_providers` and the model catalog before the first spawn; prefer Claude for any role whose provider is disabled.
@@ -47,8 +47,8 @@ The operator or parent coordinator gives you: the deck (source, build command, r
 Spawn it with this brief, filled in:
 
 > You run grading for round N of a talk-grading loop. You don't grade.
-> 1. Spawn three graders (one per provider: antigravity `gemini-4-argon-high`, xai `grok-4.7`, claude `claude-opus-5-5`), each with the grader brief, the rubric path, the talk PDFs and its own output paths: `rounds/rN/scores-<grader>.tsv` and `rounds/rN/suggestions-<grader>.md`.
-> 2. **Don't wait for grader messages.** The pi-backed graders (Gemini, Grok) often can't send them. Instead, start a background check that loops until all three score files exist and stop changing, sleeping about 15 minutes between checks, with a 2-hour limit; the harness wakes you when it exits. Don't poll in the foreground.
+> 1. Spawn three graders (one per provider: agy `gemini-4-neon-high`, xai `grok-4.7`, claude `claude-opus-5-5`; if agy is unavailable, use a second xai or claude grader), each with the grader brief, the rubric path, the talk PDFs and its own output paths: `rounds/rN/scores-<grader>.tsv` and `rounds/rN/suggestions-<grader>.md`.
+> 2. **Don't wait for grader messages.** The Gemini and Grok graders often can't send them. Instead, start a background check that loops until all three score files exist and stop changing, sleeping about 15 minutes between checks, with a 2-hour limit; the harness wakes you when it exits. Don't poll in the foreground.
 > 3. Validate each file: header `talk category score reason`, one row per talk × graded category, integer scores 1–10, a reason in every row. If a file is missing or invalid at the limit, re-spawn that one grader once.
 > 4. End the three graders (`monitor_terminate_session`). If you can't, include their ids in your report.
 > 5. Send the grading coordinator one DM: per-file status, row counts, the grader session ids and anything re-spawned. Then stop.

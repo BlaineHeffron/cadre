@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createServer } from 'node:http';
 import { createDependencyHealthProbe } from '../modules/ops/dependency-health.mjs';
 import { summarizeReadiness } from '../modules/ops/health-controls.mjs';
 
@@ -13,7 +12,7 @@ async function fixture(t) {
   const env = { PATH: dir, HOME: dir };
   const binary = (name, body) => writeFile(join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
   for (const name of ['codex', 'claude', 'grok']) await binary(name, '[ "$1" = "--version" ] || exit 9\necho fixture-version');
-  const probe = (options = {}) => createDependencyHealthProbe({ env, imageGenEnabled: false, cacheMs: 0, ...options });
+  const probe = (options = {}) => createDependencyHealthProbe({ env, cacheMs: 0, ...options });
   return { dir, env, binary, probe };
 }
 
@@ -91,23 +90,4 @@ it('uses configured wrapper HF_HOME ahead of env, or a local model path', async 
   assert.equal((await probe()()).data.transcriptionModel.status, 'ok');
   env.FLEET_TRANSCRIBE_ENGINE = 'whisper-cpp';
   assert.equal((await probe()()).data.transcriptionModel, undefined);
-});
-
-it('accepts any proxy HTTP response, warns on failure/timeout, and skips when disabled', async (t) => {
-  const { probe } = await fixture(t);
-  let requests = 0;
-  const server = createServer((req, res) => {
-    requests++;
-    if (req.url !== '/hang') { res.writeHead(401); res.end('no key needed for readiness'); }
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => { server.closeAllConnections(); server.close(); });
-  const proxyUrl = `http://127.0.0.1:${server.address().port}/`;
-  const get = probe({ imageGenEnabled: true, proxyUrl });
-  assert.deepEqual((await get()).data.cliProxyApi, { status: 'ok', detail: 'http_401' });
-  assert.equal((await probe({ imageGenEnabled: false, proxyUrl })()).data.cliProxyApi, undefined);
-  assert.equal(requests, 1);
-  assert.equal((await probe({ imageGenEnabled: true, proxyUrl: `${proxyUrl}hang`, timeoutMs: 100 })()).data.cliProxyApi.status, 'degraded');
-  await new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); });
-  assert.equal((await get()).data.cliProxyApi.status, 'degraded');
 });

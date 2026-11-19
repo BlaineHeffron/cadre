@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { generateImage, GOOGLE_IMAGE_MODEL, GROK_IMAGE_ARGS, runImageCli } from '../modules/integrations/image-generation.mjs';
+import { generateImage, GROK_IMAGE_ARGS, runImageCli } from '../modules/integrations/image-generation.mjs';
 import { createImageGenServer } from '../scripts/image-gen-mcp.mjs';
 
 const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
@@ -19,7 +19,7 @@ afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recurs
 async function outputEnv() {
   const dir = await mkdtemp(join(tmpdir(), 'cadre-image-test-'));
   dirs.push(dir);
-  return { DEFAULT_OUTPUT_DIR: dir, IMAGE_GEN_PROXY_KEY_FILE: join(dir, 'proxy-key') };
+  return { DEFAULT_OUTPUT_DIR: dir };
 }
 
 describe('subscription image generation', () => {
@@ -41,8 +41,8 @@ describe('subscription image generation', () => {
     await writeFile(external, png);
     const linked = join(dir, 'linked.png');
     await symlink(external, linked);
-    const options = { env, run: () => assert.fail('must not spend quota'), readKey: () => assert.fail('must not read credentials') };
-    for (const provider of ['openai', 'google', 'xai']) {
+    const options = { env, run: () => assert.fail('must not spend quota') };
+    for (const provider of ['openai', 'xai']) {
       for (const [reference_images, error] of [
         [[], /1–4/], [Array(5).fill(invalid), /1–4/], ['bad', /1–4/], [[null], /1–4/], [[' '], /1–4/],
         [[join(dir, 'missing')], /does not exist/], [[external], /working directory/], [[linked], /working directory/],
@@ -83,25 +83,6 @@ describe('subscription image generation', () => {
     await assert.rejects(readdir(workDir), /ENOENT/);
   });
 
-  it('places Google reference inlineData before the text part', async () => {
-    const env = await outputEnv();
-    const dir = await referenceDir();
-    const reference_images = [join(dir, 'one'), join(dir, 'two')];
-    await writeFile(reference_images[0], landscape);
-    await writeFile(reference_images[1], Buffer.from('RIFFxxxxWEBP'));
-    await generateImage({ provider: 'google', prompt: 'edit armor', reference_images }, { env,
-      readKey: async () => 'dummy',
-      fetchImpl: async (_url, request) => {
-        assert.deepEqual(JSON.parse(request.body).contents[0].parts, [
-          { inlineData: { mimeType: 'image/png', data: landscape.toString('base64') } },
-          { inlineData: { mimeType: 'image/webp', data: Buffer.from('RIFFxxxxWEBP').toString('base64') } },
-          { text: 'edit armor' },
-        ]);
-        return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: landscape.toString('base64') } }] } }] }) };
-      },
-    });
-  });
-
   it('allows only Grok image_edit for references and saves its verified result', async () => {
     const env = await outputEnv();
     env.HOME = env.DEFAULT_OUTPUT_DIR;
@@ -128,21 +109,19 @@ describe('subscription image generation', () => {
     assert.deepEqual(await readFile(result.path), landscape);
   });
 
-  it('rejects unsupported options before invoking providers or reading credentials', async () => {
+  it('rejects unsupported options before invoking providers', async () => {
     const env = await outputEnv();
-    const options = { env, run: () => assert.fail('must not spend quota'), readKey: () => assert.fail('must not read credentials') };
-    for (const provider of ['openai', 'google', 'xai']) {
-      for (const input of [{ aspect_ratio: 'bad' }, { size: 'bad' }, { background: 'bad' }, { aspect_ratio: null }]) {
+    const options = { env, run: () => assert.fail('must not spend quota') };
+    for (const provider of ['openai', 'xai']) {
+      for (const input of [{ aspect_ratio: 'bad' }, { background: 'bad' }, { aspect_ratio: null }]) {
         await assert.rejects(generateImage({ provider, prompt: 'test', ...input }, options), /does not support/);
       }
     }
     for (const provider of ['openai', 'xai']) {
-      await assert.rejects(generateImage({ provider, prompt: 'test', size: '1K' }, options), /subscription tool exposes no control/);
       await assert.rejects(generateImage({ provider, prompt: 'test', aspect_ratio: '4:3' }, options), /does not support aspect_ratio/);
     }
-    for (const provider of ['google', 'xai']) {
-      await assert.rejects(generateImage({ provider, prompt: 'test', background: 'transparent' }, options), /does not support background/);
-    }
+    await assert.rejects(generateImage({ provider: 'xai', prompt: 'test', background: 'transparent' }, options), /does not support background/);
+    await assert.rejects(generateImage({ provider: 'google', prompt: 'test' }, options), /Unknown image provider: google/);
   });
 
   it('passes Codex ratio hints and transparency and verifies PNG output before saving', async () => {
@@ -177,21 +156,17 @@ describe('subscription image generation', () => {
     assert.deepEqual(await readdir(env.DEFAULT_OUTPUT_DIR), before);
   });
 
-  it('maps Google ratio and resolution and rejects mismatched PNG dimensions', async () => {
+  it('defaults to OpenAI through Codex when no provider is given', async () => {
     const env = await outputEnv();
-    for (const size of ['512', '1K', '2K', '4K']) {
-      await generateImage({ provider: 'google', prompt: 'icon', aspect_ratio: '3:2', size, background: 'opaque' }, { env,
-        readKey: async () => 'dummy',
-        fetchImpl: async (_url, request) => {
-          assert.deepEqual(JSON.parse(request.body).generationConfig.imageConfig, { imageSize: size, aspectRatio: '3:2' });
-          return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: landscape.toString('base64') } }] } }] }) };
-        },
-      });
-    }
-    await assert.rejects(generateImage({ provider: 'google', prompt: 'icon', aspect_ratio: '9:16' }, { env,
-      readKey: async () => 'dummy', fetchImpl: async () => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: landscape.toString('base64') } }] } }] }) }),
-    }), /did not return the requested aspect_ratio/);
+    const commands = [];
+    const result = await generateImage({ prompt: 'a square' }, { env,
+      run: async (command, _args, { cwd }) => { commands.push(command); await writeFile(join(cwd, 'image.png'), png); },
+    });
+    assert.deepEqual(commands, ['codex']);
+    assert.equal(result.provider, 'openai');
+    assert.ok(result.path.startsWith(join(env.DEFAULT_OUTPUT_DIR, 'openai-')));
   });
+
   it('runs isolated Codex with one framed prompt and saves verified output', async () => {
     const env = { ...await outputEnv(), HOME: '/home/test', PATH: '/bin', OPENAI_API_KEY: 'never-forward', CODEX_API_KEY: 'never-forward', CADRE_TOKEN: 'never-forward', DUENO_TOKEN: 'never-forward' };
     const prompt = 'a blue square; $(touch bad) `x` "quoted"\nsecond line';
@@ -248,73 +223,22 @@ describe('subscription image generation', () => {
     }), /timed out/);
   });
 
-  it('reads the proxy key at call time and constructs a loopback Gemini request', async () => {
-    assert.equal(GOOGLE_IMAGE_MODEL, 'gemini-3.1-flash-image');
-    const env = await outputEnv();
-    let calls = 0;
-    const options = { env,
-      readKey: async (path, encoding) => {
-        assert.equal(path, env.IMAGE_GEN_PROXY_KEY_FILE);
-        assert.equal(encoding, 'utf8');
-        return `dummy-${++calls}\n`;
-      },
-      fetchImpl: async (url, request) => {
-        assert.equal(url, `http://127.0.0.1:8317/v1beta/models/${GOOGLE_IMAGE_MODEL}:generateContent`);
-        assert.equal(request.redirect, 'error');
-        assert.equal(request.method, 'POST');
-        assert.equal(request.headers.Authorization, `Bearer dummy-${calls}`);
-        assert.ok(request.signal instanceof AbortSignal);
-        assert.deepEqual(JSON.parse(request.body), {
-          contents: [{ role: 'user', parts: [{ text: 'a square' }] }],
-          generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { imageSize: '1K' } },
-        });
-        return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: png.toString('base64'), mimeType: 'image/png' } }] } }] }) };
-      },
-    };
-    for (let i = 0; i < 2; i++) {
-      const result = await generateImage({ provider: 'google', prompt: 'a square' }, options);
-      assert.ok(result.path.startsWith(env.DEFAULT_OUTPUT_DIR));
-      assert.deepEqual(await readFile(result.path), png);
-    }
-    assert.equal(calls, 2);
-  });
-
   it('verifies JPEG and WebP output and selects matching file extensions', async () => {
     const env = await outputEnv();
+    env.HOME = env.DEFAULT_OUTPUT_DIR;
+    await mkdir(join(env.HOME, '.grok/sessions/test'), { recursive: true });
     for (const [bytes, mimeType, extension] of [
       [Buffer.from([255, 216, 255, 0]), 'image/jpeg', 'jpg'],
       [Buffer.from('RIFFxxxxWEBP'), 'image/webp', 'webp'],
     ]) {
-      const result = await generateImage({ provider: 'google', prompt: 'test' }, {
-        env, readKey: async () => 'dummy',
-        fetchImpl: async () => ({ ok: true, json: async () => ({ candidates: [{ content: {
-          parts: [{ inlineData: { data: bytes.toString('base64') } }],
-        } }] }) }),
+      const imagePath = join(env.HOME, `.grok/sessions/test/image.${extension}`);
+      await writeFile(imagePath, bytes);
+      const result = await generateImage({ provider: 'xai', prompt: 'test' }, { env,
+        run: async () => JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify({ type: 'ImageGen', path: imagePath }) }] } }),
       });
       assert.equal(result.mimeType, mimeType);
       assert.ok(result.path.endsWith(`.${extension}`));
       assert.deepEqual(await readFile(result.path), bytes);
-    }
-  });
-
-  it('returns clear Google errors without echoing keys or upstream bodies', async () => {
-    const env = await outputEnv();
-    const input = { provider: 'google', prompt: 'test' };
-    await assert.rejects(generateImage(input, { env }), /key file and Google login/);
-    await assert.rejects(generateImage(input, { env, readKey: async () => '' }), /key file is empty/);
-    const options = { env, readKey: async () => 'secret-dummy' };
-    for (const [fetchImpl, message] of [
-      [async () => { throw new Error('secret-dummy'); }, /could not reach local/],
-      [async () => ({ ok: false, status: 401, json: async () => ({ error: 'secret-dummy' }) }), /HTTP 401/],
-      [async () => ({ ok: true, json: async () => { throw new Error('secret-dummy'); } }), /invalid response/],
-      [async () => ({ ok: true, json: async () => ({ candidates: [] }) }), /returned no image/],
-      [async () => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: 'bm90IGFuIGltYWdl' } }] } }] }) }), /no valid PNG/],
-    ]) {
-      await assert.rejects(generateImage(input, { ...options, fetchImpl }), (error) => {
-        assert.match(error.message, message);
-        assert.equal(error.message.includes('secret-dummy'), false);
-        return true;
-      });
     }
   });
 
@@ -385,7 +309,7 @@ describe('subscription image generation', () => {
   it('exposes generation and provider errors through the MCP tool', async () => {
     const server = createImageGenServer(async (input) => {
       assert.equal(input.prompt, 'test');
-      if (input.provider === 'google') assert.deepEqual(input, { provider: 'google', prompt: 'test', aspect_ratio: '3:4', size: '2K', background: 'opaque', reference_images: ['ref.png'] });
+      if (input.provider !== 'xai') assert.deepEqual(input, { prompt: 'test', aspect_ratio: '3:2', background: 'opaque', reference_images: ['ref.png'] });
       if (input.provider === 'xai') throw new Error('not available on subscription');
       return { provider: input.provider, path: '/test.png', mimeType: 'image/png', bytes: 9 };
     });
@@ -395,8 +319,10 @@ describe('subscription image generation', () => {
       await server.connect(serverTransport);
       await client.connect(clientTransport);
       assert.deepEqual((await client.listTools()).tools.map((tool) => tool.name), ['generate_image']);
-      const result = await client.callTool({ name: 'generate_image', arguments: { provider: 'google', prompt: 'test', aspect_ratio: '3:4', size: '2K', background: 'opaque', reference_images: ['ref.png'] } });
+      const result = await client.callTool({ name: 'generate_image', arguments: { prompt: 'test', aspect_ratio: '3:2', background: 'opaque', reference_images: ['ref.png'] } });
       assert.equal(result.structuredContent.path, '/test.png');
+      const google = await client.callTool({ name: 'generate_image', arguments: { provider: 'google', prompt: 'test' } });
+      assert.equal(google.isError, true);
       const unavailable = await client.callTool({ name: 'generate_image', arguments: { provider: 'xai', prompt: 'test' } });
       assert.equal(unavailable.isError, true);
       assert.equal(unavailable.content[0].text, 'not available on subscription');

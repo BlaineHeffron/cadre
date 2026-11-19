@@ -112,11 +112,11 @@ it('a resume check that fails (stored MCP capabilities it cannot use) refuses be
   assert.ok(!result.calls.includes('kill-session'), result.calls.join(','));
 });
 
-// A session recorded under catalog A: the dueno server as it was before it gained the antigravity
-// provider (Oct 29). The catalog is now B, so the recorded digest no longer matches.
+// A session recorded under catalog A: the dueno server as if it had not yet gained the openrouter
+// provider. The catalog is now B, so the recorded digest no longer matches.
 function launchedUnderCatalogA() {
   const now = buildMcpCapabilityCatalog();
-  const before = { ...now, servers: now.servers.map((server) => (server.id === 'dueno' ? { ...server, providers: server.providers.filter((p) => p !== 'antigravity') } : server)) };
+  const before = { ...now, servers: now.servers.map((server) => (server.id === 'dueno' ? { ...server, providers: server.providers.filter((p) => p !== 'openrouter') } : server)) };
   const recorded = sanitizedMcpSnapshot(resolveMcpCapabilities({ inherited: { serverIds: ['dueno'], profileId: 'dueno' }, provider: 'claude', runtime: 'claude', catalog: before }));
   const current = resolveMcpCapabilities({ inherited: { serverIds: ['dueno'], profileId: 'dueno' }, provider: 'claude', runtime: 'claude', catalog: now });
   assert.notEqual(recorded.configurationDigest, current.configurationDigest, 'the catalog change moves the digest');

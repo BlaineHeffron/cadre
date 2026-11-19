@@ -6,11 +6,9 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const TIMEOUT_MS = 180_000;
-export const GOOGLE_IMAGE_MODEL = 'gemini-3.1-flash-image';
 const IMAGE_OPTIONS = {
-  openai: { aspect_ratio: ['1:1', '3:2', '2:3'], size: [], background: ['transparent', 'opaque'] },
-  google: { aspect_ratio: ['1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9', '9:21', '1:4', '4:1', '1:8', '8:1'], size: ['512', '1K', '2K', '4K'], background: ['opaque'] },
-  xai: { aspect_ratio: ['1:1', '16:9', '9:16', '3:2', '2:3'], size: [], background: ['opaque'] },
+  openai: { aspect_ratio: ['1:1', '3:2', '2:3'], background: ['transparent', 'opaque'] },
+  xai: { aspect_ratio: ['1:1', '16:9', '9:16', '3:2', '2:3'], background: ['opaque'] },
 };
 export const GROK_IMAGE_ARGS = Object.freeze([
   '--no-subagents', '--max-turns', '3', '--permission-mode', 'dontAsk', '--allow', 'image_gen',
@@ -66,14 +64,14 @@ function outside(directory, path) {
   return offset === '..' || offset.startsWith('../') || isAbsolute(offset);
 }
 
-export async function generateImage({ provider, prompt, output_path, aspect_ratio, size, background, reference_images }, {
-  env = process.env, run = runImageCli, fetchImpl = fetch, readKey = readFile,
+export async function generateImage({ provider = 'openai', prompt, output_path, aspect_ratio, background, reference_images }, {
+  env = process.env, run = runImageCli,
 } = {}) {
-  if (!['openai', 'google', 'xai'].includes(provider)) throw new Error(`Unknown image provider: ${provider}`);
+  if (!Object.hasOwn(IMAGE_OPTIONS, provider)) throw new Error(`Unknown image provider: ${provider}`);
   if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('An image prompt is required.');
-  for (const [option, value] of Object.entries({ aspect_ratio, size, background })) {
+  for (const [option, value] of Object.entries({ aspect_ratio, background })) {
     if (value !== undefined && !IMAGE_OPTIONS[provider][option].includes(value)) {
-      throw new Error(`${provider} does not support ${option}=${JSON.stringify(value)}. Supported values: ${IMAGE_OPTIONS[provider][option].join(', ') || 'none (the subscription tool exposes no control)'}.`);
+      throw new Error(`${provider} does not support ${option}=${JSON.stringify(value)}. Supported values: ${IMAGE_OPTIONS[provider][option].join(', ')}.`);
     }
   }
   const references = [];
@@ -110,81 +108,55 @@ export async function generateImage({ provider, prompt, output_path, aspect_rati
   await mkdir(outputDir, { recursive: true });
   if ((await lstat(outputDir)).isSymbolicLink()) throw new Error('The generated-images directory must not be a symlink.');
   let bytes;
-  if (provider !== 'google') {
-    const cwd = await mkdtemp(join(tmpdir(), 'cadre-image-'));
-    try {
-      const referencePaths = [];
-      for (const [index, reference] of references.entries()) {
-        const path = join(cwd, `reference-${index + 1}.${reference.extension}`);
-        await writeFile(path, reference.bytes, { flag: 'wx' });
-        referencePaths.push(path);
-      }
-      // An isolated cwd, sandbox, and allowlisted env bound untrusted image descriptions.
-      const childEnv = Object.fromEntries(['HOME', 'PATH'].filter((key) => env[key]).map((key) => [key, env[key]]));
-      if (provider === 'openai') {
-        await run('codex', [
-          'exec', '--ignore-user-config', '--skip-git-repo-check', '--ephemeral',
-          '--sandbox', 'workspace-write', '-C', cwd, ...referencePaths.flatMap((path) => ['-i', path]), ...(references.length ? ['--'] : []),
-          `Use the built-in image_gen tool to generate exactly one image. Save it as ${join(cwd, 'image.png')}. Do not use API keys or external image services.${references.length ? ' Use the attached images as references or for editing with image_gen.' : ''}${background ? ` Set transparent_background=${background === 'transparent'}.` : ''} The image description is: ${JSON.stringify(aspect_ratio ? `${prompt}\nRequired output aspect ratio: ${aspect_ratio}.` : prompt)}`,
-        ], { cwd, env: childEnv, timeoutMs: TIMEOUT_MS });
-        try { bytes = await readFile(join(cwd, 'image.png')); }
-        catch { throw new Error('Codex completed without saving an image.'); }
-      } else {
-        // References switch the allowed tool to image_edit and deny image_gen.
-        const output = await run('grok', [
-          '--cwd', cwd, ...GROK_IMAGE_ARGS.map((arg) => references.length ? arg === 'image_gen' ? 'image_edit' : arg.replace(',image_edit,', ',image_gen,') : arg), ...(references.length ? ['--tools', 'image_edit'] : []), '-p',
-          `Call the built-in ${references.length ? 'image_edit' : 'image_gen'} tool exactly once.${references.length ? ` Set image to ${JSON.stringify(referencePaths)} and use these images as references for the edit.` : ''}${aspect_ratio ? ` Set the tool argument aspect_ratio=${JSON.stringify(aspect_ratio)}.` : ''} Do not read instructions, search for tools, or use other tools. Report the actual image file path from the tool result. The image description is: ${JSON.stringify(prompt)}`,
-        ], { cwd, env: childEnv, timeoutMs: TIMEOUT_MS });
-        let imagePath;
-        for (const line of String(output || '').split('\n')) {
-          try {
-            const event = JSON.parse(line);
-            for (const block of event.type === 'user' ? event.message?.content || [] : []) {
-              if (block.type !== 'tool_result' || block.is_error) continue;
-              const result = JSON.parse(block.content);
-              if (result.type === (references.length ? 'ImageEdit' : 'ImageGen')) imagePath = result.path;
-            }
-          } catch { /* Ignore unrelated stream events. */ }
-        }
-        if (!imagePath) throw new Error('Grok produced no image; check subscription image access and tool permissions.');
-        let path;
-        let sessionsDir;
-        try {
-          path = await realpath(imagePath);
-          sessionsDir = await realpath(join(childEnv.HOME || homedir(), '.grok/sessions'));
-        } catch { throw new Error('Grok produced no image file.'); }
-        if (!path.startsWith(`${sessionsDir}/`) || !/\.(png|jpe?g|webp)$/i.test(path)) {
-          throw new Error('Grok image path is outside the subscription image sessions directory.');
-        }
-        bytes = await readFile(path);
-      }
-    } finally {
-      await rm(cwd, { recursive: true, force: true });
+  const cwd = await mkdtemp(join(tmpdir(), 'cadre-image-'));
+  try {
+    const referencePaths = [];
+    for (const [index, reference] of references.entries()) {
+      const path = join(cwd, `reference-${index + 1}.${reference.extension}`);
+      await writeFile(path, reference.bytes, { flag: 'wx' });
+      referencePaths.push(path);
     }
-  } else {
-    let key;
-    try {
-      key = String(await readKey(env.IMAGE_GEN_PROXY_KEY_FILE || join(homedir(), '.dueno-fleet/cliproxyapi/local-api-key'), 'utf8')).trim();
-    } catch { throw new Error('Google image generation needs the local CLIProxyAPI key file and Google login.'); }
-    if (!key) throw new Error('The local CLIProxyAPI key file is empty.');
-    let response;
-    try {
-      response = await fetchImpl(`http://127.0.0.1:8317/v1beta/models/${GOOGLE_IMAGE_MODEL}:generateContent`, {
-        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(TIMEOUT_MS),
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [...references.map(({ bytes, mimeType }) => ({ inlineData: { mimeType, data: bytes.toString('base64') } })), { text: prompt }] }],
-          generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { imageSize: size || '1K', ...(aspect_ratio ? { aspectRatio: aspect_ratio } : {}) } },
-        }),
-      });
-    } catch { throw new Error('Google image generation could not reach local CLIProxyAPI or timed out.'); }
-    if (!response.ok) throw new Error(`Google image generation failed (HTTP ${response.status}); check the proxy Google login and model availability.`);
-    let result;
-    try { result = await response.json(); }
-    catch { throw new Error('Google image generation returned an invalid response.'); }
-    const part = result?.candidates?.flatMap((candidate) => candidate.content?.parts || []).find((part) => part.inlineData?.data);
-    if (!part) throw new Error('Google image generation returned no image; check subscription model availability.');
-    bytes = Buffer.from(part.inlineData.data, 'base64');
+    // An isolated cwd, sandbox, and allowlisted env bound untrusted image descriptions.
+    const childEnv = Object.fromEntries(['HOME', 'PATH'].filter((key) => env[key]).map((key) => [key, env[key]]));
+    if (provider === 'openai') {
+      await run('codex', [
+        'exec', '--ignore-user-config', '--skip-git-repo-check', '--ephemeral',
+        '--sandbox', 'workspace-write', '-C', cwd, ...referencePaths.flatMap((path) => ['-i', path]), ...(references.length ? ['--'] : []),
+        `Use the built-in image_gen tool to generate exactly one image. Save it as ${join(cwd, 'image.png')}. Do not use API keys or external image services.${references.length ? ' Use the attached images as references or for editing with image_gen.' : ''}${background ? ` Set transparent_background=${background === 'transparent'}.` : ''} The image description is: ${JSON.stringify(aspect_ratio ? `${prompt}\nRequired output aspect ratio: ${aspect_ratio}.` : prompt)}`,
+      ], { cwd, env: childEnv, timeoutMs: TIMEOUT_MS });
+      try { bytes = await readFile(join(cwd, 'image.png')); }
+      catch { throw new Error('Codex completed without saving an image.'); }
+    } else {
+      // References switch the allowed tool to image_edit and deny image_gen.
+      const output = await run('grok', [
+        '--cwd', cwd, ...GROK_IMAGE_ARGS.map((arg) => references.length ? arg === 'image_gen' ? 'image_edit' : arg.replace(',image_edit,', ',image_gen,') : arg), ...(references.length ? ['--tools', 'image_edit'] : []), '-p',
+        `Call the built-in ${references.length ? 'image_edit' : 'image_gen'} tool exactly once.${references.length ? ` Set image to ${JSON.stringify(referencePaths)} and use these images as references for the edit.` : ''}${aspect_ratio ? ` Set the tool argument aspect_ratio=${JSON.stringify(aspect_ratio)}.` : ''} Do not read instructions, search for tools, or use other tools. Report the actual image file path from the tool result. The image description is: ${JSON.stringify(prompt)}`,
+      ], { cwd, env: childEnv, timeoutMs: TIMEOUT_MS });
+      let imagePath;
+      for (const line of String(output || '').split('\n')) {
+        try {
+          const event = JSON.parse(line);
+          for (const block of event.type === 'user' ? event.message?.content || [] : []) {
+            if (block.type !== 'tool_result' || block.is_error) continue;
+            const result = JSON.parse(block.content);
+            if (result.type === (references.length ? 'ImageEdit' : 'ImageGen')) imagePath = result.path;
+          }
+        } catch { /* Ignore unrelated stream events. */ }
+      }
+      if (!imagePath) throw new Error('Grok produced no image; check subscription image access and tool permissions.');
+      let path;
+      let sessionsDir;
+      try {
+        path = await realpath(imagePath);
+        sessionsDir = await realpath(join(childEnv.HOME || homedir(), '.grok/sessions'));
+      } catch { throw new Error('Grok produced no image file.'); }
+      if (!path.startsWith(`${sessionsDir}/`) || !/\.(png|jpe?g|webp)$/i.test(path)) {
+        throw new Error('Grok image path is outside the subscription image sessions directory.');
+      }
+      bytes = await readFile(path);
+    }
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
   }
   const [mimeType, extension] = imageType(bytes);
   const info = mimeType === 'image/png' ? pngInfo(bytes) : null;

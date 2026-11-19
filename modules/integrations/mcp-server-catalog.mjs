@@ -6,7 +6,7 @@ import { configuredOauthProvidersSync, connectedOauthProvidersSync } from './mcp
 
 export const MCP_CATALOG_VERSION = 1;
 
-const NATIVE_MCP_PROVIDERS = Object.freeze(['claude', 'codex', 'xai', 'google', 'opencode-go', 'openrouter', 'antigravity']);
+const NATIVE_MCP_PROVIDERS = Object.freeze(['claude', 'codex', 'xai', 'google', 'opencode-go', 'openrouter']);
 const NATIVE_MCP_RUNTIMES = Object.freeze(['claude', 'codex', 'pi']);
 const DUENO_MCP_PROVIDERS = Object.freeze([...NATIVE_MCP_PROVIDERS, 'deepseek']);
 const DUENO_MCP_RUNTIMES = Object.freeze([...NATIVE_MCP_RUNTIMES, 'deepseek']);
@@ -407,7 +407,7 @@ const SERVER_DEFINITIONS = Object.freeze([
   server({
     id: 'image-gen',
     label: 'Image generation',
-    description: 'Subscription image generation through Codex, Google Nano Banana, and Grok Build.',
+    description: 'Subscription image generation through Codex and Grok Build.',
     category: 'creative',
     providers: NATIVE_MCP_PROVIDERS,
     runtimes: NATIVE_MCP_RUNTIMES,

@@ -52,7 +52,7 @@ workspace-global `.mcp.json`, `.codex/config.toml`, or `.claude/settings.local.j
 | `rea` | stdio | none | [`rea-agents`](https://github.com/morluto/rea) (MIT; pinned npm dependency, runs `rea mcp`); decompiled output is untrusted |
 | `bevy_brp` | stdio | none | [`bevy_brp_mcp`](https://github.com/natepiano/bevy_brp) 0.22.x for Bevy 0.19; operator runs `cargo install bevy_brp_mcp` |
 | `pixellab` | http | `DM_MCP_PIXELLAB_API_KEY` / `PIXELLAB_API_KEY` | PixelLab's official `https://api.pixellab.ai/mcp` |
-| `image-gen` | stdio | ChatGPT login (Codex), Google login (local CLIProxyAPI); key-file path only | Cadre-owned `scripts/image-gen-mcp.mjs` |
+| `image-gen` | stdio | ChatGPT login (Codex), SuperGrok login (Grok Build) | Cadre-owned `scripts/image-gen-mcp.mjs` |
 | `filesystem`, `git`, `fetch`, `memory`, `sequential-thinking`, `time` | stdio | none | maintained MCP reference servers |
 | `espocrm`, `invoice-ninja` | http | API key env | self-hosted; endpoint must be supplied |
 | `seodata` | stdio | none (optional `SEODATA_API_KEY`) | locally built [`seodata-mcp`](https://github.com/BlaineHeffron/seodata-mcp) |
@@ -87,24 +87,21 @@ only. No send scope is requested anywhere.
 - `image-gen` is a Cadre-owned subscription image server, requires explicit
   selection, and is in no built-in profile. The old IDs `grok-imagine` and
   `gpt-image` resolve to `image-gen` in session selections and custom profiles;
-  only one server is registered. It exposes `generate_image` with `provider`
-  (`openai`, `google`, `xai`), `prompt`, and optional `output_path`,
-  `aspect_ratio`, `size`, and `background` (`transparent` or `opaque`).
+  only one server is registered. It exposes `generate_image` with optional
+  `provider` (`openai`, the default, or `xai`), `prompt`, and optional
+  `output_path`, `aspect_ratio`, and `background` (`transparent` or `opaque`).
   Unsupported options fail before invoking a provider. Omitting options keeps
-  provider defaults (Google defaults to `1K`).
+  provider defaults.
 
-  | Provider | Aspect ratios | Size | Background |
-  | --- | --- | --- | --- |
-  | OpenAI | `1:1`, `3:2`, `2:3` (prompt hint, verified) | No explicit size control | Transparent or opaque |
-  | Google | `1:1`, `3:2`, `2:3`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`, `9:21`, `1:4`, `4:1`, `1:8`, `8:1` | `512`, `1K`, `2K`, `4K` | Opaque only |
-  | xAI | `1:1`, `16:9`, `9:16`, `3:2`, `2:3` | No explicit size control | Opaque only |
+  | Provider | Aspect ratios | Background |
+  | --- | --- | --- |
+  | OpenAI | `1:1`, `3:2`, `2:3` (prompt hint, verified) | Transparent or opaque |
+  | xAI | `1:1`, `16:9`, `9:16`, `3:2`, `2:3` | Opaque only |
 
   PNG aspect ratios are checked within 2% to accommodate provider rounding.
   OpenAI ratio requests require PNG output. Transparent requests require PNG
   alpha (RGBA, gray-alpha, or a transparency chunk) before saving.
-  Google maps to `generationConfig.imageConfig.aspectRatio` and `imageSize`;
-  its [image configuration](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-1-flash-image)
-  exposes no transparency control. Codex and Grok options were checked against
+  Codex and Grok options were checked against
   their built-in tool schemas (Codex 0.161.0 and Grok 1.0.50), rather than paid
   API schemas. Grok receives `aspect_ratio` as a tool argument; Codex receives
   `transparent_background` as a tool argument and aspect ratio in the prompt.
@@ -114,18 +111,6 @@ only. No send scope is requested anywhere.
     kills its process group. Paid API keys and Cadre session credentials are
     omitted from the child environment. The server verifies PNG/JPEG/WebP
     signature bytes before saving the output.
-  - Google requests
-    `gemini-3.1-flash-image` (Nano Banana 2)
-    through local CLIProxyAPI's Gemini-native endpoint on `127.0.0.1:8317`.
-    Nano Banana 2.1 exists as `gemini-nano-banana-2.1`, but this Antigravity
-    channel does not serve it yet; the Google model is one constant to update
-    when subscription access becomes available.
-    The operator manages the proxy and its Google subscription login. The server
-    reads the local client key file at call time; only its path is configured
-    (`IMAGE_GEN_PROXY_KEY_FILE`, default
-    `~/.dueno-fleet/cliproxyapi/local-api-key`). The key is never placed in argv
-    or agent launch configuration. Provider model availability can differ from
-    Google's public API catalog; unavailable models fail clearly.
   - xAI uses Grok Build's built-in `image_gen` with the SuperGrok login.
     It runs with `dontAsk` permissions, explicitly allows `image_gen`, disables
     shell/file writes, web search and subagents, and limits turns and runtime.
@@ -209,7 +194,6 @@ DM_MCP_GITHUB_TOKEN=...
 DM_MCP_EXA_API_KEY=...
 DM_MCP_PIXELLAB_API_KEY=...                           # pixellab.ai account API token
 MESHY_API_KEY=...                                     # forwarded into the meshy stdio server (agent-visible)
-IMAGE_GEN_PROXY_KEY_FILE=/path/to/local-api-key       # optional path only; default ~/.dueno-fleet/cliproxyapi/local-api-key
 SEMANTIC_SCHOLAR_API_KEY=...                          # optional; also ADS_API_KEY, OPENALEX_EMAIL, UNPAYWALL_EMAIL for paper-search
 DM_MCP_HUGGINGFACE_TOKEN=...
 DM_MCP_ESPOCRM_TOKEN=...
