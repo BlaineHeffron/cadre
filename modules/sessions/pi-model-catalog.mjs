@@ -48,7 +48,10 @@ export const PI_FALLBACK_MODELS = Object.freeze({
     { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
     { id: 'hy3', label: 'HY3' },
   ]),
-  openrouter: Object.freeze([{ id: 'z-ai/glm-5.3-flash', label: 'Z.ai GLM 5.3 Flash' }]),
+  openrouter: Object.freeze([
+    { id: 'z-ai/glm-5.3-flash', label: 'Z.ai GLM 5.3 Flash' },
+    { id: 'google/gemini-4-carbon', label: 'Gemini 4 Carbon' },
+  ]),
   antigravity: Object.freeze([{ id: 'gemini-4-argon-high', label: 'Gemini 4 Argon High' }]),
 });
 
