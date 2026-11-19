@@ -33,25 +33,43 @@ const MCP_SERVERS_SELECTION_SCHEMA = {
   },
   additionalProperties: false,
 };
+const CODEX_PLUGIN_LIST_SCHEMA = { type: 'array', uniqueItems: true, items: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*$' } };
 const CODEX_PLUGIN_SELECTION_SCHEMA = {
   type: 'object',
-  description: 'Per-session Codex installed-plugin selection. remove disables additional plugins; add re-enables plugins and wins over Fleet defaults. Separate from Fleet skills and mcpServers.',
-  properties: {
-    add: { type: 'array', uniqueItems: true, items: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*$' } },
-    remove: { type: 'array', uniqueItems: true, items: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*$' } },
-  },
+  description: 'Codex plugins, not skills or mcpServers; add wins over Fleet defaults.',
+  properties: { add: CODEX_PLUGIN_LIST_SCHEMA, remove: CODEX_PLUGIN_LIST_SCHEMA },
   additionalProperties: false,
 };
 const MCP_SELECTION_SCHEMA_PROPERTIES = {
-  mcpProfile: { type: 'string', description: 'Server-owned MCP capability profile ID. Call monitor_list_mcp_servers for options.' },
+  mcpProfile: { type: 'string', description: 'From monitor_list_mcp_servers.' },
   mcpServers: MCP_SERVERS_SELECTION_SCHEMA,
   promptProfile: buildPromptProfileFieldSchema(),
   skills: {
     type: 'array',
     uniqueItems: true,
     items: { type: 'string' },
-    description: 'Fleet launch skill IDs to compose into the provider-bound startup prompt.',
+    description: 'Fleet launch skill IDs.',
   },
+};
+// One participant entry for spawn_collab_session and spawn_conference_session. Fields that override a
+// top-level field drop its description; the participants description says they override.
+const undescribed = ({ description: _description, ...schema }) => schema;
+const PARTICIPANT_PROPERTIES = {
+  provider: MCP_PROVIDER_SCHEMA,
+  session_id: { type: 'string', description: 'Existing session to attach.' },
+  create: { type: 'boolean', description: 'Default true unless session_id is set.' },
+  model: undescribed(MCP_AGENT_MODEL_SCHEMA),
+  thinking_level: { type: 'string' },
+  display_name: { type: 'string' },
+  initial_task: { type: 'string', description: 'Participant-specific task.' },
+  work_dir: { type: 'string' },
+  ...Object.fromEntries(Object.entries(MCP_SELECTION_SCHEMA_PROPERTIES).map(([key, schema]) => [key, undescribed(schema)])),
+  codexPlugins: undescribed(CODEX_PLUGIN_SELECTION_SCHEMA),
+};
+const QUEUE_OPTION_SCHEMA = {
+  type: 'object',
+  properties: { id: { type: 'string' }, label: { type: 'string' }, value: { type: 'string' }, description: { type: 'string' } },
+  additionalProperties: false,
 };
 
 export function buildMonitorMcpServer({ requestImpl }) {
@@ -400,18 +418,14 @@ export function buildMonitorMcpServer({ requestImpl }) {
     // ── Session management ──
     {
       name: 'monitor_list_claude_sessions',
-      description: 'List Claude sessions in compact paginated form by default.',
+      description: 'List Claude sessions.',
       inputSchema: {
         type: 'object',
         properties: {
-          limit: { type: 'integer', description: 'Maximum sessions to return. Defaults to 25.' },
-          offset: { type: 'integer', description: 'Session offset for pagination. Defaults to 0.' },
-          compact: { type: 'boolean', description: 'Return compact summaries by default. Set false for full session objects.' },
-          fields: {
-            type: 'array',
-            description: 'Optional list of session fields to keep in each result, selected from the full session object plus compact aliases (overrides compact).',
-            items: { type: 'string' },
-          },
+          limit: { type: 'integer', description: 'Default 25.' },
+          offset: { type: 'integer' },
+          compact: { type: 'boolean', description: 'false returns full objects.' },
+          fields: { type: 'array', description: 'Session fields to keep (overrides compact).', items: { type: 'string' } },
         },
         additionalProperties: false,
       },
@@ -419,18 +433,14 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_list_codex_sessions',
-      description: 'List Codex sessions in compact paginated form by default.',
+      description: 'List Codex sessions.',
       inputSchema: {
         type: 'object',
         properties: {
-          limit: { type: 'integer', description: 'Maximum sessions to return. Defaults to 25.' },
-          offset: { type: 'integer', description: 'Session offset for pagination. Defaults to 0.' },
-          compact: { type: 'boolean', description: 'Return compact summaries by default. Set false for full session objects.' },
-          fields: {
-            type: 'array',
-            description: 'Optional list of session fields to keep in each result, selected from the full session object plus compact aliases (overrides compact).',
-            items: { type: 'string' },
-          },
+          limit: { type: 'integer', description: 'Default 25.' },
+          offset: { type: 'integer' },
+          compact: { type: 'boolean', description: 'false returns full objects.' },
+          fields: { type: 'array', description: 'Session fields to keep (overrides compact).', items: { type: 'string' } },
         },
         additionalProperties: false,
       },
@@ -438,18 +448,14 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_list_pi_sessions',
-      description: 'List Pi coding-agent sessions in compact paginated form by default.',
+      description: 'List Pi sessions.',
       inputSchema: {
         type: 'object',
         properties: {
-          limit: { type: 'integer', description: 'Maximum sessions to return. Defaults to 25.' },
-          offset: { type: 'integer', description: 'Session offset for pagination. Defaults to 0.' },
-          compact: { type: 'boolean', description: 'Return compact summaries by default. Set false for full session objects.' },
-          fields: {
-            type: 'array',
-            description: 'Optional list of session fields to keep in each result, selected from the full session object plus compact aliases (overrides compact).',
-            items: { type: 'string' },
-          },
+          limit: { type: 'integer', description: 'Default 25.' },
+          offset: { type: 'integer' },
+          compact: { type: 'boolean', description: 'false returns full objects.' },
+          fields: { type: 'array', description: 'Session fields to keep (overrides compact).', items: { type: 'string' } },
         },
         additionalProperties: false,
       },
@@ -457,19 +463,19 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'spawn_session',
-      description: 'Spawn exactly one interactive session using a provider returned by monitor_list_agent_providers. Returns thread_id, participant ids/names and warnings. With returnResults true, a Claude session spawned without parentThreadId returns the final message of each turn with no background work or returnResults workers outstanding to you as a DM result; end your turn to wait for it instead of polling.',
+      description: 'Spawn one interactive session. Returns thread_id, participant ids/names and warnings.',
       inputSchema: {
         type: 'object',
         properties: {
           provider: MCP_PROVIDER_SCHEMA,
-          workDir: { type: 'string', description: 'Working directory for the session' },
-          displayName: { type: 'string', description: 'Display name for the session' },
+          workDir: { type: 'string' },
+          displayName: { type: 'string' },
           model: MCP_AGENT_MODEL_SCHEMA,
-          thinkingLevel: { type: 'string', description: 'Optional reasoning/effort level for the spawned session' },
-          initialPrompt: { type: 'string', description: 'Optional prompt to inject after the session starts' },
-          parentThreadId: { type: 'string', description: 'Optional existing agent-bus thread id to attach the spawned session to as a participant.' },
-          returnResults: { type: 'boolean', description: 'Default false. When true, a Claude session spawned without parentThreadId sends you its final message of each turn with no background work or returnResults workers outstanding as a DM result. Leave off when only handing off context.' },
-          machine: { type: 'string', description: 'Optional paired machine to run on (Claude, Codex or Pi; DeepSeek stays on the hub); workDir is then a path on that machine. Defaults to the hub.' },
+          thinkingLevel: { type: 'string' },
+          initialPrompt: { type: 'string' },
+          parentThreadId: { type: 'string', description: 'Existing thread to add the session to as a participant.' },
+          returnResults: { type: 'boolean', description: 'Claude without parentThreadId only: DMs you the final message of each turn that ends with no background work or returnResults workers outstanding; end your turn to wait, do not poll. Omit when only handing off context.' },
+          machine: { type: 'string', description: 'Paired machine (Claude, Codex, Pi; not DeepSeek); workDir is a path there. Default hub.' },
           ...MCP_SELECTION_SCHEMA_PROPERTIES,
           codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
         },
@@ -503,12 +509,40 @@ export function buildMonitorMcpServer({ requestImpl }) {
       },
     },
     {
-      name: 'monitor_terminate_session',
-      description: 'Terminate and verify an existing agent session by session id. Returns session_id and status: terminated, already_gone, refused, failed, or not_found without laundering failures as success.',
+      name: 'handoff_session',
+      description: 'Hand an idle session to another provider/model: a new linked session in the same workDir and profiles gets a text brief. The source stays idle and resumable; mid-turn sources are refused. Returns the new session id and links.',
       inputSchema: {
         type: 'object',
         properties: {
-          session_id: { type: 'string', minLength: 1, pattern: '\\S', description: 'Session id to terminate.' },
+          session_id: { type: 'string', minLength: 1, pattern: '\\S', description: 'Source session.' },
+          provider: MCP_PROVIDER_SCHEMA,
+          model: MCP_AGENT_MODEL_SCHEMA,
+          thinkingLevel: { type: 'string' },
+        },
+        required: ['session_id', 'provider'],
+        additionalProperties: false,
+      },
+      handler: async ({ session_id, provider, model, thinkingLevel }) => {
+        assertMcpProviderModel(provider, model);
+        const result = await request(`/api/agents/sessions/${encodeURIComponent(String(session_id).trim())}/handoff`, {
+          method: 'POST',
+          // Automated handoff: the structured runtime serves it when CADRE_STRUCTURED_AUTOMATED_SPAWNS is on.
+          body: { provider, model, thinkingLevel, structured: true },
+        });
+        return {
+          session_id: result.id, provider: result.provider, backendType: result.backendType,
+          handoffFrom: result.handoffFrom, handoffTo: result.handoffTo,
+          ...(result.dropped?.length ? { dropped: result.dropped } : {}), ...(result.linkError ? { warnings: [result.linkError] } : {}),
+        };
+      },
+    },
+    {
+      name: 'monitor_terminate_session',
+      description: 'Terminate a session and verify it. Returns session_id and status: terminated, already_gone, refused, failed or not_found (failures are never reported as success).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string', minLength: 1, pattern: '\\S' },
         },
         required: ['session_id'],
         additionalProperties: false,
@@ -543,7 +577,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_list_agent_providers',
-      description: 'List agent providers, runtimes, and one-off execution capabilities from the unified agent layer.',
+      description: 'List agent providers and runtimes.',
       inputSchema: {
         type: 'object',
         properties: { ...PAGE_PROPERTIES },
@@ -557,10 +591,10 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_list_mcp_servers',
-      description: 'List server-owned MCP capability profiles, allowlisted servers, compatibility, and sanitized availability.',
+      description: 'List MCP profiles and allowlisted servers with availability.',
       inputSchema: {
         type: 'object',
-        properties: { ...PAGE_PROPERTIES, serverId: { type: 'string', description: 'Only return this server.' } },
+        properties: { ...PAGE_PROPERTIES, serverId: { type: 'string' } },
         additionalProperties: false,
       },
       handler: async (args = {}) => {
@@ -572,7 +606,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_agent_bus_auth_readiness',
-      description: 'Report live sessions that still lack a scoped Agent Bus MCP credential before enforce rollout.',
+      description: 'List live sessions still lacking a scoped Agent Bus MCP credential.',
       inputSchema: {
         type: 'object',
         properties: { ...PAGE_PROPERTIES },
@@ -586,7 +620,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_list_prompt_profiles',
-      description: 'List style prompt profile IDs, labels, and short descriptions. Prompt bodies are omitted.',
+      description: 'List style prompt profiles (no bodies).',
       inputSchema: {
         type: 'object',
         properties: { ...PAGE_PROPERTIES },
@@ -600,17 +634,17 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_run_agent_task',
-      description: 'Run a one-off task through the unified agent layer without leaving a long-lived interactive session behind. Returns status, session_id and final output (last 12000 characters).',
+      description: 'Run a one-off task with no lasting session. Returns status, session_id and the last 12000 characters of output.',
       inputSchema: {
         type: 'object',
         properties: {
           provider: MCP_PROVIDER_SCHEMA,
-          prompt: { type: 'string', description: 'Task prompt to execute.' },
-          workDir: { type: 'string', description: 'Working directory for the task.' },
-          displayName: { type: 'string', description: 'Optional short task label.' },
+          prompt: { type: 'string' },
+          workDir: { type: 'string' },
+          displayName: { type: 'string' },
           model: MCP_AGENT_MODEL_SCHEMA,
-          thinkingLevel: { type: 'string', description: 'Optional reasoning/effort override.' },
-          timeoutMs: { type: 'integer', description: 'Optional one-off task timeout in milliseconds.' },
+          thinkingLevel: { type: 'string' },
+          timeoutMs: { type: 'integer' },
           ...MCP_SELECTION_SCHEMA_PROPERTIES,
           codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
         },
@@ -636,39 +670,38 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'register_scheduled_agent',
-      description: 'Register a recurring agent task. Registration works even when the background pump is disabled. Returns id and status.',
+      description: 'Register a recurring agent task (works with the pump off). snake_case fields are aliases. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
-          workDir: { type: 'string', description: 'Persistent working directory for every run.' },
-          work_dir: { type: 'string', description: 'Alias for workDir.' },
-          prompt: { type: 'string', description: 'Prompt injected into each fresh session.' },
+          workDir: { type: 'string', description: 'Used for every run.' },
+          work_dir: { type: 'string' },
+          prompt: { type: 'string', description: 'Injected into each fresh session.' },
           provider: MCP_PROVIDER_SCHEMA,
           model: MCP_AGENT_MODEL_SCHEMA,
-          intervalSeconds: { type: 'integer', description: 'Run interval in seconds, clamped 15..3600.' },
-          interval_seconds: { type: 'integer', description: 'Alias for intervalSeconds.' },
-          maxIterations: { type: 'integer', description: 'Maximum runs; 0 means unlimited.' },
-          max_iterations: { type: 'integer', description: 'Alias for maxIterations.' },
-          parentThreadId: { type: 'string', description: 'Optional agent-bus thread to attach each run to.' },
-          parent_thread_id: { type: 'string', description: 'Alias for parentThreadId.' },
-          startImmediately: { type: 'boolean', description: 'When true, first run is due immediately. Defaults true.' },
-          start_immediately: { type: 'boolean', description: 'Alias for startImmediately.' },
+          intervalSeconds: { type: 'integer', description: 'Clamped 15..3600.' },
+          interval_seconds: { type: 'integer' },
+          maxIterations: { type: 'integer', description: '0 = unlimited.' },
+          max_iterations: { type: 'integer' },
+          parentThreadId: { type: 'string', description: 'Thread each run joins.' },
+          parent_thread_id: { type: 'string' },
+          startImmediately: { type: 'boolean', description: 'Default true.' },
+          start_immediately: { type: 'boolean' },
           controlProfile: {
             type: 'string',
             enum: [COORDINATOR_SCHEDULE_PROFILE],
-            description: 'Optional server-owned control profile. coordinator-v1 grants only the fenced coordinator workflow.',
+            description: 'Grants only the fenced coordinator workflow.',
           },
           control_profile: {
             type: 'string',
             enum: [COORDINATOR_SCHEDULE_PROFILE],
-            description: 'Alias for controlProfile.',
           },
           coordinator: {
             type: 'object',
-            description: 'Required settings when controlProfile is coordinator-v1. Fleet validates and stamps these as trusted schedule metadata.',
+            description: 'Required with coordinator-v1; stamped as trusted schedule metadata.',
             properties: {
               policyId: { type: 'string' },
-              repository: { type: 'string', description: 'Primary owner/repo. Prefer repositories for multi-repository loops.' },
+              repository: { type: 'string', description: 'owner/repo; prefer repositories for several.' },
               repositories: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string' } },
               projectRoots: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string' } },
               protectedSessionIds: { type: 'array', maxItems: 64, uniqueItems: true, items: { type: 'string' } },
@@ -692,17 +725,17 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'spawn_loop_session',
-      description: 'Start a bounded loop that periodically injects a fixed prompt into one live agent session. Returns id and status.',
+      description: 'Start a bounded loop that injects a fixed prompt into one live session on an interval. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
-          kind: { type: 'string', minLength: 1, description: 'Target agent session kind.' },
-          session_id: { type: 'string', minLength: 1, description: 'Target agent session ID.' },
-          prompt: { type: 'string', minLength: 1, description: 'Fixed prompt injected on every tick.' },
+          kind: { type: 'string', minLength: 1 },
+          session_id: { type: 'string', minLength: 1 },
+          prompt: { type: 'string', minLength: 1 },
           interval_seconds: { type: 'integer', minimum: 15, maximum: 1296000 },
           max_iterations: { type: 'integer', minimum: 1, maximum: 100 },
-          title: { type: 'string', description: 'Optional loop title.' },
-          display_name: { type: 'string', description: 'Optional display label.' },
+          title: { type: 'string' },
+          display_name: { type: 'string' },
         },
         required: ['kind', 'session_id', 'prompt', 'interval_seconds', 'max_iterations'],
         additionalProperties: false,
@@ -728,10 +761,10 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'list_scheduled_agents',
-      description: 'List registered scheduled agent tasks.',
+      description: 'List scheduled agent tasks.',
       inputSchema: {
         type: 'object',
-        properties: { ...PAGE_PROPERTIES, compact: { type: 'boolean', description: 'Defaults true; false reads full records in the requested page.' } },
+        properties: { ...PAGE_PROPERTIES, compact: { type: 'boolean', description: 'false returns full records.' } },
         additionalProperties: false,
       },
       handler: async (args = {}) => {
@@ -744,11 +777,11 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'cancel_scheduled_agent',
-      description: 'Cancel a registered scheduled agent task. Returns id and status.',
+      description: 'Cancel a scheduled agent task. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Scheduled task id.' },
+          id: { type: 'string' },
         },
         required: ['id'],
         additionalProperties: false,
@@ -758,7 +791,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_step_scheduled_agents',
-      description: 'Run one manual scheduled-agent tick now, independent of the background pump. Returns schedule ids, session ids and statuses.',
+      description: 'Run one scheduled-agent tick now, independent of the pump. Returns schedule ids, session ids and statuses.',
       inputSchema: {
         type: 'object',
         properties: {},
@@ -771,19 +804,19 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_list_human_queue',
-      description: 'List Command Center human-decision queue items populated by fleet supervisors.',
+      description: 'List Command Center human-decision queue items.',
       inputSchema: {
         type: 'object',
         properties: {
           ...PAGE_PROPERTIES,
-          compact: { type: 'boolean', description: 'Defaults true; false reads full records in the requested page.' },
+          compact: { type: 'boolean', description: 'false returns full records.' },
           status: {
             type: 'string',
             enum: ['open', 'answered', 'routed', 'delivery_failed', 'acknowledged', 'dismissed', 'withdrawn', 'all'],
-            description: 'Queue status filter: open, answered, routed, delivery_failed, acknowledged, dismissed, withdrawn, or all. Defaults to open.',
+            description: 'Default open.',
           },
-          source: { type: 'string', description: 'Only items with this source label.' },
-          sessionId: { type: 'string', description: 'Only items for this related session id.' },
+          source: { type: 'string' },
+          sessionId: { type: 'string' },
         },
         additionalProperties: false,
       },
@@ -798,40 +831,31 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_add_human_queue_item',
-      description: 'Add a Command Center work-queue item when a session needs a user decision. Returns id and status.',
+      description: 'Queue a decision for the user in Command Center. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
-          title: { type: 'string', description: 'Short queue item title.' },
-          question: { type: 'string', description: 'Decision question for the user.' },
-          details: { type: 'string', description: 'Brief context needed to answer.' },
-          source: { type: 'string', description: 'Source label, e.g. fleet_supervisor.' },
-          priority: { type: 'string', description: 'Priority label such as low, normal, high, or urgent.' },
-          sessionKind: { type: 'string', description: 'Related session backend kind: claude, codex, or pi.' },
-          sessionId: { type: 'string', description: 'Related session id.' },
-          threadId: { type: 'string', description: 'Related agent-bus thread id.' },
-          passThrough: { type: 'boolean', description: 'When true, the answer is routed directly to sessionKind/sessionId instead of back through the supervisor.' },
+          title: { type: 'string' },
+          question: { type: 'string' },
+          details: { type: 'string', description: 'Context needed to answer.' },
+          source: { type: 'string', description: 'e.g. fleet_supervisor.' },
+          priority: { type: 'string', description: 'low, normal, high or urgent.' },
+          sessionKind: { type: 'string', description: 'claude, codex or pi.' },
+          sessionId: { type: 'string' },
+          threadId: { type: 'string' },
+          passThrough: { type: 'boolean', description: 'Route the answer to sessionKind/sessionId, not the supervisor.' },
           operatorAction: {
             type: 'object',
-            description: 'Allowlisted operator request to run only after dashboard approval. Requester and delivery target come from your authenticated session.',
+            description: 'Allowlisted operator request, run only after dashboard approval.',
             properties: { method: { type: 'string', enum: ['POST', 'DELETE'] }, path: { type: 'string' }, body: {} },
             required: ['method', 'path'],
             additionalProperties: false,
           },
-          allowFreeform: { type: 'boolean', description: 'Whether free-form answer input is allowed. Defaults true.' },
+          allowFreeform: { type: 'boolean', description: 'Default true.' },
           options: {
             type: 'array',
-            description: 'Optional multiple-choice answers.',
-            items: {
-              type: 'object',
-              properties: {
-                id: { type: 'string' },
-                label: { type: 'string' },
-                value: { type: 'string' },
-                description: { type: 'string' },
-              },
-              additionalProperties: false,
-            },
+            description: 'Multiple-choice answers.',
+            items: QUEUE_OPTION_SCHEMA,
           },
         },
         required: ['question'],
@@ -842,14 +866,14 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_answer_human_queue_item',
-      description: 'Answer a Command Center human-decision queue item, usually after the user provides the decision. Returns id and status.',
+      description: 'Answer a human queue item, usually with the user\'s decision. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Queue item id.' },
-          answer: { type: 'string', description: 'Free-form answer text.' },
-          optionId: { type: 'string', description: 'Selected option id.' },
-          optionValue: { type: 'string', description: 'Selected option value.' },
+          id: { type: 'string' },
+          answer: { type: 'string', description: 'Free-form answer.' },
+          optionId: { type: 'string' },
+          optionValue: { type: 'string' },
         },
         required: ['id'],
         additionalProperties: false,
@@ -862,22 +886,17 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_update_human_queue_item',
-      description: 'Update your own open Command Center queue item instead of dismissing and re-adding it. Returns id and status.',
+      description: 'Update your own open queue item instead of dismissing and re-adding it. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Queue item id.' },
-          title: { type: 'string', description: 'Replacement title.' },
-          question: { type: 'string', description: 'Replacement decision question.' },
-          details: { type: 'string', description: 'Replacement context.' },
+          id: { type: 'string' },
+          title: { type: 'string' },
+          question: { type: 'string' },
+          details: { type: 'string' },
           options: {
             type: 'array',
-            description: 'Replacement multiple-choice answers.',
-            items: {
-              type: 'object',
-              properties: { id: { type: 'string' }, label: { type: 'string' }, value: { type: 'string' }, description: { type: 'string' } },
-              additionalProperties: false,
-            },
+            items: QUEUE_OPTION_SCHEMA,
           },
         },
         required: ['id'],
@@ -888,12 +907,12 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_acknowledge_human_queue_item',
-      description: 'Mark a Command Center human queue item as acknowledged after routed session action is verified. Returns id and status.',
+      description: 'Acknowledge a queue item once the routed session action is verified. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Queue item id.' },
-          note: { type: 'string', description: 'Optional acknowledgement note.' },
+          id: { type: 'string' },
+          note: { type: 'string' },
         },
         required: ['id'],
         additionalProperties: false,
@@ -906,11 +925,11 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_dismiss_human_queue_item',
-      description: 'Withdraw a Command Center human queue item that no longer needs a decision. Your own item becomes withdrawn with nothing sent back to you. Returns id and status.',
+      description: 'Withdraw a queue item that no longer needs a decision; your own item becomes withdrawn and nothing is sent back. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Queue item id.' },
+          id: { type: 'string' },
         },
         required: ['id'],
         additionalProperties: false,
@@ -920,13 +939,13 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_send_to_session',
-      description: 'Queue text input for an agent session. Returns transaction_id and status. queued is Fleet queue acceptance only; delivery status comes from monitor_list_session_deliveries(transactionId). sent means keystrokes delivered to the provider pane, not that the agent read or applied it. Results must come from the worker (room_send/agent_dm).',
+      description: 'Queue text input for a session. Returns transaction_id and status: queued is queue acceptance only (track via monitor_list_session_deliveries(transactionId)); sent means keystrokes reached the pane, not that the agent read them. Results come from the worker via room_send/agent_dm.',
       inputSchema: {
         type: 'object',
         properties: {
-          type: { type: 'string', enum: ['claude', 'codex', 'pi'], description: 'Session backend type' },
-          sessionId: { type: 'string', description: 'Session ID' },
-          text: { type: 'string', description: 'Text to send' },
+          type: { type: 'string', enum: ['claude', 'codex', 'pi'] },
+          sessionId: { type: 'string' },
+          text: { type: 'string' },
         },
         required: ['type', 'sessionId', 'text'],
         additionalProperties: false,
@@ -945,19 +964,15 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_list_session_deliveries',
-      description: 'Read 25 compact delivery records by default; use nextOffset for more. List recent direct session input delivery audit records, including monitor_send_to_session sends. Records are append-only per transition, newest first; the first record for a transactionId is its current state. metadata.confirmation holds submit evidence.',
+      description: 'List session input delivery records. Append-only per transition, newest first: the first record for a transactionId is its current state. metadata.confirmation holds submit evidence.',
       inputSchema: {
         type: 'object',
         properties: {
-          type: { type: 'string', enum: ['claude', 'codex', 'pi'], description: 'Optional session backend filter.' },
-          sessionId: { type: 'string', description: 'Optional session ID filter.' },
-          source: { type: 'string', description: 'Optional delivery source filter, such as monitor_send_to_session.' },
-          status: {
-            type: 'string',
-            enum: ['queued', 'sending', 'awaiting_response', 'sent', 'failed', 'dropped'],
-            description: 'Optional delivery status filter.',
-          },
-          transactionId: { type: 'string', description: 'Optional command transaction ID filter.' },
+          type: { type: 'string', enum: ['claude', 'codex', 'pi'] },
+          sessionId: { type: 'string' },
+          source: { type: 'string' },
+          status: { type: 'string', enum: ['queued', 'sending', 'awaiting_response', 'sent', 'failed', 'dropped'] },
+          transactionId: { type: 'string' },
           ...PAGE_PROPERTIES,
         },
         additionalProperties: false,
@@ -981,15 +996,15 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_get_session_output',
-      description: 'Fetch captured session output. Defaults to 50 lines and 3000 characters; request more with lines/maxChars or page back with nextOffset.',
+      description: 'Fetch captured session output; page back with nextOffset.',
       inputSchema: {
         type: 'object',
         properties: {
-          type: { type: 'string', description: 'Session backend type or provider alias.' },
-          sessionId: { type: 'string', description: 'Session ID' },
-          lines: { type: 'integer', minimum: 1, maximum: 5000, description: 'Captured history lines; defaults to 50, maximum 5000.' },
-          maxChars: { type: 'integer', minimum: 1, maximum: 12000, description: 'Characters per page; defaults to 3000, maximum 12000.' },
-          offset: { type: 'integer', minimum: 0, description: 'Characters back from the captured tail; use nextOffset for older output.' },
+          type: { type: 'string', description: 'Backend type or provider alias.' },
+          sessionId: { type: 'string' },
+          lines: { type: 'integer', minimum: 1, maximum: 5000, description: 'History lines. Default 50.' },
+          maxChars: { type: 'integer', minimum: 1, maximum: 12000, description: 'Characters per page. Default 3000.' },
+          offset: { type: 'integer', minimum: 0, description: 'Characters back from the tail.' },
         },
         required: ['type', 'sessionId'],
         additionalProperties: false,
@@ -1011,15 +1026,15 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_scheduled_send',
-      description: 'Schedule a message to be sent to a session after a delay. Use for timed check-ins, follow-ups, or recurring pings. Returns id and status.',
+      description: 'Send a message to a session after a delay or at a time. Returns id and status.',
       inputSchema: {
         type: 'object',
         properties: {
-          type: { type: 'string', enum: ['claude', 'codex', 'pi'], description: 'Session backend type' },
-          sessionId: { type: 'string', description: 'Session ID' },
-          text: { type: 'string', description: 'Text to send' },
-          delayMs: { type: 'number', description: 'Delay in milliseconds before sending' },
-          sendAt: { type: 'string', description: 'ISO timestamp to send at (alternative to delayMs)' },
+          type: { type: 'string', enum: ['claude', 'codex', 'pi'] },
+          sessionId: { type: 'string' },
+          text: { type: 'string' },
+          delayMs: { type: 'number' },
+          sendAt: { type: 'string', description: 'ISO time; alternative to delayMs.' },
         },
         required: ['type', 'sessionId', 'text'],
         additionalProperties: false,
@@ -1031,21 +1046,17 @@ export function buildMonitorMcpServer({ requestImpl }) {
     // ── Thread management ──
     {
       name: 'monitor_list_threads',
-      description: 'List collaboration threads in compact paginated form. Defaults to open threads only.',
+      description: 'List collaboration threads.',
       inputSchema: {
         type: 'object',
         properties: {
-          status: { type: 'string', description: 'Thread status filter: open, stale, closed, or all. Defaults to open.' },
-          limit: { type: 'integer', description: 'Maximum threads to return. Defaults to 25.' },
-          offset: { type: 'integer', description: 'Thread offset for pagination. Defaults to 0.' },
-          compact: { type: 'boolean', description: 'Return compact summaries by default. Set false for full thread metadata.' },
-          include_messages: { type: 'boolean', description: 'Include recent messages for returned threads.' },
-          message_limit: { type: 'integer', description: 'Maximum messages per thread when include_messages=true. Defaults to 10.' },
-          fields: {
-            type: 'array',
-            description: 'Optional list of thread fields to keep in each result.',
-            items: { type: 'string' },
-          },
+          status: { type: 'string', description: 'open (default), stale, closed or all.' },
+          limit: { type: 'integer', description: 'Default 25.' },
+          offset: { type: 'integer' },
+          compact: { type: 'boolean', description: 'false returns full metadata.' },
+          include_messages: { type: 'boolean' },
+          message_limit: { type: 'integer', description: 'Per thread. Default 10.' },
+          fields: { type: 'array', description: 'Thread fields to keep.', items: { type: 'string' } },
         },
         additionalProperties: false,
       },
@@ -1109,38 +1120,29 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'spawn_collab_session',
-      description: 'Spawn exactly two participants in one collaboration thread and inject the standard Cadre collaboration onboarding prompt into both sessions. Returns thread_id, participant ids/names and bootstrap failures.',
+      description: 'Start a collaboration thread with exactly two participants, both given the Cadre onboarding prompt. Returns thread_id, participant ids/names and bootstrap failures.',
       inputSchema: {
         type: 'object',
         properties: {
-          title: { type: 'string', description: 'Thread title' },
-          projectKey: { type: 'string', description: 'Project path/key for the collaboration thread' },
+          title: { type: 'string' },
+          projectKey: { type: 'string' },
           worktree: worktreeSchema,
-          workDir: { type: 'string', description: 'Default working directory for newly created sessions' },
-          initialTask: { type: 'string', description: 'Shared task for both participants' },
+          workDir: { type: 'string', description: 'Default for new sessions.' },
+          initialTask: { type: 'string', description: 'Shared task.' },
           model: MCP_AGENT_MODEL_SCHEMA,
-          thinkingLevel: { type: 'string', description: 'Optional default reasoning/effort level for newly created participants' },
+          thinkingLevel: { type: 'string', description: 'Default for new participants.' },
           ...MCP_SELECTION_SCHEMA_PROPERTIES,
           codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
           participants: {
             type: 'array',
             minItems: 2,
             maxItems: 2,
-            description: 'Exactly two participants. Each participant may attach an existing session via session_id or create a new one via provider/model.',
+            description: 'Attach session_id or create from provider/model; fields override top-level ones.',
             items: {
               type: 'object',
               properties: {
-                provider: MCP_PROVIDER_SCHEMA,
-                session_id: { type: 'string', description: 'Existing session id to attach instead of creating a new one.' },
-                create: { type: 'boolean', description: 'Create a new session when true. Defaults to true when session_id is omitted.' },
-                model: MCP_AGENT_MODEL_SCHEMA,
-                thinking_level: { type: 'string', description: 'Optional reasoning/effort override for a newly created participant.' },
-                display_name: { type: 'string', description: 'Optional display name for a newly created participant.' },
-                initial_task: { type: 'string', description: 'Optional participant-specific task.' },
-                work_dir: { type: 'string', description: 'Optional working directory override for this participant.' },
-                machine: { type: 'string', description: 'Optional paired machine for a new participant; its work_dir and the worktree repo are paths there.' },
-                ...MCP_SELECTION_SCHEMA_PROPERTIES,
-                codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
+                ...PARTICIPANT_PROPERTIES,
+                machine: { type: 'string', description: 'Paired machine for a new participant; work_dir and the worktree repo are paths there.' },
               },
               additionalProperties: false,
             },
@@ -1178,39 +1180,24 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'spawn_conference_session',
-      description: 'Spawn a multi-participant collaboration conference thread with two or more participants. Use this when you want a shared thread across N sessions. Returns thread_id, participant ids/names and bootstrap failures.',
+      description: 'Start a collaboration thread with two or more participants. Returns thread_id, participant ids/names and bootstrap failures.',
       inputSchema: {
         type: 'object',
         properties: {
-          title: { type: 'string', description: 'Conference thread title' },
-          projectKey: { type: 'string', description: 'Project path/key for the conference thread' },
+          title: { type: 'string' },
+          projectKey: { type: 'string' },
           worktree: worktreeSchema,
-          workDir: { type: 'string', description: 'Default working directory for newly created sessions' },
-          initialTask: { type: 'string', description: 'Shared task for the full conference' },
+          workDir: { type: 'string', description: 'Default for new sessions.' },
+          initialTask: { type: 'string', description: 'Shared task.' },
           model: MCP_AGENT_MODEL_SCHEMA,
-          thinkingLevel: { type: 'string', description: 'Optional default reasoning/effort level for newly created participants' },
+          thinkingLevel: { type: 'string', description: 'Default for new participants.' },
           ...MCP_SELECTION_SCHEMA_PROPERTIES,
           codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
           participants: {
             type: 'array',
             minItems: 2,
-            description: 'Conference participants. Each participant may attach an existing session or create a new one via provider/model.',
-            items: {
-              type: 'object',
-              properties: {
-                provider: MCP_PROVIDER_SCHEMA,
-                session_id: { type: 'string', description: 'Existing session id to attach instead of creating a new one.' },
-                create: { type: 'boolean', description: 'Create a new session when true. Defaults to true when session_id is omitted.' },
-                model: MCP_AGENT_MODEL_SCHEMA,
-                thinking_level: { type: 'string', description: 'Optional reasoning/effort override for a newly created participant.' },
-                display_name: { type: 'string', description: 'Optional display name for a newly created participant.' },
-                initial_task: { type: 'string', description: 'Optional participant-specific task.' },
-                work_dir: { type: 'string', description: 'Optional working directory override for this participant.' },
-                ...MCP_SELECTION_SCHEMA_PROPERTIES,
-                codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
-              },
-              additionalProperties: false,
-            },
+            description: 'Attach session_id or create from provider/model; fields override top-level ones.',
+            items: { type: 'object', properties: PARTICIPANT_PROPERTIES, additionalProperties: false },
           },
         },
         required: ['title', 'participants'],
@@ -1246,7 +1233,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     // ── Recording evidence ──
     {
       name: 'monitor_scan_audio_recordings',
-      description: 'Scan the configured audio recording inbox and ingest exported transcript/summary files as gated evidence packets. Returns recording ids/status and skipped errors.',
+      description: 'Ingest transcript/summary files from the audio inbox as gated evidence. Returns recording ids/status and skipped errors.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1260,14 +1247,14 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_list_audio_recordings',
-      description: 'List ingested audio recording manifests. Transcript and summary text are not included.',
+      description: 'List audio recording manifests (no transcript or summary text).',
       inputSchema: {
         type: 'object',
         properties: {
-          sourceTool: { type: 'string', description: 'Optional source tool filter.' },
-          tag: { type: 'string', description: 'Optional tag filter.' },
-          limit: { type: 'integer', description: 'Maximum records to return. Defaults to 25.' },
-          offset: { type: 'integer', description: 'Pagination offset. Defaults to 0.' },
+          sourceTool: { type: 'string' },
+          tag: { type: 'string' },
+          limit: { type: 'integer', description: 'Default 25.' },
+          offset: { type: 'integer' },
         },
         additionalProperties: false,
       },
@@ -1284,11 +1271,11 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_read_audio_recording',
-      description: 'Read one ingested audio recording manifest. Transcript and summary text are not included.',
+      description: 'Read one audio recording manifest (no transcript or summary text).',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Recording id or audio_recording evidence ref.' },
+          id: { type: 'string', description: 'Recording id or evidence ref.' },
         },
         required: ['id'],
         additionalProperties: false,
@@ -1298,11 +1285,11 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_read_audio_recording_evidence',
-      description: 'Read one gated audio recording evidence packet with verbatim, capped transcript/summary text.',
+      description: 'Read one recording\'s evidence packet: verbatim, capped transcript/summary.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Recording id.' },
+          id: { type: 'string' },
         },
         required: ['id'],
         additionalProperties: false,
@@ -1312,11 +1299,11 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'monitor_act_on_audio_recording',
-      description: 'Spawn a scoped action session for one recording. The prompt contains safe counts only; evidence is staged in the workdir. Returns recording id, session_id and status.',
+      description: 'Spawn a scoped action session for one recording; evidence is staged in its workdir, the prompt holds counts only. Returns id, session_id and status.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Recording id.' },
+          id: { type: 'string' },
         },
         required: ['id'],
         additionalProperties: false,
@@ -1330,23 +1317,23 @@ export function buildMonitorMcpServer({ requestImpl }) {
     // ── Claude Code cloud sessions (internal, undocumented endpoints; see cloud-sessions.mjs) ──
     {
       name: 'cloud_status',
-      description: 'List Claude Code cloud (anthropic_cloud) sessions with account usage, or get one session by id. Returns id, title, state (working|blocked|done|failed|stopped), detail, needs_action, branches, pr, url and cost_usd.',
+      description: 'List cloud sessions with account usage, or get one by id. Returns id, title, state, detail, needs_action, branches, pr, url and cost_usd.',
       inputSchema: {
         type: 'object',
-        properties: { id: { type: 'string', description: 'Cloud session id (session_… or cse_…). Omit to list.' } },
+        properties: { id: { type: 'string', description: 'Omit to list.' } },
         additionalProperties: false,
       },
       handler: async (args = {}) => cloudStatus(args),
     },
     {
       name: 'cloud_output',
-      description: 'Tail a Claude Code cloud session transcript as compact role/text lines. Returns lines, last_assistant_text and next_seq; pass next_seq back as after_seq to continue.',
+      description: 'Tail a cloud session transcript. Returns lines, last_assistant_text and next_seq; pass next_seq as after_seq to continue.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Cloud session id.' },
-          after_seq: { type: 'integer', minimum: 0, description: 'Return events after this sequence number. Omit for the newest events.' },
-          limit: { type: 'integer', minimum: 1, maximum: 200, description: 'Maximum events to read. Defaults to 50.' },
+          id: { type: 'string' },
+          after_seq: { type: 'integer', minimum: 0, description: 'Omit for the newest events.' },
+          limit: { type: 'integer', minimum: 1, maximum: 200, description: 'Default 50.' },
         },
         required: ['id'],
         additionalProperties: false,
@@ -1355,13 +1342,13 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'cloud_send',
-      description: 'Send a message to a Claude Code cloud session via `claude -p --cloud`. With wait_s > 0, wait up to wait_s seconds and return the reply; otherwise return once sent.',
+      description: 'Send a message to a cloud session. With wait_s > 0, waits up to wait_s seconds and returns the reply.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Cloud session id.' },
-          text: { type: 'string', minLength: 1, description: 'Message to send.' },
-          wait_s: { type: 'integer', minimum: 0, maximum: 600, description: 'Seconds to wait for the reply. Defaults to 0 (do not wait).' },
+          id: { type: 'string' },
+          text: { type: 'string', minLength: 1 },
+          wait_s: { type: 'integer', minimum: 0, maximum: 600, description: 'Default 0.' },
         },
         required: ['id', 'text'],
         additionalProperties: false,
@@ -1370,15 +1357,15 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'cloud_launch',
-      description: 'Launch a Claude Code cloud session on a GitHub repo, owned by you: Cadre DMs you when it blocks, fails, finishes or opens a PR (the PR is then registered with watch_pr). Returns id and url.',
+      description: 'Launch a Claude Code cloud session on a GitHub repo, owned by you: Cadre DMs you when it blocks, fails, finishes or opens a PR (then watched via watch_pr). Returns id and url.',
       inputSchema: {
         type: 'object',
         properties: {
-          prompt: { type: 'string', minLength: 1, description: 'First message for the session.' },
-          repo: { type: 'string', pattern: '^[\\w.-]+/[\\w.-]+$', description: 'GitHub owner/name.' },
-          ref: { type: 'string', minLength: 1, description: 'Branch, tag or commit to start from. Defaults to the repo default branch.' },
-          name: { type: 'string', minLength: 1, description: 'Session title. Defaults to the start of the prompt.' },
-          model: { type: 'string', minLength: 1, description: 'Model id. Defaults to the account default.' },
+          prompt: { type: 'string', minLength: 1 },
+          repo: { type: 'string', pattern: '^[\\w.-]+/[\\w.-]+$', description: 'owner/name.' },
+          ref: { type: 'string', minLength: 1, description: 'Default: repo default branch.' },
+          name: { type: 'string', minLength: 1, description: 'Session title.' },
+          model: { type: 'string', minLength: 1 },
         },
         required: ['prompt', 'repo'],
         additionalProperties: false,
@@ -1387,10 +1374,10 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'cloud_watch',
-      description: 'Become the owner of an existing Claude Code cloud session: Cadre DMs you when it blocks, fails, finishes or opens a PR. Returns id, state and status.',
+      description: 'Own an existing cloud session: Cadre DMs you when it blocks, fails, finishes or opens a PR. Returns id, state and status.',
       inputSchema: {
         type: 'object',
-        properties: { id: { type: 'string', minLength: 1, description: 'Cloud session id.' } },
+        properties: { id: { type: 'string', minLength: 1 } },
         required: ['id'],
         additionalProperties: false,
       },
@@ -1398,13 +1385,13 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'cloud_attach',
-      description: 'Add a Claude Code cloud session to a room you own or are in, or with title to a new room you own but are not in (pair it with a reviewer there, who reports the result; a solo cloud needs no room, it DMs you), and watch it as its owner. Room messages addressed to it (a reply to it, its id or title, @clouds) are sent to it; its new assistant replies are posted to the room as cloud:<id>. Returns id, thread_id and status.',
+      description: 'Add a cloud session you then own to a room you own or are in, or with title to a new room you own but are not in (pair it with a reviewer who reports; a solo cloud DMs you, no room needed). Messages addressed to it (reply, id, title, @clouds) reach it; its replies post as cloud:<id>. Returns id, thread_id and status.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', minLength: 1, description: 'Cloud session id.' },
-          thread_id: { type: 'string', minLength: 1, description: 'Room id. Pass this or title.' },
-          title: { type: 'string', minLength: 1, description: 'Title for a new room you own (you are not added to it). Pass this or thread_id.' },
+          id: { type: 'string', minLength: 1 },
+          thread_id: { type: 'string', minLength: 1, description: 'Pass this or title.' },
+          title: { type: 'string', minLength: 1, description: 'New room title. Pass this or thread_id.' },
         },
         required: ['id'],
         additionalProperties: false,
@@ -1413,12 +1400,12 @@ export function buildMonitorMcpServer({ requestImpl }) {
     },
     {
       name: 'cloud_detach',
-      description: 'Remove a Claude Code cloud session from a room you own or are in. Room messages stop reaching it and its replies stop being posted; the session keeps running. Returns id, thread_id and status.',
+      description: 'Remove a cloud session from a room you own or are in; it keeps running but stops exchanging room messages. Returns id, thread_id and status.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', minLength: 1, description: 'Cloud session id.' },
-          thread_id: { type: 'string', minLength: 1, description: 'Room id.' },
+          id: { type: 'string', minLength: 1 },
+          thread_id: { type: 'string', minLength: 1 },
         },
         required: ['id', 'thread_id'],
         additionalProperties: false,
@@ -1456,6 +1443,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
     'monitor_list_codex_sessions',
     'monitor_list_pi_sessions',
     'spawn_session',
+    'handoff_session',
     'monitor_terminate_session',
     'monitor_list_agent_providers',
     'monitor_list_mcp_servers',

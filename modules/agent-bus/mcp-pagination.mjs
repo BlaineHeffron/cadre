@@ -1,7 +1,7 @@
 export const DEFAULT_LIST_LIMIT = 25;
 export const PAGE_PROPERTIES = {
-  limit: { type: 'integer', minimum: 1, maximum: 200, description: 'Page size; defaults to 25.' },
-  offset: { type: 'integer', minimum: 0, description: 'Page offset; defaults to 0.' },
+  limit: { type: 'integer', minimum: 1, maximum: 200, description: 'Default 25.' },
+  offset: { type: 'integer', minimum: 0 },
 };
 
 export function normalizeLimit(value, fallback = DEFAULT_LIST_LIMIT) {

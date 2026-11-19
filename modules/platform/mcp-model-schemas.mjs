@@ -12,13 +12,10 @@ export const MCP_AGENT_MODELS = Object.freeze([...new Set([...MCP_CODEX_MODELS, 
 
 export const MCP_PROVIDER_SCHEMA = Object.freeze({
   type: 'string',
-  description: 'Agent provider ID from monitor_list_agent_providers.',
+  description: 'From monitor_list_agent_providers.',
 });
 
-export const MCP_AGENT_MODEL_SCHEMA = Object.freeze({
-  type: 'string',
-  description: 'Model ID from the server model catalog for the selected provider.',
-});
+export const MCP_AGENT_MODEL_SCHEMA = Object.freeze({ type: 'string' });
 
 export function assertMcpProviderModel(provider = '', model = '', { allowEmpty = true } = {}) {
   const normalizedProvider = normalizeAgentProvider(provider);

@@ -58,7 +58,9 @@ needs Ghidra or Hopper, which the fleet host does not install, so native tools
 report unavailable; report that limitation rather than installing an engine.
 Use the connected server's actual tool list and input schemas. Inspect
 `binary_session` with `{}` and its `result.tool_availability` for availability
-reasons; do not call an unadvertised tool. If tools are missing, a call is
+reasons; do not call an unadvertised tool. Its default summary keeps each
+provider candidate's status, code and reason; request `{"detail": "complete"}`
+only for an unavailable candidate's remediation or diagnostics. If tools are missing, a call is
 blocked, or a provider is unavailable, follow the connection and recovery guide
 below rather than retrying the unchanged call.
 
@@ -66,7 +68,7 @@ For an operator-supplied JavaScript tree or ASAR without the MCP server, the
 pinned CLI returns the same Evidence record directly:
 
 ```bash
-npx -y rea-agents@6.8.0 analyze-javascript-application /absolute/path/to/app --json
+npx -y rea-agents@6.9.0 analyze-javascript-application /absolute/path/to/app --json
 ```
 
 ## Route the target first
@@ -83,20 +85,38 @@ explicit path or endpoint and do not need it.
 - Android APK code, classes, methods, or incoming references:
   `inspect_android_package`, then focused Android tools when advertised.
   Archive member inventory still uses the archive route above.
+- Bun `--compile` or Deno `deno compile` executable: `open_binary`, then
+  `inspect_artifact`; the embedded module graph or virtual filesystem is the
+  application layer. Extract stored modules and analyze the JavaScript; the
+  executable is not run.
 - Managed PE/CLI assembly: `inspect_managed_artifact`.
 - Firmware image: `inspect_firmware_regions` when advertised. Use
   `extract_firmware` when extraction is requested, with a caller-selected new
   absolute output directory. These tools use caller-supplied Binwalk/Unblob on
-  Linux; see the [firmware guide](https://github.com/morluto/rea/blob/main/docs/firmware-analysis.md).
+  Linux; see the [firmware guide](https://github.com/morluto/rea/blob/main/docs/guides/firmware/firmware-analysis.md).
+- ESP32-family app or bootloader image (`0xE9` magic): `inspect_artifact`
+  without a provider.
 - .NET NativeAOT PE/ELF: native Ghidra analysis; see the NativeAOT section in
   the native guide below.
 - A single-format file (Go, Rust, PE tables, ELF notes, IL2CPP, `.pyc`, BEAM,
-  WASM, SQLite, model files, APK signatures, Apple resources): the engine-free
-  inspector listed in the native guide.
+  WASM, SQLite, model files, APK signatures, Apple resources, Windows `.lnk`
+  shortcuts, Linux kernel build config): the engine-free inspector listed in the
+  native guide. Go string literals need `include_string_literals: true`.
+- ELF/PE/Mach-O hardening, pre-`main`/exit initializers, or ELF unwind function
+  ranges: `inspect_binary_hardening`, `inspect_native_initializers`, or
+  `inspect_elf_unwind_ranges`. A missing import, table, or `.eh_frame` is
+  `unknown` or observed absence, not proof the protection or function is absent.
+- What a shipped `.app`, install directory, ASAR, or executable exposes to
+  static analysis: `audit_release_exposure`. Keep unknown and unassessed checks;
+  the report does not establish that the application is secure.
 - Native program behavior, live calls, or instrumentation: the native runtime
   section of the runtime guide. Static tools never observe execution.
 - User-owned browser page already open: `list_browser_targets`. A browser action
   the agent must perform: `capture_browser_scenario` with declared actions.
+  For passive SPA traffic, the default scope is the page origin; pass the page
+  origin and the API origins found in loaded bundles in `allowed_origins` (it
+  replaces the default), and read `completeness.excluded` before reporting an
+  API absent.
 - Retained HAR/SAZ/qlog capture: `inspect_web_network_capture`; it never fetches
   recorded URLs.
 - User-owned Electron runtime already open: `list_electron_targets`.
@@ -115,7 +135,9 @@ For a target of unknown or large size, request `detail: "summary"` where
 advertised and page the returned `parent_evidence_id` with
 `inspect_analysis_view`. Over MCP, `analyze_function` already replies with a
 summary. When the parent ID is unknown, `get_evidence_bundle` with
-`detail: "summary"` and exact filters finds it. A client-truncated reply is
+`detail: "summary"` and exact filters finds it. A record with no supported view
+(such as an annotation) is read with `detail: "records"` and an `evidence_id`
+filter. A client-truncated reply is
 incomplete: page the retained parent or export it, never parse the preview or
 rerun the producer. Do not repeat an identical tool call. Make a focused follow-up only when the
 returned result leaves a specific question unanswered.
@@ -163,8 +185,10 @@ as complete while required questions remain open.
 Explain findings in plain language and tie them to returned evidence. When the
 user asks to build something, use normal coding tools, work from your written
 specification rather than the decompiled output, and separate observed behavior
-from design choices. Close an opened native session with `close_binary` when the
-investigation is complete.
+from design choices. Close an opened native session with `close_binary` when its
+engine is no longer needed; Evidence and Unknown history stay on the connection.
+End the investigation with `reset_investigation`, passing `save_path` to
+checkpoint the bundle first when a later process must restore it.
 
 ## Target guides
 
@@ -182,4 +206,4 @@ The guides below are inlined; read only the one for your target.
 
 {{skill:rea-connection-and-recovery}}
 
-<!-- upstream: morluto/rea@160d821 .agents/skills/reverse-engineer-anything/SKILL.md -->
+<!-- upstream: morluto/rea@d74549e .agents/skills/reverse-engineer-anything/SKILL.md -->

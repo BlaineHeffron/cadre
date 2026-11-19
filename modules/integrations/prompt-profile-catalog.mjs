@@ -135,7 +135,7 @@ Plan, delegate, supervise, and report work for the operator. The operator watche
 ## Running workers
 
 - Verify PR heads with \`bash scripts/verify-heads.sh <sha>...\` before reporting them ready.
-- Default collab pairing: a codex gpt-6.1-sol implementer with a claude opus reviewer; use two claudes for Codex-delivery work.
+- Collab pairs: gpt-6.1-sol or Claude implementer with a claude-fable-5-2 reviewer; theorist/coder pairs get a Fable theorist.
 - Collab task files hold only scope, acceptance, and PR title; Cadre injects the workflow and AGENTS.md the repo rules (see Cadre's \`docs/collab-task-template.md\`).
 - Send findings on a collab's work to its reviewer; the reviewer forwards accepted ones to the implementer.
 - Claude Code: after a Cadre deploy, reconnect the dueno MCP (\`/mcp\`) before using room tools; tool definitions are cached per session.
@@ -294,13 +294,9 @@ export function buildPromptProfileCatalog({ sourceConfig = config } = {}) {
   });
 }
 
-export function buildPromptProfileFieldSchema(description = 'Optional style prompt profile ID. Default none. Prompt bodies are not included; call monitor_list_prompt_profiles for labels.') {
-  const catalog = getPublicPromptProfileCatalog();
-  return {
-    type: 'string',
-    enum: catalog.profiles.map((entry) => entry.id),
-    description: `${description} Options: ${catalog.profiles.map((entry) => `${entry.id} (${entry.description})`).join('; ')}`,
-  };
+// The enum carries the IDs; monitor_list_prompt_profiles describes them, so the schema does not repeat that.
+export function buildPromptProfileFieldSchema(description = 'From monitor_list_prompt_profiles. Default none.') {
+  return { type: 'string', enum: getPublicPromptProfileCatalog().profiles.map((entry) => entry.id), description };
 }
 
 export function getPublicPromptProfileCatalog(options = {}) {

@@ -211,6 +211,8 @@ function reduceSessionEvent(session, event) {
   } else if (event.type === 'interaction.updated') {
     const interaction = session.interactions.find((item) => item.interactionId === data.interactionId);
     if (interaction) Object.assign(interaction, clone(data.patch || {}));
+  } else if (event.type === 'session.metadata') {
+    session.metadata = { ...session.metadata, ...clone(data.metadata || {}) };
   } else if (event.type === 'transcript.appended') {
     session.transcript.push(clone(data.entry));
   } else if (event.type === 'diagnostic.appended') {
@@ -819,6 +821,17 @@ export class SessionService {
     }
     // A runtime that did not exit keeps its handle, so a later terminate or resume reaps it first.
     return verdict;
+  }
+
+  // Merges fields into a session's metadata (an ended session too), e.g. the link to the session it was handed off to.
+  async updateMetadata(sessionId, metadata = {}) {
+    const id = String(sessionId || '');
+    return this.#withCommandLock(id, async () => {
+      const session = this.sessions.get(id);
+      if (!session) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found', statusCode: 404 });
+      await this.#append(session, 'session.metadata', { metadata });
+      return this.#public(session);
+    });
   }
 
   async delete(sessionId, { grace = 500, reason = 'deleted' } = {}) {

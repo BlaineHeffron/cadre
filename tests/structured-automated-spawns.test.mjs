@@ -109,6 +109,7 @@ async function waitFor(check, timeoutMs = 5000) {
 
 const PRINCIPALS = {
   agent: { authenticated: true, principal: { type: 'agent', kind: 'claude', sessionId: 'parent-1' } },
+  otherAgent: { authenticated: true, principal: { type: 'agent', kind: 'claude', sessionId: 'parent-2' } },
   ui: { authenticated: true, principal: { type: 'ui', kind: 'dashboard', sessionId: 'browser' } },
   coordinator: {
     authenticated: true, principal: { type: 'service', kind: 'scheduled-agent-pump', sessionId: 'sched-1' },
@@ -426,6 +427,67 @@ describe('structured automated spawns', () => {
       await request('POST', `/api/claude/sessions/${explicit.json().id}/input`, { payload: { text: 'run tests', source: 'agent_bus' } });
       await waitFor(() => getProtocolSessionProvider('claude').service.get(explicit.json().id).interactions.length === 1);
       assert.equal(getProtocolSessionProvider('claude').service.get(explicit.json().id).interactions[0].status, 'open');
+    } finally {
+      await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('hands a structured worker off through handoff_session, linking both and leaving the source idle', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, transports, request, mcp } = await buildApp();
+    try {
+      const busy = (await mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, initialPrompt: 'long task: port the parser' })).participants[0].session_id;
+      // Mid-turn: refused, and nothing new starts.
+      await waitFor(() => typeof transports[0].finishTurn === 'function');
+      await assert.rejects(mcp.handleToolCall('handoff_session', { session_id: busy, provider: 'claude' }), /mid-turn/);
+      assert.equal(transports.length, 1);
+      transports[0].finishTurn();
+      await waitFor(async () => (await request('GET', `/api/claude/sessions/${busy}`)).json().state.status === 'ready');
+
+      const result = await mcp.handleToolCall('handoff_session', { session_id: busy, provider: 'claude', model: 'claude-sonnet-5-5' });
+      assert.equal(transports.length, 2);
+      const brief = transports[1].prompts[0][0].text;
+      assert.match(brief, new RegExp(`^Handoff from Cadre session ${busy} \\(provider claude`));
+      assert.match(brief, /## Original task\n\nlong task: port the parser/);
+      assert.match(brief, /### Assistant\n\nStructured reply/);
+      assert.equal(brief.includes('## Working tree'), false);
+      assert.match(brief, /Continue this work from here\. The previous session is paused; verify the working tree before acting\./);
+      assert.equal(transports[1].spec.workDir, workDir);
+      const source = (await request('GET', `/api/claude/sessions/${busy}`)).json();
+      const target = (await request('GET', `/api/claude/sessions/${result.session_id}`)).json();
+      assert.equal(target.model, 'claude-sonnet-5-5');
+      assert.deepEqual(source.handoffTo, { sessionId: result.session_id, kind: 'claude', provider: 'claude', model: 'claude-sonnet-5-5' });
+      assert.equal(target.handoffFrom.sessionId, busy);
+      assert.equal(source.state.status, 'ready');
+      assert.equal(source.sessionEnded, false);
+      assert.deepEqual(source.spawner, { kind: 'claude', sessionId: 'parent-1' });
+    } finally {
+      await app.close();
+      delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;
+    }
+  });
+
+  it('lets an agent hand off only sessions it spawned, and the operator any', async () => {
+    process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS = 'claude';
+    const { app, transports, request, mcp } = await buildApp();
+    try {
+      // Another agent's worker: parent-1 (the MCP caller here) did not spawn it.
+      const foreign = (await request('POST', '/api/claude/sessions', { principal: 'otherAgent', payload: { structured: true, workDir, initialPrompt: 'other work' } })).json().id;
+      await waitFor(async () => (await request('GET', `/api/claude/sessions/${foreign}`)).json().state.status === 'ready');
+      assert.deepEqual((await request('GET', `/api/claude/sessions/${foreign}`)).json().spawner, { kind: 'claude', sessionId: 'parent-2' });
+      await assert.rejects(mcp.handleToolCall('handoff_session', { session_id: foreign, provider: 'claude' }),
+        (error) => error.payload?.code === 'handoff_not_owner' && error.statusCode === 403);
+      // Nor can it get around the tool through the HTTP route with its own credential.
+      const direct = await request('POST', `/api/agents/sessions/${foreign}/handoff`, { payload: { provider: 'claude' } });
+      assert.deepEqual([direct.statusCode, direct.json().code], [403, 'handoff_not_owner']);
+      assert.equal(transports.length, 1);
+      assert.equal((await request('GET', `/api/claude/sessions/${foreign}`)).json().handoffTo, null);
+
+      // The operator's route is not restricted.
+      const operator = await request('POST', `/api/agents/sessions/${foreign}/handoff`, { principal: 'ui', payload: { provider: 'claude' } });
+      assert.equal(operator.statusCode, 200, operator.body);
+      assert.equal((await request('GET', `/api/claude/sessions/${foreign}`)).json().handoffTo.sessionId, operator.json().id);
     } finally {
       await app.close();
       delete process.env.CADRE_STRUCTURED_AUTOMATED_SPAWNS;

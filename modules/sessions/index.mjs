@@ -1826,6 +1826,18 @@ async function getSessionState(session, { forceRefresh = false } = {}) {
   return { state: projectCanonicalState(snapshot), canonicalState: snapshot, attention: null };
 }
 
+// What a handoff carries to the next session, and the links between the two.
+function sessionLaunchSelection(meta = {}) {
+  return {
+    mcpCapabilities: meta.mcpCapabilities ? { profileId: meta.mcpCapabilities.profileId, serverIds: meta.mcpCapabilities.serverIds } : null,
+    promptProfile: meta.promptProfile?.profileId || '',
+    skills: meta.skills || [],
+    handoffFrom: meta.metadata?.handoffFrom || null,
+    handoffTo: meta.metadata?.handoffTo || null,
+    spawner: meta.metadata?.spawner || meta.metadata?.spawnedBy || null,
+  };
+}
+
 function buildEndedSessionListEntry(id, meta = {}) {
   const sessionName = meta.tmuxSession || tmuxNameFromExternalSessionId(id) || `${config.tmuxPrefix}-${id}`;
   const cliSessionId = normalizeText(meta.cliSessionId || meta.sessionId || meta.metadata?.cliSessionId);
@@ -2794,7 +2806,8 @@ async function sessionsPlugin(app, {
     const meta = sessions.get(id);
     if (!meta) return reply.code(404).send({ error: `Session not found: ${id}` });
 
-    meta.displayName = normalizeDisplayName(req.body?.displayName);
+    if (req.body?.handoffTo) meta.metadata = { ...meta.metadata, handoffTo: req.body.handoffTo };
+    else meta.displayName = normalizeDisplayName(req.body?.displayName);
     sessions.set(id, meta);
     invalidateSessionCaches();
     await persistSessions();
@@ -2852,6 +2865,7 @@ async function sessionsPlugin(app, {
         pendingResponse,
         lines,
         controlProvenance: sessionControlProvenance(detailMeta),
+        ...sessionLaunchSelection(detailMeta),
       };
     } catch (err) {
       if (err.code === 'session_not_found' || err.statusCode === 404) {
@@ -2885,6 +2899,7 @@ async function sessionsPlugin(app, {
           attention: null,
           lines,
           controlProvenance: sessionControlProvenance(detailMeta),
+          ...sessionLaunchSelection(detailMeta),
         };
       }
       return reply.code(err.statusCode || 500).send({ error: err.message, code: err.code || null });

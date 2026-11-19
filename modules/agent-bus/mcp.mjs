@@ -46,6 +46,7 @@ const AGENT_PERMISSION_AUTHORITY_TOOLS = new Set([
 const AGENT_PRIVILEGED_CONTROL_TOOLS = new Set([
   'spawn_session',
   'spawn_collab_session',
+  'handoff_session',
   'register_scheduled_agent',
   'monitor_step_scheduled_agents',
   'monitor_terminate_session',
@@ -401,8 +402,8 @@ export function buildAgentBusMcpServer({
     if (name === 'monitor_list_threads' && args.include_messages === true) {
       await rejectAuthorization(context, name, 'coordinator_thread_messages_denied', 'Coordinators cannot read thread messages through monitor_list_threads');
     }
-    if (!['monitor_get_session_output', 'monitor_send_to_session', 'monitor_terminate_session'].includes(name)) return;
-    const terminate = name === 'monitor_terminate_session';
+    if (!['monitor_get_session_output', 'monitor_send_to_session', 'monitor_terminate_session', 'handoff_session'].includes(name)) return;
+    const terminate = ['monitor_terminate_session', 'handoff_session'].includes(name);
     const id = String(terminate ? args.session_id || '' : args.sessionId || '').trim();
     let matches;
     if (terminate) {

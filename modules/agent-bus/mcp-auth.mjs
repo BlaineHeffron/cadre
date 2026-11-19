@@ -22,6 +22,7 @@ export const AGENT_SPAWN_TOOL_SCOPES = Object.freeze([
   'monitor_run_agent_task',
   'register_scheduled_agent',
   'spawn_loop_session',
+  'handoff_session',
 ]);
 export const AGENT_BUS_AGENT_TOOL_SCOPES = Object.freeze([
   'mcp:discover',
