@@ -14,6 +14,9 @@ import {
   updateAgentProviderPreferences,
 } from '../modules/agent/provider-preferences.mjs';
 
+// Hermetic: agy may be installed on the host, and its availability gates the provider list.
+process.env.AGY_BIN = '/nonexistent/agy';
+
 const tempDirs = [];
 
 afterEach(async () => {

@@ -150,7 +150,7 @@ function hasObservedClearReset(previousContent = '', currentContent = '') {
 
 const TOOL_BUSY_STATES = new Set(['working', 'thinking', 'needs_approval', 'needs_confirmation']);
 
-const HARNESS_KINDS = ['claude', 'codex', 'deepseek', 'pi'];
+const HARNESS_KINDS = ['claude', 'codex', 'deepseek', 'pi', 'agy'];
 
 function byKind(factory) {
   return Object.fromEntries(HARNESS_KINDS.map((kind) => [kind, factory(kind)]));

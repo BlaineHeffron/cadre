@@ -1,5 +1,5 @@
 import { api } from './api.mjs';
-import { setClaudeSessions, setCodexSessions, setDeepseekSessions, setPiSessions } from './state.mjs';
+import { setAgySessions, setClaudeSessions, setCodexSessions, setDeepseekSessions, setPiSessions } from './state.mjs';
 
 export function normalizeProvider(provider = '') {
   const normalized = String(provider || '').trim().toLowerCase();
@@ -27,7 +27,7 @@ export function sessionCreatedAt(session) {
   return value > 1e12 ? value : value * 1000;
 }
 
-export function buildUnifiedAgentSessions({ claudeSessions = [], codexSessions = [], deepseekSessions = [], piSessions = [], provider = 'all' } = {}) {
+export function buildUnifiedAgentSessions({ claudeSessions = [], codexSessions = [], deepseekSessions = [], piSessions = [], agySessions = [], provider = 'all' } = {}) {
   const sessionMap = new Map();
   for (const session of [
     ...codexSessions.map((entry) => ({
@@ -45,6 +45,7 @@ export function buildUnifiedAgentSessions({ claudeSessions = [], codexSessions =
       _kind: 'pi',
       _provider: normalizeProvider(entry.provider),
     })),
+    ...agySessions.map((entry) => ({ ...entry, _kind: 'agy', _provider: 'agy' })),
     ...deepseekSessions.map((entry) => ({
       ...entry,
       _kind: 'deepseek',
@@ -68,12 +69,15 @@ export function buildUnifiedAgentSessions({ claudeSessions = [], codexSessions =
 }
 
 export async function loadUnifiedAgentSessions() {
-  const [claudeData, codexData, deepseekData, piData] = await Promise.all([
+  const [claudeData, codexData, deepseekData, piData, agyData] = await Promise.all([
     api.get('/claude/sessions'),
     api.get('/codex/sessions'),
     api.get('/deepseek/sessions'),
     api.get('/pi/sessions'),
+    api.get('/agy/sessions'),
   ]);
+  const nextAgySessions = agyData?.sessions || [];
+  setAgySessions(nextAgySessions);
   const nextClaudeSessions = claudeData?.sessions || [];
   const nextCodexSessions = codexData?.sessions || [];
   const nextPiSessions = piData?.sessions || [];
@@ -87,6 +91,7 @@ export async function loadUnifiedAgentSessions() {
     codexSessions: nextCodexSessions,
     piSessions: nextPiSessions,
     deepseekSessions: nextDeepseekSessions,
+    agySessions: nextAgySessions,
   });
 }
 

@@ -16,6 +16,7 @@ import {
   codexSessions,
   deepseekSessions,
   piSessions,
+  agySessions,
   removeSessionForKind,
   sessionDisplayStatus,
   wsConnected,
@@ -329,6 +330,7 @@ export function AgentsPage({ focus = '' } = {}) {
   const killCodexSession = useMemo(() => makeKillSession(loading, loadError, 'codex'), []);
   const killDeepseekSession = useMemo(() => makeKillSession(loading, loadError, 'deepseek'), []);
   const killPiSession = useMemo(() => makeKillSession(loading, loadError, 'pi'), []);
+  const killAgySession = useMemo(() => makeKillSession(loading, loadError, 'agy'), []);
   const resumeSession = useMemo(() => makeResumeSession(loading, loadError), []);
   const startFreshSession = useMemo(() => makeStartFreshSession(loading, loadError), []);
 
@@ -451,8 +453,9 @@ export function AgentsPage({ focus = '' } = {}) {
     codexSessions: codexSessions.value,
     deepseekSessions: deepseekSessions.value,
     piSessions: piSessions.value,
+    agySessions: agySessions.value,
   });
-  const recentDirs = recentWorkDirs([claudeSessions.value, codexSessions.value, deepseekSessions.value, piSessions.value]);
+  const recentDirs = recentWorkDirs([claudeSessions.value, codexSessions.value, deepseekSessions.value, piSessions.value, agySessions.value]);
   const workDirOptions = Array.from(new Set(
     allSessions
       .map((session) => String(session.workDir || '').trim())
@@ -1085,6 +1088,8 @@ export function AgentsPage({ focus = '' } = {}) {
                       ? killClaudeSession
                       : session._kind === 'pi'
                         ? killPiSession
+                      : session._kind === 'agy'
+                        ? killAgySession
                         : session._kind === 'deepseek'
                           ? killDeepseekSession
                           : killCodexSession}

@@ -21,6 +21,8 @@ import {
   setCodexSessions,
   setDeepseekSessions,
   setPiSessions,
+  setAgySessions,
+  agySessions,
   upsertPromptNotificationFromAlert,
   hasSeenPromptNotification,
 } from './state.mjs';
@@ -80,11 +82,13 @@ function isActiveVisibleRoute(targetRoute) {
 }
 
 function promptNotificationTitle(kind, sessionId, fallback = '') {
-  const label = kind === 'claude' ? 'Claude' : kind === 'pi' ? 'Pi' : kind === 'deepseek' ? 'DeepSeek Harness' : 'Codex';
+  const label = kind === 'claude' ? 'Claude' : kind === 'pi' ? 'Pi' : kind === 'agy' ? 'Antigravity' : kind === 'deepseek' ? 'DeepSeek Harness' : 'Codex';
   const sessionStore = kind === 'claude'
     ? claudeSessions
     : kind === 'pi'
       ? piSessions
+      : kind === 'agy'
+        ? agySessions
       : kind === 'deepseek'
         ? deepseekSessions
         : codexSessions;
@@ -109,6 +113,7 @@ function App({ onRouteChange }) {
         <${SessionRoute} path="/codex/:id" provider="codex" />
         <${CodexSessionsPage} path="/codex" />
         <${SessionRoute} path="/pi/:id" provider="pi" />
+        <${SessionRoute} path="/agy/:id" provider="agy" />
         <${SessionRoute} path="/deepseek/:id" provider="deepseek" />
         <${AgentCollabPage} path="/collab/:id?" />
         <${ScheduledAgentsPage} path="/scheduled-agents" />
@@ -162,11 +167,15 @@ subscribe('pi:sessions', (type, data) => {
   if (type === 'sessions' && data?.sessions) setPiSessions(data.sessions);
 });
 
+subscribe('agy:sessions', (type, data) => {
+  if (type === 'sessions' && data?.sessions) setAgySessions(data.sessions);
+});
+
 subscribe('deepseek:sessions', (type, data) => {
   if (type === 'sessions' && data?.sessions) setDeepseekSessions(data.sessions);
 });
 
-for (const kind of ['claude', 'codex', 'pi']) {
+for (const kind of ['claude', 'codex', 'pi', 'agy']) {
   subscribe(`${kind}:alerts`, (type, data) => {
     if (type !== 'alert' || !data) return;
     const route = data.route || `/${kind}/${data.sessionId}`;

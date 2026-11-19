@@ -31,6 +31,10 @@ export const codexPromptNotifications = signal([]);
 export const piSessions = signal([]);
 export const piPromptNotifications = signal([]);
 
+// Antigravity CLI (agy) sessions
+export const agySessions = signal([]);
+export const agyPromptNotifications = signal([]);
+
 // DeepSeek Harness ACP sessions
 export const deepseekSessions = signal([]);
 export const deepseekPromptNotifications = signal([]);
@@ -52,10 +56,12 @@ export const seenSessionIds = signal(loadSeen());
 export const seenCodexSessionIds = signal(loadSeen('dueno_seen_codex_sessions'));
 export const seenPiSessionIds = signal(loadSeen('dueno_seen_pi_sessions'));
 export const seenDeepseekSessionIds = signal(loadSeen('dueno_seen_deepseek_sessions'));
+export const seenAgySessionIds = signal(loadSeen('dueno_seen_agy_sessions'));
 export const seenClaudePromptNotificationKeys = signal(loadSeen(CLAUDE_ATTENTION_SEEN_KEY));
 export const seenCodexPromptNotificationKeys = signal(loadSeen(CODEX_ATTENTION_SEEN_KEY));
 export const seenPiPromptNotificationKeys = signal(loadSeen('dueno_seen_pi_prompt_notifications'));
 export const seenDeepseekPromptNotificationKeys = signal(loadSeen('dueno_seen_deepseek_prompt_notifications'));
+export const seenAgyPromptNotificationKeys = signal(loadSeen('dueno_seen_agy_prompt_notifications'));
 
 // Last completed turn viewed on this device, independent of server state.
 const DONE_SEEN_KEY = 'dueno_seen_completed_turns';
@@ -78,7 +84,7 @@ export function markSessionTurnSeen(kind, session) {
 }
 
 export const unseenDoneCount = computed(() =>
-  ['claude', 'codex', 'pi', 'deepseek'].reduce((count, kind) => count
+  ['claude', 'codex', 'pi', 'agy', 'deepseek'].reduce((count, kind) => count
     + sessionStoreForKind(kind).value.filter((session) => sessionDisplayStatus(kind, session) === 'done').length, 0)
 );
 
@@ -117,6 +123,7 @@ export const deepseekNeedsInput = computed(() =>
 export function sessionStoreForKind(kind) {
   if (kind === 'claude') return claudeSessions;
   if (kind === 'pi') return piSessions;
+  if (kind === 'agy') return agySessions;
   if (kind === 'deepseek') return deepseekSessions;
   return codexSessions;
 }
@@ -124,6 +131,7 @@ export function sessionStoreForKind(kind) {
 export function seenSessionStoreForKind(kind) {
   if (kind === 'claude') return seenSessionIds;
   if (kind === 'pi') return seenPiSessionIds;
+  if (kind === 'agy') return seenAgySessionIds;
   if (kind === 'deepseek') return seenDeepseekSessionIds;
   return seenCodexSessionIds;
 }
@@ -131,6 +139,7 @@ export function seenSessionStoreForKind(kind) {
 function seenPromptStoreForKind(kind) {
   if (kind === 'claude') return seenClaudePromptNotificationKeys;
   if (kind === 'pi') return seenPiPromptNotificationKeys;
+  if (kind === 'agy') return seenAgyPromptNotificationKeys;
   if (kind === 'deepseek') return seenDeepseekPromptNotificationKeys;
   return seenCodexPromptNotificationKeys;
 }
@@ -138,6 +147,7 @@ function seenPromptStoreForKind(kind) {
 function promptNotificationsStoreForKind(kind) {
   if (kind === 'claude') return claudePromptNotifications;
   if (kind === 'pi') return piPromptNotifications;
+  if (kind === 'agy') return agyPromptNotifications;
   if (kind === 'deepseek') return deepseekPromptNotifications;
   return codexPromptNotifications;
 }
@@ -155,6 +165,11 @@ export function setCodexSessions(sessions) {
 export function setPiSessions(sessions) {
   piSessions.value = Array.isArray(sessions) ? sessions : [];
   pruneSeenSessionsForKind('pi');
+}
+
+export function setAgySessions(sessions) {
+  agySessions.value = Array.isArray(sessions) ? sessions : [];
+  pruneSeenSessionsForKind('agy');
 }
 
 export function setDeepseekSessions(sessions) {
@@ -252,7 +267,7 @@ export const unseenDeepseekSessionCount = computed(() =>
 );
 
 export const sessionPromptNotifications = computed(() =>
-  [...claudePromptNotifications.value, ...codexPromptNotifications.value, ...piPromptNotifications.value, ...deepseekPromptNotifications.value]
+  [...claudePromptNotifications.value, ...codexPromptNotifications.value, ...piPromptNotifications.value, ...agyPromptNotifications.value, ...deepseekPromptNotifications.value]
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
 );
 export const unseenSessionPromptNotificationCount = computed(() =>
@@ -282,6 +297,8 @@ export const state = {
   claudePromptNotifications,
   codexPromptNotifications,
   piPromptNotifications,
+  agySessions,
+  agyPromptNotifications,
   deepseekPromptNotifications,
   sessionPromptNotifications,
   unseenSessionPromptNotificationCount,

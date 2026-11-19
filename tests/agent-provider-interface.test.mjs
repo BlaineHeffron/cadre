@@ -104,6 +104,8 @@ describe('Agent provider interface', () => {
     );
     assert.throws(() => resolveAgentProviderSelection({ provider: 'antigravity' }), /or openrouter$/);
     assert.equal(isModelCompatibleWithProvider('antigravity', 'gemini-4-argon-high'), false);
+    // Gemini 4 now belongs to Google's Antigravity CLI provider.
+    assert.equal(inferAgentProviderFromModel('gemini-4-argon-high'), 'agy');
     assert.equal(inferAgentProviderFromModel('gemini-3.5-flash'), 'google');
     assert.equal(inferAgentProviderFromModel('glm-5.2'), 'opencode-go');
     assert.equal(inferAgentProviderFromModel('kimi-k3'), 'opencode-go');
@@ -121,7 +123,7 @@ describe('Agent provider interface', () => {
     assert.equal(resolveAgentBackendType('gsd'), '');
 
     // `pi` stays an invalid provider id: it names a backend, not one of its providers.
-    assert.throws(() => resolveAgentProviderSelection({ provider: 'pi' }), /deepseek, xai, google, opencode-go, or openrouter/);
+    assert.throws(() => resolveAgentProviderSelection({ provider: 'pi' }), /deepseek, agy, xai, google, opencode-go, or openrouter/);
   });
 
   it('rejects unknown Pi provider typos', () => {

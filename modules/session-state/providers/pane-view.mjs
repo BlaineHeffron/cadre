@@ -61,6 +61,8 @@ function isProviderFooter(provider, line) {
     return /^[a-z][a-z0-9_.-]*\s+(?:minimal|low|medium|high|xhigh|max)\s+·/i.test(line)
       || /\b\d+% left\b/i.test(line);
   }
+  // agy's status row: "<hint>  auto · Gemini 4 Neon · medium".
+  if (provider === 'agy') return /\s·\s[^·]+\s·\s(?:low|medium|high|xhigh|max)$/i.test(line);
   return false;
 }
 

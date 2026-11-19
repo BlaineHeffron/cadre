@@ -19,6 +19,7 @@ import { routeRemoteSessionCommands } from './modules/sessions/index.mjs';
 import { codexSessionsPlugin } from './modules/sessions/codex-sessions.mjs';
 import { createCodexAppServerSessionProvider } from './modules/sessions/codex-app-server-sessions.mjs';
 import { getPiProviderHealth, piSessionsPlugin } from './modules/sessions/pi-sessions.mjs';
+import { agySessionsPlugin } from './modules/sessions/agy-sessions.mjs';
 import { deepseekSessionsPlugin, getDeepSeekProviderHealth } from './modules/sessions/deepseek-sessions.mjs';
 import { agentInterfacePlugin } from './modules/agent/interface.mjs';
 import { agentBusPlugin } from './modules/agent-bus/index.mjs';
@@ -174,6 +175,9 @@ app.addHook('onClose', () => codexAppServer.close());
 
 // Pi coding-agent sessions (multi-provider, non-Anthropic models)
 await app.register(piSessionsPlugin, { wsManager, sessionDeliveryAuditStore });
+
+// Google Antigravity CLI sessions (interactive `agy` in tmux; enabled when the binary is installed)
+await app.register(agySessionsPlugin, { wsManager, sessionDeliveryAuditStore });
 
 // DeepSeek Harness sessions (ACP JSON-RPC over stdio; no tmux transport)
 await app.register(deepseekSessionsPlugin, { wsManager, sessionDeliveryAuditStore });

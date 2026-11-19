@@ -8,8 +8,9 @@ export const MCP_CATALOG_VERSION = 1;
 
 const NATIVE_MCP_PROVIDERS = Object.freeze(['claude', 'codex', 'xai', 'google', 'opencode-go', 'openrouter']);
 const NATIVE_MCP_RUNTIMES = Object.freeze(['claude', 'codex', 'pi']);
-const DUENO_MCP_PROVIDERS = Object.freeze([...NATIVE_MCP_PROVIDERS, 'deepseek']);
-const DUENO_MCP_RUNTIMES = Object.freeze([...NATIVE_MCP_RUNTIMES, 'deepseek']);
+// agy takes Cadre's dueno server only; other servers would each need an agy config branch.
+const DUENO_MCP_PROVIDERS = Object.freeze([...NATIVE_MCP_PROVIDERS, 'deepseek', 'agy']);
+const DUENO_MCP_RUNTIMES = Object.freeze([...NATIVE_MCP_RUNTIMES, 'deepseek', 'agy']);
 
 const SERVER_DEFINITIONS = Object.freeze([
   server({
