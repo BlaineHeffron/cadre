@@ -133,6 +133,16 @@ describe('agy sessions', () => {
     assert.deepEqual(result.response.body.warnings || [], []);
   });
 
+  it('gives a session without dueno the event hooks only: no MCP config, rule or priming turn', async () => {
+    const result = await runScenario({ action: 'create', dueno: false });
+    assert.equal(result.response.statusCode, 200, JSON.stringify(result.response.body));
+    const pane = result.tmuxArgs.at(-1);
+    assert.ok(pane.includes(`'--add-dir' '${join(result.stateDir, 'mcp_client_configs', `agy-${result.response.body.id}`)}'`));
+    assert.doesNotMatch(pane, /cadre:connect/);
+    assert.deepEqual(Object.keys(JSON.parse(result.hooks)), ['cadre-events']);
+    assert.deepEqual([result.mcpConfig, result.rule], ['', '']);
+  });
+
   it('resumes the workDir conversation with --continue when no conversation id is known', async () => {
     const result = await runScenario({ action: 'resume' });
     assert.equal(result.response.statusCode, 200, JSON.stringify(result.response.body));
@@ -211,9 +221,13 @@ describe('agy sessions', () => {
     await writeFile(transcriptPath, `${step('PLANNER_RESPONSE', { content: 'Partial.' })}\n`, { flag: 'a' });
     await send(events.Stop[0], { hookEventName: 'Stop', lastUserInput: 'Next', terminationReason: 'USER_CANCELED', fullyIdle: true });
     await send(events.Stop[0], { hookEventName: 'Stop', lastUserInput: 'Next', terminationReason: 'NO_TOOL_CALL', fullyIdle: false });
-    const tail = (await readHookEventsSince(hookFile)).events.slice(-3);
-    assert.deepEqual(tail.map((event) => event.lastAssistantMessage), ['', '', 'Partial.']);
+    // An error is reported to a waiting spawner rather than leaving it waiting.
+    await send(events.Stop[0], { hookEventName: 'Stop', lastUserInput: 'Next', terminationReason: 'ERROR', error: 'quota exceeded', fullyIdle: true });
+    const tail = (await readHookEventsSince(hookFile)).events.slice(-4);
+    assert.deepEqual(tail.map((event) => event.lastAssistantMessage), ['', '', 'Partial.', 'agy stopped with an error: quota exceeded']);
     assert.deepEqual(tail[2].payload.background_tasks, ['agy']);
+    // The prompt is logged once per turn, not on every model call or stop.
+    assert.deepEqual(logged.map((event) => event.payload.prompt), ['List rooms', undefined, undefined]);
   });
 
   it('rejects models agy does not list and reports a missing binary', async () => {
@@ -224,7 +238,7 @@ describe('agy sessions', () => {
   });
 });
 
-async function runScenario({ action, model = 'gemini-4-neon-medium', agyMode = 'ready', extra = {}, stored = {} } = {}) {
+async function runScenario({ action, model = 'gemini-4-neon-medium', agyMode = 'ready', extra = {}, stored = {}, dueno = true } = {}) {
   const root = await tempDir();
   const binDir = join(root, 'bin');
   const workDir = join(root, 'work');
@@ -251,7 +265,7 @@ async function runScenario({ action, model = 'gemini-4-neon-medium', agyMode = '
     }]));
   }
   const url = action === 'resume' ? '/api/agy/sessions/agyresume1/resume' : '/api/agy/sessions';
-  const payload = action === 'resume' ? {} : { workDir, provider: 'agy', model, mcpServers: { add: ['dueno'] }, ...extra };
+  const payload = action === 'resume' ? {} : { workDir, provider: 'agy', model, ...(dueno ? { mcpServers: { add: ['dueno'] } } : {}), ...extra };
   const wrapped = `
     import Fastify from ${JSON.stringify(pathToFileURL(resolve('node_modules/fastify/fastify.js')).href)};
     import { readFile, readdir } from 'node:fs/promises';

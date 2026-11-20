@@ -88,7 +88,7 @@ export function createHookEventRetention({ store, retentionDays = 7 } = {}) {
             const entry = await directory.read();
             if (!entry) { await directory.close(); directory = null; break; }
             entries++;
-            if (!entry.isFile() || !/^(?:codex-app-server|claude|codex|pi|deepseek)-[A-Za-z0-9._-]+\.jsonl$/.test(entry.name)
+            if (!entry.isFile() || !/^(?:codex-app-server|claude|codex|pi|agy|deepseek)-[A-Za-z0-9._-]+\.jsonl$/.test(entry.name)
               || live.has(entry.name)) continue;
             const eventsPath = join(root, HOOKS_DIRNAME, entry.name);
             const info = await lstat(eventsPath).catch(() => null);
@@ -322,21 +322,27 @@ async function lastAgyReply(transcriptPath = '') {
 /**
  * Maps an agy hook payload (camelCase; Stop carries no reply) onto the Claude fields recordHookPayload
  * reads. A turn's first model call is its UserPromptSubmit. The priming turn is not a turn: null.
- * Only a normal stop (NO_TOOL_CALL) carries a reply for returnResults; a cancel or error does not, and
- * background work still running (fullyIdle false) holds it like Claude's background_tasks.
+ * returnResults gets the reply of a normal stop (NO_TOOL_CALL), agy's error text for ERROR (a waiting
+ * spawner must hear of it), and nothing for a cancel or other stop. Background work still running
+ * (fullyIdle false) holds it like Claude's background_tasks.
  */
 export async function agyHookPayload(payload = {}) {
   if (payload.lastUserInput === AGY_CONNECT_INPUT) return null;
   const stop = payload.hookEventName === 'Stop';
+  const eventName = stop ? 'Stop' : Number(payload.invocationNum) > 0 ? 'PostToolUse' : 'UserPromptSubmit';
+  const reply = async () => {
+    if (payload.terminationReason === 'NO_TOOL_CALL') return lastAgyReply(payload.transcriptPath);
+    return payload.terminationReason === 'ERROR' ? `agy stopped with an error: ${payload.error || 'unknown error'}` : '';
+  };
   return {
     session_id: payload.conversationId,
-    hook_event_name: stop ? 'Stop' : Number(payload.invocationNum) > 0 ? 'PostToolUse' : 'UserPromptSubmit',
+    hook_event_name: eventName,
     transcript_path: payload.transcriptPath,
     cwd: payload.cwd,
     model: payload.modelName,
-    prompt: payload.lastUserInput,
+    ...(eventName === 'UserPromptSubmit' ? { prompt: payload.lastUserInput } : {}),
     ...(stop ? {
-      last_assistant_message: payload.terminationReason === 'NO_TOOL_CALL' ? await lastAgyReply(payload.transcriptPath) : '',
+      last_assistant_message: await reply(),
       ...(payload.fullyIdle === false ? { background_tasks: ['agy'] } : {}),
     } : {}),
   };

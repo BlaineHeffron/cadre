@@ -68,7 +68,11 @@ describe('hook event retention through the session registry', () => {
       }
       const unpaired = join(paths[0].stateDir, 'deepseek-unpaired.json');
       await writeFile(unpaired, '{}');
+      // An agy session's hooks write the same pair; once it is gone and old, it is pruned too.
+      const agyGone = [join(paths[0].hooksDir, 'agy-gone1.jsonl'), join(paths[0].stateDir, 'agy-gone1.json')];
+      for (const path of agyGone) { await writeFile(path, '{}'); await utimes(path, old, old); }
       await retention.sweep();
+      for (const path of agyGone) await assert.rejects(stat(path), { code: 'ENOENT' });
       for (const path of [paths[0].eventsPath, paths[0].statePath, paths[2].eventsPath, paths[2].statePath, unpaired]) assert.ok(await stat(path));
       for (const path of [paths[1].eventsPath, paths[1].statePath]) await assert.rejects(stat(path), { code: 'ENOENT' });
       for (const name of unrelated) assert.ok(await stat(join(paths[0].hooksDir, name)));
