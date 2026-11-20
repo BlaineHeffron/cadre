@@ -4,6 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { legacyTopicKeyFor } from './routing.mjs';
 import { latexMathToUnicode } from './math.mjs';
+import { urlEntities } from '../../public/lib/links.mjs';
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
 const DEFAULT_MAX_MESSAGE_LENGTH = 3000;
@@ -99,6 +100,14 @@ function splitPageByCodepoints(text, limit) {
 
 function splitPage(text, limit) {
   if (Array.from(text).length <= limit) return [text, ''];
+  const [head] = splitPageAnywhere(text, limit);
+  // A page never ends mid-link; a link longer than a page is still cut.
+  const link = urlEntities(text).find(({ offset, length }) => offset > 0 && offset < head.length && head.length < offset + length);
+  const cut = link ? link.offset : head.length;
+  return [text.slice(0, cut), text.slice(cut)];
+}
+
+function splitPageAnywhere(text, limit) {
   const chars = Array.from(text);
   const candidate = chars.slice(0, limit).join('');
   const minNewlineIndex = Math.floor(limit / 4);
@@ -338,6 +347,7 @@ export class TelegramSender {
     return this.telegramPost('editMessageText', {
       message_id: Number(messageId),
       text: String(text ?? ''),
+      entities: urlEntities(text ?? ''),
       reply_markup: { inline_keyboard: telegramButtons(buttons) || [] },
     });
   }
@@ -416,7 +426,9 @@ export class TelegramSender {
     const pinged = this.claimPing(ping);
     for (const [index, page] of pages.entries()) {
       // A paged message pings once, on its last page.
-      const payload = { text: cleanHeader ? `${cleanHeader}\n${page}` : page, disable_notification: !(pinged && index === pages.length - 1) };
+      const pageText = cleanHeader ? `${cleanHeader}\n${page}` : page;
+      // Explicit entities, so Telegram's own detection cannot run a link into markdown like `**`.
+      const payload = { text: pageText, entities: urlEntities(pageText), disable_notification: !(pinged && index === pages.length - 1) };
       if (threadId != null) payload.message_thread_id = Number(threadId);
       if (inlineKeyboard && index === pages.length - 1) {
         payload.reply_markup = { inline_keyboard: inlineKeyboard };

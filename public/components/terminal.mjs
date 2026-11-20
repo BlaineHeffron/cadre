@@ -1,6 +1,7 @@
 import { h, Fragment } from 'preact';
 import { useRef, useEffect, useLayoutEffect } from 'preact/hooks';
 import { ansiToHtml } from '../lib/ansi-to-html.mjs';
+import { trimUrl } from '../lib/links.mjs';
 
 export function stripAnsi(text) {
   return text.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
@@ -29,11 +30,12 @@ function safeHref(escapedUrl) {
 // Bare URLs become links; a terminal hyperlink is already one.
 function linkifyHtml(text = '') {
   return text.replace(
-    /<a\b[^>]*>[\s\S]*?<\/a>|\bhttps?:\/\/[^\s<>"']+/g,
-    (url) => {
-      if (url.startsWith('<')) return url;
+    /<a\b[^>]*>[\s\S]*?<\/a>|(?<![A-Za-z0-9])https?:\/\/(?:(?!&quot;|&#39;)[^\s<>"'`[\]])+/g,
+    (match) => {
+      if (match.startsWith('<')) return match;
+      const url = trimUrl(match);
       const href = safeHref(url);
-      return href ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>` : url;
+      return href ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>${match.slice(url.length)}` : match;
     }
   );
 }
