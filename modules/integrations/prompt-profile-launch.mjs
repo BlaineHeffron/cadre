@@ -13,6 +13,8 @@ export function promptProfilePath(backendType, sessionId, { codexHome = '' } = {
   if (text(backendType) === 'codex') {
     return join(codexHome || process.env.CODEX_HOME || join(homedir(), '.codex'), `cadre-${text(sessionId)}.config.toml`);
   }
+  // agy has no system-prompt flag; it loads AGENTS.md from each `--add-dir` workspace as a rule.
+  if (text(backendType) === 'agy') return runtimeStatePath(`prompt_profiles/agy-${text(sessionId)}/AGENTS.md`);
   return runtimeStatePath(`prompt_profiles/${text(backendType)}-${text(sessionId)}.txt`);
 }
 
@@ -70,7 +72,8 @@ export async function preparePromptProfileLaunch({
 }
 
 export async function cleanupPromptProfileLaunch({ backendType, sessionId } = {}) {
-  await rm(promptProfilePath(backendType, sessionId), { force: true }).catch(() => {});
+  const path = promptProfilePath(backendType, sessionId);
+  await rm(text(backendType) === 'agy' ? dirname(path) : path, { recursive: true, force: true }).catch(() => {});
 }
 
 export function sanitizedPromptSnapshot(resolved) {

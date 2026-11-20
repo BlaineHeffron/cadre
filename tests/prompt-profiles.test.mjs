@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile, stat } from 'node:fs/promises';
+import { basename, dirname } from 'node:path';
 import {
   buildPromptProfileCatalog,
   buildPromptProfileFieldSchema,
@@ -131,5 +133,13 @@ describe('prompt profile launch args', () => {
     assert.match(prepared.prepared.body, /research agent/i);
     assert.ok(prepared.prepared.filePath);
     await cleanupPromptProfileLaunch({ backendType: 'claude', sessionId: 'styletest' });
+  });
+
+  it('gives agy the profile as AGENTS.md in a workspace directory that cleanup removes', async () => {
+    const { prepared } = await preparePromptProfileLaunch({ promptProfile: 'caveman', backendType: 'agy', sessionId: 'agystyle1' });
+    assert.equal(basename(prepared.filePath), 'AGENTS.md');
+    assert.equal(await readFile(prepared.filePath, 'utf8'), `${prepared.body}\n`);
+    await cleanupPromptProfileLaunch({ backendType: 'agy', sessionId: 'agystyle1' });
+    await assert.rejects(stat(dirname(prepared.filePath)), { code: 'ENOENT' });
   });
 });
