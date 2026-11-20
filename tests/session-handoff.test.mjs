@@ -102,11 +102,21 @@ describe('handoff prompt', () => {
 });
 
 // The real agent interface over stub provider routes, the seam its spawn tests use.
-async function buildApp({ status = 'ready', refuse = null } = {}) {
+// An agy conversation log: steps, with Cadre's priming input first.
+function writeAgyLog(path) {
+  const request = (text) => ({ step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', content: `<USER_REQUEST>\n${text}\n</USER_REQUEST>` });
+  writeFileSync(path, [request('cadre:connect'), { step_index: 1, type: 'ERROR_MESSAGE', error: 'Cadre tools connected' },
+    request('Fix the flaky login test in auth.spec'), { step_index: 3, type: 'PLANNER_RESPONSE', tool_calls: [{ name: 'run_command' }] },
+    { step_index: 4, type: 'GENERIC', content: 'TOOL OUTPUT: 3 failing' },
+    { step_index: 5, type: 'PLANNER_RESPONSE', content: 'The test races the session cookie; I added an await.' },
+  ].map((record) => JSON.stringify(record)).join('\n') + '\n');
+}
+
+async function buildApp({ status = 'ready', refuse = null, sourceKind = 'claude' } = {}) {
   const workDir = join(root, `work-${Math.random().toString(36).slice(2)}`);
   mkdirSync(workDir);
   const log = join(workDir, 'session.jsonl');
-  writeClaudeLog(log);
+  (sourceKind === 'agy' ? writeAgyLog : writeClaudeLog)(log);
   const app = Fastify({ logger: false });
   const created = [];
   const puts = [];
@@ -114,13 +124,13 @@ async function buildApp({ status = 'ready', refuse = null } = {}) {
     id: 'src1', provider: 'anthropic', model: 'claude-opus-5-5', workDir, displayName: 'Login fix',
     state: { status }, mcpCapabilities: { profileId: 'dueno', serverIds: ['dueno'] }, promptProfile: 'none', skills: [],
   };
-  app.get('/api/claude/sessions', async () => ({ sessions: [{ id: 'src1' }] }));
-  app.get('/api/codex/sessions', async () => ({ sessions: [] }));
-  app.get('/api/pi/sessions', async () => ({ sessions: [] }));
-  app.get('/api/claude/sessions/:id', async () => source);
+  for (const kind of ['claude', 'codex', 'pi', 'agy']) {
+    app.get(`/api/${kind}/sessions`, async () => ({ sessions: kind === sourceKind ? [{ id: 'src1' }] : [] }));
+  }
+  app.get(`/api/${sourceKind}/sessions/:id`, async () => source);
   // As the tmux transcript route does: the same paged reader over the bound session log.
-  app.get('/api/claude/sessions/:id/transcript', async (req) => readConversationPage(log, 'claude', req.query));
-  app.put('/api/claude/sessions/:id', async (req) => { puts.push({ id: req.params.id, body: req.body }); return { ok: true }; });
+  app.get(`/api/${sourceKind}/sessions/:id/transcript`, async (req) => readConversationPage(log, sourceKind, req.query));
+  app.put(`/api/${sourceKind}/sessions/:id`, async (req) => { puts.push({ id: req.params.id, body: req.body }); return { ok: true }; });
   for (const kind of ['codex', 'pi']) {
     app.post(`/api/${kind}/sessions`, async (req, reply) => {
       created.push({ kind, body: req.body });
@@ -164,6 +174,20 @@ describe('POST /api/agents/sessions/:id/handoff', () => {
       assert.deepEqual(puts, [{ id: 'src1', body: { handoffTo } }]);
       assert.deepEqual(res.json().handoffTo, handoffTo);
       assert.deepEqual(res.json().dropped, []);
+    } finally { await app.close(); }
+  });
+
+  it('hands off an agy session from its conversation log, without the priming turn', async () => {
+    const { app, created, puts, handoff } = await buildApp({ sourceKind: 'agy' });
+    try {
+      const res = await handoff({ provider: 'codex' });
+      assert.equal(res.statusCode, 200, res.body);
+      const { body } = created[0];
+      assert.equal(body.metadata.handoffFrom.kind, 'agy');
+      assert.match(body.initialPrompt, /## Original task\n\nFix the flaky login test/);
+      assert.match(body.initialPrompt, /I added an await/);
+      assert.equal(/cadre:connect|TOOL OUTPUT/.test(body.initialPrompt), false);
+      assert.deepEqual(puts.map((put) => put.id), ['src1']);
     } finally { await app.close(); }
   });
 

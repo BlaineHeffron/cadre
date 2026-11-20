@@ -175,7 +175,8 @@ Current provider mapping:
   payload to `scripts/agent-hooks/log-event.mjs --provider agy`, which maps it onto Cadre's hook
   state (`agyHookPayload`). That hook state gives turn-end status, the transcript path for the
   transcript view and Telegram relay, the reply for `returnResults`, and the conversation id, so a
-  resume uses `--conversation <id>`. The priming turn is skipped. It does not join collaboration rooms.
+  resume uses `--conversation <id>`. The priming turn is skipped. agy joins collaboration rooms and
+  can be a handoff source or target.
   Cadre never runs `agy -p` or `agy acp`.
 
 Gemini via subscription now goes through the `agy` provider; the retired `antigravity` Pi provider (local CLIProxyAPI) is gone, and sessions saved with it list as an unsupported provider and cannot be resumed.

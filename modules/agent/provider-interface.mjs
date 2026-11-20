@@ -150,7 +150,7 @@ const PROVIDER_DEFINITIONS = Object.freeze({
     defaultModel: PI_PROVIDER_DEFINITIONS.openrouter.defaultModel,
     get transportCapabilities() { return tmuxTransportCapabilities(); },
   }),
-  // Google's own interactive CLI; no Cadre MCP, so it cannot join collaboration rooms.
+  // Google's own interactive CLI; Cadre's dueno MCP comes from a private workspace (agyMcpWorkspacePath).
   agy: Object.freeze({
     id: 'agy',
     label: 'Antigravity',
@@ -158,7 +158,6 @@ const PROVIDER_DEFINITIONS = Object.freeze({
     runtime: 'agy',
     backendProvider: 'agy',
     defaultModel: AGY_DEFAULT_MODEL,
-    supportsCollaboration: false,
     get transportCapabilities() { return tmuxTransportCapabilities(); },
   }),
 });

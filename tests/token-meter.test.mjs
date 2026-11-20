@@ -55,9 +55,9 @@ test('MCP tool schemas should not grow', async () => {
   const { mcp, servers } = await meterStatic();
   const caps = {
     'monitor server': [servers.monitor.bytes, 28566],
-    'agent-bus server': [servers['agent-bus'].bytes, 9459],
-    'dueno profile': [mcp.dueno.bytes, 23689],
-    'dueno-full profile': [mcp['dueno-full'].bytes, 38024],
+    'agent-bus server': [servers['agent-bus'].bytes, 9465],
+    'dueno profile': [mcp.dueno.bytes, 23690],
+    'dueno-full profile': [mcp['dueno-full'].bytes, 38030],
   };
   for (const [name, [bytes, cap]] of Object.entries(caps)) assert.ok(bytes <= cap, `${name} tools/list is ${bytes} bytes, cap ${cap}`);
 });

@@ -49,11 +49,11 @@ describe('agy provider', () => {
     assert.equal(findAgyBinarySync({ HOME: home, PATH: '', AGY_BIN: join(home, 'missing') }), '');
   });
 
-  it('is disabled unless the binary is found, and never joins collaboration rooms', () => {
+  it('is disabled unless the binary is found, and can join collaboration rooms', () => {
     const agy = (agyAvailable) => buildAgentProviderCatalog({}, { agyAvailable }).find((entry) => entry.id === 'agy');
     assert.equal(agy(false).enabled, false);
     assert.equal(agy(true).enabled, true);
-    assert.equal(agy(true).supportsCollaboration, false);
+    assert.equal(agy(true).supportsCollaboration, true);
     assert.equal(buildAgentProviderCatalog({ agy: false }, { agyAvailable: true }).find((entry) => entry.id === 'agy').enabled, false);
     assert.equal(inferAgentProviderFromModel('gemini-4-neon-medium'), 'agy');
   });

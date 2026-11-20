@@ -528,7 +528,7 @@ export function buildAgentBusMcpServer({
       name: 'agent_dm',
       description: 'Send a direct message to any agent, creating the deterministic pair room when needed. Returns message_id, delivery_count and failed_targets on failure.',
       inputSchema: { type: 'object', properties: {
-        kind: { type: 'string', enum: ['claude', 'codex', 'pi', 'deepseek', 'codex-app-server', 'cloud'], description: "target session's provider" }, session_id: { type: 'string' }, body: { type: 'string' }, summary: { type: 'string', maxLength: 200 },
+        kind: { type: 'string', enum: ['claude', 'codex', 'pi', 'agy', 'deepseek', 'codex-app-server', 'cloud'], description: "target session's provider" }, session_id: { type: 'string' }, body: { type: 'string' }, summary: { type: 'string', maxLength: 200 },
       }, required: ['kind', 'session_id', 'body'], additionalProperties: false },
     },
     {
@@ -668,7 +668,7 @@ export function buildAgentBusMcpServer({
       }
 
       case 'agent_directory': {
-        const kinds = ['claude', 'codex', 'pi'].filter((kind) => !args.kind || args.kind === kind);
+        const kinds = ['claude', 'codex', 'pi', 'agy'].filter((kind) => !args.kind || args.kind === kind);
         const payloads = await Promise.all(kinds.map((kind) => request(`/api/${kind}/sessions`).catch(() => ({ sessions: [] }))));
         const agents = payloads.flatMap((payload, index) => (payload.sessions || []).map((session) => ({ kind: kinds[index], session })))
           .sort((a, b) => Number(b.session.created || 0) - Number(a.session.created || 0))
