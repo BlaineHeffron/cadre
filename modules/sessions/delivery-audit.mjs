@@ -20,7 +20,7 @@ function text(value) {
 
 function normalizeKind(value) {
   const normalized = text(value).toLowerCase();
-  return ['claude', 'codex', 'pi', 'deepseek'].includes(normalized) ? normalized : '';
+  return ['claude', 'codex', 'pi', 'agy', 'deepseek'].includes(normalized) ? normalized : '';
 }
 
 function normalizeLimit(value, fallback = 100) {

@@ -140,7 +140,7 @@ This session runs under Cadre. Cadre's tools (room_send, room_context, agent_dm,
 // (AGY_CONNECT_INPUT) is ended by this hook before any model call; the user's turns then have them.
 const AGY_CONNECT_HOOKS = `${JSON.stringify({ cadre: { PreInvocation: [{
   type: 'command',
-  command: `grep -q '"lastUserInput":"${AGY_CONNECT_INPUT}"' && echo '${JSON.stringify({
+  command: `grep -Eq '"lastUserInput": ?"${AGY_CONNECT_INPUT}"' && echo '${JSON.stringify({
     injectSteps: [{ errorMessage: { userMessage: 'Cadre tools connected' } }], terminationBehavior: 'terminate',
   })}' || echo {}`,
 }] } }, null, 2)}\n`;
