@@ -17,7 +17,7 @@ const DEFAULT_TASK_TIMEOUT_MS = 180000;
 const DEFAULT_TASK_POLL_INTERVAL_MS = 1000;
 const DEFAULT_TASK_LINES = 400;
 const BUSY_ONE_OFF_STATUSES = new Set(['working', 'thinking', 'awaiting_response']);
-const HANDOFF_SOURCE_KINDS = ['claude', 'codex', 'pi'];
+const HANDOFF_SOURCE_KINDS = ['claude', 'codex', 'pi', 'agy'];
 const HANDOFF_RECENT_MESSAGES = 40;
 // Selections a target provider may refuse; the handoff then starts without them and says so.
 const HANDOFF_DROPPABLE_ERROR = /^(mcp_|prompt_profile_|launch_skill_)/;

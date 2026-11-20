@@ -273,6 +273,7 @@ test('room list pins the caller and returns only the compact participant-scoped 
   assert.equal(calls[1], '/api/agent-bus/threads?status=open&compact=true');
   await assert.rejects(server.callTool('agent_dm', { kind: 'gpt', session_id: 'c2', body: 'hi' }, context), /kind/);
   await assert.doesNotReject(server.callTool('agent_dm', { kind: 'codex-app-server', session_id: 'c2', body: 'hi' }, context));
+  await assert.doesNotReject(server.callTool('agent_dm', { kind: 'agy', session_id: 'a2', body: 'hi' }, context));
 });
 
 test('room creator can read, address, and close without being a participant', async () => {
@@ -331,7 +332,9 @@ test('room lifecycle dispatch preserves actor context for route ownership checks
 
 test('agent_directory unifies provider rosters with display name and canonical state', async () => {
   const server = buildAgentBusMcpServer({ requestImpl: async (path) => ({ sessions: path.includes('codex')
-    ? [{ id: 'c1', displayName: 'Builder', state: { status: 'ready' } }] : [] }) });
+    ? [{ id: 'c1', displayName: 'Builder', state: { status: 'ready' } }]
+    : path.includes('agy') ? [{ id: 'a1', created: 1, state: { status: 'working' } }] : [] }) });
   const result = await server.callTool('agent_directory', {}, context);
-  assert.deepEqual(result.structuredContent.agents, [{ kind: 'codex', sessionId: 'c1', displayName: 'Builder', state: 'ready' }]);
+  assert.deepEqual(result.structuredContent.agents.map(({ kind, sessionId }) => [kind, sessionId]), [['agy', 'a1'], ['codex', 'c1']]);
+  assert.deepEqual(result.structuredContent.agents.find((agent) => agent.kind === 'codex'), { kind: 'codex', sessionId: 'c1', displayName: 'Builder', state: 'ready' });
 });

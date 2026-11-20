@@ -730,7 +730,7 @@ export function AgentSessionDetailPage({ id, provider = 'claude', embedded = fal
               },
               title: 'Toggle a rendered Markdown and math view built from the model session log. Raw terminal content remains unchanged.',
             }, 'Rendered transcript'),
-            !isRustManagedReadOnly && ['claude', 'codex', 'pi'].includes(descriptor.kind)
+            !isRustManagedReadOnly && ['claude', 'codex', 'pi', 'agy'].includes(descriptor.kind)
               ? h('button', { class: 'btn', onClick: openHandoff, title: 'Start a new session on another provider or model from a brief of this one; this session stays as it is' }, 'Hand off…')
               : null,
             h('button', { class: 'btn', onClick: copySessionId }, 'Copy ID'),
