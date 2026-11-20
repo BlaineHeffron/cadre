@@ -54,10 +54,10 @@ test('meterStatic lists the dueno tools each credential profile can discover', a
 test('MCP tool schemas should not grow', async () => {
   const { mcp, servers } = await meterStatic();
   const caps = {
-    'monitor server': [servers.monitor.bytes, 28553],
+    'monitor server': [servers.monitor.bytes, 28571],
     'agent-bus server': [servers['agent-bus'].bytes, 9459],
     'dueno profile': [mcp.dueno.bytes, 23689],
-    'dueno-full profile': [mcp['dueno-full'].bytes, 38011],
+    'dueno-full profile': [mcp['dueno-full'].bytes, 38029],
   };
   for (const [name, [bytes, cap]] of Object.entries(caps)) assert.ok(bytes <= cap, `${name} tools/list is ${bytes} bytes, cap ${cap}`);
 });

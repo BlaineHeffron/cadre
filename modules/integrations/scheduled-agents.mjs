@@ -10,7 +10,7 @@ import {
 const DEFAULT_STORE_FILE = runtimeStatePath('scheduled_agents.json');
 const LEGACY_STORE_FILE = legacyRootStatePath('scheduled_agents.json');
 const MIN_INTERVAL_SECONDS = 15;
-const INJECT_SESSION_KINDS = new Set(['claude', 'codex', 'pi']);
+const INJECT_SESSION_KINDS = new Set(['claude', 'codex', 'pi', 'agy']);
 const MAX_INTERVAL_SECONDS = 1296000;
 const DEFAULT_RUN_CLAIM_LEASE_MS = 10 * 60 * 1000;
 const DEFAULT_IDLE_SESSION_GRACE_MS = 60 * 1000;
@@ -97,7 +97,7 @@ export function normalizeScheduledAgent(input = {}, { nowMs = Date.now() } = {})
     throw error;
   }
   if (type === 'inject' && !INJECT_SESSION_KINDS.has(targetSession.kind)) {
-    const error = new Error('inject scheduled agent targetSession kind must be claude, codex, or pi');
+    const error = new Error('inject scheduled agent targetSession kind must be claude, codex, pi, or agy');
     error.code = 'scheduled_agent_target_kind_invalid';
     throw error;
   }

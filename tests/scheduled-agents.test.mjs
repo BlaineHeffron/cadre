@@ -103,6 +103,10 @@ describe('scheduled agents', () => {
     await assert.rejects(() => first.register({
       type: 'inject', targetSession: { kind: 'tmux', sessionId: 'session-1' }, prompt: 'bad kind', intervalSeconds: 15, maxIterations: 1,
     }), { code: 'scheduled_agent_target_kind_invalid' });
+    const agyLoop = await first.register({
+      type: 'inject', targetSession: { kind: 'agy', sessionId: 'agy-1' }, prompt: 'agy tick', intervalSeconds: 15, maxIterations: 1,
+    });
+    assert.deepEqual(agyLoop.targetSession, { kind: 'agy', sessionId: 'agy-1' });
   });
 
   it('defers a busy inject target and advances nextRun without forcing send', async () => {

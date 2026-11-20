@@ -40,6 +40,8 @@ describe('session delivery audit', () => {
       status: 'failed',
       error: 'tmux failed',
     });
+    await store.record({ source: 'monitor_send_to_session', kind: 'agy', sessionId: 'agy_1', text: 'Ping', status: 'sent' });
+    assert.deepEqual(store.list({ kind: 'agy' }).map((row) => row.target.sessionId), ['agy_1']);
     await store.close();
 
     assert.match(sent.id, /^sdel_/);

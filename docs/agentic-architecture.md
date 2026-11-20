@@ -164,7 +164,11 @@ Current provider mapping:
   Models come from `agy models`; the id carries the effort (`gemini-4-neon-medium`), so
   thinkingLevel is not passed. `--settings` trusts the workDir for that run only. Cadre's dueno MCP
   (the only MCP server agy accepts) comes from a private `--add-dir` workspace holding
-  `.agents/mcp_config.json`; neither the repo nor `~/.gemini` is written. Resume uses `--continue`,
+  `.agents/mcp_config.json`; neither the repo nor `~/.gemini` is written. That workspace also holds
+  `AGENTS.md` (an always-on rule: Cadre's tools are `call_mcp_tool` on server `dueno`) and
+  `.agents/hooks.json`. agy leaves MCP tools out of a conversation's first interactive turn, so each
+  launch and resume first runs `-i cadre:connect`, which the hook ends before any model call; the
+  pane shows `cadre:connect` and `Cadre tools connected`. Resume uses `--continue`,
   which agy scopes to the workDir's latest conversation. Prompt profiles warn and are skipped (no
   system-prompt flag); the session is pane-only (no transcript); it does not join collaboration rooms.
   Cadre never runs `agy -p` or `agy acp`.
