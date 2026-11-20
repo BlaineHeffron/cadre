@@ -1765,7 +1765,8 @@ async function cleanupSessionArtifacts(id, meta, logger) {
   await Promise.all([
     cleanup(meta.workDir, removeGithubAgentScratch(meta)),
     cleanup(meta.workDir, removeSessionHookFiles({ workDir: meta.workDir, provider: config.id, sessionId: id })),
-    cleanup(promptProfilePath(config.id, id), cleanupPromptProfileLaunch({ backendType: config.id, sessionId: id })),
+    // agy's profile is a workspace directory holding AGENTS.md.
+    cleanup(promptProfilePath(config.id, id), rm(config.id === 'agy' ? dirname(promptProfilePath(config.id, id)) : promptProfilePath(config.id, id), { recursive: true, force: true })),
     cleanup(initialPromptPath(id), rm(initialPromptPath(id), { force: true })),
     ...(meta.launchLogPath ? [cleanup(meta.launchLogPath, rm(meta.launchLogPath, { force: true }))] : []),
     ...(meta.sandbox === 'nono' ? [removeSandboxState(id)] : []),

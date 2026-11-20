@@ -151,6 +151,16 @@ describe('agy sessions', () => {
     assert.match(result.profileRule, /caveman/i);
   });
 
+  it('reapplies the prompt profile workspace on resume', async () => {
+    const result = await runScenario({ action: 'resume', stored: { promptProfile: { profileId: 'caveman', placement: 'append' } } });
+    assert.equal(result.response.statusCode, 200, JSON.stringify(result.response.body));
+    const profileDir = join(result.stateDir, 'prompt_profiles', 'agy-agyresume1');
+    const pane = result.tmuxArgs.at(-1);
+    assert.ok(pane.includes(`'--add-dir' '${profileDir}'`));
+    assert.ok(JSON.parse(pane.match(/'--settings' '([^']+)'/)[1]).trustedWorkspaces.includes(profileDir));
+    assert.match(result.profileRule, /caveman/i);
+  });
+
   it('rejects models agy does not list and reports a missing binary', async () => {
     const unknown = await runScenario({ action: 'create', model: 'gemini-4-carbon' });
     assert.deepEqual([unknown.response.statusCode, unknown.response.body.code], [400, 'agy_model_unsupported']);
@@ -159,7 +169,7 @@ describe('agy sessions', () => {
   });
 });
 
-async function runScenario({ action, model = 'gemini-4-neon-medium', agyMode = 'ready', extra = {} } = {}) {
+async function runScenario({ action, model = 'gemini-4-neon-medium', agyMode = 'ready', extra = {}, stored = {} } = {}) {
   const root = await tempDir();
   const binDir = join(root, 'bin');
   const workDir = join(root, 'work');
@@ -182,6 +192,7 @@ async function runScenario({ action, model = 'gemini-4-neon-medium', agyMode = '
       id: 'agyresume1', tmuxSession: 'agy-agyresume1', source: 'dashboard', workDir, created: Date.now(),
       provider: 'agy', runtime: 'agy', model: 'gemini-4-argon-high',
       mcpCapabilities: { profileId: 'default', serverIds: ['dueno'], catalogVersion: 1, provider: 'agy', runtime: 'agy' },
+      ...stored,
     }]));
   }
   const url = action === 'resume' ? '/api/agy/sessions/agyresume1/resume' : '/api/agy/sessions';
