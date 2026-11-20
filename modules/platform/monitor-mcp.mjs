@@ -955,7 +955,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       inputSchema: {
         type: 'object',
         properties: {
-          type: { type: 'string', enum: ['claude', 'codex', 'pi'] },
+          type: { type: 'string', enum: ['claude', 'codex', 'pi', 'agy'] },
           sessionId: { type: 'string' },
           text: { type: 'string' },
         },
@@ -980,7 +980,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       inputSchema: {
         type: 'object',
         properties: {
-          type: { type: 'string', enum: ['claude', 'codex', 'pi'] },
+          type: { type: 'string', enum: ['claude', 'codex', 'pi', 'agy'] },
           sessionId: { type: 'string' },
           source: { type: 'string' },
           status: { type: 'string', enum: ['queued', 'sending', 'awaiting_response', 'sent', 'failed', 'dropped'] },
@@ -1042,7 +1042,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       inputSchema: {
         type: 'object',
         properties: {
-          type: { type: 'string', enum: ['claude', 'codex', 'pi'] },
+          type: { type: 'string', enum: ['claude', 'codex', 'pi', 'agy'] },
           sessionId: { type: 'string' },
           text: { type: 'string' },
           delayMs: { type: 'number' },

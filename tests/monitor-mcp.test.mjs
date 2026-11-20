@@ -330,30 +330,32 @@ describe('Monitor MCP server', () => {
   });
 
   it('sends session text via a single input request with enter=true', async () => {
-    const requests = [];
-    const server = buildMonitorMcpServer({
-      async requestImpl(path, opts = {}) {
-        requests.push({ path, opts });
-        if (path === '/api/claude/sessions/claude_1/input') {
-          return { ok: true, accepted: true, transactionId: 'cmd_1', state: 'queued' };
-        }
-        throw new Error(`Unexpected path: ${path}`);
-      },
-    });
+    for (const type of ['claude', 'agy']) {
+      const requests = [];
+      const server = buildMonitorMcpServer({
+        async requestImpl(path, opts = {}) {
+          requests.push({ path, opts });
+          if (path === `/api/${type}/sessions/${type}_1/input`) {
+            return { ok: true, accepted: true, transactionId: 'cmd_1', state: 'queued' };
+          }
+          throw new Error(`Unexpected path: ${path}`);
+        },
+      });
 
-    const result = await server.handleToolCall('monitor_send_to_session', {
-      type: 'claude',
-      sessionId: 'claude_1',
-      text: 'Ping',
-    });
+      const result = await server.handleToolCall('monitor_send_to_session', {
+        type,
+        sessionId: `${type}_1`,
+        text: 'Ping',
+      });
 
-    assert.deepEqual(requests, [{
-      path: '/api/claude/sessions/claude_1/input',
-      opts: { method: 'POST', body: { text: 'Ping', enter: true, source: 'monitor_send_to_session' } },
-    }]);
-    assert.deepEqual(result, {
-      transaction_id: 'cmd_1', status: 'queued',
-    });
+      assert.deepEqual(requests, [{
+        path: `/api/${type}/sessions/${type}_1/input`,
+        opts: { method: 'POST', body: { text: 'Ping', enter: true, source: 'monitor_send_to_session' } },
+      }]);
+      assert.deepEqual(result, {
+        transaction_id: 'cmd_1', status: 'queued',
+      });
+    }
   });
 
   it('lists direct session delivery audit records', async () => {

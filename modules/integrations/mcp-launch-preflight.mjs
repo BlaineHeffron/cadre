@@ -8,6 +8,7 @@ import { config } from '../../config.mjs';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
 import { buildAgentBusMcpUrl } from '../platform/mcp-seed.mjs';
 import { CODEX_APP_SERVER_ENV_ALLOWLIST } from '../agent/codex-app-server-transport.mjs';
+import { AGY_CONNECT_INPUT } from '../agent/runtime-args.mjs';
 import {
   AGENT_BUS_AGENT_TOOL_SCOPES,
   AGENT_SPAWN_TOOL_SCOPES,
@@ -131,6 +132,19 @@ export function mcpClientConfigPath(backendType, sessionId) {
 
 // agy reads MCP servers only from user or workspace config, so each session gets a private
 // workspace (`--add-dir`) holding `.agents/mcp_config.json`; the repo and user config stay untouched.
+// agy loads AGENTS.md from every workspace as an always-on rule.
+const AGY_DUENO_RULE = `# Cadre
+This session runs under Cadre. Cadre's tools (room_send, room_context, agent_dm, spawn_session and the rest) are on the MCP server \`dueno\`: call them with \`call_mcp_tool\` on server \`dueno\`. Never say they are unavailable without checking that server, and never call its HTTP endpoint or read mcp_config.json yourself.
+`;
+// Interactive agy leaves MCP tools out of a conversation's first turn, so the launch's first input
+// (AGY_CONNECT_INPUT) is ended by this hook before any model call; the user's turns then have them.
+const AGY_CONNECT_HOOKS = `${JSON.stringify({ cadre: { PreInvocation: [{
+  type: 'command',
+  command: `grep -q '"lastUserInput":"${AGY_CONNECT_INPUT}"' && echo '${JSON.stringify({
+    injectSteps: [{ errorMessage: { userMessage: 'Cadre tools connected' } }], terminationBehavior: 'terminate',
+  })}' || echo {}`,
+}] } }, null, 2)}\n`;
+
 export function agyMcpWorkspacePath(sessionId) {
   return runtimeStatePath(`mcp_client_configs/agy-${text(sessionId)}`);
 }
@@ -631,6 +645,10 @@ export async function prepareMcpCapabilityLaunch({
       ? dirname(dirname(await writePrivateFile(join(agyMcpWorkspacePath(sessionId), '.agents', 'mcp_config.json'),
         `${JSON.stringify({ mcpServers: agyServers }, null, 2)}\n`)))
       : '';
+    if (agyWorkspaceDir) {
+      await writePrivateFile(join(agyWorkspaceDir, 'AGENTS.md'), AGY_DUENO_RULE);
+      await writePrivateFile(join(agyWorkspaceDir, '.agents', 'hooks.json'), AGY_CONNECT_HOOKS);
+    }
     const credentialPath = backendType === 'codex' && serverIds.includes('dueno') && busCredential?.token
       ? await writePrivateFile(mcpClientCredentialPath(backendType, sessionId), `${String(busCredential.token)}\n`)
       : '';

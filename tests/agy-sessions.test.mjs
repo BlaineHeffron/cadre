@@ -114,6 +114,17 @@ describe('agy sessions', () => {
     const mcpConfig = JSON.parse(result.mcpConfig);
     assert.match(mcpConfig.mcpServers.dueno.serverUrl, /\/mcp$/);
     assert.match(mcpConfig.mcpServers.dueno.headers.Authorization, /^Bearer \S+/);
+    // agy loads AGENTS.md from every workspace, so the hint reaches the model without touching the prompt.
+    assert.match(result.rule, /call_mcp_tool` on server `dueno`/);
+    // Interactive agy has no MCP tools on a conversation's first turn: the launch spends that turn on
+    // `-i cadre:connect`, which the workspace hook ends before any model call.
+    assert.match(pane, new RegExp(`'--add-dir' '${addDir}' '-i' 'cadre:connect'`));
+    const runHook = (lastUserInput) => execFileAsync('sh', ['-c', `printf '%s' '${JSON.stringify({ hookEventName: 'PreInvocation', lastUserInput })}' | ${JSON.parse(result.hooks).cadre.PreInvocation[0].command}`]).then(({ stdout }) => JSON.parse(stdout));
+    assert.deepEqual(await runHook('cadre:connect'), {
+      injectSteps: [{ errorMessage: { userMessage: 'Cadre tools connected' } }], terminationBehavior: 'terminate',
+    });
+    assert.deepEqual(await runHook('fix the failing test'), {});
+    assert.deepEqual(await runHook('cadre:connect, then fix the test'), {});
     assert.equal(result.persisted.model, 'gemini-4-neon-medium');
     assert.deepEqual(result.response.body.warnings || [], []);
   });
@@ -122,6 +133,10 @@ describe('agy sessions', () => {
     const result = await runScenario({ action: 'resume' });
     assert.equal(result.response.statusCode, 200, JSON.stringify(result.response.body));
     assert.match(result.tmuxArgs.at(-1), /'--model' 'gemini-4-argon-high' '--continue'/);
+    // Resume rebuilds the private workspace, hint and connect turn included.
+    assert.match(result.rule, /call_mcp_tool` on server `dueno`/);
+    assert.match(result.tmuxArgs.at(-1), /'-i' 'cadre:connect'/);
+    assert.ok(JSON.parse(result.hooks).cadre.PreInvocation);
   });
 
   it('warns that a prompt profile cannot be applied instead of passing one', async () => {
@@ -162,6 +177,7 @@ async function runScenario({ action, model = 'gemini-4-neon-medium', agyMode = '
     await writeFile(join(root, '.agy_sessions.json'), JSON.stringify([{
       id: 'agyresume1', tmuxSession: 'agy-agyresume1', source: 'dashboard', workDir, created: Date.now(),
       provider: 'agy', runtime: 'agy', model: 'gemini-4-argon-high',
+      mcpCapabilities: { profileId: 'default', serverIds: ['dueno'], catalogVersion: 1, provider: 'agy', runtime: 'agy' },
     }]));
   }
   const url = action === 'resume' ? '/api/agy/sessions/agyresume1/resume' : '/api/agy/sessions';
@@ -177,10 +193,13 @@ async function runScenario({ action, model = 'gemini-4-neon-medium', agyMode = '
     const response = await app.inject({ method: 'POST', url: ${JSON.stringify(url)}, payload: ${JSON.stringify(payload)} });
     const state = await readFile(${JSON.stringify(join(stateDir, 'agy_sessions.json'))}, 'utf8').then(JSON.parse).catch(() => []);
     const id = response.json().id;
-    const mcpConfig = await readFile(${JSON.stringify(join(stateDir, 'mcp_client_configs'))} + '/agy-' + id + '/.agents/mcp_config.json', 'utf8').catch(() => '');
+    const workspace = ${JSON.stringify(join(stateDir, 'mcp_client_configs'))} + '/agy-' + (id || 'agyresume1');
+    const mcpConfig = await readFile(workspace + '/.agents/mcp_config.json', 'utf8').catch(() => '');
+    const rule = await readFile(workspace + '/AGENTS.md', 'utf8').catch(() => '');
+    const hooks = await readFile(workspace + '/.agents/hooks.json', 'utf8').catch(() => '{}');
     const tmuxArgs = await readFile(${JSON.stringify(tmuxArgsFile)}, 'utf8').catch(() => '');
     await app.close();
-    console.log(JSON.stringify({ response: { statusCode: response.statusCode, body: response.json() }, persisted: state[0] || null, mcpConfig, tmuxArgs }));
+    console.log(JSON.stringify({ response: { statusCode: response.statusCode, body: response.json() }, persisted: state[0] || null, mcpConfig, rule, hooks, tmuxArgs }));
   `;
   const env = {
     ...coverageEnv,
