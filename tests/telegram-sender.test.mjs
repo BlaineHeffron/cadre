@@ -647,7 +647,7 @@ describe('telegram sender API and state', () => {
 
 describe('telegram sender links', () => {
   const bugUrl = 'https://dueno-1.tailc7ab6f.ts.net:8447/iu-tech-report-html/index.html';
-  const linked = ({ text, entities }) => entities.map(({ type, offset, length }) => [type, text.slice(offset, offset + length)]);
+  const linked = ({ text, entities = [] }) => entities.map(({ type, offset, length }) => [type, text.slice(offset, offset + length)]);
 
   it('sends url entities that stop at markdown and punctuation around a link', async () => {
     await withTempState(async (stateDir) => {
@@ -697,6 +697,16 @@ describe('telegram sender links', () => {
     const pages = pagedMessages(`${'a'.repeat(30)} https://a.example/${'p'.repeat(20)} b`, 70);
     assert.ok(pages.length > 1);
     assert.ok(pages.some((page) => page.includes(`https://a.example/${'p'.repeat(20)}`)));
+  });
+
+  it('sends text without an http(s) link with no entities field', async () => {
+    await withTempState(async (stateDir) => {
+      const calls = [];
+      const sender = new TelegramSender({ stateDir, fetchImpl: buildFetchRecorder(calls) });
+      await sender.sendMessagePages('see github.com/x, a@b.co, @bot #tag', { threadId: 5 });
+      await sender.editMessageText(7, '**done**');
+      assert.deepEqual(calls.map((call) => 'entities' in call.body), [false, false]);
+    });
   });
 
   it('links edited message text the same way', async () => {

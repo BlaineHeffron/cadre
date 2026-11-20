@@ -135,6 +135,13 @@ export function pagedMessages(text = '', maxLength = DEFAULT_MAX_MESSAGE_LENGTH)
   return chunks.map((chunk, index) => `[${index + 1}/${total}] ${chunk}`);
 }
 
+// Explicit `url` entities, so Telegram's own detection cannot run a link into markdown like `**`.
+// Text without a link is sent exactly as before, with no `entities` field.
+function linkEntities(text) {
+  const entities = urlEntities(text);
+  return entities.length ? { entities } : {};
+}
+
 function telegramButtons(buttons = []) {
   if (!Array.isArray(buttons) || buttons.length === 0) return null;
   return buttons.map((button) => {
@@ -347,7 +354,7 @@ export class TelegramSender {
     return this.telegramPost('editMessageText', {
       message_id: Number(messageId),
       text: String(text ?? ''),
-      entities: urlEntities(text ?? ''),
+      ...linkEntities(text ?? ''),
       reply_markup: { inline_keyboard: telegramButtons(buttons) || [] },
     });
   }
@@ -427,8 +434,7 @@ export class TelegramSender {
     for (const [index, page] of pages.entries()) {
       // A paged message pings once, on its last page.
       const pageText = cleanHeader ? `${cleanHeader}\n${page}` : page;
-      // Explicit entities, so Telegram's own detection cannot run a link into markdown like `**`.
-      const payload = { text: pageText, entities: urlEntities(pageText), disable_notification: !(pinged && index === pages.length - 1) };
+      const payload = { text: pageText, ...linkEntities(pageText), disable_notification: !(pinged && index === pages.length - 1) };
       if (threadId != null) payload.message_thread_id = Number(threadId);
       if (inlineKeyboard && index === pages.length - 1) {
         payload.reply_markup = { inline_keyboard: inlineKeyboard };
