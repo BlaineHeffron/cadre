@@ -1,11 +1,23 @@
 import { open, stat } from 'node:fs/promises';
+import { AGY_CONNECT_INPUT } from '../agent/hook-events.mjs';
+
+// agy logs steps, not messages: the user's request (bar Cadre's priming input) and the planner's text.
+function agyMessage(record) {
+  if (record?.type === 'USER_INPUT' && record.source === 'USER_EXPLICIT') {
+    const text = String(record.content || '').match(/<USER_REQUEST>\n?([\s\S]*?)\n?<\/USER_REQUEST>/)?.[1] ?? '';
+    return text.trim() === AGY_CONNECT_INPUT ? null : { role: 'user', content: text };
+  }
+  if (record?.type === 'PLANNER_RESPONSE') return { role: 'assistant', content: String(record.content || '') };
+  return record?.step_index === undefined ? record : null;
+}
 
 function parseJsonLines(content = '') {
   const records = [];
   for (const line of String(content || '').split(/\r?\n/)) {
     if (!line.trim()) continue;
     try {
-      records.push(JSON.parse(line));
+      const record = agyMessage(JSON.parse(line));
+      if (record) records.push(record);
     } catch {
       // Ignore partial or malformed transcript lines.
     }

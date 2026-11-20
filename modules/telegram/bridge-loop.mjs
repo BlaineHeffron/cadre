@@ -103,12 +103,12 @@ function sessionBusThreadId(session = {}) {
 }
 
 function sessionInputPath(runtime, sessionId) {
-  const kind = ['claude', 'codex', 'pi'].includes(runtime) ? runtime : 'codex';
+  const kind = ['claude', 'codex', 'pi', 'agy'].includes(runtime) ? runtime : 'codex';
   return `/api/${kind}/sessions/${encodeURIComponent(sessionId)}/input`;
 }
 
 function sessionKeysPath(runtime, sessionId) {
-  const kind = ['claude', 'codex', 'pi'].includes(runtime) ? runtime : 'codex';
+  const kind = ['claude', 'codex', 'pi', 'agy'].includes(runtime) ? runtime : 'codex';
   return `/api/${kind}/sessions/${encodeURIComponent(sessionId)}/keys`;
 }
 

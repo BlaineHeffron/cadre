@@ -10,6 +10,10 @@ import { findAgyBinarySync, listAgyModels, parseAgyModels } from '../modules/ses
 import { buildAgentProviderCatalog, inferAgentProviderFromModel } from '../modules/agent/provider-interface.mjs';
 import { buildAgentModelCatalog } from '../modules/agent-bus/routes.mjs';
 import { detectProviderState } from '../modules/session-state/providers/patterns.mjs';
+import { readHookEventsSince } from '../modules/agent/hook-events.mjs';
+import { readHookDerivedState, readHookSessionMetadata } from '../modules/session-state/providers/hook.mjs';
+import { resolveBinding } from '../modules/telegram/binding.mjs';
+import { readConversationPage } from '../modules/telegram/transcript.mjs';
 
 const execFileAsync = promisify(execFile);
 const coverageEnv = process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {};
@@ -119,7 +123,7 @@ describe('agy sessions', () => {
     // Interactive agy has no MCP tools on a conversation's first turn: the launch spends that turn on
     // `-i cadre:connect`, which the workspace hook ends before any model call.
     assert.match(pane, new RegExp(`'--add-dir' '${addDir}' '-i' 'cadre:connect'`));
-    const runHook = (lastUserInput) => execFileAsync('sh', ['-c', `printf '%s' '${JSON.stringify({ hookEventName: 'PreInvocation', lastUserInput })}' | ${JSON.parse(result.hooks).cadre.PreInvocation[0].command}`]).then(({ stdout }) => JSON.parse(stdout));
+    const runHook = (lastUserInput) => execFileAsync('sh', ['-c', `printf '%s' '${JSON.stringify({ hookEventName: 'PreInvocation', lastUserInput })}' | ${JSON.parse(result.hooks)['cadre-connect'].PreInvocation[0].command}`]).then(({ stdout }) => JSON.parse(stdout));
     assert.deepEqual(await runHook('cadre:connect'), {
       injectSteps: [{ errorMessage: { userMessage: 'Cadre tools connected' } }], terminationBehavior: 'terminate',
     });
@@ -136,7 +140,7 @@ describe('agy sessions', () => {
     // Resume rebuilds the private workspace, hint and connect turn included.
     assert.match(result.rule, /call_mcp_tool` on server `dueno`/);
     assert.match(result.tmuxArgs.at(-1), /'-i' 'cadre:connect'/);
-    assert.ok(JSON.parse(result.hooks).cadre.PreInvocation);
+    assert.ok(JSON.parse(result.hooks)['cadre-connect'].PreInvocation);
   });
 
   it('applies a prompt profile as an AGENTS.md rule in its own trusted --add-dir workspace', async () => {
@@ -159,6 +163,57 @@ describe('agy sessions', () => {
     assert.ok(pane.includes(`'--add-dir' '${profileDir}'`));
     assert.ok(JSON.parse(pane.match(/'--settings' '([^']+)'/)[1]).trustedWorkspaces.includes(profileDir));
     assert.match(result.profileRule, /caveman/i);
+  });
+
+  it('reports turns from its workspace hooks: turn end, reply, transcript and conversation id', async () => {
+    const { hooks } = await runScenario({ action: 'create' });
+    const events = JSON.parse(hooks)['cadre-events'];
+    const root = await tempDir();
+    const workDir = join(root, 'repo');
+    await mkdir(join(workDir, '.git'), { recursive: true });
+    const transcriptPath = join(root, 'transcript_full.jsonl');
+    const step = (type, extra = {}) => JSON.stringify({ step_index: 0, type, status: 'DONE', ...extra });
+    const request = (text) => step('USER_INPUT', { source: 'USER_EXPLICIT', content: `<USER_REQUEST>\n${text}\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nt\n</ADDITIONAL_METADATA>` });
+    const transcript = [request('cadre:connect'), step('ERROR_MESSAGE', { error: 'Cadre tools connected' }), request('List rooms'),
+      step('PLANNER_RESPONSE', { tool_calls: [{ name: 'call_mcp_tool' }] }), step('GENERIC', { content: '{}' }), step('PLANNER_RESPONSE', { content: 'Two rooms are open.' })];
+    await writeFile(transcriptPath, `${transcript.join('\n')}\n`);
+    const base = { conversationId: 'conv-1', transcriptPath, cwd: workDir, modelName: 'gemini-4-neon-medium' };
+    const send = async (hook, payload) => {
+      const child = execFile('sh', ['-c', hook.command], { env: { ...coverageEnv, PATH: process.env.PATH, DUENO_SESSION_ID: 'agyhooks1', DUENO_SESSION_WORK_DIR: workDir } });
+      child.stdin.end(JSON.stringify({ ...base, ...payload }));
+      const stdout = await new Promise((done, fail) => { let out = ''; child.stdout.on('data', (chunk) => { out += chunk; }); child.on('error', fail); child.on('close', () => done(out)); });
+      assert.equal(stdout.trim(), '{}');
+    };
+    await send(events.PreInvocation[0], { hookEventName: 'PreInvocation', lastUserInput: 'cadre:connect', invocationNum: 0 });
+    await send(events.Stop[0], { hookEventName: 'Stop', lastUserInput: 'cadre:connect' });
+    await send(events.PreInvocation[0], { hookEventName: 'PreInvocation', lastUserInput: 'List rooms', invocationNum: 0 });
+    await send(events.PreInvocation[0], { hookEventName: 'PreInvocation', lastUserInput: 'List rooms', invocationNum: 1 });
+    await send(events.Stop[0], { hookEventName: 'Stop', lastUserInput: 'List rooms', terminationReason: 'NO_TOOL_CALL', fullyIdle: true });
+
+    const hookFile = { workDir, provider: 'agy', sessionId: 'agyhooks1' };
+    const logged = (await readHookEventsSince(hookFile)).events;
+    // The priming turn is not reported; the reply that ended the turn is what returnResults sends.
+    assert.deepEqual(logged.map((event) => event.eventName), ['UserPromptSubmit', 'PostToolUse', 'Stop']);
+    assert.equal(logged.at(-1).lastAssistantMessage, 'Two rooms are open.');
+    assert.equal((await readHookDerivedState(hookFile)).activity, 'prompt_ready');
+    const metadata = await readHookSessionMetadata(hookFile);
+    assert.deepEqual([metadata.cliSessionId, metadata.duenoSessionId, metadata.transcriptPath], ['conv-1', 'agyhooks1', transcriptPath]);
+
+    const binding = await resolveBinding({ id: 'agyhooks1', workDir, runtime: 'agy' });
+    assert.deepEqual([binding.path, binding.anchor], [transcriptPath, 'hook']);
+    assert.deepEqual((await readConversationPage(transcriptPath, 'agy', { limit: 10 })).messages,
+      [{ role: 'user', text: 'List rooms' }, { role: 'assistant', text: 'Two rooms are open.' }]);
+
+    // A turn with no reply after its request returns nothing, not the previous reply; a cancel or error
+    // returns nothing; background work still running holds the result.
+    await writeFile(transcriptPath, `${request('Next')}\n`, { flag: 'a' });
+    await send(events.Stop[0], { hookEventName: 'Stop', lastUserInput: 'Next', terminationReason: 'NO_TOOL_CALL', fullyIdle: true });
+    await writeFile(transcriptPath, `${step('PLANNER_RESPONSE', { content: 'Partial.' })}\n`, { flag: 'a' });
+    await send(events.Stop[0], { hookEventName: 'Stop', lastUserInput: 'Next', terminationReason: 'USER_CANCELED', fullyIdle: true });
+    await send(events.Stop[0], { hookEventName: 'Stop', lastUserInput: 'Next', terminationReason: 'NO_TOOL_CALL', fullyIdle: false });
+    const tail = (await readHookEventsSince(hookFile)).events.slice(-3);
+    assert.deepEqual(tail.map((event) => event.lastAssistantMessage), ['', '', 'Partial.']);
+    assert.deepEqual(tail[2].payload.background_tasks, ['agy']);
   });
 
   it('rejects models agy does not list and reports a missing binary', async () => {

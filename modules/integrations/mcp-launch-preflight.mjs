@@ -6,9 +6,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { config } from '../../config.mjs';
 import { runtimeStatePath } from '../ops/runtime-state.mjs';
+import { shellQuote } from '../platform/shell-quote.mjs';
 import { buildAgentBusMcpUrl } from '../platform/mcp-seed.mjs';
 import { CODEX_APP_SERVER_ENV_ALLOWLIST } from '../agent/codex-app-server-transport.mjs';
-import { AGY_CONNECT_INPUT } from '../agent/runtime-args.mjs';
+import { AGY_CONNECT_INPUT } from '../agent/hook-events.mjs';
 import {
   AGENT_BUS_AGENT_TOOL_SCOPES,
   AGENT_SPAWN_TOOL_SCOPES,
@@ -138,12 +139,21 @@ This session runs under Cadre. Cadre's tools (room_send, room_context, agent_dm,
 `;
 // Interactive agy leaves MCP tools out of a conversation's first turn, so the launch's first input
 // (AGY_CONNECT_INPUT) is ended by this hook before any model call; the user's turns then have them.
-const AGY_CONNECT_HOOKS = `${JSON.stringify({ cadre: { PreInvocation: [{
+const AGY_CONNECT_HOOK = {
   type: 'command',
   command: `grep -Eq '"lastUserInput": ?"${AGY_CONNECT_INPUT}"' && echo '${JSON.stringify({
     injectSteps: [{ errorMessage: { userMessage: 'Cadre tools connected' } }], terminationBehavior: 'terminate',
   })}' || echo {}`,
-}] } }, null, 2)}\n`;
+};
+// Turn starts and ends go to Cadre's hook state like Claude's hooks: turn end, transcript path, returnResults.
+const AGY_EVENT_HOOK = {
+  type: 'command',
+  command: `${shellQuote(process.execPath)} ${shellQuote(fileURLToPath(new URL('../../scripts/agent-hooks/log-event.mjs', import.meta.url)))} --provider agy >/dev/null 2>&1; echo {}`,
+};
+const agyHooks = (connect) => `${JSON.stringify({
+  ...(connect ? { 'cadre-connect': { PreInvocation: [AGY_CONNECT_HOOK] } } : {}),
+  'cadre-events': { PreInvocation: [AGY_EVENT_HOOK], Stop: [AGY_EVENT_HOOK] },
+}, null, 2)}\n`;
 
 export function agyMcpWorkspacePath(sessionId) {
   return runtimeStatePath(`mcp_client_configs/agy-${text(sessionId)}`);
@@ -641,13 +651,13 @@ export async function prepareMcpCapabilityLaunch({
     const piConfigPath = backendType === 'pi' && serverIds.length > 0
       ? await writePiConfig(sessionId, piServers)
       : '';
-    const agyWorkspaceDir = backendType === 'agy' && serverIds.length > 0
-      ? dirname(dirname(await writePrivateFile(join(agyMcpWorkspacePath(sessionId), '.agents', 'mcp_config.json'),
-        `${JSON.stringify({ mcpServers: agyServers }, null, 2)}\n`)))
+    // Every agy session gets the workspace for its event hooks; MCP config, rule and priming need dueno.
+    const agyWorkspaceDir = backendType === 'agy'
+      ? dirname(dirname(await writePrivateFile(join(agyMcpWorkspacePath(sessionId), '.agents', 'hooks.json'), agyHooks(Boolean(agyServers.dueno)))))
       : '';
-    if (agyWorkspaceDir) {
+    if (agyServers.dueno) {
+      await writePrivateFile(join(agyWorkspaceDir, '.agents', 'mcp_config.json'), `${JSON.stringify({ mcpServers: agyServers }, null, 2)}\n`);
       await writePrivateFile(join(agyWorkspaceDir, 'AGENTS.md'), AGY_DUENO_RULE);
-      await writePrivateFile(join(agyWorkspaceDir, '.agents', 'hooks.json'), AGY_CONNECT_HOOKS);
     }
     const credentialPath = backendType === 'codex' && serverIds.includes('dueno') && busCredential?.token
       ? await writePrivateFile(mcpClientCredentialPath(backendType, sessionId), `${String(busCredential.token)}\n`)
@@ -666,6 +676,7 @@ export async function prepareMcpCapabilityLaunch({
         claudeConfigPath: preparedClaudeConfigPath,
         piConfigPath,
         agyWorkspaceDir,
+        agyConnect: Boolean(agyServers.dueno),
         piExtensionPath: backendType === 'pi' && piConfigPath
           ? resolve(dirname(fileURLToPath(import.meta.url)), 'pi-mcp-extension.mjs')
           : '',

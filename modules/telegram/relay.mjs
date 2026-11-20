@@ -325,6 +325,7 @@ export async function listSessionsFromRegistry({ sessionsDir = null, roots = nul
       { path: join(root, '.dueno/state/claude_sessions.json'), fallbackRuntime: 'claude' },
       { path: join(root, '.dueno/state/codex_sessions.json'), fallbackRuntime: 'codex' },
       { path: join(root, '.dueno/state/pi_sessions.json'), fallbackRuntime: 'pi' },
+      { path: join(root, '.dueno/state/agy_sessions.json'), fallbackRuntime: 'agy' },
     ];
     for (const file of files) {
       const entries = await readJsonFile(file.path, []);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
-import { recordHookPayload } from '../../modules/agent/hook-events.mjs';
+import { agyHookPayload, recordHookPayload } from '../../modules/agent/hook-events.mjs';
 import { readEnv } from '../../modules/platform/cadre-env.mjs';
 
 function parseArgs(argv = []) {
@@ -24,8 +24,10 @@ async function readStdin() {
 async function main() {
   const { provider } = parseArgs(process.argv.slice(2));
   const raw = await readStdin();
-  const payload = raw.trim() ? JSON.parse(raw) : {};
   const envProvider = String(readEnv('DUENO_PROVIDER') || '').trim();
+  const parsed = raw.trim() ? JSON.parse(raw) : {};
+  const payload = (provider || envProvider) === 'agy' ? await agyHookPayload(parsed) : parsed;
+  if (!payload) return;
   const duenoSessionId = String(readEnv('DUENO_SESSION_ID') || '').trim();
   const { stopDecision } = await recordHookPayload(payload, {
     provider: provider || envProvider,

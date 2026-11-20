@@ -483,7 +483,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
           thinkingLevel: { type: 'string' },
           initialPrompt: { type: 'string' },
           parentThreadId: { type: 'string', description: 'Existing thread to add the session to as a participant.' },
-          returnResults: { type: 'boolean', description: 'Claude without parentThreadId only: DMs you the final message of each turn that ends with no background work or returnResults workers outstanding; end your turn to wait, do not poll. Omit when only handing off context.' },
+          returnResults: { type: 'boolean', description: 'Claude/agy, no parentThreadId: DMs you the final message of each turn that ends with no background work or returnResults workers outstanding; end your turn to wait, do not poll. Omit when only handing off context.' },
           machine: { type: 'string', description: 'Paired machine (Claude, Codex, Pi; not DeepSeek); workDir is a path there. Default hub.' },
           ...MCP_SELECTION_SCHEMA_PROPERTIES,
           codexPlugins: CODEX_PLUGIN_SELECTION_SCHEMA,
@@ -494,7 +494,7 @@ export function buildMonitorMcpServer({ requestImpl }) {
       },
       handler: async ({ provider, workDir, displayName, model, thinkingLevel, initialPrompt, parentThreadId, returnResults = false, machine, mcpProfile = 'dueno', mcpServers, codexPlugins, promptProfile, skills, codeMode }) => {
         assertMcpProviderModel(provider, model);
-        const returnToSpawner = returnResults === true && provider === 'claude' && !parentThreadId;
+        const returnToSpawner = returnResults === true && ['claude', 'agy'].includes(provider) && !parentThreadId;
         const result = await request('/api/agents/sessions', {
           method: 'POST',
           body: {

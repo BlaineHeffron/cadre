@@ -1,10 +1,14 @@
-import { appendFile, lstat, mkdir, opendir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, open, opendir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deriveHookState } from '../session-state/providers/hook.mjs';
 
 // Claude Code plugin that forwards lifecycle hooks to scripts/agent-hooks/log-event.mjs.
 export const CLAUDE_FLEET_PLUGIN_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../scripts/agent-hooks/claude-fleet');
+
+// agy's first input on launch and resume: a priming turn its workspace hook ends before any model call.
+export const AGY_CONNECT_INPUT = 'cadre:connect';
+const AGY_REPLY_TAIL_BYTES = 512 * 1024;
 
 const HOOKS_DIRNAME = join('.agent_bus', 'hooks');
 const STATE_DIRNAME = join(HOOKS_DIRNAME, 'state');
@@ -292,6 +296,50 @@ export async function recordHookPayload(payload = {}, {
   });
 
   return { ...result, paths };
+}
+
+// The reply that ended agy's turn: the last planner text after the last user input, or '' (e.g. a cancel).
+async function lastAgyReply(transcriptPath = '') {
+  const handle = await open(transcriptPath, 'r').catch(() => null);
+  if (!handle) return '';
+  try {
+    const { size } = await handle.stat();
+    const length = Math.min(size, AGY_REPLY_TAIL_BYTES);
+    const { buffer } = await handle.read(Buffer.alloc(length), 0, length, size - length);
+    const records = buffer.toString('utf8').split('\n').map((line) => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean);
+    for (const record of records.reverse()) {
+      if (record.type === 'USER_INPUT') return '';
+      if (record.type === 'PLANNER_RESPONSE' && typeof record.content === 'string' && record.content.trim()) return record.content;
+    }
+    return '';
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Maps an agy hook payload (camelCase; Stop carries no reply) onto the Claude fields recordHookPayload
+ * reads. A turn's first model call is its UserPromptSubmit. The priming turn is not a turn: null.
+ * Only a normal stop (NO_TOOL_CALL) carries a reply for returnResults; a cancel or error does not, and
+ * background work still running (fullyIdle false) holds it like Claude's background_tasks.
+ */
+export async function agyHookPayload(payload = {}) {
+  if (payload.lastUserInput === AGY_CONNECT_INPUT) return null;
+  const stop = payload.hookEventName === 'Stop';
+  return {
+    session_id: payload.conversationId,
+    hook_event_name: stop ? 'Stop' : Number(payload.invocationNum) > 0 ? 'PostToolUse' : 'UserPromptSubmit',
+    transcript_path: payload.transcriptPath,
+    cwd: payload.cwd,
+    model: payload.modelName,
+    prompt: payload.lastUserInput,
+    ...(stop ? {
+      last_assistant_message: payload.terminationReason === 'NO_TOOL_CALL' ? await lastAgyReply(payload.transcriptPath) : '',
+      ...(payload.fullyIdle === false ? { background_tasks: ['agy'] } : {}),
+    } : {}),
+  };
 }
 
 export async function recordRuntimeHookEvent({
