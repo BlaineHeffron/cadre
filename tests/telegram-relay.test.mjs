@@ -2291,10 +2291,17 @@ describe('telegram relay registry session listing', () => {
         },
       ]));
 
+      // agy's registry has no runtime field; the file names it.
+      await mkdir(join(sessionsDir, '.dueno', 'state'), { recursive: true });
+      await writeFile(join(sessionsDir, '.dueno', 'state', 'agy_sessions.json'), JSON.stringify([
+        { id: 'agy-1', tmuxSession: 'agy-agy-1', workDir: '/tmp/agy' },
+      ]));
+
       assert.deepEqual(await listSessionsFromRegistry({ sessionsDir, agentBusStatePaths: [] }), [
         { id: 'claude-1', tmuxSession: 'dm-agent-1', workDir: '/tmp/claude', runtime: 'claude', state: null, name: 'Lead Implementer', created: 0, cliSessionId: '' },
         { id: 'codex-1', tmuxSession: 'codex-1', workDir: '/tmp/codex', runtime: 'codex', state: null, name: 'GitHub PR #8', created: 0, cliSessionId: '' },
         { id: 'pi-1', tmuxSession: 'pi-1', workDir: '/tmp/pi', runtime: 'pi', state: null, name: '', created: 0, cliSessionId: 'pi-cli-1' },
+        { id: 'agy-1', tmuxSession: 'agy-agy-1', workDir: '/tmp/agy', runtime: 'agy', state: null, name: '', created: 0, cliSessionId: '' },
       ]);
     });
   });

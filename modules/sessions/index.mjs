@@ -432,7 +432,7 @@ const PROVIDER_CONFIGS = {
   },
   // Google's unmodified interactive Antigravity CLI. MCP comes from a private `--add-dir` workspace
   // (see agyMcpWorkspacePath) and a prompt profile from another one holding AGENTS.md (see
-  // promptProfilePath). It has no hook reporter, so the session is pane-only.
+  // promptProfilePath). That workspace's hooks report turns through log-event.mjs (see agyHookPayload).
   agy: {
     id: 'agy',
     displayName: 'Antigravity',
@@ -440,10 +440,9 @@ const PROVIDER_CONFIGS = {
     binaryName: 'agy',
     binaryEnv: 'AGY_BIN',
     strictBinary: true,
-    readNativeHookState: false,
     // The first prompt is typed into the pane, as for Codex, so it never enters argv.
     typesInitialPrompt: true,
-    // No captured conversation id: resume continues the workDir's most recent conversation.
+    // Until a hook reports the conversation id, resume continues the workDir's most recent conversation.
     resumesWithoutCliSessionId: true,
     defaultProvider: 'agy',
     defaultRuntime: 'agy',
@@ -461,8 +460,8 @@ const PROVIDER_CONFIGS = {
       }
       return { provider: 'agy', runtime: 'agy', launchRuntime: 'agy' };
     },
-    buildArgs: ({ mcpLaunch = {}, promptLaunch = {}, ...options } = {}) => buildAgentRuntimeLaunchArgs({ ...options, mcpWorkspaceDir: mcpLaunch.agyWorkspaceDir, profileWorkspaceDir: promptLaunch.filePath ? dirname(promptLaunch.filePath) : '', runtime: 'agy' }),
-    buildResumeArgs: ({ mcpLaunch = {}, promptLaunch = {}, ...options } = {}) => buildAgentRuntimeResumeArgs({ ...options, mcpWorkspaceDir: mcpLaunch.agyWorkspaceDir, profileWorkspaceDir: promptLaunch.filePath ? dirname(promptLaunch.filePath) : '', runtime: 'agy' }),
+    buildArgs: ({ mcpLaunch = {}, promptLaunch = {}, ...options } = {}) => buildAgentRuntimeLaunchArgs({ ...options, mcpWorkspaceDir: mcpLaunch.agyWorkspaceDir, connect: mcpLaunch.agyConnect, profileWorkspaceDir: promptLaunch.filePath ? dirname(promptLaunch.filePath) : '', runtime: 'agy' }),
+    buildResumeArgs: ({ mcpLaunch = {}, promptLaunch = {}, ...options } = {}) => buildAgentRuntimeResumeArgs({ ...options, mcpWorkspaceDir: mcpLaunch.agyWorkspaceDir, connect: mcpLaunch.agyConnect, profileWorkspaceDir: promptLaunch.filePath ? dirname(promptLaunch.filePath) : '', runtime: 'agy' }),
     shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, workDir }) {
       const baseCommand = [sessionBinary, ...allArgs].map(shellQuote).join(' ');
       const command = launchLogPath ? `${baseCommand} 2> >(tee -a ${shellQuote(launchLogPath)} >&2)` : baseCommand;

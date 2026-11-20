@@ -544,10 +544,12 @@ async function reusePrevious(previous, session) {
 export async function resolveBinding(session = {}, { previous = null, liveTenantCount = 1, deps = {} } = {}) {
   const sessionId = text(session.id);
   const runtime = normalizeRuntime(session);
-  if (!sessionId || !session.workDir || !['claude', 'codex', 'pi'].includes(runtime)) {
+  if (!sessionId || !session.workDir || !['claude', 'codex', 'pi', 'agy'].includes(runtime)) {
     return refused('unsupported_session');
   }
   const resolvedDeps = normalizeDeps(deps);
+  // agy names its transcript only in its hook payloads.
+  if (runtime === 'agy') return await resolveHook(session, resolvedDeps) || refused('not_found');
 
   // `/clear` moves a Claude session to a new transcript; the old file and the registry's
   // launch-time cliSessionId still name the old one, so the hook's live path wins.

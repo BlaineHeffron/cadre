@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { CLAUDE_FLEET_PLUGIN_DIR, defaultClaudeEffort } from './hook-events.mjs';
+import { AGY_CONNECT_INPUT, CLAUDE_FLEET_PLUGIN_DIR, defaultClaudeEffort } from './hook-events.mjs';
 
 const HARNESS_ALIASES = Object.freeze({
   agy: 'agy',
@@ -220,8 +220,6 @@ class PiRuntimeHarness extends AgentRuntimeHarness {
   }
 }
 
-export const AGY_CONNECT_INPUT = 'cadre:connect';
-
 // Google's unmodified interactive `agy`; the pane opens in the workDir, so it needs no --cd.
 // agy model ids carry the effort (`gemini-4-neon-medium`) and `--effort` would override it, so
 // thinkingLevel is not passed. `--settings` is session-only: it trusts the workDir (and the
@@ -231,12 +229,13 @@ class AgyRuntimeHarness extends AgentRuntimeHarness {
     super({ id: 'agy' });
   }
 
-  buildLaunchArgs({ args = [], model = '', workDir = '', mcpWorkspaceDir = '', profileWorkspaceDir = '' } = {}) {
+  buildLaunchArgs({ args = [], model = '', workDir = '', mcpWorkspaceDir = '', profileWorkspaceDir = '', connect = false } = {}) {
     const trusted = [this.normalizeWorkDir(workDir), mcpWorkspaceDir, profileWorkspaceDir].filter(Boolean);
     const nextArgs = ['--dangerously-skip-permissions', '--settings', JSON.stringify({ trustedWorkspaces: trusted })];
     if (profileWorkspaceDir) nextArgs.push('--add-dir', profileWorkspaceDir);
-    // The workspace's hook ends this first turn before any model call (see AGY_CONNECT_HOOKS).
-    if (mcpWorkspaceDir) nextArgs.push('--add-dir', mcpWorkspaceDir, '-i', AGY_CONNECT_INPUT);
+    if (mcpWorkspaceDir) nextArgs.push('--add-dir', mcpWorkspaceDir);
+    // The workspace's hook ends this first turn before any model call (see AGY_CONNECT_HOOK).
+    if (connect) nextArgs.push('-i', AGY_CONNECT_INPUT);
     if (model) nextArgs.push('--model', model);
     return [...nextArgs, ...args];
   }

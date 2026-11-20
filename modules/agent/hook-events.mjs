@@ -1,10 +1,14 @@
-import { appendFile, lstat, mkdir, opendir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, open, opendir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deriveHookState } from '../session-state/providers/hook.mjs';
 
 // Claude Code plugin that forwards lifecycle hooks to scripts/agent-hooks/log-event.mjs.
 export const CLAUDE_FLEET_PLUGIN_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../scripts/agent-hooks/claude-fleet');
+
+// agy's first input on launch and resume: a priming turn its workspace hook ends before any model call.
+export const AGY_CONNECT_INPUT = 'cadre:connect';
+const AGY_REPLY_TAIL_BYTES = 512 * 1024;
 
 const HOOKS_DIRNAME = join('.agent_bus', 'hooks');
 const STATE_DIRNAME = join(HOOKS_DIRNAME, 'state');
@@ -84,7 +88,7 @@ export function createHookEventRetention({ store, retentionDays = 7 } = {}) {
             const entry = await directory.read();
             if (!entry) { await directory.close(); directory = null; break; }
             entries++;
-            if (!entry.isFile() || !/^(?:codex-app-server|claude|codex|pi|deepseek)-[A-Za-z0-9._-]+\.jsonl$/.test(entry.name)
+            if (!entry.isFile() || !/^(?:codex-app-server|claude|codex|pi|agy|deepseek)-[A-Za-z0-9._-]+\.jsonl$/.test(entry.name)
               || live.has(entry.name)) continue;
             const eventsPath = join(root, HOOKS_DIRNAME, entry.name);
             const info = await lstat(eventsPath).catch(() => null);
@@ -292,6 +296,56 @@ export async function recordHookPayload(payload = {}, {
   });
 
   return { ...result, paths };
+}
+
+// The reply that ended agy's turn: the last planner text after the last user input, or '' (e.g. a cancel).
+async function lastAgyReply(transcriptPath = '') {
+  const handle = await open(transcriptPath, 'r').catch(() => null);
+  if (!handle) return '';
+  try {
+    const { size } = await handle.stat();
+    const length = Math.min(size, AGY_REPLY_TAIL_BYTES);
+    const { buffer } = await handle.read(Buffer.alloc(length), 0, length, size - length);
+    const records = buffer.toString('utf8').split('\n').map((line) => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean);
+    for (const record of records.reverse()) {
+      if (record.type === 'USER_INPUT') return '';
+      if (record.type === 'PLANNER_RESPONSE' && typeof record.content === 'string' && record.content.trim()) return record.content;
+    }
+    return '';
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Maps an agy hook payload (camelCase; Stop carries no reply) onto the Claude fields recordHookPayload
+ * reads. A turn's first model call is its UserPromptSubmit. The priming turn is not a turn: null.
+ * returnResults gets the reply of a normal stop (NO_TOOL_CALL), agy's error text for ERROR (a waiting
+ * spawner must hear of it), and nothing for a cancel or other stop. Background work still running
+ * (fullyIdle false) holds it like Claude's background_tasks.
+ */
+export async function agyHookPayload(payload = {}) {
+  if (payload.lastUserInput === AGY_CONNECT_INPUT) return null;
+  const stop = payload.hookEventName === 'Stop';
+  const eventName = stop ? 'Stop' : Number(payload.invocationNum) > 0 ? 'PostToolUse' : 'UserPromptSubmit';
+  const reply = async () => {
+    if (payload.terminationReason === 'NO_TOOL_CALL') return lastAgyReply(payload.transcriptPath);
+    return payload.terminationReason === 'ERROR' ? `agy stopped with an error: ${payload.error || 'unknown error'}` : '';
+  };
+  return {
+    session_id: payload.conversationId,
+    hook_event_name: eventName,
+    transcript_path: payload.transcriptPath,
+    cwd: payload.cwd,
+    model: payload.modelName,
+    ...(eventName === 'UserPromptSubmit' ? { prompt: payload.lastUserInput } : {}),
+    ...(stop ? {
+      last_assistant_message: await reply(),
+      ...(payload.fullyIdle === false ? { background_tasks: ['agy'] } : {}),
+    } : {}),
+  };
 }
 
 export async function recordRuntimeHookEvent({

@@ -171,7 +171,11 @@ Current provider mapping:
   pane shows `cadre:connect` and `Cadre tools connected`. Resume uses `--continue`,
   which agy scopes to the workDir's latest conversation. A prompt profile (append or replace) becomes
   an always-on rule: `AGENTS.md` in its own trusted `--add-dir` workspace (agy has no system-prompt
-  flag). The session is pane-only (no transcript); it does not join collaboration rooms.
+  flag). Every agy session's workspace also has `PreInvocation` and `Stop` hooks that pipe agy's
+  payload to `scripts/agent-hooks/log-event.mjs --provider agy`, which maps it onto Cadre's hook
+  state (`agyHookPayload`). That hook state gives turn-end status, the transcript path for the
+  transcript view and Telegram relay, the reply for `returnResults`, and the conversation id, so a
+  resume uses `--conversation <id>`. The priming turn is skipped. It does not join collaboration rooms.
   Cadre never runs `agy -p` or `agy acp`.
 
 Gemini via subscription now goes through the `agy` provider; the retired `antigravity` Pi provider (local CLIProxyAPI) is gone, and sessions saved with it list as an unsupported provider and cannot be resumed.
