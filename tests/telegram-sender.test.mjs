@@ -644,3 +644,77 @@ describe('telegram sender API and state', () => {
     });
   });
 });
+
+describe('telegram sender links', () => {
+  const bugUrl = 'https://dueno-1.tailc7ab6f.ts.net:8447/iu-tech-report-html/index.html';
+  const linked = ({ text, entities = [] }) => entities.map(({ type, offset, length }) => [type, text.slice(offset, offset + length)]);
+
+  it('sends url entities that stop at markdown and punctuation around a link', async () => {
+    await withTempState(async (stateDir) => {
+      await writeFile(join(stateDir, 'config.env'), 'TELEGRAM_BOT_TOKEN="secret-token"\nTELEGRAM_CHAT_ID=-100123\n');
+      const calls = [];
+      const sender = new TelegramSender({ stateDir, fetchImpl: buildFetchRecorder(calls) });
+      await sender.deliver({
+        route: route({ session_id: 'session-links' }),
+        header: '🤖 session-',
+        text: [
+          `Report: **${bugUrl}**`,
+          '*https://a.example/one* __https://a.example/two__ `https://a.example/three`',
+          '[the docs](https://a.example/docs?q=1#top) and [https://a.example/x](https://a.example/x)',
+          'See https://a.example/end. Or https://a.example/b, (https://a.example/c)',
+          'Wiki https://en.wikipedia.org/wiki/Foo_(bar) and (https://en.wikipedia.org/wiki/Foo_(bar)).',
+          'plain *bold* text',
+        ].join('\n'),
+      });
+      const sent = calls.find((call) => call.url.endsWith('/sendMessage')).body;
+      assert.ok(sent.text.startsWith('🤖 session-\nReport: **https://'), 'non-link text is unchanged');
+      assert.deepEqual(linked(sent).map(([, url]) => url), [
+        bugUrl,
+        'https://a.example/one', 'https://a.example/two', 'https://a.example/three',
+        'https://a.example/docs?q=1#top', 'https://a.example/x', 'https://a.example/x',
+        'https://a.example/end', 'https://a.example/b', 'https://a.example/c',
+        'https://en.wikipedia.org/wiki/Foo_(bar)', 'https://en.wikipedia.org/wiki/Foo_(bar)',
+      ]);
+      assert.ok(sent.entities.every(({ type }) => type === 'url'));
+    });
+  });
+
+  it('never ends a page inside a link, and links each page on its own text', async () => {
+    await withTempState(async (stateDir) => {
+      await writeFile(join(stateDir, 'config.env'), 'TELEGRAM_BOT_TOKEN="secret-token"\nTELEGRAM_CHAT_ID=-100123\nMAX_MSG_LENGTH=120\n');
+      const calls = [];
+      const sender = new TelegramSender({ stateDir, fetchImpl: buildFetchRecorder(calls) });
+      const text = `${'word '.repeat(12)}**${bugUrl}** ${'tail '.repeat(20)}`;
+      await sender.sendMessagePages(text, { threadId: 5 });
+      const pages = calls.map((call) => call.body);
+      assert.ok(pages.length > 1);
+      assert.deepEqual(pages.flatMap((page) => linked(page)), [['url', bugUrl]]);
+      assert.equal(pages.map((page) => page.text.replace(/^\[\d+\/\d+\] /, '')).join(''), text);
+    });
+  });
+
+  it('keeps a link whole when splitting pages directly', () => {
+    const pages = pagedMessages(`${'a'.repeat(30)} https://a.example/${'p'.repeat(20)} b`, 70);
+    assert.ok(pages.length > 1);
+    assert.ok(pages.some((page) => page.includes(`https://a.example/${'p'.repeat(20)}`)));
+  });
+
+  it('sends text without an http(s) link with no entities field', async () => {
+    await withTempState(async (stateDir) => {
+      const calls = [];
+      const sender = new TelegramSender({ stateDir, fetchImpl: buildFetchRecorder(calls) });
+      await sender.sendMessagePages('see github.com/x, a@b.co, @bot #tag', { threadId: 5 });
+      await sender.editMessageText(7, '**done**');
+      assert.deepEqual(calls.map((call) => 'entities' in call.body), [false, false]);
+    });
+  });
+
+  it('links edited message text the same way', async () => {
+    await withTempState(async (stateDir) => {
+      const calls = [];
+      const sender = new TelegramSender({ stateDir, fetchImpl: buildFetchRecorder(calls) });
+      await sender.editMessageText(7, `**${bugUrl}**`);
+      assert.deepEqual(linked(calls[0].body), [['url', bugUrl]]);
+    });
+  });
+});
