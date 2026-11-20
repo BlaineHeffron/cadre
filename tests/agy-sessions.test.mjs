@@ -139,12 +139,16 @@ describe('agy sessions', () => {
     assert.ok(JSON.parse(result.hooks).cadre.PreInvocation);
   });
 
-  it('warns that a prompt profile cannot be applied instead of passing one', async () => {
-    const result = await runScenario({ action: 'create', extra: { promptProfile: 'command-center' } });
+  it('applies a prompt profile as an AGENTS.md rule in its own trusted --add-dir workspace', async () => {
+    const result = await runScenario({ action: 'create', extra: { promptProfile: 'caveman' } });
     assert.equal(result.response.statusCode, 200, JSON.stringify(result.response.body));
-    assert.deepEqual(result.response.body.warnings.map((entry) => entry.code), ['prompt_profile_unsupported']);
-    assert.equal(result.persisted.promptProfile.attached, false);
-    assert.doesNotMatch(result.tmuxArgs.at(-1), /system-prompt|prompt_profiles/);
+    assert.deepEqual(result.response.body.warnings, undefined);
+    assert.equal(result.persisted.promptProfile.attached, true);
+    const profileDir = join(result.stateDir, 'prompt_profiles', `agy-${result.response.body.id}`);
+    const pane = result.tmuxArgs.at(-1);
+    assert.ok(pane.includes(`'--add-dir' '${profileDir}'`));
+    assert.ok(JSON.parse(pane.match(/'--settings' '([^']+)'/)[1]).trustedWorkspaces.includes(profileDir));
+    assert.match(result.profileRule, /caveman/i);
   });
 
   it('rejects models agy does not list and reports a missing binary', async () => {
@@ -197,9 +201,10 @@ async function runScenario({ action, model = 'gemini-4-neon-medium', agyMode = '
     const mcpConfig = await readFile(workspace + '/.agents/mcp_config.json', 'utf8').catch(() => '');
     const rule = await readFile(workspace + '/AGENTS.md', 'utf8').catch(() => '');
     const hooks = await readFile(workspace + '/.agents/hooks.json', 'utf8').catch(() => '{}');
+    const profileRule = await readFile(${JSON.stringify(join(stateDir, 'prompt_profiles'))} + '/agy-' + id + '/AGENTS.md', 'utf8').catch(() => '');
     const tmuxArgs = await readFile(${JSON.stringify(tmuxArgsFile)}, 'utf8').catch(() => '');
     await app.close();
-    console.log(JSON.stringify({ response: { statusCode: response.statusCode, body: response.json() }, persisted: state[0] || null, mcpConfig, rule, hooks, tmuxArgs }));
+    console.log(JSON.stringify({ response: { statusCode: response.statusCode, body: response.json() }, persisted: state[0] || null, mcpConfig, rule, hooks, profileRule, tmuxArgs }));
   `;
   const env = {
     ...coverageEnv,

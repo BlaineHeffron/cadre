@@ -169,8 +169,9 @@ Current provider mapping:
   `.agents/hooks.json`. agy leaves MCP tools out of a conversation's first interactive turn, so each
   launch and resume first runs `-i cadre:connect`, which the hook ends before any model call; the
   pane shows `cadre:connect` and `Cadre tools connected`. Resume uses `--continue`,
-  which agy scopes to the workDir's latest conversation. Prompt profiles warn and are skipped (no
-  system-prompt flag); the session is pane-only (no transcript); it does not join collaboration rooms.
+  which agy scopes to the workDir's latest conversation. A prompt profile (append or replace) becomes
+  an always-on rule: `AGENTS.md` in its own trusted `--add-dir` workspace (agy has no system-prompt
+  flag). The session is pane-only (no transcript); it does not join collaboration rooms.
   Cadre never runs `agy -p` or `agy acp`.
 
 Gemini via subscription now goes through the `agy` provider; the retired `antigravity` Pi provider (local CLIProxyAPI) is gone, and sessions saved with it list as an unsupported provider and cannot be resumed.

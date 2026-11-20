@@ -3,7 +3,7 @@ import { exec } from '../../lib/exec.mjs';
 import { config as appConfig } from '../../config.mjs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { stripCodexIndent } from '../session-state/providers/patterns.mjs';
 import { normalizeProviderPane } from '../session-state/providers/pane-view.mjs';
 import { assertValidCodexModel } from './codex-models.mjs';
@@ -64,7 +64,6 @@ import {
   preIssuedCredentialStore,
   sanitizedMcpSnapshot,
 } from '../integrations/mcp-launch-preflight.mjs';
-import { resolvePromptProfile } from '../integrations/prompt-profile-catalog.mjs';
 import {
   buildPromptLaunchArgs,
   cleanupPromptProfileLaunch,
@@ -432,8 +431,8 @@ const PROVIDER_CONFIGS = {
     },
   },
   // Google's unmodified interactive Antigravity CLI. MCP comes from a private `--add-dir` workspace
-  // (see agyMcpWorkspacePath). It has no system-prompt flag and no hook reporter, so prompt
-  // profiles are not applied and the session is pane-only.
+  // (see agyMcpWorkspacePath) and a prompt profile from another one holding AGENTS.md (see
+  // promptProfilePath). It has no hook reporter, so the session is pane-only.
   agy: {
     id: 'agy',
     displayName: 'Antigravity',
@@ -442,7 +441,6 @@ const PROVIDER_CONFIGS = {
     binaryEnv: 'AGY_BIN',
     strictBinary: true,
     readNativeHookState: false,
-    supportsPromptProfiles: false,
     // The first prompt is typed into the pane, as for Codex, so it never enters argv.
     typesInitialPrompt: true,
     // No captured conversation id: resume continues the workDir's most recent conversation.
@@ -463,8 +461,8 @@ const PROVIDER_CONFIGS = {
       }
       return { provider: 'agy', runtime: 'agy', launchRuntime: 'agy' };
     },
-    buildArgs: ({ mcpLaunch = {}, ...options } = {}) => buildAgentRuntimeLaunchArgs({ ...options, mcpWorkspaceDir: mcpLaunch.agyWorkspaceDir, runtime: 'agy' }),
-    buildResumeArgs: ({ mcpLaunch = {}, ...options } = {}) => buildAgentRuntimeResumeArgs({ ...options, mcpWorkspaceDir: mcpLaunch.agyWorkspaceDir, runtime: 'agy' }),
+    buildArgs: ({ mcpLaunch = {}, promptLaunch = {}, ...options } = {}) => buildAgentRuntimeLaunchArgs({ ...options, mcpWorkspaceDir: mcpLaunch.agyWorkspaceDir, profileWorkspaceDir: promptLaunch.filePath ? dirname(promptLaunch.filePath) : '', runtime: 'agy' }),
+    buildResumeArgs: ({ mcpLaunch = {}, promptLaunch = {}, ...options } = {}) => buildAgentRuntimeResumeArgs({ ...options, mcpWorkspaceDir: mcpLaunch.agyWorkspaceDir, profileWorkspaceDir: promptLaunch.filePath ? dirname(promptLaunch.filePath) : '', runtime: 'agy' }),
     shellCommand({ sessionBinary, allArgs, launchLogPath, sessionId, provider, workDir }) {
       const baseCommand = [sessionBinary, ...allArgs].map(shellQuote).join(' ');
       const command = launchLogPath ? `${baseCommand} 2> >(tee -a ${shellQuote(launchLogPath)} >&2)` : baseCommand;
@@ -1158,9 +1156,6 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
   if (sandboxMode === 'nono') assertNonoSupported({ researchSafeRuntime, codexPlugins: selectedCodexPlugins, serverIds: resolvedMcp.serverIds });
   const selectedSkills = sanitizedSkillSnapshot(skills);
   resolveLaunchSkills({ skillIds: selectedSkills });
-  const promptWarnings = config.supportsPromptProfiles === false && resolvePromptProfile({ promptProfile }).body
-    ? [{ code: 'prompt_profile_unsupported', message: `${config.displayName} has no system-prompt flag; the prompt profile was not applied.` }]
-    : [];
 
   const id = sessionId || generateId();
   if (typeof id !== 'string' || !/^[a-f0-9]{8,32}$/.test(id) || sessions.has(id)) throw Object.assign(new Error('Invalid or duplicate sessionId'), { statusCode: 400 });
@@ -1277,7 +1272,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     ...(mcpToolScope === 'bus' ? { mcpToolScope } : {}),
     ...(selectedCodexPlugins ? { codexPlugins: selectedCodexPlugins } : {}),
     ...(codeMode ? { codeMode } : {}),
-    promptProfile: { ...sanitizedPromptSnapshot(promptPreparation.resolved), ...(promptWarnings.length ? { attached: false } : {}) },
+    promptProfile: sanitizedPromptSnapshot(promptPreparation.resolved),
     skills: selectedSkills,
     autoCloseMode: String(autoCloseMode || 'never').trim() || 'never',
     autoCloseAfterMs: Number.isFinite(Number(autoCloseAfterMs)) ? Number(autoCloseAfterMs) : 0,
@@ -1319,7 +1314,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
       initialPromptError = error.message;
     }
   }
-  return { id, sessionName, mcpCapabilities: meta.mcpCapabilities, ...(codeMode ? { codeMode } : {}), ...(initialPromptError ? { initialPromptError } : {}), ...(promptWarnings.length ? { warnings: promptWarnings } : {}) };
+  return { id, sessionName, mcpCapabilities: meta.mcpCapabilities, ...(codeMode ? { codeMode } : {}), ...(initialPromptError ? { initialPromptError } : {}) };
 }
 
 async function refreshSessionCliMetadata(id, meta = {}, targetSessions = sessions) {
@@ -1770,7 +1765,7 @@ async function cleanupSessionArtifacts(id, meta, logger) {
   await Promise.all([
     cleanup(meta.workDir, removeGithubAgentScratch(meta)),
     cleanup(meta.workDir, removeSessionHookFiles({ workDir: meta.workDir, provider: config.id, sessionId: id })),
-    cleanup(promptProfilePath(config.id, id), rm(promptProfilePath(config.id, id), { force: true })),
+    cleanup(promptProfilePath(config.id, id), cleanupPromptProfileLaunch({ backendType: config.id, sessionId: id })),
     cleanup(initialPromptPath(id), rm(initialPromptPath(id), { force: true })),
     ...(meta.launchLogPath ? [cleanup(meta.launchLogPath, rm(meta.launchLogPath, { force: true }))] : []),
     ...(meta.sandbox === 'nono' ? [removeSandboxState(id)] : []),
