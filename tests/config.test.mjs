@@ -56,6 +56,8 @@ async function importConfigWithEnv(overrides) {
     'CADRE_REPO_QUALITY_REPO_PATHS_JSON',
     'CADRE_REPO_QUALITY_PROVIDER',
     'CADRE_REPO_QUALITY_MODEL',
+    'CADRE_ARCHITECTURE_WATCH_PROVIDER',
+    'CADRE_ARCHITECTURE_WATCH_MODEL',
     'CADRE_REPO_QUALITY_INTERVAL_SECONDS',
     'CADRE_REPO_QUALITY_MAX_FANOUT',
     'CADRE_REPO_QUALITY_TOP_N',
@@ -530,6 +532,15 @@ describe('config.skillsUpstream', () => {
     assert.equal(config.skillsUpstream.intervalSeconds, 86400);
     assert.equal(config.skillsUpstream.worktreeBaseDir, '/tmp/skill-wt');
     assert.equal(config.skillsUpstream.maxFanout, 10);
+  });
+});
+
+describe('config.architectureWatch', () => {
+  it('defaults to the claude pair and honors env overrides', async () => {
+    const defaults = await importConfigWithEnv({ CADRE_ARCHITECTURE_WATCH_PROVIDER: undefined, CADRE_ARCHITECTURE_WATCH_MODEL: undefined });
+    assert.deepEqual(defaults.config.architectureWatch, { provider: 'claude', model: 'claude-opus-5-5' });
+    const override = await importConfigWithEnv({ CADRE_ARCHITECTURE_WATCH_PROVIDER: 'codex', CADRE_ARCHITECTURE_WATCH_MODEL: 'gpt-5.5' });
+    assert.deepEqual(override.config.architectureWatch, { provider: 'codex', model: 'gpt-5.5' });
   });
 });
 

@@ -15,6 +15,7 @@ import { promisify } from 'node:util';
 import { exec } from '../../lib/exec.mjs';
 import {
   createAgentSessionWorktree,
+  listWorktrees,
   removeAgentSessionWorktree,
   safeWorktreeName,
 } from '../fleet/git-worktree.mjs';
@@ -50,6 +51,7 @@ import {
   repoQualityReportSlug,
   shouldDispatchRepoQualityFix,
 } from './repo-quality.mjs';
+import { expandSkillTokens } from './launch-skills.mjs';
 import { buildDelegatedScheduledAgentInput } from '../agent-bus/coordinator-policy.mjs';
 import { buildImprovePrompt, hasFailingRubric } from '../sessions/session-grading.mjs';
 
@@ -66,6 +68,8 @@ const DEFAULT_JOB_OPPORTUNITIES_INTERVAL_SECONDS = 86400;
 const SESSION_IMPROVE_TASK_ID = 'sched_session_improve_daily';
 const DAY_MS = 86_400_000;
 const SKILLS_UPSTREAM_BRANCH_PREFIX = 'dueno-fleet/skill-sync';
+const ARCHITECTURE_WATCH_TASK_ID = 'sched_architecture_watch_daily';
+const ARCHITECTURE_BRANCH_PREFIX = 'dueno-fleet/architecture';
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -990,6 +994,67 @@ function buildSessionImproveLauncher({ inner, listLedger, createWorktree, worktr
   };
 }
 
+// Runs over the repoQuality repositories; the launcher moves each repo's run into a fresh worktree.
+function buildArchitectureWatchTaskInput(sourceConfig = appConfig, { nowMs = Date.now() } = {}) {
+  return {
+    id: ARCHITECTURE_WATCH_TASK_ID,
+    workDir: configuredRepoQualityRepoPaths(sourceConfig)[0] || process.cwd(),
+    prompt: 'Daily architecture watch: per repoQuality repo, one agent opens at most one deepening PR.',
+    ...resolveWatcherProviderModel(sourceConfig?.architectureWatch, [], 'architectureWatch'),
+    intervalSeconds: 86400,
+    maxIterations: 0,
+    startImmediately: false,
+    nextRunAtEpochMs: nowMs + DAY_MS,
+    metadata: { kind: 'architecture_watch' },
+  };
+}
+
+function buildArchitectureWatchPrompt(repoPath, worktreePath) {
+  return expandSkillTokens([
+    '{{skill:codebase-design}}',
+    '{{skill:codebase-deepening}}',
+    '{{skill:domain-modeling}}',
+    `# Daily architecture watch: ${safeWorktreeName(repoPath)}`,
+    `You run unattended; nobody will answer questions. Work only in this worktree: ${worktreePath}. Do not edit any other checkout.`,
+    'If the repo has CONTEXT.md or GLOSSARY.md (and ADRs), read them first and use their vocabulary.',
+    'Find the single highest-value deepening opportunity: shallow modules that become one deep module with a narrow interface, tested through that interface. Implement it, replace the shallow tests, and run the repo checks.',
+    'If nothing clears that bar, stop: commit nothing and open no PR.',
+    'Otherwise open exactly one PR from this branch whose body follows the template below, including Merge Danger. Do not merge.',
+    '{{skill:pr}}',
+  ].join('\n\n'));
+}
+
+function buildArchitectureWatchLauncher({ inner, repoPaths = [], listOpenPrBranches, createWorktree, worktreeBaseDir, now, logger } = {}) {
+  return async (input = {}) => {
+    if (input.taskId !== ARCHITECTURE_WATCH_TASK_ID) return inner(input);
+    let first = null;
+    for (const [i, repoPath] of repoPaths.filter((path) => !isLiveFleetCheckout(path)).entries()) {
+      try {
+        // An unreadable PR list throws into the catch, skipping the repo: never risk a second PR.
+        const open = await (listOpenPrBranches || defaultListOpenPrBranches)(repoPath);
+        if (open.some((branch) => branch.startsWith(`${ARCHITECTURE_BRANCH_PREFIX}/`))) continue;
+        // No open watch PR: earlier runs' worktrees are done; keepUnpushed keeps any with unpushed work.
+        const stale = await listWorktrees(repoPath).catch((error) => logger?.warn?.({ err: error, repoPath }, 'Architecture watch worktree list failed') || []);
+        for (const { path, branch } of stale.filter((entry) => entry.branch.startsWith(`${ARCHITECTURE_BRANCH_PREFIX}/`))) {
+          await removeAgentSessionWorktree({ repoPath, worktreePath: path, branch, keepUnpushed: true })
+            .catch((error) => logger?.warn?.({ err: error, path }, 'Architecture watch stale worktree removal failed'));
+        }
+        const worktree = await (createWorktree || createAgentSessionWorktree)({
+          repoPath, baseDir: worktreeBaseDir, displayName: `architecture-${safeWorktreeName(repoPath)}`, branchPrefix: ARCHITECTURE_BRANCH_PREFIX, nowMs: now() + i,
+        });
+        const session = await inner({
+          prompt: buildArchitectureWatchPrompt(repoPath, worktree.worktreePath), workDir: worktree.worktreePath, provider: input.provider, model: input.model,
+          displayName: `architecture ${safeWorktreeName(repoPath)}`, parentThreadId: input.parentThreadId || null,
+        });
+        first ||= session;
+      } catch (error) {
+        if (logger?.warn) logger.warn({ err: error, repoPath }, 'Architecture watch launch failed');
+      }
+    }
+    return first || { skip: true, action: 'skippedNoDispatch' };
+  };
+}
+
 async function defaultCreateRepoQualityWorktree({
   repoPath,
   baseDir,
@@ -1230,7 +1295,15 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
   const sessionLauncher = buildRepoQualityLauncher({
     inner: buildSkillsUpstreamLauncher({
       inner: buildSessionImproveLauncher({
-        inner: opts.sessionLauncher,
+        inner: buildArchitectureWatchLauncher({
+          inner: opts.sessionLauncher,
+          repoPaths: configuredRepoQualityRepoPaths(rootConfig),
+          listOpenPrBranches: opts.listOpenPrBranches,
+          createWorktree: opts.createArchitectureWatchWorktree,
+          worktreeBaseDir: configuredRepoQualityWorktreeBase(rootConfig),
+          now,
+          logger: opts.log || app.log,
+        }),
         listLedger: opts.listLedger,
         createWorktree: opts.createSessionImproveWorktree,
         worktreeBaseDir: configuredSkillsUpstreamWorktreeBase(rootConfig),
@@ -1445,19 +1518,23 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
     };
   });
 
-  app.post('/api/fleet/session-improve/:action', async (req, reply) => {
+  const dailyTasks = {
+    'session-improve': [SESSION_IMPROVE_TASK_ID, buildSessionImproveTaskInput, () => skillsUpstreamRepoProblem(configuredSkillsUpstreamRepoPath(rootConfig))],
+    'architecture-watch': [ARCHITECTURE_WATCH_TASK_ID, buildArchitectureWatchTaskInput, () => repoQualityRepoProblem(configuredRepoQualityRepoPaths(rootConfig))],
+  };
+  for (const [job, [id, buildInput, findProblem]] of Object.entries(dailyTasks)) app.post(`/api/fleet/${job}/:action`, async (req, reply) => {
     if (!['setup', 'run-now'].includes(req.params.action)) return reply.code(404).send({ error: 'Unknown action', code: 'not_found' });
-    const problem = skillsUpstreamRepoProblem(configuredSkillsUpstreamRepoPath(rootConfig));
+    const problem = findProblem();
     if (problem) return reply.code(400).send({ error: problem });
-    const input = buildSessionImproveTaskInput(rootConfig, { nowMs: now() });
-    const existing = await store.get(SESSION_IMPROVE_TASK_ID);
+    const input = buildInput(rootConfig, { nowMs: now() });
+    const existing = await store.get(id);
     // A cancelled task's old run time is stale; re-enabling schedules a day out.
     const nextRunAtEpochMs = existing?.status === 'active' ? existing.nextRunAtEpochMs : input.nextRunAtEpochMs;
-    await (existing ? store.update(SESSION_IMPROVE_TASK_ID, { ...input, status: 'active', nextRunAtEpochMs }) : store.register(input));
-    if (req.params.action === 'setup') return safeTask(await store.get(SESSION_IMPROVE_TASK_ID));
-    await store.update(SESSION_IMPROVE_TASK_ID, { nextRunAtEpochMs: now(), updatedAt: now() });
+    await (existing ? store.update(id, { ...input, status: 'active', nextRunAtEpochMs }) : store.register(input));
+    if (req.params.action === 'setup') return safeTask(await store.get(id));
+    await store.update(id, { nextRunAtEpochMs: now(), updatedAt: now() });
     const step = safeStepSummary(await stepDue(now(), stepDeps));
-    return { task: safeTask(await store.get(SESSION_IMPROVE_TASK_ID)), step };
+    return { task: safeTask(await store.get(id)), step };
   });
 
   app.get('/api/fleet/job-opportunities', async () => {

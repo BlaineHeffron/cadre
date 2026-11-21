@@ -64,3 +64,12 @@ curl -X POST http://127.0.0.1:4310/api/fleet/repo-quality/run-now
 ```
 
 Do not merge the agents' PRs from the watcher. Do not restart production from a feature checkout.
+
+## Architecture watch
+
+Scheduled job `sched_architecture_watch_daily`, off by default and not self-registered. Enable it with `POST /api/fleet/architecture-watch/setup` (`run-now` registers and steps once); turn it off with `POST /api/agents/scheduled/sched_architecture_watch_daily/cancel`. Setup and run-now refuse the same empty or live-checkout `repoPaths` as repo-quality.
+
+- Repositories: the physical paths in `DM_REPO_QUALITY_REPO_PATHS_JSON` (sections are ignored). The live checkout is skipped at launch even if the task was registered earlier.
+- Provider/model: `DM_ARCHITECTURE_WATCH_PROVIDER` / `DM_ARCHITECTURE_WATCH_MODEL` via `envProviderModel({ label: 'architectureWatch', defaultProvider: 'claude' })`; with no env set that is `claude` / `claude-opus-5-5`.
+- Once a day, per repo: if an open PR's head branch starts with `dueno-fleet/architecture/` (or `gh pr list` fails), the repo is skipped. Otherwise a fresh worktree is created on that prefix under the repo-quality worktree base and one agent starts with the `codebase-design`, `codebase-deepening`, `domain-modeling`, and `pr` launch skills expanded into its brief. It finds the single highest-value deepening opportunity, implements it with tests at the new interface, and opens one PR whose body follows `pr` (including Merge Danger), or opens nothing when no opportunity clears the bar. A tick with no launch is `skippedNoDispatch`.
+- Before creating a repo's new worktree, the launcher removes that repo's earlier `dueno-fleet/architecture/*` worktrees and local branches with `removeAgentSessionWorktree({ keepUnpushed: true })`. A worktree with uncommitted changes, commits on no remote, a switched branch, or any git error is kept. A repo skipped for an open PR or a `gh` failure is never cleaned.

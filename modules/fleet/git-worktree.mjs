@@ -286,6 +286,10 @@ export async function reapWorktrees({
   return summary;
 }
 
+export async function listWorktrees(repoPath) {
+  return parseWorktreePorcelain(await git(repoPath, ['worktree', 'list', '--porcelain']));
+}
+
 function parseWorktreePorcelain(output = '') {
   const entries = [];
   let current = null;
