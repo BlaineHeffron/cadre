@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
 import { buildMonitorMcpServer } from '../modules/platform/monitor-mcp.mjs';
+import { shouldSuppressSideEffectLoops } from '../modules/platform/side-effect-loops.mjs';
 import { defaultSkillsUpstreamRepoPath, scheduledAgentsPlugin } from '../modules/integrations/scheduled-agents-plugin.mjs';
 import {
   buildScheduledAgentStore,
@@ -2363,6 +2364,114 @@ describe('scheduled agents routes', () => {
   });
 });
 
+describe('architecture watch', () => {
+  const day = 86_400_000;
+  const archConfig = (repoPaths) => ({
+    repoQuality: { repoPaths }, architectureWatch: { provider: 'claude', model: 'claude-opus-5-5' }, fleet: { repoPaths: {} }, githubAgents: { repoPaths: {} },
+  });
+
+  it('spawns one deepening agent per repo per day in a fresh worktree, skipping repos with an open watch PR', async () => {
+    let nowMs = 10 * day;
+    const launches = [];
+    const worktrees = [];
+    const open = { '/repo/a': [], '/repo/b': ['dueno-fleet/architecture/architecture-b-1'], '/repo/c': ['feature/x'] };
+    const app = await buildScheduledRoutesApp({
+      now: () => nowMs,
+      rootConfig: archConfig({ a: '/repo/a', b: '/repo/b', c: '/repo/c', gone: '/repo/gh-fails' }),
+      listOpenPrBranches: async (repoPath) => {
+        if (!open[repoPath]) throw new Error('gh failed');
+        return open[repoPath];
+      },
+      createArchitectureWatchWorktree: async (input) => { worktrees.push(input); return { worktreePath: `/wt/${worktrees.length}` }; },
+      sessionLauncher: async (input) => { launches.push(input); return { id: `sess_arch_${launches.length}` }; },
+    });
+
+    assert.equal((await app.inject({ method: 'POST', url: '/api/agents/scheduled/step-now' })).json().spawned, 0, 'off until setup');
+    const setup = (await app.inject({ method: 'POST', url: '/api/fleet/architecture-watch/setup' })).json();
+    assert.equal(setup.id, 'sched_architecture_watch_daily');
+    assert.equal(setup.intervalSeconds, 86400);
+    assert.deepEqual([setup.provider, setup.model], ['claude', 'claude-opus-5-5']);
+    assert.equal(launches.length, 0, 'setup does not launch');
+
+    const run = (await app.inject({ method: 'POST', url: '/api/fleet/architecture-watch/run-now' })).json();
+    assert.equal(run.step.spawned, 1);
+    assert.deepEqual(worktrees.map((w) => [w.repoPath, w.branchPrefix]), [['/repo/a', 'dueno-fleet/architecture'], ['/repo/c', 'dueno-fleet/architecture']]);
+    assert.deepEqual(launches.map((l) => [l.workDir, l.provider, l.model]), [['/wt/1', 'claude', 'claude-opus-5-5'], ['/wt/2', 'claude', 'claude-opus-5-5']]);
+    for (const heading of ['# Codebase Design', '# Deepening', '# Domain Modeling', '## Merge Danger', '# Daily architecture watch: /repo/a']) {
+      assert.ok(launches[0].prompt.includes(heading), heading);
+    }
+    assert.ok(!launches[0].prompt.includes('{{skill:'), 'skill tokens are expanded');
+
+    assert.equal((await app.inject({ method: 'POST', url: '/api/agents/scheduled/step-now' })).json().spawned, 0, 'once per interval');
+    nowMs += day - 1;
+    assert.equal((await app.inject({ method: 'POST', url: '/api/agents/scheduled/step-now' })).json().spawned, 0);
+
+    open['/repo/a'] = ['dueno-fleet/architecture/architecture-a-1'];
+    open['/repo/c'] = ['dueno-fleet/architecture/architecture-c-1'];
+    nowMs += 1;
+    const next = (await app.inject({ method: 'POST', url: '/api/agents/scheduled/step-now' })).json();
+    assert.equal(next.spawned, 0);
+    assert.equal(next.tasks[0].action, 'skippedNoDispatch');
+    assert.equal(launches.length, 2, 'an open PR from this job blocks the next one');
+    await app.close();
+  });
+
+  it('refuses the live checkout at setup and at launch', async () => {
+    const store = memoryStore({ now: () => 1000 });
+    const launches = [];
+    const deps = {
+      store,
+      now: () => 1000,
+      listOpenPrBranches: async () => [],
+      createArchitectureWatchWorktree: async ({ repoPath }) => ({ worktreePath: `${repoPath}-wt` }),
+      sessionLauncher: async (input) => { launches.push(input); return { id: 'sess_arch' }; },
+    };
+    const live = await buildScheduledRoutesApp({ ...deps, rootConfig: archConfig({ live: '/home/x/cadre-live' }) });
+    const refused = await live.inject({ method: 'POST', url: '/api/fleet/architecture-watch/setup' });
+    assert.equal(refused.statusCode, 400);
+    assert.equal(refused.json().error.code, 'repo_quality_live_checkout');
+    await live.close();
+
+    // A task registered earlier keeps running after the config later names the live checkout.
+    const before = await buildScheduledRoutesApp({ ...deps, rootConfig: archConfig({ a: '/repo/a' }) });
+    await before.inject({ method: 'POST', url: '/api/fleet/architecture-watch/setup' });
+    await before.close();
+    await store.update('sched_architecture_watch_daily', { nextRunAtEpochMs: 1000 });
+    const after = await buildScheduledRoutesApp({ ...deps, rootConfig: archConfig({ live: '/home/x/cadre-live', a: '/repo/a' }) });
+    assert.equal((await after.inject({ method: 'POST', url: '/api/agents/scheduled/step-now' })).json().spawned, 1);
+    assert.deepEqual(launches.map((l) => l.workDir), ['/repo/a-wt']);
+    await after.close();
+  });
+
+  it('spawns nothing from the pump when side-effect loops are suppressed', async () => {
+    const pump = async (env) => {
+      const store = memoryStore({ now: () => 2 * day });
+      const launches = [];
+      const app = Fastify({ logger: false });
+      await app.register(scheduledAgentsPlugin, {
+        store,
+        config: { enabled: !shouldSuppressSideEffectLoops({ env }), tickIntervalSec: 1 },
+        now: () => 2 * day,
+        rootConfig: archConfig({ a: '/repo/a' }),
+        listOpenPrBranches: async () => [],
+        createArchitectureWatchWorktree: async () => ({ worktreePath: '/wt/a' }),
+        sessionLauncher: async (input) => { launches.push(input); return { id: 'sess_arch' }; },
+      });
+      await app.inject({ method: 'POST', url: '/api/fleet/architecture-watch/setup' });
+      await store.update('sched_architecture_watch_daily', { nextRunAtEpochMs: 0 });
+      await new Promise((done) => setTimeout(done, 1300));
+      await app.close();
+      return launches.length;
+    };
+    const [suppressed, allowed] = await Promise.all([
+      pump({ PORT: '4311', CADRE_DISABLE_SIDE_EFFECTS: '1' }),
+      pump({ PORT: '4310' }),
+    ]);
+    assert.equal(suppressed, 0);
+    assert.equal(allowed, 1);
+  });
+});
+
 function baseTask(overrides = {}) {
   return {
     id: 'sched_test',
@@ -2406,6 +2515,7 @@ async function buildScheduledRoutesApp({
   loadPreviousRepoQualityReport,
   listLedger,
   createSessionImproveWorktree,
+  createArchitectureWatchWorktree,
   rootConfig = {
     dependencyWatch: { repoPaths: {} },
     fleet: { repoPaths: {} },
@@ -2437,6 +2547,7 @@ async function buildScheduledRoutesApp({
     loadPreviousRepoQualityReport,
     listLedger,
     createSessionImproveWorktree,
+    createArchitectureWatchWorktree,
     sessionLauncher,
     lookupSessionState,
     loop: {

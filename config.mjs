@@ -104,6 +104,12 @@ const repoQualityPair = envProviderModel({
   defaultProvider: 'codex',
   label: 'repoQuality',
 });
+const architectureWatchPair = envProviderModel({
+  providerKey: 'DM_ARCHITECTURE_WATCH_PROVIDER',
+  modelKey: 'DM_ARCHITECTURE_WATCH_MODEL',
+  defaultProvider: 'codex',
+  label: 'architectureWatch',
+});
 
 export const config = {
   host: env('HOST', '127.0.0.1'),
@@ -347,6 +353,9 @@ export const config = {
     maxFanout: envInt('DM_REPO_QUALITY_MAX_FANOUT', 2, { min: 1, max: 10 }),
     topN: envInt('DM_REPO_QUALITY_TOP_N', 10, { min: 1, max: 50 }),
   },
+
+  // Daily deepening agent per repoQuality repo; enabled by POST /api/fleet/architecture-watch/setup.
+  architectureWatch: { provider: architectureWatchPair.provider, model: architectureWatchPair.model },
 
   jobOpportunities: {
     scraperPath: env('DM_JOB_OPPORTUNITIES_SCRAPER_PATH', ''),
