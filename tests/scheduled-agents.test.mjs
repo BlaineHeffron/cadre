@@ -2397,7 +2397,7 @@ describe('architecture watch', () => {
     assert.equal(run.step.spawned, 1);
     assert.deepEqual(worktrees.map((w) => [w.repoPath, w.branchPrefix]), [['/repo/a', 'dueno-fleet/architecture'], ['/repo/c', 'dueno-fleet/architecture']]);
     assert.deepEqual(launches.map((l) => [l.workDir, l.provider, l.model]), [['/wt/1', 'claude', 'claude-opus-5-5'], ['/wt/2', 'claude', 'claude-opus-5-5']]);
-    for (const heading of ['# Codebase Design', '# Deepening', '# Domain Modeling', '## Merge Danger', '# Daily architecture watch: /repo/a']) {
+    for (const heading of ['# Codebase Design', '# Deepening', '# Domain Modeling', '## Merge Danger', '# Daily architecture watch: a', 'Work only in this worktree: /wt/1.']) {
       assert.ok(launches[0].prompt.includes(heading), heading);
     }
     assert.ok(!launches[0].prompt.includes('{{skill:'), 'skill tokens are expanded');

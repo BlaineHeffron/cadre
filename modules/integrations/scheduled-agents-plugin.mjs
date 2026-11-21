@@ -1008,13 +1008,14 @@ function buildArchitectureWatchTaskInput(sourceConfig = appConfig, { nowMs = Dat
   };
 }
 
-function buildArchitectureWatchPrompt(repoPath) {
+function buildArchitectureWatchPrompt(repoPath, worktreePath) {
   return expandSkillTokens([
     '{{skill:codebase-design}}',
     '{{skill:codebase-deepening}}',
     '{{skill:domain-modeling}}',
-    `# Daily architecture watch: ${repoPath}`,
-    'You run unattended; nobody will answer questions. Work only in this worktree. If the repo has CONTEXT.md or GLOSSARY.md (and ADRs), read them first and use their vocabulary.',
+    `# Daily architecture watch: ${safeWorktreeName(repoPath)}`,
+    `You run unattended; nobody will answer questions. Work only in this worktree: ${worktreePath}. Do not edit any other checkout.`,
+    'If the repo has CONTEXT.md or GLOSSARY.md (and ADRs), read them first and use their vocabulary.',
     'Find the single highest-value deepening opportunity: shallow modules that become one deep module with a narrow interface, tested through that interface. Implement it, replace the shallow tests, and run the repo checks.',
     'If nothing clears that bar, stop: commit nothing and open no PR.',
     'Otherwise open exactly one PR from this branch whose body follows the template below, including Merge Danger. Do not merge.',
@@ -1028,14 +1029,14 @@ function buildArchitectureWatchLauncher({ inner, repoPaths = [], listOpenPrBranc
     let first = null;
     for (const [i, repoPath] of repoPaths.filter((path) => !isLiveFleetCheckout(path)).entries()) {
       try {
-        // An unreadable PR list counts as open: never risk a second PR.
-        const open = await (listOpenPrBranches || defaultListOpenPrBranches)(repoPath).catch(() => null);
-        if (!open || open.some((branch) => branch.startsWith(`${ARCHITECTURE_BRANCH_PREFIX}/`))) continue;
+        // An unreadable PR list throws into the catch, skipping the repo: never risk a second PR.
+        const open = await (listOpenPrBranches || defaultListOpenPrBranches)(repoPath);
+        if (open.some((branch) => branch.startsWith(`${ARCHITECTURE_BRANCH_PREFIX}/`))) continue;
         const worktree = await (createWorktree || createAgentSessionWorktree)({
           repoPath, baseDir: worktreeBaseDir, displayName: `architecture-${safeWorktreeName(repoPath)}`, branchPrefix: ARCHITECTURE_BRANCH_PREFIX, nowMs: now() + i,
         });
         const session = await inner({
-          prompt: buildArchitectureWatchPrompt(repoPath), workDir: worktree.worktreePath, provider: input.provider, model: input.model,
+          prompt: buildArchitectureWatchPrompt(repoPath, worktree.worktreePath), workDir: worktree.worktreePath, provider: input.provider, model: input.model,
           displayName: `architecture ${safeWorktreeName(repoPath)}`, parentThreadId: input.parentThreadId || null,
         });
         first ||= session;
