@@ -4,6 +4,9 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { createAgentSessionWorktree } from '../modules/fleet/git-worktree.mjs';
 import { buildMonitorMcpServer } from '../modules/platform/monitor-mcp.mjs';
 import { shouldSuppressSideEffectLoops } from '../modules/platform/side-effect-loops.mjs';
 import { defaultSkillsUpstreamRepoPath, scheduledAgentsPlugin } from '../modules/integrations/scheduled-agents-plugin.mjs';
@@ -2414,6 +2417,54 @@ describe('architecture watch', () => {
     assert.equal(next.tasks[0].action, 'skippedNoDispatch');
     assert.equal(launches.length, 2, 'an open PR from this job blocks the next one');
     await app.close();
+  });
+
+  it('removes earlier clean watch worktrees before the next run, keeping unpushed work and repos with an open PR', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cadre-arch-watch-'));
+    const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+    const makeRepo = async (name) => {
+      const repo = join(root, name);
+      await mkdir(repo);
+      git(root, 'init', '--bare', '-b', 'main', `${name}.git`);
+      git(repo, 'init', '-b', 'main');
+      git(repo, 'config', 'user.email', 'test@example.invalid');
+      git(repo, 'config', 'user.name', 'Test');
+      await writeFile(join(repo, 'README.md'), 'root\n');
+      git(repo, 'add', 'README.md');
+      git(repo, 'commit', '-m', 'initial');
+      git(repo, 'remote', 'add', 'origin', join(root, `${name}.git`));
+      git(repo, 'push', '-q', 'origin', 'main');
+      return repo;
+    };
+    try {
+      const [free, busy] = [await makeRepo('free'), await makeRepo('busy')];
+      const baseDir = join(root, 'wt');
+      const earlier = (repoPath, nowMs) => createAgentSessionWorktree({ repoPath, baseDir, displayName: 'architecture-old', branchPrefix: 'dueno-fleet/architecture', nowMs });
+      const clean = await earlier(free, 1);
+      const unpushed = await earlier(free, 2);
+      await writeFile(join(unpushed.worktreePath, 'work.txt'), 'work\n');
+      git(unpushed.worktreePath, 'add', 'work.txt');
+      git(unpushed.worktreePath, 'commit', '-m', 'unpushed');
+      const busyOld = await earlier(busy, 3);
+      const launches = [];
+      const app = await buildScheduledRoutesApp({
+        now: () => 10 * day,
+        rootConfig: { ...archConfig({ free, busy }), repoQuality: { repoPaths: { free, busy }, worktreeBaseDir: baseDir } },
+        listOpenPrBranches: async (repoPath) => (repoPath === busy ? ['dueno-fleet/architecture/architecture-busy-x'] : []),
+        sessionLauncher: async (input) => { launches.push(input); return { id: 'sess_arch' }; },
+      });
+      await app.inject({ method: 'POST', url: '/api/fleet/architecture-watch/run-now' });
+      await app.close();
+
+      assert.equal(existsSync(clean.worktreePath), false);
+      assert.equal(git(free, 'branch', '--list', clean.branch), '');
+      assert.ok(existsSync(unpushed.worktreePath), 'unpushed commits are kept');
+      assert.equal(launches.length, 1);
+      assert.ok(existsSync(launches[0].workDir), 'today\'s worktree exists');
+      assert.ok(existsSync(busyOld.worktreePath), 'a repo with an open watch PR is not cleaned');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('refuses the live checkout at setup and at launch', async () => {

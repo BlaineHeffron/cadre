@@ -15,6 +15,7 @@ import { promisify } from 'node:util';
 import { exec } from '../../lib/exec.mjs';
 import {
   createAgentSessionWorktree,
+  listWorktrees,
   removeAgentSessionWorktree,
   safeWorktreeName,
 } from '../fleet/git-worktree.mjs';
@@ -1032,6 +1033,12 @@ function buildArchitectureWatchLauncher({ inner, repoPaths = [], listOpenPrBranc
         // An unreadable PR list throws into the catch, skipping the repo: never risk a second PR.
         const open = await (listOpenPrBranches || defaultListOpenPrBranches)(repoPath);
         if (open.some((branch) => branch.startsWith(`${ARCHITECTURE_BRANCH_PREFIX}/`))) continue;
+        // No open watch PR: earlier runs' worktrees are done; keepUnpushed keeps any with unpushed work.
+        const stale = await listWorktrees(repoPath).catch((error) => logger?.warn?.({ err: error, repoPath }, 'Architecture watch worktree list failed') || []);
+        for (const { path, branch } of stale.filter((entry) => entry.branch.startsWith(`${ARCHITECTURE_BRANCH_PREFIX}/`))) {
+          await removeAgentSessionWorktree({ repoPath, worktreePath: path, branch, keepUnpushed: true })
+            .catch((error) => logger?.warn?.({ err: error, path }, 'Architecture watch stale worktree removal failed'));
+        }
         const worktree = await (createWorktree || createAgentSessionWorktree)({
           repoPath, baseDir: worktreeBaseDir, displayName: `architecture-${safeWorktreeName(repoPath)}`, branchPrefix: ARCHITECTURE_BRANCH_PREFIX, nowMs: now() + i,
         });

@@ -107,7 +107,7 @@ const repoQualityPair = envProviderModel({
 const architectureWatchPair = envProviderModel({
   providerKey: 'DM_ARCHITECTURE_WATCH_PROVIDER',
   modelKey: 'DM_ARCHITECTURE_WATCH_MODEL',
-  defaultProvider: 'codex',
+  defaultProvider: 'claude',
   label: 'architectureWatch',
 });
 
