@@ -1,6 +1,6 @@
 # Side-effect loops run only on port 4310 or with an explicit override
 
-Many Cadre instances run on one machine (agent smoke servers, tests, workers), but only one may poll GitHub, run scheduled agents, bridge Telegram or serve the agent MCP listener without duplicating real-world actions. So loops are off unless the server is on the production port 4310 or `CADRE_ALLOW_SIDE_EFFECTS=1` is set, rather than on by default with opt-out flags.
+Many Cadre instances run on one machine (agent smoke servers, tests), but only one may poll GitHub, run scheduled agents, bridge Telegram or serve the agent MCP listener without duplicating real-world actions. So loops are off unless the server is on the production port 4310 or `CADRE_ALLOW_SIDE_EFFECTS=1` is set, rather than on by default with opt-out flags.
 
 ## Consequences
 

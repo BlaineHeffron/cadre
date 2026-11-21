@@ -7,12 +7,12 @@ Cadre is a self-hosted control plane that schedules, runs and monitors coding-ag
 ### Sessions
 
 **Session**:
-One running or resumable coding-agent conversation that Cadre launched, identified by its provider kind and session id.
+One running or resumable coding-agent conversation that Cadre runs or tracks, identified by its kind and session id.
 _Avoid_: Agent (for the session itself), pane, process
 
 **Provider**:
 The agent harness a session runs on, or for Pi the model service behind it; for example `claude`, `codex`, `agy`, `deepseek` or `xai`.
-_Avoid_: Backend, runtime (those name how Cadre drives the harness, not which harness)
+_Avoid_: Backend, runtime, kind (those name the harness; several providers such as `xai`, `google` and `openrouter` share the `pi` harness)
 
 **agy**:
 The provider that runs Google's unmodified Antigravity CLI binary in a terminal pane; it is the only supported route to Gemini by subscription.
@@ -31,15 +31,15 @@ Continuing an idle session as a new linked session on another provider or model,
 _Avoid_: Using "handoff" for the implementer sending a PR to a reviewer (call that the **review handoff**) or for spawning a session without `returnResults`
 
 **Child session**:
-A session spawned by another session; with `returnResults` its finished turns are sent back to the spawner.
+A session spawned by another session; with `returnResults` the final message of each finished turn is sent back to the spawner.
 _Avoid_: Worker (reserved for the machine role), subagent
 
 **returnResults**:
-A spawn option that DMs each finished turn of a child session back to its spawner; it applies only to `claude` and `agy` children spawned outside a room.
+A spawn option that DMs the final message of each finished turn of a child session back to its spawner; it applies only to `claude` and `agy` children spawned outside a room.
 _Avoid_: Callback, reply-to-parent
 
 **Coordinator**:
-A session that plans work, spawns and steers child sessions and rooms, and sends the operator's decisions to the Command Queue, usually via the `coordinator` prompt profile.
+A session that plans work, spawns and steers child sessions and rooms, and queues decisions for the operator in the Command Queue, then acts on the answers, usually via the `coordinator` prompt profile.
 _Avoid_: Manager, director, supervisor (the Fleet Supervisor is a different profile)
 
 ### Rooms
