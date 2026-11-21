@@ -16,7 +16,7 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
   ];
   if (!busAvailable) return [...lines, '', 'This session has no shared room channel.'].join('\n');
   return [...lines, '',
-    'Workflow: if you are assigned implementer or reviewer, the implementer writes code and tests; the reviewer blocks on correctness or unnecessary code. Iterate until the reviewer approves.',
+    'Workflow: if you are assigned implementer or reviewer, the implementer writes code and tests; the reviewer blocks on correctness, unnecessary code, and spec gaps: missing Acceptance items, changes outside Scope, or unverified evidence. Iterate until the reviewer approves.',
     'Coordinator findings go through the reviewer, who forwards accepted findings or rebuts them with evidence. The implementer acts only on forwarded findings.',
     merge === 'reviewer'
       ? 'Unless your task says otherwise: after approval and the project\'s gates pass, the reviewer merges the PR, then reports; do not delete the remote branch.'
@@ -28,7 +28,7 @@ export function renderCollabOnboarding({ self, participants, threadId, title, bu
     `Context: room_context(thread_id="${threadId}")`,
     `Send: room_send(thread_id="${threadId}", body="...", reply_to="<message id of the claim you address>")`,
     'Reply only if this is new work. Do not reply to delayed copies or courtesy acks.',
-    'Handoff: in implement/review collabs, the implementer sends PR, head SHA, and checks to the reviewer with type="message". Only the reviewer posts type="result", starting with "DIRECTOR REPORT": PR number, Head: <sha>, changes, test results, and open items. Without a reviewer or in a single-role room, participants post the same report as type="result" and stop. Set summary to "<merged|ready|blocked|needs-decision> · PR #n · <one line>". The room owner already receives it; do not also DM it to the owner or coordinator. agent_dm is for things not posted in the room.',
+    'Handoff: in implement/review collabs, the implementer sends PR, head SHA, and checks to the reviewer with type="message". Only the reviewer posts type="result", starting with "DIRECTOR REPORT": PR number, Head: <sha>, changes, spec conformance, test results, and open items. Without a reviewer or in a single-role room, participants post the same report as type="result" and stop. Set summary to "<merged|ready|blocked|needs-decision> · PR #n · <one line>". The room owner already receives it; do not also DM it to the owner or coordinator. agent_dm is for things not posted in the room.',
     'After opening a PR, the room owner may call watch_pr({repo, number, thread_id}) to be notified of reviews, conflicts, CI results, merge or close; fix failed checks, push and keep watching. Cadre never merges. The owner ends the room with room_end after the work lands; Cadre cleans a managed worktree at room end when all its commits are on the remote.',
   ].join('\n');
 }
