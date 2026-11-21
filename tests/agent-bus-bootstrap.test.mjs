@@ -117,12 +117,12 @@ test('bootstrap injects simplified room prompts without loop startup metadata', 
   assert.doesNotMatch(h.injected.codex[0], /\back\b|manager.loop|wait for/i);
   for (const prompt of [h.injected.codex[0], h.injected.claude[0]]) {
     assert.match(prompt, /delegate it to a built-in subagent when available: Haiku \(model: "haiku"\) on Claude, GPT-6 Luna \(gpt-6-luna\) on Codex/);
-    assert.match(prompt, /if you are assigned implementer or reviewer, the implementer writes code and tests; the reviewer blocks on correctness or unnecessary code\. Iterate until the reviewer approves/);
+    assert.match(prompt, /if you are assigned implementer or reviewer, the implementer writes code and tests; the reviewer blocks on correctness, unnecessary code, and spec gaps: missing Acceptance items, changes outside Scope, or unverified evidence\. Iterate until the reviewer approves/);
     assert.match(prompt, /Coordinator findings go through the reviewer/);
     assert.match(prompt, /implementer acts only on forwarded findings/);
     assert.match(prompt, /Unless your task says otherwise: do not merge or delete the remote branch; the coordinator or operator merges/);
     assert.match(prompt, /in implement\/review collabs, the implementer sends PR, head SHA, and checks to the reviewer with type="message"/);
-    assert.match(prompt, /Only the reviewer posts type="result", starting with "DIRECTOR REPORT": PR number, Head: <sha>, changes, test results, and open items/);
+    assert.match(prompt, /Only the reviewer posts type="result", starting with "DIRECTOR REPORT": PR number, Head: <sha>, changes, spec conformance, test results, and open items/);
     assert.match(prompt, /Without a reviewer or in a single-role room, participants post the same report as type="result" and stop/);
     assert.doesNotMatch(prompt, /Other participants post type=result and stop/);
     assert.match(prompt, /<merged\|ready\|blocked\|needs-decision> · PR #n · <one line>/);
