@@ -2,6 +2,8 @@
 
 Self-hosted control plane that schedules, runs, and monitors coding-agent sessions. Guidance for contributors and for operators running Cadre. A running instance holds production state and side-effect loops; handle both deliberately.
 
+Use the terms in `CONTEXT.md`; read `docs/adr/` before reversing a recorded decision.
+
 ## Minimize code
 
 Ship the feature with the fewest lines. Do not add parallel scopes, policy layers, wrappers, or helpers unless an existing path cannot do the job. Prefer deleting and reusing over extending. Extra code is extra bugs and extra maintenance.
