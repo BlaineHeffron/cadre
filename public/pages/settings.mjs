@@ -208,6 +208,38 @@ function SessionGradingCard({ prefs, save }) {
   `;
 }
 
+// One provider/model pair per job in the provider preferences; launches read it, so no restart is needed.
+function JobProvidersCard({ prefs, save }) {
+  const defaults = prefs.jobDefaults || {};
+  return html`
+    <div class="card">
+      <div class="card-header"><span class="card-title">Job Providers</span></div>
+      <p class="note" style="margin-bottom:8px">
+        Provider and model for each scheduled job. A saved value overrides the env default from the next launch; a disabled provider runs on claude / claude-opus-5-5.
+      </p>
+      ${Object.keys(defaults).map((job) => {
+        const saved = prefs.jobProviders?.[job];
+        const fallback = defaults[job].provider ? `${defaults[job].provider} / ${defaults[job].model || 'provider default'}` : 'inherited';
+        return html`
+          <label class="setting-switch">
+            <span class="setting-switch-text">
+              <span>${job}</span>
+              <span class="setting-switch-hint">Env default: ${fallback}.</span>
+            </span>
+            <select class="input" style="width:auto" aria-label=${`${job} provider`} value=${saved?.provider || ''} disabled=${prefs.loading}
+              onChange=${(e) => save({ jobProviders: { [job]: e.currentTarget.value ? { provider: e.currentTarget.value, model: '' } : null } })}>
+              <option value="">Env default</option>
+              ${(prefs.providerCatalog || []).map((entry) => html`<option value=${entry.id}>${entry.label}${entry.enabled ? '' : ' (disabled)'}</option>`)}
+            </select>
+            ${saved ? html`<input class="input" style="width:160px" aria-label=${`${job} model`} placeholder="provider default" value=${saved.model}
+              disabled=${prefs.loading} onChange=${(e) => save({ jobProviders: { [job]: { provider: saved.provider, model: e.currentTarget.value.trim() } } })} />` : null}
+          </label>
+        `;
+      })}
+    </div>
+  `;
+}
+
 export function SettingsPage({ section }) {
   const inputToken = useMemo(() => signal(''), []);
   const pairing = useMemo(() => signal(null), []);
@@ -440,6 +472,7 @@ export function SettingsPage({ section }) {
 
       ${isAuthenticated.value ? html`<${MachinesCard} />` : null}
       ${isAuthenticated.value ? html`<${SessionGradingCard} prefs=${agentProviders.value} save=${saveAgentProviderPreferences} />` : null}
+      ${isAuthenticated.value ? html`<${JobProvidersCard} prefs=${agentProviders.value} save=${saveAgentProviderPreferences} />` : null}
 
       <div class="card">
         <div class="card-header">

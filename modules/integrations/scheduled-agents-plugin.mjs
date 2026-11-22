@@ -1,5 +1,6 @@
 import { config as appConfig } from '../../config.mjs';
 import { resolveCompatibleProviderModelPair } from '../agent/provider-interface.mjs';
+import { resolveJobProviderModel } from '../agent/provider-preferences.mjs';
 import {
   buildScheduledAgentStore,
   resolveIdleSessionGraceMs,
@@ -70,6 +71,15 @@ const DAY_MS = 86_400_000;
 const SKILLS_UPSTREAM_BRANCH_PREFIX = 'dueno-fleet/skill-sync';
 const ARCHITECTURE_WATCH_TASK_ID = 'sched_architecture_watch_daily';
 const ARCHITECTURE_BRANCH_PREFIX = 'dueno-fleet/architecture';
+
+const JOB_BY_TASK_ID = {
+  [FLEET_HYGIENE_TASK_ID]: 'fleetHygiene',
+  [DEPENDENCY_WATCH_TASK_ID]: 'dependencyWatch',
+  [SKILLS_UPSTREAM_TASK_ID]: 'skillsUpstream',
+  [JOB_OPPORTUNITIES_TASK_ID]: 'jobOpportunities',
+  [REPO_QUALITY_TASK_ID]: 'repoQuality',
+  [ARCHITECTURE_WATCH_TASK_ID]: 'architectureWatch',
+};
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -1292,7 +1302,7 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
   const rootConfig = opts.rootConfig || appConfig;
   const store = opts.store || buildScheduledAgentStore({ env: opts.env || process.env });
   const now = opts.now || (() => Date.now());
-  const sessionLauncher = buildRepoQualityLauncher({
+  const jobLauncher = buildRepoQualityLauncher({
     inner: buildSkillsUpstreamLauncher({
       inner: buildSessionImproveLauncher({
         inner: buildArchitectureWatchLauncher({
@@ -1330,6 +1340,12 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
     now,
     logger: opts.log || app.log,
   });
+  // Every job launch resolves its provider/model here: the Settings value, else the task's env/code pair.
+  const sessionLauncher = async (input = {}) => {
+    const job = JOB_BY_TASK_ID[input.taskId];
+    if (!job) return jobLauncher(input);
+    return jobLauncher({ ...input, ...await resolveJobProviderModel(job, input, { ...opts.preferences, logger: opts.log || app.log }) });
+  };
   const stepDeps = {
     store,
     sessionLauncher,

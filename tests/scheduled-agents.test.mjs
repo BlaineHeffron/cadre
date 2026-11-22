@@ -7,6 +7,7 @@ import Fastify from 'fastify';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createAgentSessionWorktree } from '../modules/fleet/git-worktree.mjs';
+import { updateAgentProviderPreferences } from '../modules/agent/provider-preferences.mjs';
 import { buildMonitorMcpServer } from '../modules/platform/monitor-mcp.mjs';
 import { shouldSuppressSideEffectLoops } from '../modules/platform/side-effect-loops.mjs';
 import { defaultSkillsUpstreamRepoPath, scheduledAgentsPlugin } from '../modules/integrations/scheduled-agents-plugin.mjs';
@@ -2419,6 +2420,40 @@ describe('architecture watch', () => {
     await app.close();
   });
 
+  it('launches on the Settings pair over the task pair, and on claude/opus with a warning when that provider is disabled', async () => {
+    const storeFile = join(await mkdtemp(join(tmpdir(), 'cadre-job-providers-')), 'prefs.json');
+    const launches = [];
+    const warnings = [];
+    let nowMs = 10 * day;
+    const app = await buildScheduledRoutesApp({
+      now: () => nowMs,
+      rootConfig: archConfig({ a: '/repo/a' }),
+      listOpenPrBranches: async () => [],
+      createArchitectureWatchWorktree: async () => ({ worktreePath: '/wt/a' }),
+      sessionLauncher: async (input) => { launches.push([input.provider, input.model]); return { id: `sess_${launches.length}` }; },
+      preferences: { storeFile },
+      log: { warn: (message) => { if (typeof message === 'string') warnings.push(message); }, info() {}, error() {} },
+    });
+    const run = async () => { nowMs += day; await app.inject({ method: 'POST', url: '/api/fleet/architecture-watch/run-now' }); };
+    await app.inject({ method: 'POST', url: '/api/fleet/architecture-watch/setup' });
+
+    await run();
+    await updateAgentProviderPreferences({ jobProviders: { architectureWatch: { provider: 'codex', model: 'gpt-5.5' } } }, { storeFile });
+    await run();
+    await updateAgentProviderPreferences({ codexEnabled: false }, { storeFile });
+    await run();
+    await updateAgentProviderPreferences({ codexEnabled: true, jobProviders: { architectureWatch: null } }, { storeFile });
+    await run();
+    assert.deepEqual(launches, [
+      ['claude', 'claude-opus-5-5'],
+      ['codex', 'gpt-5.5'],
+      ['claude', 'claude-opus-5-5'],
+      ['claude', 'claude-opus-5-5'],
+    ], 'task pair, Settings pair, disabled fallback, cleared back to the task pair');
+    assert.deepEqual(warnings, ['architectureWatch: provider codex is disabled; running on claude/claude-opus-5-5']);
+    await app.close();
+  });
+
   it('removes earlier clean watch worktrees before the next run, keeping unpushed work and repos with an open PR', async () => {
     const root = await mkdtemp(join(tmpdir(), 'cadre-arch-watch-'));
     const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -2573,6 +2608,8 @@ async function buildScheduledRoutesApp({
     githubAgents: { repoPaths: {} },
   },
   authContext = null,
+  preferences,
+  log,
 } = {}) {
   const app = Fastify({ logger: false });
   if (authContext) {
@@ -2601,6 +2638,8 @@ async function buildScheduledRoutesApp({
     createArchitectureWatchWorktree,
     sessionLauncher,
     lookupSessionState,
+    preferences,
+    log,
     loop: {
       start() {},
       stop() {},

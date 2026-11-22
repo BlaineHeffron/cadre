@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildAgentProviderCatalog } from './provider-interface.mjs';
+import { buildAgentProviderCatalog, isModelCompatibleWithProvider, listAgentProviderDefinitions } from './provider-interface.mjs';
 import {
   DEFAULT_CODEX_MODEL,
   FAST_CLAUDE_MODEL,
@@ -25,7 +25,26 @@ const DEFAULT_PREFERENCES = Object.freeze({
   graderSampleRate: null,
   graderModel: null,
   claudeCodeMode: false,
+  jobProviders: {},
 });
+
+// Jobs whose provider/model come from envProviderModel in config.mjs; Settings can override each one.
+export const JOB_PROVIDER_KEYS = ['githubAgents', 'fleetHygiene', 'dependencyWatch', 'skillsUpstream', 'jobOpportunities', 'repoQuality', 'architectureWatch'];
+const JOB_FALLBACK = Object.freeze({ provider: 'claude', model: 'claude-opus-5-5' });
+
+function jobProviderProblem(entry) {
+  if (!listAgentProviderDefinitions().some((definition) => definition.id === entry?.provider)) return 'provider must be a known agent provider';
+  if (entry.model != null && (typeof entry.model !== 'string' || (entry.model && !isModelCompatibleWithProvider(entry.provider, entry.model)))) {
+    return `model must be empty or a ${entry.provider} model`;
+  }
+  return '';
+}
+
+function normalizeJobProviders(input = {}) {
+  return Object.fromEntries(JOB_PROVIDER_KEYS
+    .filter((job) => input?.[job] && !jobProviderProblem(input[job]))
+    .map((job) => [job, { provider: input[job].provider, model: input[job].model || '' }]));
+}
 
 const GRADER_MODELS = ANTHROPIC_FALLBACK_MODELS.map((entry) => entry.id);
 const validRate = (value) => typeof value === 'number' && value >= 0 && value <= 1;
@@ -41,6 +60,7 @@ function normalizePreferences(input = {}) {
     graderSampleRate: validRate(input?.graderSampleRate) ? input.graderSampleRate : null,
     graderModel: GRADER_MODELS.includes(input?.graderModel) ? input.graderModel : null,
     claudeCodeMode: input?.claudeCodeMode === true,
+    jobProviders: normalizeJobProviders(input?.jobProviders),
   };
   if (!normalized.claude && !normalized.codex && !normalized.deepseek && !normalized.pi) {
     throw new Error('At least one agent provider must remain enabled');
@@ -130,10 +150,16 @@ export async function updateAgentProviderPreferences(input = {}, { storeFile } =
   if (input.graderModel != null && !GRADER_MODELS.includes(input.graderModel)) {
     throw new TypeError(`graderModel must be one of ${GRADER_MODELS.join(', ')}, or null for the env default`);
   }
+  for (const [job, entry] of Object.entries(input.jobProviders || {})) {
+    const problem = !JOB_PROVIDER_KEYS.includes(job) ? 'is not a known job' : entry === null ? '' : jobProviderProblem(entry);
+    if (problem) throw new TypeError(`jobProviders.${job} ${problem}, or null for the env default`);
+  }
   const current = await readStore(storeFile);
   const next = normalizePreferences({
     ...current,
     ...input,
+    // A partial map: each named job is replaced, null clears it.
+    jobProviders: { ...current.jobProviders, ...input.jobProviders },
   });
   await writeStore(next, storeFile);
   return defaultMetadata(next);
@@ -143,6 +169,15 @@ export async function updateAgentProviderPreferences(input = {}, { storeFile } =
 export async function resolveGraderSettings(defaults = {}, { storeFile } = {}) {
   const saved = await readStore(storeFile);
   return { sampleRate: saved.graderSampleRate ?? defaults.sampleRate ?? 0, model: saved.graderModel ?? defaults.model };
+}
+
+// Settings > the task's env/code pair; a disabled provider runs on claude/opus with one warning. Read on every launch.
+export async function resolveJobProviderModel(job, pair = {}, { storeFile, logger = console } = {}) {
+  const preferences = await getAgentProviderPreferences({ storeFile });
+  const chosen = preferences.jobProviders[job] || { provider: pair.provider || '', model: pair.model || '' };
+  if (preferences.availableProviders.includes(chosen.provider)) return chosen;
+  logger.warn(`${job}: provider ${chosen.provider || '(none)'} is disabled; running on ${JOB_FALLBACK.provider}/${JOB_FALLBACK.model}`);
+  return { ...JOB_FALLBACK };
 }
 
 export function availableSpawnTypes(preferences = DEFAULT_PREFERENCES, capabilityOptions = {}) {
@@ -228,7 +263,7 @@ export function resolveCollabModels(preferences = DEFAULT_PREFERENCES, requested
 }
 
 export async function agentProviderPreferencesPlugin(app, opts = {}) {
-  const withDefaults = (preferences) => ({ ...preferences, graderDefaults: opts.graderDefaults || null });
+  const withDefaults = (preferences) => ({ ...preferences, graderDefaults: opts.graderDefaults || null, jobDefaults: opts.jobDefaults || null });
   app.get('/api/agent-provider-preferences', async () => withDefaults(await getAgentProviderPreferences(opts)));
   app.put('/api/agent-provider-preferences', async (req, reply) => {
     let preferences;

@@ -545,7 +545,7 @@ describe('config.architectureWatch', () => {
 });
 
 describe('config.repoQuality', () => {
-  it('defaults to empty paths, weekly interval, fan-out 2, top 10, and a codex pair', async () => {
+  it('defaults to empty paths, weekly interval, fan-out 2, top 10, and a claude pair', async () => {
     const { config } = await importConfigWithEnv({
       CADRE_REPO_QUALITY_REPO_PATHS_JSON: undefined,
       CADRE_REPO_QUALITY_PROVIDER: undefined,
@@ -557,8 +557,8 @@ describe('config.repoQuality', () => {
     });
 
     assert.deepEqual(config.repoQuality.repoPaths, {});
-    assert.equal(config.repoQuality.provider, 'codex');
-    assert.equal(config.repoQuality.model, 'gpt-6.1-sol');
+    assert.equal(config.repoQuality.provider, 'claude');
+    assert.equal(config.repoQuality.model, 'claude-opus-5-5');
     assert.equal(config.repoQuality.intervalSeconds, 604800);
     assert.equal(config.repoQuality.maxFanout, 2);
     assert.equal(config.repoQuality.topN, 10);
