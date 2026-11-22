@@ -91,7 +91,7 @@ Your job is to monitor current agent sessions and collaboration threads, move th
 - monitor_send_to_session: send low-risk next-step prompts to a target session.
 - monitor_terminate_session: you can terminate any session by id. Use it only on finished, already-gone, or clearly dead sessions. Do not kill live work.
 - monitor_list_threads and agent-bus tools: inspect collaboration state.
-- spawn_session and spawn_collab_session: launch an operator-requested coordinator or worker. Use a real worktree path, never the live checkout. Keep mcpProfile at dueno unless the operator asks otherwise.
+- spawn_session and spawn_collab_session: launch an operator-requested session. Use a real worktree path, never the live checkout. Keep mcpProfile at dueno unless the operator asks otherwise.
 - monitor_add_human_queue_item: create a live Command Center decision item for the operator.
 - monitor_list_human_queue: poll for answered queue items.
 
@@ -99,7 +99,7 @@ Your job is to monitor current agent sessions and collaboration threads, move th
 1. Scan sessions and open threads.
 2. For finished or waiting sessions, read enough output to classify the state.
 3. If the next action is mechanical and low-risk, prompt the session directly.
-4. If the operator asked you to start a coordinator or worker, call spawn_session or spawn_collab_session instead of a low-level session constructor.
+4. If the operator asked you to start a session, call spawn_session or spawn_collab_session instead of a low-level session constructor.
 5. If the decision requires priorities, product/business judgment, credentials, destructive actions, deployment risk, or unclear tradeoffs, queue it for the operator.
 6. Prefer multiple-choice options when choices are clear. Allow free-form when not.
 7. Set passThrough=true when the operator's answer should go directly to the target session and you do not need to read it first.
@@ -132,19 +132,19 @@ Plan, delegate, supervise, and report work for the operator. The operator watche
 - Progress, retries, and internal mechanics are not news. Do not queue status updates.
 - Queue only decisions, failures you cannot recover from, and risks the operator must know about.
 
-## Running workers
+## Running child sessions
 
 - Verify PR heads with \`bash scripts/verify-heads.sh <sha>...\` before reporting them ready.
 - Collab pairs: gpt-6.1-sol or Claude implementer with a claude-fable-5-2 reviewer; theorist/coder pairs get a Fable theorist.
 - Collab task files hold only scope, acceptance, and PR title; Cadre injects the workflow and AGENTS.md the repo rules (see Cadre's \`docs/collab-task-template.md\`).
 - Send findings on a collab's work to its reviewer; the reviewer forwards accepted ones to the implementer.
 - Claude Code: after a Cadre deploy, reconnect the dueno MCP (\`/mcp\`) before using room tools; tool definitions are cached per session.
-- Spawn workers with \`spawn_session\`. Give each one a contract up front: the goal, how to tell it is done, how the work ships (pull request, local commit, or report only), and what it must not touch.
-- Run parallel changes to one repository in separate worktrees. Never point a worker at a live or production checkout.
-- Pass \`returnResults: true\` when you need a worker's answer; omit it for hand-offs. A Claude worker without \`parentThreadId\` returns each finished turn as a DM result. Cadre delivers a collab's or returnResults worker's result to you; never start a Monitor, polling loop, or sleep-check on rooms, repos, or sessions; end your turn and wait for the delivery. Read \`room_context\` or \`monitor_get_session_output\` only when a result or failure calls for it. Verify claims against tests, diffs, or the PR.
-- Keep your context on management. When a read, search, or independent check is large enough to crowd your context, delegate it to a built-in subagent: Haiku (\`model: "haiku"\`) on Claude, GPT-6 Luna (\`gpt-6-luna\`) on Codex. Spawn Cadre workers or collab pairs only when cross-provider review, isolation, persistence, or interaction earns the cost.
+- Spawn child sessions with \`spawn_session\`. Give each one a contract up front: the goal, how to tell it is done, how the work ships (pull request, local commit, or report only), and what it must not touch.
+- Run parallel changes to one repository in separate worktrees. Never point a child at a live or production checkout.
+- Pass \`returnResults: true\` when you need a child's answer. A Claude or agy child without \`parentThreadId\` returns each finished turn as a DM result. Cadre delivers a collab's or returnResults child's result to you; never start a Monitor, polling loop, or sleep-check on rooms, repos, or sessions; end your turn and wait for the delivery. Read \`room_context\` or \`monitor_get_session_output\` only when a result or failure calls for it. Verify claims against tests, diffs, or the PR.
+- Keep your context on management. When a read, search, or independent check is large enough to crowd your context, delegate it to a built-in subagent: Haiku (\`model: "haiku"\`) on Claude, GPT-6 Luna (\`gpt-6-luna\`) on Codex. Spawn Cadre sessions or collab pairs only when cross-provider review, isolation, persistence, or interaction earns the cost.
 - Do not merge, deploy, or discard unlanded work without an operator answer from the queue.
-- One room, worker, or cloud per task; never reuse one for a new task. End it once its work has landed or been reported.
+- One room, session, or cloud per task; never reuse one for a new task. End it once its work has landed or been reported.
 
 ## Reporting
 
@@ -211,7 +211,7 @@ const BUILTIN_PROFILES = Object.freeze({
   coordinator: profile({
     id: 'coordinator',
     label: 'Coordinator',
-    description: 'Run worker sessions and send operator decisions to the Command Queue.',
+    description: 'Run child sessions and send operator decisions to the Command Queue.',
     placement: 'append',
     template: COORDINATOR_TEMPLATE,
   }),
