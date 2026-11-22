@@ -146,6 +146,15 @@ resolved provider is disabled (the `enabled` flag `monitor_list_agent_providers`
 the job runs on `claude` / `claude-opus-5-5` and logs one warning naming the job and the
 disabled provider.
 
+Limits:
+
+- For the scheduled jobs, the env/code-default pair is the one stored on the task when it
+  was registered; only skillsUpstream re-registers at startup. A changed env var or code
+  default (including repoQuality's codex → claude) applies after that job's setup route runs
+  again. A Settings value applies from the next launch.
+- A Settings value for githubAgents is not inherited by fleetHygiene, skillsUpstream,
+  dependencyWatch or jobOpportunities; they inherit githubAgents only at env level.
+
 ## Agent process isolation
 
 - Fleet-launched sessions run in transient `dueno-agent-<provider>-<session>.scope` units below `dueno-agents.slice`.

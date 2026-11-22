@@ -74,7 +74,9 @@ const ARCHITECTURE_BRANCH_PREFIX = 'dueno-fleet/architecture';
 
 const JOB_BY_TASK_ID = {
   [FLEET_HYGIENE_TASK_ID]: 'fleetHygiene',
+  [LEGACY_FLEET_HYGIENE_TASK_ID]: 'fleetHygiene',
   [DEPENDENCY_WATCH_TASK_ID]: 'dependencyWatch',
+  [LEGACY_DEPENDENCY_WATCH_TASK_ID]: 'dependencyWatch',
   [SKILLS_UPSTREAM_TASK_ID]: 'skillsUpstream',
   [JOB_OPPORTUNITIES_TASK_ID]: 'jobOpportunities',
   [REPO_QUALITY_TASK_ID]: 'repoQuality',
