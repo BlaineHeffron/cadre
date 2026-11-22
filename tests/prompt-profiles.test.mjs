@@ -41,7 +41,7 @@ describe('prompt profile catalog', () => {
     assert.ok(resolved.body.includes("Send findings on a collab's work to its reviewer; the reviewer forwards accepted ones to the implementer."));
     assert.ok(resolved.body.includes('Claude Code: after a Cadre deploy, reconnect the dueno MCP (`/mcp`) before using room tools; tool definitions are cached per session.'));
     assert.match(resolved.body, /Collab task files hold only scope, acceptance, and PR title; Cadre injects the workflow and AGENTS\.md the repo rules \(see Cadre's `docs\/collab-task-template\.md`\)/);
-    assert.match(resolved.body, /Cadre delivers a collab's or returnResults worker's result to you; never start a Monitor, polling loop, or sleep-check on rooms, repos, or sessions; end your turn and wait for the delivery/);
+    assert.match(resolved.body, /Cadre delivers a collab's or returnResults child's result to you; never start a Monitor, polling loop, or sleep-check on rooms, repos, or sessions; end your turn and wait for the delivery/);
     assert.match(resolved.body, /Read `room_context` or `monitor_get_session_output` only when a result or failure calls for it/);
     assert.match(resolved.body, /Keep your context on management/);
     assert.match(resolved.body, /Haiku \(`model: "haiku"`\) on Claude, GPT-6 Luna \(`gpt-6-luna`\) on Codex/);
