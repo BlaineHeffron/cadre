@@ -131,6 +131,30 @@ routing, point the provider `base_url` at a closed port; Codex must report `wait
 network` rather than answer. `node --test tests/headroom.test.mjs` also loads the generated
 config through the installed Codex CLI when one is on `PATH`.
 
+## Job providers
+
+Settings → Job Providers sets the provider and model for each job whose pair comes from
+`envProviderModel` in `config.mjs`: githubAgents, fleetHygiene, dependencyWatch,
+skillsUpstream, jobOpportunities, repoQuality and architectureWatch. Values are saved in the
+agent provider preferences (`PUT /api/agent-provider-preferences` with
+`jobProviders: { <job>: { provider, model } }`; `null` clears a job, an empty model means the
+provider default) and are read on every launch, so no restart is needed.
+
+Precedence: a value saved in Settings wins; with none saved, the env vars
+(`DM_<JOB>_PROVIDER` / `DM_<JOB>_MODEL`) apply; with neither, the code default. If the
+resolved provider is disabled (the `enabled` flag `monitor_list_agent_providers` reports),
+the job runs on `claude` / `claude-opus-5-5` and logs one warning naming the job and the
+disabled provider.
+
+Limits:
+
+- For the scheduled jobs, the env/code-default pair is the one stored on the task when it
+  was registered; only skillsUpstream re-registers at startup. A changed env var or code
+  default (including repoQuality's codex → claude) applies after that job's setup route runs
+  again. A Settings value applies from the next launch.
+- A Settings value for githubAgents is not inherited by fleetHygiene, skillsUpstream,
+  dependencyWatch or jobOpportunities; they inherit githubAgents only at env level.
+
 ## Agent process isolation
 
 - Fleet-launched sessions run in transient `dueno-agent-<provider>-<session>.scope` units below `dueno-agents.slice`.

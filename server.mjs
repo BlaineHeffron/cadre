@@ -25,7 +25,7 @@ import { agentInterfacePlugin } from './modules/agent/interface.mjs';
 import { agentBusPlugin } from './modules/agent-bus/index.mjs';
 import { getOpsMetricsRegistry, opsLogMethod, opsObservabilityPlugin } from './modules/ops/observability.mjs';
 import { commandCenterAIPlugin, onHumanQueueChange } from './modules/integrations/command-center-ai.mjs';
-import { agentProviderPreferencesPlugin } from './modules/agent/provider-preferences.mjs';
+import { JOB_PROVIDER_KEYS, agentProviderPreferencesPlugin } from './modules/agent/provider-preferences.mjs';
 import { exec } from './lib/exec.mjs';
 import { fleetPlugin } from './modules/fleet/index.mjs';
 import { githubAgentsPlugin } from './modules/integrations/github-agents-plugin.mjs';
@@ -142,6 +142,7 @@ await app.register(machinesPlugin, { role: config.role, store: machines, credent
   supervise: !sideEffectLoopsSuppressed, routeCommands: routeRemoteSessionCommands, wsManager: { broadcast: (...args) => wsManager.broadcast(...args) } });
 await app.register(agentProviderPreferencesPlugin, {
   graderDefaults: { sampleRate: config.githubAgents.graderSampleRate, model: config.githubAgents.graderModel },
+  jobDefaults: Object.fromEntries(JOB_PROVIDER_KEYS.map((job) => [job, { provider: config[job].provider, model: config[job].model }])),
   ...(sideEffectLoopsSuppressed ? {} : { exec }),
 });
 

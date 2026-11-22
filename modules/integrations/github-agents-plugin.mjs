@@ -6,7 +6,7 @@ import { resolveAgentProviderSelection } from '../agent/provider-interface.mjs';
 import { resolveSandbox } from '../agent/nono-launch.mjs';
 import { getProtocolSessionProvider } from '../sessions/protocol-session-registry.mjs';
 import { gradeTrend, promptChanges } from '../sessions/session-grading.mjs';
-import { resolveGraderSettings } from '../agent/provider-preferences.mjs';
+import { resolveGraderSettings, resolveJobProviderModel } from '../agent/provider-preferences.mjs';
 import {
   buildGithubAgentRepoStore,
   GithubAgentPoller,
@@ -139,12 +139,15 @@ export async function githubAgentsPlugin(app, opts = {}) {
     env: opts.env || process.env,
     defaultAutoReviewEnabled: sourceConfig.autoReviewEnabled,
   });
-  const sessionLauncher = opts.sessionLauncher || ((input) => defaultSessionLauncher({
+  const launch = opts.sessionLauncher || ((input) => defaultSessionLauncher({
     ...input,
     env: sourceConfig.env,
     createSession: opts.createSession || createAgentSession,
     enqueueSessionCommand: opts.enqueueSessionCommand || enqueueAgentSessionCommand,
   }));
+  const sessionLauncher = async (input) => launch({
+    ...input, ...await resolveJobProviderModel('githubAgents', input, { ...opts.preferences, logger: opts.log || app.log }),
+  });
   const latestResults = opts.latestResults || new Map();
 
   async function handleResult(result) {

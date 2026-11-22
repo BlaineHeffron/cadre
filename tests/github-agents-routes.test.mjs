@@ -1,7 +1,10 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
-import { rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { updateAgentProviderPreferences } from '../modules/agent/provider-preferences.mjs';
 import { buildGithubAgentRepoStore } from '../modules/integrations/github-agents.mjs';
 import {
   defaultSessionLauncher,
@@ -242,6 +245,27 @@ describe('GitHub agents routes', () => {
     await app.close();
   });
 
+  it('spawns on the githubAgents pair saved in Settings over the env pair, and the env pair once cleared', async () => {
+    const storeFile = join(await mkdtemp(join(tmpdir(), 'cadre-github-job-')), 'prefs.json');
+    tempFiles.push(storeFile);
+    const launches = [];
+    const app = await buildApp({
+      configOverrides: { enabled: true, provider: 'xai', model: 'grok-4.6', maxSpawnsPerPoll: 1 },
+      env: { GITHUB_TOKEN_REF: 'secret-token' },
+      fetchImpl: mockGithubFetch([], { pulls: [githubItem(4, 'PR 4'), githubItem(5, 'PR 5')], issues: [] }),
+      sessionLauncher: async (launch) => { launches.push([launch.provider, launch.model]); return { sessionId: `sess_${launches.length}` }; },
+      preferences: { storeFile },
+    });
+    await app.inject({ method: 'POST', url: '/api/agents/github', headers: authHeaders(), payload: { owner: 'octo', repo: 'demo', authRef: 'GITHUB_TOKEN_REF', lastSeenPrNumber: 3, lastSeenIssueNumber: 2 } });
+    const poll = () => app.inject({ method: 'POST', url: '/api/agents/github/poll-now', headers: authHeaders(), payload: { id: 'octo/demo' } });
+    await updateAgentProviderPreferences({ jobProviders: { githubAgents: { provider: 'codex', model: '' } } }, { storeFile });
+    await poll();
+    await updateAgentProviderPreferences({ jobProviders: { githubAgents: null } }, { storeFile });
+    await poll();
+    assert.deepEqual(launches, [['codex', ''], ['xai', 'grok-4.6']]);
+    await app.close();
+  });
+
   it('poll-now does not fetch or spawn while disabled', async () => {
     let fetched = false;
     let spawned = false;
@@ -335,6 +359,7 @@ async function buildApp({
   createIssueWorktree = null,
   poller = null,
   requireAuth = false,
+  preferences,
   repoStore = buildGithubAgentRepoStore({ stateStore: memoryStateStore(), defaultAutoReviewEnabled: true }),
 } = {}) {
   process.env.AUTH_TOKEN = TEST_TOKEN;
@@ -358,6 +383,7 @@ async function buildApp({
     env,
     fetchImpl,
     sessionLauncher,
+    preferences,
     ...(poller ? { poller } : {}),
     ...(wsManager ? { wsManager } : {}),
     ...(createPrWorktree ? { createPrWorktree } : {}),

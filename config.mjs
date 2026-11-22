@@ -101,7 +101,7 @@ const jobOpportunitiesPair = envProviderModel({
 const repoQualityPair = envProviderModel({
   providerKey: 'DM_REPO_QUALITY_PROVIDER',
   modelKey: 'DM_REPO_QUALITY_MODEL',
-  defaultProvider: 'codex',
+  defaultProvider: 'claude',
   label: 'repoQuality',
 });
 const architectureWatchPair = envProviderModel({

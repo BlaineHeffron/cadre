@@ -172,3 +172,26 @@ describe('session grading settings', () => {
     assert.deepEqual(await resolveGraderSettings(env, { storeFile }), env, 'null falls back to env');
   });
 });
+
+describe('job provider settings', () => {
+  it('validates a per-job pair, merges it into the saved map and clears it with null', async () => {
+    const storeFile = await makeStoreFile();
+    const app = Fastify();
+    const jobDefaults = { repoQuality: { provider: 'claude', model: 'claude-opus-5-5' } };
+    await app.register(agentProviderPreferencesPlugin, { storeFile, jobDefaults });
+    const put = (body) => app.inject({ method: 'PUT', url: '/api/agent-provider-preferences', payload: body });
+
+    const initial = (await app.inject({ method: 'GET', url: '/api/agent-provider-preferences' })).json();
+    assert.deepEqual([initial.jobProviders, initial.jobDefaults], [{}, jobDefaults]);
+    for (const jobProviders of [{ nightly: { provider: 'codex' } }, { repoQuality: { provider: 'nope' } }, { repoQuality: { provider: 'codex', model: 'claude-opus-5-5' } }]) {
+      const response = await put({ jobProviders });
+      assert.equal(response.statusCode, 400, JSON.stringify(jobProviders));
+      assert.match(response.json().error, /^jobProviders\.\w+ /);
+    }
+    await put({ jobProviders: { repoQuality: { provider: 'codex', model: 'gpt-5.5' } } });
+    const saved = (await put({ jobProviders: { fleetHygiene: { provider: 'xai' } } })).json();
+    assert.deepEqual(saved.jobProviders, { fleetHygiene: { provider: 'xai', model: '' }, repoQuality: { provider: 'codex', model: 'gpt-5.5' } });
+    assert.deepEqual((await put({ jobProviders: { repoQuality: null } })).json().jobProviders, { fleetHygiene: { provider: 'xai', model: '' } });
+    await app.close();
+  });
+});
