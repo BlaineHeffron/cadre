@@ -998,9 +998,9 @@ nono's Landlock can work.
     structured session on the hub. Prompts, answers, deliveries and delete use the unchanged paths.
   - **One list.** The worker's event stream and the collab live-session guard list every kind it serves
     (`app.hasRoute`), so rows, Command Queue prompts and removals work for Codex and Pi.
-  - **returnResults stays Claude's and agy's.** `spawn_session` sets `returnToSpawner` only for Claude and agy on the
-    hub too, so the hook mirror is unchanged (tmux and structured Claude share `/api/claude/sessions`). Codex and Pi
-    children answer over the bus with their hub-minted token, as local ones do.
+  - **returnResults stays Claude's on a worker.** `spawn_session` sets `returnToSpawner` only for Claude and agy, and agy
+    runs only on the hub, so the hook mirror is unchanged (tmux and structured Claude share `/api/claude/sessions`).
+    Codex and Pi children answer over the bus with their hub-minted token, as local ones do.
   - **Collab cleanup.** The worker now ends the room's sessions on its side (any kind) before it cleans a
     worktree; the hub sends `sessionIds` in the cleanup instead of one delete per id, which needed a kind the hub may
     no longer have once its index entry is dropped.
