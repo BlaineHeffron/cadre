@@ -3798,8 +3798,8 @@ input[type="checkbox"]:not(.switch) {
 
   .nav-links {
     flex: 1 1 auto;
+    min-width: 0;
     overflow: visible;
-    width: 100%;
     flex-wrap: nowrap;
     gap: 4px;
     padding-top: 0;
@@ -3815,12 +3815,25 @@ input[type="checkbox"]:not(.switch) {
     flex-shrink: 1;
   }
 
-  /* Phones keep the brand; the connection badge shrinks to a coloured dot. */
+  /* Phones keep the brand; the connection badge shrinks to a coloured dot. When a wide font
+     leaves too little room, the brand gives up width first, then the links; More and Settings never do. */
   .nav-brand {
     display: flex;
     align-items: center;
-    flex: none;
+    flex: 0 100 auto;
+    min-width: 0;
     font-size: var(--fs-base);
+  }
+
+  .nav-brand > span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .nav-more-wrap,
+  .nav-settings-link {
+    flex: none;
   }
 
   .nav-connection-badge {
@@ -3842,6 +3855,8 @@ input[type="checkbox"]:not(.switch) {
 
   .nav-link-mobile-default {
     display: inline-flex;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .nav-link-mobile-default .nav-link-badge {
