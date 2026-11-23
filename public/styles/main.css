@@ -903,6 +903,7 @@ body:has(.tmux-pane-page) {
   border: 1px solid var(--border);
   background: var(--bg-card);
   color: var(--text-primary);
+  font-size: var(--fs-sm);
   white-space: nowrap;
 }
 
@@ -1030,6 +1031,7 @@ body:has(.tmux-pane-page) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
 }
 
 .collab-detail-shortcuts {
@@ -1041,11 +1043,17 @@ body:has(.tmux-pane-page) {
 
 .collab-thread-item {
   display: block;
+  overflow-wrap: anywhere;
   padding: 12px 16px;
   color: var(--text-primary);
   text-decoration: none;
   border-top: 1px solid var(--border);
   transition: background 0.15s, border-color 0.15s;
+}
+
+.collab-thread-item .badge {
+  flex: none;
+  align-self: flex-start;
 }
 
 .collab-thread-item:hover,
@@ -3728,6 +3736,54 @@ input[type="checkbox"]:not(.switch) {
 /* ── Responsive ── */
 
 @media (max-width: 768px) {
+  /* Phones: no text under 14px and no control under 40px. */
+  :root {
+    --control-h: 40px;
+    --fs-xs: 14px;
+    --fs-sm: 14px;
+  }
+
+  .nav-settings-link {
+    min-width: 40px;
+    justify-content: center;
+  }
+
+  .collab-message-view-toggle {
+    min-height: var(--control-h);
+  }
+
+  /* A checkbox's label is its tap target. */
+  label:has(> input[type="checkbox"]) {
+    min-height: var(--control-h);
+  }
+
+  /* Unclassed buttons and <small> would otherwise use the browser's 13.33px and 11.67px. */
+  button,
+  small {
+    font-size: var(--fs-sm);
+  }
+
+  summary {
+    padding-block: 10px;
+  }
+
+  .terminal-keys-row > button {
+    min-height: var(--control-h);
+  }
+
+  /* Settings rows wrap their controls under the label instead of widening the page. */
+  .setting-switch {
+    flex-wrap: wrap;
+  }
+
+  .setting-switch-text {
+    flex: 1 1 14rem;
+  }
+
+  select {
+    min-height: var(--control-h);
+  }
+
   body:has(.tmux-pane-page) .nav {
     display: none;
   }
@@ -3742,10 +3798,10 @@ input[type="checkbox"]:not(.switch) {
 
   .nav-links {
     flex: 1 1 auto;
+    min-width: 0;
     overflow: visible;
-    width: 100%;
     flex-wrap: nowrap;
-    gap: 6px;
+    gap: 4px;
     padding-top: 0;
     margin-left: 0;
     justify-content: flex-end;
@@ -3753,18 +3809,31 @@ input[type="checkbox"]:not(.switch) {
 
   .nav-link {
     min-height: 44px;
-    padding: 6px 7px;
+    padding: 6px 5px;
     font-size: var(--fs-xs);
     white-space: nowrap;
     flex-shrink: 1;
   }
 
-  /* Phones keep the brand; the connection badge shrinks to a coloured dot. */
+  /* Phones keep the brand; the connection badge shrinks to a coloured dot. When a wide font
+     leaves too little room, the brand gives up width first, then the links; More and Settings never do. */
   .nav-brand {
     display: flex;
     align-items: center;
-    flex: none;
+    flex: 0 100 auto;
+    min-width: 0;
     font-size: var(--fs-base);
+  }
+
+  .nav-brand > span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .nav-more-wrap,
+  .nav-settings-link {
+    flex: none;
   }
 
   .nav-connection-badge {
@@ -3786,6 +3855,8 @@ input[type="checkbox"]:not(.switch) {
 
   .nav-link-mobile-default {
     display: inline-flex;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .nav-link-mobile-default .nav-link-badge {
@@ -3960,13 +4031,7 @@ input[type="checkbox"]:not(.switch) {
 
   .session-header-actions .btn {
     flex: 0 0 auto;
-    min-height: 34px;
     padding: 4px 8px;
-    font-size: var(--fs-xs);
-  }
-
-  .session-title {
-    font-size: var(--fs-xs);
   }
 
   .session-header-primary .badge {
@@ -3975,7 +4040,6 @@ input[type="checkbox"]:not(.switch) {
 
   .session-header-primary .btn {
     flex: 0 0 auto;
-    min-height: 34px;
     padding: 4px 8px;
   }
 
