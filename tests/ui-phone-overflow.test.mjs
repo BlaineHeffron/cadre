@@ -37,6 +37,7 @@ test('at phone widths no page scrolls sideways, even with long URLs, paths and I
     '/api/threats/alerts': { alerts: [] },
     '/api/files/info': { path: longFile, name: longFile, type: 'file', size: 2, sizeFormatted: '2 B', isText: true, extension: '.json' },
     '/api/files/read': { content: '{}', path: longFile },
+    '/api/capture/notes': { notes: [{ id: 'n1', text: `Note ${url}` }] },
     '/api/codex/sessions': { sessions: [session('c1')] },
     '/api/agent-bus/threads': { threads: [thread] },
     [`/api/agent-bus/threads/${thread.id}`]: { thread, messages: [{ id: 'm1', from: 'claude:a1', body: `See ${url}` }] },
@@ -67,7 +68,13 @@ test('at phone widths no page scrolls sideways, even with long URLs, paths and I
     '/loop-sessions': `codex:c1-${id}`,
     '/skills': `Uses ${url}`,
     '/recordings': `meeting_${id}${id}`,
-    '/settings': 'session-improver',
+    '/settings': ['session-improver', `machine-${id}`],
+    '/': 'Launch Supervisor',
+    '/claude': `Run command: ${url}`,
+    '/collab': `Room ${url}`,
+    '/tmux': 'Tmux Sessions',
+    '/capture': 'Quick Capture',
+    '/capture/notes': `Note ${url}`,
     '/threats': 'Threat Alerts',
     [`/files?path=${longFile}`]: longFile,
   };
@@ -76,7 +83,7 @@ test('at phone widths no page scrolls sideways, even with long URLs, paths and I
     await page.setViewportSize({ width: viewport, height: 800 });
     for (const [route, text] of Object.entries(pages)) {
       await page.goto(`${origin}${route}`);
-      await page.getByText(text).first().waitFor();
+      for (const t of [text].flat()) await page.getByText(t).first().waitFor();
       const width = await page.evaluate(() => document.documentElement.scrollWidth);
       if (width > viewport) tooWide[`${route} @${viewport}`] = width;
     }

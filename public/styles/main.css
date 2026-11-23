@@ -1496,7 +1496,6 @@ input[type="checkbox"]:not(.switch) {
 
 .setting-switch {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -1507,7 +1506,6 @@ input[type="checkbox"]:not(.switch) {
 }
 
 .setting-switch-text {
-  flex: 1 1 14rem;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -3759,8 +3757,27 @@ input[type="checkbox"]:not(.switch) {
     min-height: var(--control-h);
   }
 
-  summary.card-title {
+  /* Unclassed buttons and <small> would otherwise use the browser's 13.33px and 11.67px. */
+  button,
+  small {
+    font-size: var(--fs-sm);
+  }
+
+  summary {
     padding-block: 10px;
+  }
+
+  .terminal-keys-row > button {
+    min-height: var(--control-h);
+  }
+
+  /* Settings rows wrap their controls under the label instead of widening the page. */
+  .setting-switch {
+    flex-wrap: wrap;
+  }
+
+  .setting-switch-text {
+    flex: 1 1 14rem;
   }
 
   select {
