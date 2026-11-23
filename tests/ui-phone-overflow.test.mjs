@@ -1,4 +1,4 @@
-// The real app at a 320px phone width in headless Chromium against a stubbed API full of long
+// The real app at 320, 360 and 390px phone widths in headless Chromium against a stubbed API full of long
 // URLs, paths and IDs: no page scrolls sideways.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -12,9 +12,10 @@ const url = `https://github.com/acme/repo/pull/123456789/files#diff-${'012345678
 const path = '/home/operator/.worktrees/feature-a-really-long-branch-name/modules/deeply/nested';
 const longFile = `an_extremely_long_file_name_${'x'.repeat(60)}.json`;
 const id = 'abcdef0123456789'.repeat(2);
+const thread = { id: `thr_${id}`, title: `Room ${url}`, status: 'open', participants: [] };
 const session = (sid) => ({ id: sid, displayName: `Task ${sid}`, workDir: path, tmuxSession: `claude-${sid}`, state: { status: 'blocked', interaction: { kind: 'permission', detail: `Run command: ${url}` } } });
 
-test('at 320px no page scrolls sideways, even with long URLs, paths and IDs', { skip: !process.env.CHROMIUM_BIN, timeout: 60000 }, async (t) => {
+test('at phone widths no page scrolls sideways, even with long URLs, paths and IDs', { skip: !process.env.CHROMIUM_BIN, timeout: 60000 }, async (t) => {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const app = Fastify();
   let browser;
@@ -36,12 +37,22 @@ test('at 320px no page scrolls sideways, even with long URLs, paths and IDs', { 
     '/api/threats/alerts': { alerts: [] },
     '/api/files/info': { path: longFile, name: longFile, type: 'file', size: 2, sizeFormatted: '2 B', isText: true, extension: '.json' },
     '/api/files/read': { content: '{}', path: longFile },
+    '/api/codex/sessions': { sessions: [session('c1')] },
+    '/api/agent-bus/threads': { threads: [thread] },
+    [`/api/agent-bus/threads/${thread.id}`]: { thread, messages: [{ id: 'm1', from: 'claude:a1', body: `See ${url}` }] },
+    '/api/agents/scheduled': { tasks: [{ id: `job-${id}`, kind: 'loop', status: 'active', workDir: path, prompt: `Check ${url}` },
+      { id: 'l1', type: 'inject', status: 'active', targetSession: { kind: 'codex', sessionId: `c1-${id}` }, prompt: `Loop ${url}` }] },
+    '/api/agent-provider-preferences': {
+      jobDefaults: { 'session-improver': { provider: 'claude', model: 'claude-opus-5-5' } },
+      jobProviders: { 'session-improver': { provider: 'codex', model: 'gpt-6-luna' } },
+      providerCatalog: [{ id: 'claude', label: 'Claude', enabled: true }, { id: 'codex', label: 'Codex', enabled: true }],
+    },
   };
   app.get('/api/*', (req) => stubs[req.url.split('?')[0]] || { sessions: [], tasks: [], threads: [], items: [] });
   app.get('/*', (_req, reply) => reply.type('text/html').send(index));
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN, headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage({ viewport: { width: 320, height: 740 } });
+  const page = await browser.newPage();
   page.setDefaultTimeout(5000);
 
   const pages = {
@@ -50,18 +61,25 @@ test('at 320px no page scrolls sideways, even with long URLs, paths and IDs', { 
     '/github-agents': `HTTP 502 from ${url}`,
     '/agents': `Run command: ${url}`,
     '/claude/a1': `Run command: ${url}`,
+    '/codex': `Run command: ${url}`,
+    [`/collab/${thread.id}`]: `See ${url}`,
+    '/scheduled-agents': `Check ${url}`,
+    '/loop-sessions': `codex:c1-${id}`,
     '/skills': `Uses ${url}`,
     '/recordings': `meeting_${id}${id}`,
-    '/settings': `machine-${id}`,
+    '/settings': 'session-improver',
     '/threats': 'Threat Alerts',
     [`/files?path=${longFile}`]: longFile,
   };
   const tooWide = {};
-  for (const [route, text] of Object.entries(pages)) {
-    await page.goto(`${origin}${route}`);
-    await page.getByText(text).first().waitFor();
-    const width = await page.evaluate(() => document.documentElement.scrollWidth);
-    if (width > 320) tooWide[route] = width;
+  for (const viewport of [320, 360, 390]) {
+    await page.setViewportSize({ width: viewport, height: 800 });
+    for (const [route, text] of Object.entries(pages)) {
+      await page.goto(`${origin}${route}`);
+      await page.getByText(text).first().waitFor();
+      const width = await page.evaluate(() => document.documentElement.scrollWidth);
+      if (width > viewport) tooWide[`${route} @${viewport}`] = width;
+    }
   }
   assert.deepEqual(tooWide, {});
 });
