@@ -14,7 +14,7 @@ Tailscale IPv4 address (`tailscale ip -4` on the worker), `<name>` the name you 
   `machine_provider_unsupported`. Structured runtimes and nono follow the worker's own
   `CADRE_STRUCTURED_AUTOMATED_SPAWNS`, `CLAUDE_STREAM_JSON_ENABLED`, `CODEX_APP_SERVER_ENABLED` and
   `CADRE_SANDBOX`, as on the hub. `isolatedWorktree` worktrees are made and removed on the worker.
-  DeepSeek and `task_spawn` stay on the hub. macOS workers are not supported yet.
+  DeepSeek, agy and `task_spawn` stay on the hub. macOS workers are not supported yet.
 - The child gets only the `dueno` MCP and calls the hub directly over HTTPS with a token the hub
   minted. It can `room_send`, `agent_dm` and read rooms; room messages to it are delivered.
 - The hub runs one supervisor per worker (only where side-effect loops run, so on 4310). It polls
