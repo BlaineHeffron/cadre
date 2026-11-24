@@ -29,8 +29,9 @@ Tailscale IPv4 address (`tailscale ip -4` on the worker), `<name>` the name you 
   `blocked` and is not retried until it restarts on the hub's protocol.
 - Resume and delete go through the hub (resume rotates the session's token; delete revokes it).
   Command Queue and supervisor messages reach remote sessions.
-- Not yet: `returnResults` (rejected with 400), Telegram output, the UI, other runtimes. Spawning on
-  an unreachable worker fails (503, or 426 on a protocol mismatch); it is never queued.
+- Not yet: restart (409 `restart_unsupported_remote`) and a live terminal pane in the hub UI, which
+  shows captured output and links to the worker's own UI. Spawning on an unreachable worker fails
+  (503, or 426 on a protocol mismatch); it is never queued.
 
 ## Hub setup (once)
 
