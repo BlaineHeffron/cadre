@@ -2420,14 +2420,15 @@ describe('architecture watch', () => {
     await app.close();
   });
 
-  it('launches on the Settings pair over the task pair, and on claude/opus with a warning when that provider is disabled', async () => {
+  it('launches on the Settings pair over the current config pair (not the stale task pair), and on claude/opus when that provider is disabled', async () => {
     const storeFile = join(await mkdtemp(join(tmpdir(), 'cadre-job-providers-')), 'prefs.json');
     const launches = [];
     const warnings = [];
     let nowMs = 10 * day;
+    const rootConfig = archConfig({ a: '/repo/a' });
     const app = await buildScheduledRoutesApp({
       now: () => nowMs,
-      rootConfig: archConfig({ a: '/repo/a' }),
+      rootConfig,
       listOpenPrBranches: async () => [],
       createArchitectureWatchWorktree: async () => ({ worktreePath: '/wt/a' }),
       sessionLauncher: async (input) => { launches.push([input.provider, input.model]); return { id: `sess_${launches.length}` }; },
@@ -2436,20 +2437,22 @@ describe('architecture watch', () => {
     });
     const run = async () => { nowMs += day; await app.inject({ method: 'POST', url: '/api/fleet/architecture-watch/run-now' }); };
     await app.inject({ method: 'POST', url: '/api/fleet/architecture-watch/setup' });
+    // The code default changes after registration; the task still stores claude/opus.
+    rootConfig.architectureWatch = { provider: 'codex', model: 'gpt-5.5' };
 
     await run();
-    await updateAgentProviderPreferences({ jobProviders: { architectureWatch: { provider: 'codex', model: 'gpt-5.5' } } }, { storeFile });
+    await updateAgentProviderPreferences({ jobProviders: { architectureWatch: { provider: 'claude', model: '' } } }, { storeFile });
     await run();
-    await updateAgentProviderPreferences({ codexEnabled: false }, { storeFile });
+    await updateAgentProviderPreferences({ codexEnabled: false, jobProviders: { architectureWatch: null } }, { storeFile });
     await run();
-    await updateAgentProviderPreferences({ codexEnabled: true, jobProviders: { architectureWatch: null } }, { storeFile });
+    await updateAgentProviderPreferences({ codexEnabled: true }, { storeFile });
     await run();
     assert.deepEqual(launches, [
+      ['codex', 'gpt-5.5'],
+      ['claude', ''],
       ['claude', 'claude-opus-5-5'],
       ['codex', 'gpt-5.5'],
-      ['claude', 'claude-opus-5-5'],
-      ['claude', 'claude-opus-5-5'],
-    ], 'task pair, Settings pair, disabled fallback, cleared back to the task pair');
+    ], 'current config pair, Settings pair, disabled fallback, re-enabled back to the config pair');
     assert.deepEqual(warnings, ['architectureWatch: provider codex is disabled; running on claude/claude-opus-5-5']);
     await app.close();
   });

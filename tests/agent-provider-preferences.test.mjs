@@ -33,6 +33,19 @@ async function makeStoreFile() {
 }
 
 describe('agent provider preferences', () => {
+  it('toggles every provider off, on and off again through the Settings route', async () => {
+    const storeFile = await makeStoreFile();
+    const app = Fastify();
+    await app.register(agentProviderPreferencesPlugin, { storeFile });
+    const put = async (body) => (await app.inject({ method: 'PUT', url: '/api/agent-provider-preferences', payload: body })).json();
+    for (const key of ['claudeEnabled', 'codexEnabled', 'deepseekEnabled', 'piEnabled']) {
+      const seen = [];
+      for (const value of [false, true, false, true]) seen.push((await put({ [key]: value }))[key]);
+      assert.deepEqual(seen, [false, true, false, true], key);
+    }
+    await app.close();
+  });
+
   it('persists provider toggles and disables collab when one provider is unavailable', async () => {
     const storeFile = await makeStoreFile();
     const updated = await updateAgentProviderPreferences({ claudeEnabled: false, codexEnabled: true, deepseekEnabled: false, piEnabled: false }, { storeFile });
