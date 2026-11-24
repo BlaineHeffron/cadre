@@ -6,7 +6,7 @@ Queue and every loop stay on the hub. Design: [multi-machine-design.md](multi-ma
 Placeholders: `<hub>.<tailnet>.ts.net` is the hub's MagicDNS name, `<worker-ip>` the worker's
 Tailscale IPv4 address (`tailscale ip -4` on the worker), `<name>` the name you give the worker.
 
-## What works today (slices 1-2)
+## What works today (slices 1-7)
 
 - `spawn_session({provider, machine: '<name>', workDir: '/home/<user>/projects/<repo>'})` for Claude
   (tmux or structured), Codex and Pi. `workDir` is a path on the worker. The worker runs what its
