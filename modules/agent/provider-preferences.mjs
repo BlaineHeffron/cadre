@@ -51,10 +51,11 @@ const validRate = (value) => typeof value === 'number' && value >= 0 && value <=
 
 function normalizePreferences(input = {}) {
   const normalized = {
-    claude: input?.claudeEnabled === false ? false : input?.claude !== false,
-    codex: input?.codexEnabled === false ? false : input?.codex !== false,
-    deepseek: input?.deepseekEnabled === true || input?.deepseek === true,
-    pi: input?.piEnabled === false ? false : input?.pi !== false,
+    // The UI's *Enabled toggle wins over the stored key in both directions.
+    claude: (input?.claudeEnabled ?? input?.claude) !== false,
+    codex: (input?.codexEnabled ?? input?.codex) !== false,
+    deepseek: (input?.deepseekEnabled ?? input?.deepseek) === true,
+    pi: (input?.piEnabled ?? input?.pi) !== false,
     headroomEnabled: input?.headroomEnabled !== false,
     // null falls back to the env defaults in config.githubAgents.
     graderSampleRate: validRate(input?.graderSampleRate) ? input.graderSampleRate : null,
@@ -171,7 +172,7 @@ export async function resolveGraderSettings(defaults = {}, { storeFile } = {}) {
   return { sampleRate: saved.graderSampleRate ?? defaults.sampleRate ?? 0, model: saved.graderModel ?? defaults.model };
 }
 
-// Settings > the task's env/code pair; a disabled provider runs on claude/opus with one warning. Read on every launch.
+// Settings > the job's current env/code pair; a disabled provider runs on claude/opus with one warning. Read on every launch.
 export async function resolveJobProviderModel(job, pair = {}, { storeFile, logger = console } = {}) {
   const preferences = await getAgentProviderPreferences({ storeFile });
   const chosen = preferences.jobProviders[job] || { provider: pair.provider || '', model: pair.model || '' };

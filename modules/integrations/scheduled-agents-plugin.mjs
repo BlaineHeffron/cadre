@@ -122,6 +122,13 @@ function resolveWatcherProviderModel(own = {}, fallbacks = [], label = 'schedule
   return resolveWatcherProviderModel(fallbacks[0], fallbacks.slice(1), label);
 }
 
+// Config blocks each job inherits its provider/model from, in order.
+const JOB_PAIR_FALLBACKS = {
+  repoQuality: [], architectureWatch: [], skillsUpstream: ['githubAgents'], fleetHygiene: ['githubAgents'],
+  dependencyWatch: ['fleetHygiene', 'githubAgents'], jobOpportunities: ['fleetHygiene', 'githubAgents'],
+};
+const jobProviderPair = (config, job) => resolveWatcherProviderModel(config?.[job], JOB_PAIR_FALLBACKS[job].map((key) => config?.[key]), job);
+
 function unique(values = []) {
   return [...new Set(values.map(normalizeText).filter(Boolean))];
 }
@@ -302,11 +309,7 @@ function buildRepoQualityTaskInput(sourceConfig = appConfig, { nowMs = Date.now(
     sourceConfig?.repoQuality?.intervalSeconds,
     DEFAULT_REPO_QUALITY_INTERVAL_SECONDS,
   );
-  const pair = resolveWatcherProviderModel(
-    sourceConfig?.repoQuality,
-    [],
-    'repoQuality',
-  );
+  const pair = jobProviderPair(sourceConfig, 'repoQuality');
   return {
     id: REPO_QUALITY_TASK_ID,
     workDir: repoPaths[0] || process.cwd(),
@@ -403,11 +406,7 @@ function buildSkillsUpstreamTaskInput(sourceConfig = appConfig, { nowMs = Date.n
     sourceConfig?.skillsUpstream?.intervalSeconds,
     DEFAULT_SKILLS_UPSTREAM_INTERVAL_SECONDS,
   );
-  const pair = resolveWatcherProviderModel(
-    sourceConfig?.skillsUpstream,
-    [sourceConfig?.githubAgents],
-    'skillsUpstream',
-  );
+  const pair = jobProviderPair(sourceConfig, 'skillsUpstream');
   return {
     id: SKILLS_UPSTREAM_TASK_ID,
     workDir: repoPath,
@@ -445,11 +444,7 @@ function safeSkillsUpstreamStatus(task, sourceConfig = appConfig) {
 
 function buildFleetHygieneTaskInput(sourceConfig = appConfig, { nowMs = Date.now() } = {}) {
   const repoPaths = configuredRepoPaths(sourceConfig);
-  const pair = resolveWatcherProviderModel(
-    sourceConfig?.fleetHygiene,
-    [sourceConfig?.githubAgents],
-    'fleetHygiene',
-  );
+  const pair = jobProviderPair(sourceConfig, 'fleetHygiene');
   return {
     id: FLEET_HYGIENE_TASK_ID,
     workDir: repoPaths[0] || process.cwd(),
@@ -500,11 +495,7 @@ function buildDependencyWatchTaskInput(sourceConfig = appConfig, { nowMs = Date.
     id: DEPENDENCY_WATCH_TASK_ID,
     workDir: repoPaths[0] || process.cwd(),
     prompt: buildDependencyWatchPrompt(repoPaths),
-    ...resolveWatcherProviderModel(
-      sourceConfig?.dependencyWatch,
-      [sourceConfig?.fleetHygiene, sourceConfig?.githubAgents],
-      'dependencyWatch',
-    ),
+    ...jobProviderPair(sourceConfig, 'dependencyWatch'),
     intervalSeconds,
     maxIterations: 0,
     startImmediately: false,
@@ -530,11 +521,7 @@ function buildJobOpportunitiesTaskInput(sourceConfig = appConfig, { nowMs = Date
     id: JOB_OPPORTUNITIES_TASK_ID,
     workDir: settings.scraperPath,
     prompt: buildJobOpportunitiesPrompt(sourceConfig),
-    ...resolveWatcherProviderModel(
-      sourceConfig?.jobOpportunities,
-      [sourceConfig?.fleetHygiene, sourceConfig?.githubAgents],
-      'jobOpportunities',
-    ),
+    ...jobProviderPair(sourceConfig, 'jobOpportunities'),
     intervalSeconds,
     maxIterations: 0,
     startImmediately: false,
@@ -1012,7 +999,7 @@ function buildArchitectureWatchTaskInput(sourceConfig = appConfig, { nowMs = Dat
     id: ARCHITECTURE_WATCH_TASK_ID,
     workDir: configuredRepoQualityRepoPaths(sourceConfig)[0] || process.cwd(),
     prompt: 'Daily architecture watch: per repoQuality repo, one agent opens at most one deepening PR.',
-    ...resolveWatcherProviderModel(sourceConfig?.architectureWatch, [], 'architectureWatch'),
+    ...jobProviderPair(sourceConfig, 'architectureWatch'),
     intervalSeconds: 86400,
     maxIterations: 0,
     startImmediately: false,
@@ -1342,11 +1329,12 @@ export async function scheduledAgentsPlugin(app, opts = {}) {
     now,
     logger: opts.log || app.log,
   });
-  // Every job launch resolves its provider/model here: the Settings value, else the task's env/code pair.
+  // Every job launch resolves its provider/model here: the Settings value, else the job's current env/code pair
+  // (not the pair stored on the task at registration).
   const sessionLauncher = async (input = {}) => {
     const job = JOB_BY_TASK_ID[input.taskId];
     if (!job) return jobLauncher(input);
-    return jobLauncher({ ...input, ...await resolveJobProviderModel(job, input, { ...opts.preferences, logger: opts.log || app.log }) });
+    return jobLauncher({ ...input, ...await resolveJobProviderModel(job, jobProviderPair(rootConfig, job), { ...opts.preferences, logger: opts.log || app.log }) });
   };
   const stepDeps = {
     store,
