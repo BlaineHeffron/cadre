@@ -6,7 +6,7 @@ Queue and every loop stay on the hub. Design: [multi-machine-design.md](multi-ma
 Placeholders: `<hub>.<tailnet>.ts.net` is the hub's MagicDNS name, `<worker-ip>` the worker's
 Tailscale IPv4 address (`tailscale ip -4` on the worker), `<name>` the name you give the worker.
 
-## What works today (slices 1-2)
+## What works today (slices 1-7)
 
 - `spawn_session({provider, machine: '<name>', workDir: '/home/<user>/projects/<repo>'})` for Claude
   (tmux or structured), Codex and Pi. `workDir` is a path on the worker. The worker runs what its
@@ -14,7 +14,7 @@ Tailscale IPv4 address (`tailscale ip -4` on the worker), `<name>` the name you 
   `machine_provider_unsupported`. Structured runtimes and nono follow the worker's own
   `CADRE_STRUCTURED_AUTOMATED_SPAWNS`, `CLAUDE_STREAM_JSON_ENABLED`, `CODEX_APP_SERVER_ENABLED` and
   `CADRE_SANDBOX`, as on the hub. `isolatedWorktree` worktrees are made and removed on the worker.
-  DeepSeek and `task_spawn` stay on the hub. macOS workers are not supported yet.
+  DeepSeek, agy and `task_spawn` stay on the hub. macOS workers are not supported yet.
 - The child gets only the `dueno` MCP and calls the hub directly over HTTPS with a token the hub
   minted. It can `room_send`, `agent_dm` and read rooms; room messages to it are delivered.
 - The hub runs one supervisor per worker (only where side-effect loops run, so on 4310). It polls
@@ -29,8 +29,9 @@ Tailscale IPv4 address (`tailscale ip -4` on the worker), `<name>` the name you 
   `blocked` and is not retried until it restarts on the hub's protocol.
 - Resume and delete go through the hub (resume rotates the session's token; delete revokes it).
   Command Queue and supervisor messages reach remote sessions.
-- Not yet: `returnResults` (rejected with 400), Telegram output, the UI, other runtimes. Spawning on
-  an unreachable worker fails (503, or 426 on a protocol mismatch); it is never queued.
+- Not yet: restart (409 `restart_unsupported_remote`) and a live terminal pane in the hub UI, which
+  shows captured output and links to the worker's own UI. Spawning on an unreachable worker fails
+  (503, or 426 on a protocol mismatch); it is never queued.
 
 ## Hub setup (once)
 
