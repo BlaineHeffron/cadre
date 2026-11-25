@@ -131,6 +131,8 @@ test('a long room fills the window with a self-scrolling feed that follows the n
     await settle();
     assert.equal(await page.locator('.collab-detail').isVisible(), false, path);
     assert.equal(await page.locator('.collab-rail').isVisible(), true, path);
+    // The full-width rail drops its divider; the shell's own border frames it.
+    assert.equal(await page.locator('.collab-rail').evaluate((el) => getComputedStyle(el).borderRightWidth), '0px', path);
     assert.equal(await pageScrolls(), false, path);
   }
   assert.deepEqual(errors, []);

@@ -1295,7 +1295,7 @@ body:has(.tmux-pane-page) {
     display: none;
   }
 
-  .collab-rail {
+  .collab-shell > .collab-rail {
     border-right: 0;
   }
 
