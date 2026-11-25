@@ -123,7 +123,8 @@ async function claudeImportKeys(keys) {
   return [...new Set([...keys, ...(basename(commonDir) === '.git' ? [dirname(commonDir)] : [])])];
 }
 
-export async function seedClaudeWorkspaceTrust(workDir, { logger = console, configPath = join(process.env.HOME || homedir(), '.claude.json') } = {}) {
+// codeMode also records the Code Mode caveats as accepted, as Claude's own opt-in dialog does on "Yes".
+export async function seedClaudeWorkspaceTrust(workDir, { logger = console, configPath = join(process.env.HOME || homedir(), '.claude.json'), codeMode = false } = {}) {
   const trimmed = String(workDir || '').trim();
   if (!trimmed) return;
   const resolvedWorkDir = await realpath(trimmed).catch(() => resolve(trimmed));
@@ -153,6 +154,7 @@ export async function seedClaudeWorkspaceTrust(workDir, { logger = console, conf
 
       await writeJsonFileAtomic(configPath, {
         ...config,
+        ...(codeMode ? { codeModeCaveatsAcceptedV1: true, codeModeAutoModeCaveatAcceptedV1: true } : {}),
         projects: nextProjects,
       });
     });

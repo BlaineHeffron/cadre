@@ -16,8 +16,10 @@ writeFileSync(join(bin, 'tmux'), [
   `  list-sessions) printf 'claude-tmux1\\t1700000000\\t0\\t\\t${workDir}\\n'; cat '${join(root, 'live-tmux')}' 2>/dev/null ;;`,
   // A test may give every pane a live pid; while it does, new sessions are listed as they start.
   `  list-panes) [ "$2" = "-s" ] && cat '${join(root, 'live-pane')}' 2>/dev/null ;;`,
-  `  new-session) [ -f '${join(root, 'live-pane')}' ] && printf '%s\\t1700000000\\t0\\t\\t%s\\n' "$4" '${workDir}' >> '${join(root, 'live-tmux')}' ;;`,
+  `  new-session) rm -f '${join(root, 'ended-')}'"$4"; [ -f '${join(root, 'live-pane')}' ] && printf '%s\\t1700000000\\t0\\t\\t%s\\n' "$4" '${workDir}' >> '${join(root, 'live-tmux')}' ;;`,
   '  capture-pane) printf "> " ;;',
+  // A test may mark a session ended until it is started again, so it can be resumed.
+  `  has-session) [ -f '${join(root, 'ended-')}'"$3" ] && exit 1 ;;`,
   'esac',
   'exit 0',
   '',
@@ -649,7 +651,15 @@ describe('structured automated spawns', () => {
     const stored = (id) => JSON.parse(readFileSync(join(root, 'state', 'claude_sessions.json'), 'utf8')).find((entry) => entry.id === id);
     const spawn = (args = {}) => mcp.handleToolCall('spawn_session', { provider: 'claude', workDir, mcpProfile: 'default', ...args });
     try {
-      const results = [await spawn(), await spawn({ codeMode: true })];
+      // Claude's own Code Mode opt-in dialog is pre-answered only by a Code Mode launch.
+      const caveatsAccepted = () => {
+        const claudeJson = JSON.parse(readFileSync(join(root, '.claude.json'), 'utf8'));
+        return claudeJson.codeModeCaveatsAcceptedV1 === true && claudeJson.codeModeAutoModeCaveatAcceptedV1 === true;
+      };
+      const results = [await spawn()];
+      assert.equal(caveatsAccepted(), false);
+      results.push(await spawn({ codeMode: true }));
+      assert.equal(caveatsAccepted(), true);
       await updateAgentProviderPreferences({ claudeCodeMode: true });
       results.push(await spawn(), await spawn({ codeMode: false }));
       await updateAgentProviderPreferences({ claudeCodeMode: false });
@@ -658,6 +668,18 @@ describe('structured automated spawns', () => {
       assert.deepEqual(results.map((result) => result.warnings), [undefined, undefined, undefined, undefined]);
 
       const coded = ids[1];
+      // Resuming an existing Code Mode session pre-answers the dialog too; resuming any other session does not.
+      writeFileSync(join(root, '.claude.json'), '{}');
+      const resume = (id) => {
+        writeFileSync(join(root, `ended-claude-${id}`), '');
+        return request('POST', `/api/claude/sessions/${id}/resume`, { principal: 'ui' });
+      };
+      const plain = await resume(ids[0]);
+      assert.equal(plain.statusCode, 200, plain.body);
+      assert.equal(caveatsAccepted(), false);
+      const resumed = await resume(coded);
+      assert.equal(resumed.statusCode, 200, resumed.body);
+      assert.equal(caveatsAccepted(), true);
       assert.equal((await request('GET', `/api/claude/sessions/${coded}`)).json().codeMode, true);
       assert.equal((await request('GET', `/api/claude/sessions/${ids[0]}`)).json().codeMode, false);
       assert.equal((await sessionRollup({ kind: 'claude', sessionId: coded })).codeMode, true);
