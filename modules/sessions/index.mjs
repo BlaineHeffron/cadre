@@ -1230,7 +1230,7 @@ async function createSession({ sessionId, initialPrompt = '', workDir, args, mod
     });
     const { allArgs, paneCommand } = renderedLaunch;
     scopeLaunch = buildAgentScopeLaunch(paneCommand, { kind: config.id, sessionId: id });
-    if (config.id === 'claude') await seedClaudeWorkspaceTrust(normalizedWorkDir, claudeTrustOptions(sandboxLaunch));
+    if (config.id === 'claude') await seedClaudeWorkspaceTrust(normalizedWorkDir, { ...claudeTrustOptions(sandboxLaunch), codeMode });
 
     await launchTmuxSession({
       sessionName,
@@ -1507,7 +1507,7 @@ async function resumeSession(id, { loopRegistrationPolicy = null, busCredential 
       },
     });
     scopeLaunch = buildAgentScopeLaunch(paneCommand, { kind: config.id, sessionId: id });
-    if (config.id === 'claude') await seedClaudeWorkspaceTrust(normalizedWorkDir, claudeTrustOptions(sandboxLaunch));
+    if (config.id === 'claude') await seedClaudeWorkspaceTrust(normalizedWorkDir, { ...claudeTrustOptions(sandboxLaunch), codeMode: refreshed.codeMode === true });
     await launchTmuxSession({
       sessionName,
       workDir: normalizedWorkDir,
