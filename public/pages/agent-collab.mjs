@@ -1,7 +1,7 @@
 import { h } from 'preact';
 import { html } from 'htm/preact';
 import { signal } from '@preact/signals';
-import { useEffect, useMemo, useRef } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'preact/hooks';
 import { useSignal } from '../app/use-signal.mjs';
 import { route } from 'preact-router';
 import { api } from '../app/api.mjs';
@@ -579,9 +579,11 @@ export function AgentCollabPage({ id }) {
     return () => unsubscribeThread();
   }, [id]);
 
-  useEffect(() => { feedStickRef.current = true; }, [id]);
+  // Layout effects scroll before the scroll event or the next commit can measure taller content
+  // and wrongly drop following.
+  useLayoutEffect(() => { feedStickRef.current = true; }, [id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const feed = detailRef.current;
     if (feed && feedStickRef.current) feed.scrollTop = feed.scrollHeight;
   }, [id, threadState.value, messages.value.length]);
@@ -1028,7 +1030,7 @@ export function AgentCollabPage({ id }) {
           </div>
           ${detailLoading.value ? html`<span class="collab-room-sub">Syncing...</span>` : null}
           <span class="badge ${threadStatusClass(thread.status)}">${thread.status}</span>
-          <details class="collab-room-info">
+          <details class="collab-room-info" key=${thread.id}>
             <summary class="btn">Info</summary>
             <div class="collab-room-info-panel">
               <div class="collab-meta-grid">
@@ -1260,13 +1262,13 @@ export function AgentCollabPage({ id }) {
 
       <${BootstrapPanel} />
       <${ThreadHistoryPanel} />
-      <div class="collab-shell ${id ? 'collab-shell-has-thread' : ''}">
-        <aside class="collab-rail" aria-label="Rooms">
+      <div class="collab-shell ${threadState.value ? 'collab-shell-has-thread' : ''}">
+        <aside class="agents-desktop-rail collab-rail" aria-label="Rooms">
           <div class="agents-desktop-rail-head">
             <span class="card-title">Active rooms</span>
             <span class="agents-desktop-rail-count">${activeThreads.length} live</span>
           </div>
-          <div class="collab-rail-list">
+          <div class="agents-desktop-rail-list">
             ${loading.value ? html`
               <p style="padding:12px; color:var(--text-muted)">Loading threads...</p>
             ` : activeThreads.length === 0 ? html`
@@ -1290,28 +1292,26 @@ export function AgentCollabPage({ id }) {
                 ` : null}
               </a>
             `)}
-          ${agentBusAlerts.value.length > 0 ? html`
-            <div class="card">
-              <div class="card-header">
-                <span class="card-title">Recent Bus Alerts</span>
-              </div>
-              ${agentBusAlerts.value.slice(0, 6).map(alert => html`
-                <div style="padding:8px 0; border-top:1px solid var(--border)">
-                  <div style="display:flex; align-items:center; gap:8px">
-                    <span class="badge badge-critical">${alert.type}</span>
-                    <span style="font-size:var(--fs-xs)">${alert.error || alert.messageId || 'Alert'}</span>
-                  </div>
-                  ${alert.threadId ? html`
-                    <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">
-                      <a href="/collab/${alert.threadId}" onclick=${(event) => navigateToThread(event, alert.threadId)} style="color:var(--accent)">Open thread</a>
-                    </div>
-                  ` : null}
+            ${agentBusAlerts.value.length > 0 ? html`
+              <div class="card">
+                <div class="card-header">
+                  <span class="card-title">Recent Bus Alerts</span>
                 </div>
-              `)}
-            </div>
-          ` : null}
-
-
+                ${agentBusAlerts.value.slice(0, 6).map(alert => html`
+                  <div style="padding:8px 0; border-top:1px solid var(--border)">
+                    <div style="display:flex; align-items:center; gap:8px">
+                      <span class="badge badge-critical">${alert.type}</span>
+                      <span style="font-size:var(--fs-xs)">${alert.error || alert.messageId || 'Alert'}</span>
+                    </div>
+                    ${alert.threadId ? html`
+                      <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">
+                        <a href="/collab/${alert.threadId}" onclick=${(event) => navigateToThread(event, alert.threadId)} style="color:var(--accent)">Open thread</a>
+                      </div>
+                    ` : null}
+                  </div>
+                `)}
+              </div>
+            ` : null}
             <${ManualThreadForm} />
           </div>
         </aside>
