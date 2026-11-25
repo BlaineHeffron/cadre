@@ -863,59 +863,122 @@ body:has(.tmux-pane-page) {
   min-height: 44px;
 }
 
-.collab-body {
+/* Rooms: a rail of rooms beside the selected room's feed. The shell takes the viewport height the
+   page chrome leaves (shared with the agents view above); the feed scrolls and the composer stays
+   pinned beneath it. */
+.collab-shell {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 360px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
-.collab-sidebar-stack,
+/* A size container, so the Info panel can be bounded by the pane rather than the viewport. */
 .collab-detail {
+  container-type: size;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--bg-card);
+}
+
+.collab-detail-empty {
+  align-items: center;
+  justify-content: center;
+}
+
+.collab-room-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.collab-room-title {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
-.collab-toprail {
-  margin-bottom: 12px;
+.collab-room-title .card-title {
+  overflow: hidden;
+  font-size: var(--fs-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.collab-tab-strip {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-
-.collab-empty-tabs {
-  padding: 10px 12px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
+.collab-room-sub {
+  overflow: hidden;
   color: var(--text-muted);
   font-size: var(--fs-xs);
-  white-space: nowrap;
-}
-
-.collab-thread-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  color: var(--text-primary);
-  font-size: var(--fs-sm);
-  white-space: nowrap;
-}
-
-.collab-thread-tab-active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-
-.collab-thread-tab-title {
-  max-width: 220px;
-  overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collab-room-back {
+  display: none;
+}
+
+.collab-room-info > summary {
+  list-style: none;
+}
+
+.collab-room-info > summary::-webkit-details-marker {
+  display: none;
+}
+
+.collab-room-info-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 12px;
+  z-index: 80;
+  width: min(720px, calc(100% - 24px));
+  /* The pane's height less the header's (the panel's containing block) and the 6px offsets. */
+  max-height: calc(100cqh - 100% - 12px);
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+}
+
+.collab-room-note {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+.collab-feed {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 16px;
+}
+
+.collab-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.collab-composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.collab-composer-row > .input {
+  min-width: 0;
+  flex: 1 1 0;
 }
 
 .collab-drawer-card {
@@ -1032,13 +1095,6 @@ body:has(.tmux-pane-page) {
   gap: 10px;
   font-size: var(--fs-xs);
   overflow-wrap: anywhere;
-}
-
-.collab-detail-shortcuts {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 12px;
 }
 
 .collab-thread-item {
@@ -1199,8 +1255,8 @@ body:has(.tmux-pane-page) {
 }
 
 .collab-textarea {
-  min-height: 140px;
-  margin-top: 10px;
+  min-height: 64px;
+  max-height: 30vh;
   resize: vertical;
 }
 
@@ -1221,10 +1277,6 @@ body:has(.tmux-pane-page) {
     min-height: 0;
   }
 
-  .collab-body {
-    grid-template-columns: 1fr;
-  }
-
   .collab-form-grid,
   .collab-participant-grid,
   .collab-status-grid,
@@ -1232,41 +1284,32 @@ body:has(.tmux-pane-page) {
     grid-template-columns: 1fr;
   }
 
-  .collab-sidebar-stack {
-    order: 2;
+  /* Phone: the rail, or the selected room at full height with a back control. */
+  .collab-shell {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .collab-detail {
-    order: 1;
+  .collab-shell-has-thread > .collab-rail,
+  .collab-shell:not(.collab-shell-has-thread) > .collab-detail,
+  .page:has(> .collab-shell-has-thread) > :not(.collab-shell) {
+    display: none;
   }
 
-  .collab-thread-tab {
-    min-width: min(78vw, 300px);
-    justify-content: space-between;
+  .collab-shell > .collab-rail {
+    border-right: 0;
   }
 
-  .collab-detail-shortcuts {
-    position: sticky;
-    top: 56px;
-    z-index: 20;
-    margin-top: 14px;
-    padding: 10px 0;
-    background: linear-gradient(180deg, var(--bg-card) 0%, var(--bg-card) 70%, color-mix(in srgb, var(--bg-card) 85%, transparent) 100%);
+  .collab-room-back {
+    display: inline-flex;
   }
 
-  .collab-detail-shortcuts .btn {
-    flex: 1 1 calc(50% - 8px);
-    justify-content: center;
+  /* The title keeps the first row beside the back control; status and actions wrap below. */
+  .collab-room-header {
+    flex-wrap: wrap;
   }
 
-  .collab-message-card {
-    scroll-margin-top: 116px;
-  }
-
-  #collab-messages,
-  #collab-send-message,
-  #collab-bootstrap-status {
-    scroll-margin-top: 116px;
+  .collab-room-title {
+    flex-basis: calc(100% - 64px);
   }
 }
 
@@ -2119,11 +2162,13 @@ input[type="checkbox"]:not(.switch) {
    and the selected session own their scrolling instead of nesting inside a page
    scroll. Measuring the chrome with a fixed offset drifts as filters wrap or the
    new-session form opens. */
+#app:has(.collab-shell),
 #app:has(.agents-desktop-shell) {
   height: calc(100dvh - var(--keyboard-inset, 0px));
   min-height: 0;
 }
 
+.main:has(.collab-shell),
 .main:has(.agents-desktop-shell) {
   display: flex;
   flex-direction: column;
@@ -2132,6 +2177,7 @@ input[type="checkbox"]:not(.switch) {
   overflow: auto;
 }
 
+.page:has(.collab-shell),
 .page:has(.agents-desktop-shell) {
   display: flex;
   flex-direction: column;

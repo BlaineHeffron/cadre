@@ -1,7 +1,7 @@
 import { h } from 'preact';
 import { html } from 'htm/preact';
 import { signal } from '@preact/signals';
-import { useEffect, useMemo, useRef } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'preact/hooks';
 import { useSignal } from '../app/use-signal.mjs';
 import { route } from 'preact-router';
 import { api } from '../app/api.mjs';
@@ -47,9 +47,6 @@ function reportBootstrapWarnings(data) {
   }
 }
 
-
-const THREAD_FOCUS_KEY = 'dueno_collab_thread_focus_v1';
-const FOCUSABLE_SECTION_IDS = ['collab-messages', 'collab-send-message', 'collab-bootstrap-status'];
 
 function loadLastBootstrapThreadId() {
   try {
@@ -109,41 +106,6 @@ function getLastBootstrapConfigLabel() {
     parts.push(`${cfg.oneKind}+${cfg.twoKind}`);
   }
   return parts.join(' ') || 'previous config';
-}
-
-function goToThreadHistory(threadId) {
-  if (!threadId) return;
-  route(`/collab/${threadId}#collab-messages`);
-}
-
-function hashTargetId() {
-  if (typeof window === 'undefined') return '';
-  const hash = String(window.location.hash || '').replace(/^#/, '').trim();
-  return FOCUSABLE_SECTION_IDS.includes(hash) ? hash : '';
-}
-
-function loadThreadFocusMap() {
-  try {
-    return JSON.parse(localStorage.getItem(THREAD_FOCUS_KEY) || '{}');
-  } catch {
-    return {};
-  }
-}
-
-function saveThreadFocus(threadId, targetId) {
-  if (!threadId || !targetId) return;
-  try {
-    const next = loadThreadFocusMap();
-    next[threadId] = targetId;
-    localStorage.setItem(THREAD_FOCUS_KEY, JSON.stringify(next));
-  } catch {
-    // ignore storage failures
-  }
-}
-
-function loadThreadFocus(threadId) {
-  if (!threadId) return '';
-  return loadThreadFocusMap()[threadId] || '';
 }
 
 async function loadThreads(loading, query = '') {
@@ -424,8 +386,8 @@ export function AgentCollabPage({ id }) {
     threadParticipants: signal([]),
   }), []);
   const detailRef = useRef(null);
-  const autoFocusRef = useRef({ threadId: '', done: false });
-  const pendingThreadFocusRef = useRef({ threadId: '', targetId: '' });
+  // The feed follows new messages only while the reader is already at the bottom.
+  const feedStickRef = useRef(true);
 
   const createThread = useMemo(() => makeCreateThread(createForm, createLoading), []);
   const rawBootstrap = useMemo(
@@ -555,14 +517,6 @@ export function AgentCollabPage({ id }) {
   }, [id]);
 
   useEffect(() => {
-    if (!id) {
-      autoFocusRef.current = { threadId: '', done: false };
-      return;
-    }
-    autoFocusRef.current = { threadId: id, done: false };
-  }, [id]);
-
-  useEffect(() => {
     syncComposeFromThread(threadState.value, compose);
   }, [threadState.value]);
 
@@ -625,55 +579,14 @@ export function AgentCollabPage({ id }) {
     return () => unsubscribeThread();
   }, [id]);
 
-  useEffect(() => {
-    if (!id || !threadState.value || autoFocusRef.current.threadId !== id || autoFocusRef.current.done) return undefined;
-    const run = () => {
-      const requestedTarget = pendingThreadFocusRef.current.threadId === id
-        ? pendingThreadFocusRef.current.targetId
-        : '';
-      const targetId = requestedTarget && requestedTarget !== '__top__'
-        ? requestedTarget
-        : (requestedTarget ? '' : (hashTargetId() || loadThreadFocus(id)));
-      if (targetId) {
-        const section = document.getElementById(targetId);
-        if (section) {
-          section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          pendingThreadFocusRef.current = { threadId: '', targetId: '' };
-          autoFocusRef.current.done = true;
-          return;
-        }
-      }
+  // Layout effects scroll before the scroll event or the next commit can measure taller content
+  // and wrongly drop following.
+  useLayoutEffect(() => { feedStickRef.current = true; }, [id]);
 
-      detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      pendingThreadFocusRef.current = { threadId: '', targetId: '' };
-      autoFocusRef.current.done = true;
-    };
-
-    const handle = requestAnimationFrame(() => requestAnimationFrame(run));
-    return () => cancelAnimationFrame(handle);
+  useLayoutEffect(() => {
+    const feed = detailRef.current;
+    if (feed && feedStickRef.current) feed.scrollTop = feed.scrollHeight;
   }, [id, threadState.value, messages.value.length]);
-
-  useEffect(() => {
-    if (!id || !threadState.value) return undefined;
-    const sections = FOCUSABLE_SECTION_IDS
-      .map((sectionId) => document.getElementById(sectionId))
-      .filter(Boolean);
-    if (sections.length === 0) return undefined;
-
-    const observer = new IntersectionObserver((entries) => {
-      const visible = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((a, b) => Math.abs(a.boundingClientRect.top) - Math.abs(b.boundingClientRect.top));
-      if (visible[0]?.target?.id) saveThreadFocus(id, visible[0].target.id);
-    }, {
-      root: null,
-      threshold: 0.35,
-      rootMargin: '-72px 0px -35% 0px',
-    });
-
-    sections.forEach((section) => observer.observe(section));
-    return () => observer.disconnect();
-  }, [id, threadState.value]);
 
   const sessionOptions = participantsState.value.sessions || {};
   const providerOptions = modelCatalogState.value.providers?.length
@@ -757,22 +670,10 @@ export function AgentCollabPage({ id }) {
     showFolderPicker.value = false;
   }
 
-  function openThreadTab(threadId) {
-    if (!threadId) return;
-    if (id === threadId) {
-      const savedTarget = loadThreadFocus(threadId);
-      const target = document.getElementById(savedTarget || 'collab-message-tail');
-      target?.scrollIntoView({ behavior: 'smooth', block: savedTarget ? 'start' : 'end' });
-      return;
-    }
-    pendingThreadFocusRef.current = { threadId, targetId: '__top__' };
-    route(`/collab/${threadId}`);
-  }
-
   function navigateToThread(event, threadId) {
     if (!threadId) return;
     event?.preventDefault?.();
-    openThreadTab(threadId);
+    route(`/collab/${threadId}`);
   }
 
   function appendComposeTemplate(template) {
@@ -823,27 +724,6 @@ export function AgentCollabPage({ id }) {
     if (changed) createForm.bootstrapParticipants.value = sanitized;
   }, [providerSettings.value, modelCatalogState.value]);
 
-
-  function ThreadTabStrip() {
-    return html`
-<div class="collab-toprail">
-        <div class="collab-tab-strip">
-          ${activeThreads.length === 0 ? html`
-            <div class="collab-empty-tabs">No active threads yet</div>
-          ` : activeThreads.map((thread) => html`
-            <button
-              key=${thread.id}
-              type="button"
-              class="collab-thread-tab ${thread.id === id ? 'collab-thread-tab-active' : ''}"
-              onclick=${() => openThreadTab(thread.id)}>
-              <span class="collab-thread-tab-title">${roomLabel(thread)}</span>
-              <span class="badge ${threadStatusClass(thread.status)}">${thread.status}</span>
-            </button>
-          `)}
-        </div>
-      </div>
-    `;
-  }
 
   function BootstrapPanel() {
     return showBootstrapPanel.value ? html`
@@ -1129,153 +1009,35 @@ export function AgentCollabPage({ id }) {
     `;
   }
 
-  function ThreadMessages() {
+  // Called, not mounted as a component: a fresh inner component type would remount the feed on
+  // every page render, resetting its scroll position and the Info disclosure.
+  function threadFeed() {
+    const thread = threadState.value;
+    if (!thread) {
+      return html`
+        <section class="collab-detail collab-detail-empty">
+          <p style="color:var(--text-muted)">Select a room to read its feed.</p>
+        </section>
+      `;
+    }
     return html`
-<div class="collab-detail" ref=${detailRef}>
-          ${threadState.value ? html`
-            <div class="card">
-              <div class="card-header">
-                <div>
-                  <h2 class="card-title" style="font-size:var(--fs-md)">${roomLabel(threadState.value)}</h2>
-                  <div style="font-size:var(--fs-xs); color:var(--text-muted)">${participantSummary(threadState.value.participants)}</div>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px">
-                  <span class="badge ${threadStatusClass(threadState.value.status)}">${threadState.value.status}</span>
-                  ${threadState.value.status === 'open' ? html`
-                    <button type="button" class="btn" onclick=${closeThread}>Close</button>
-                    ${!threadState.value.metadata?.dm ? html`
-                      <button type="button" class="btn btn-danger" onclick=${endThread}>End room + sessions</button>
-                    ` : null}
-                  ` : null}
-                </div>
-              </div>
-
+      <section class="collab-detail" aria-label="Room feed">
+        <header class="collab-room-header">
+          <a href="/collab" class="btn collab-room-back" onclick=${(event) => { event.preventDefault(); route('/collab'); }} aria-label="All rooms">←</a>
+          <div class="collab-room-title">
+            <h2 class="card-title">${roomLabel(thread)}</h2>
+            <div class="collab-room-sub">${participantSummary(thread.participants)}</div>
+          </div>
+          ${detailLoading.value ? html`<span class="collab-room-sub">Syncing...</span>` : null}
+          <span class="badge ${threadStatusClass(thread.status)}">${thread.status}</span>
+          <details class="collab-room-info" key=${thread.id}>
+            <summary class="btn">Info</summary>
+            <div class="collab-room-info-panel">
               <div class="collab-meta-grid">
-                <div><span style="color:var(--text-muted)">Thread:</span> <span style="font-family:var(--font-mono)">${threadState.value.id}</span></div>
-                <div><span style="color:var(--text-muted)">Project:</span> <span style="font-family:var(--font-mono)">${threadState.value.projectKey || '-'}</span></div>
-                <div><span style="color:var(--text-muted)">Updated:</span> ${fmtTime(threadState.value.updatedAt)}</div>
+                <div><span style="color:var(--text-muted)">Thread:</span> <span style="font-family:var(--font-mono)">${thread.id}</span></div>
+                <div><span style="color:var(--text-muted)">Project:</span> <span style="font-family:var(--font-mono)">${thread.projectKey || '-'}</span></div>
+                <div><span style="color:var(--text-muted)">Updated:</span> ${fmtTime(thread.updatedAt)}</div>
               </div>
-              ${threadState.value.metadata?.missingParticipants?.length > 0 ? html`
-                <div style="margin-top:10px; font-size:var(--fs-xs); color:var(--danger)">
-                  Missing participants: ${threadState.value.metadata.missingParticipants.map(agentLabel).join(', ')}
-                </div>
-              ` : null}
-              ${endReport.value ? html`
-                <div role="status" style="margin-top:10px; font-size:var(--fs-xs); color:var(--text-secondary)">${endReport.value}</div>
-              ` : null}
-              <div class="collab-detail-shortcuts">
-                ${lastBootstrapThreadId.value && lastBootstrapThreadId.value !== threadState.value.id ? html`
-                  <button type="button" class="btn" onclick=${() => goToThreadHistory(lastBootstrapThreadId.value)}>Last Bootstrap History</button>
-                ` : null}
-                <button type="button" class="btn" onclick=${() => {
-                  saveThreadFocus(threadState.value.id, 'collab-messages');
-                  document.getElementById('collab-messages')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}>History</button>
-                <button type="button" class="btn" onclick=${() => {
-                  saveThreadFocus(threadState.value.id, 'collab-send-message');
-                  document.getElementById('collab-send-message')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}>Send</button>
-                ${(threadState.value.metadata?.bootstrapStatus || []).length > 0 ? html`
-                  <button type="button" class="btn" onclick=${() => {
-                    saveThreadFocus(threadState.value.id, 'collab-bootstrap-status');
-                    document.getElementById('collab-bootstrap-status')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  }}>Bootstrap</button>
-                ` : null}
-              </div>
-            </div>
-
-            <div class="card" id="collab-messages">
-              <div class="card-header">
-                <span class="card-title">Messages</span>
-                ${detailLoading.value ? html`<span style="font-size:var(--fs-xs); color:var(--text-muted)">Syncing...</span>` : null}
-              </div>
-              ${messages.value.length === 0 ? html`
-                <p style="color:var(--text-muted)">No messages in this thread yet.</p>
-              ` : messages.value.slice().sort((a, b) => a.createdAt - b.createdAt).map(message => {
-                const showRawMessage = rawMessageIds.value.has(message.id);
-                return html`
-                  <div class="collab-message-card" key=${message.id}>
-                    <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start">
-                      <div style="display:flex; align-items:center; gap:8px">
-                        <span style="font-weight:600">${agentLabel(message.from)}</span>
-                        ${message.type && message.type !== 'message' ? html`
-                          <span style="font-size:var(--fs-xs); color:var(--text-muted)">${message.type}</span>
-                        ` : null}
-                      </div>
-                      <div style="display:flex; align-items:center; gap:8px">
-                        <span style="font-size:var(--fs-xs); color:var(--text-muted)">${fmtTime(message.createdAt)}</span>
-                        <button
-                          type="button"
-                          class="btn collab-message-view-toggle"
-                          aria-pressed=${showRawMessage}
-                          onclick=${() => toggleRawMessage(message.id)}
-                        >${showRawMessage ? 'Rendered' : 'Raw'}</button>
-                      </div>
-                    </div>
-                    ${showRawMessage
-                      ? html`<div class="collab-message-body collab-message-raw" aria-label="Raw source collaboration message">${message.body}</div>`
-                      : html`<${MarkdownMath} content=${message.body} className="collab-message-body" ariaLabel="Rendered source collaboration message" />`}
-                    ${message.replyTo ? html`
-                      <div style="margin-top:8px; font-size:var(--fs-xs); color:var(--text-muted)">reply to ${message.replyTo}</div>
-                    ` : null}
-                  </div>
-                `;
-              })}
-              <div id="collab-message-tail"></div>
-            </div>
-
-            <div class="card" id="collab-send-message">
-              <div class="card-header">
-                <span class="card-title">Send Message</span>
-                ${sending.value ? html`<span style="font-size:var(--fs-xs); color:var(--text-muted)">Sending...</span>` : null}
-              </div>
-              <div class="collab-form-grid">
-                <label class="collab-field">
-                  <span>From</span>
-                  <select class="input" value=${selectedFromKey} onInput=${e => {
-                    const [kind, sessionId] = String(e.target.value || '').split(':');
-                    compose.fromKind.value = kind || '';
-                    compose.fromId.value = sessionId || '';
-                  }}>
-                    ${threadParticipants.map((participant) => html`
-                      <option value=${agentRefKey(participant)}>${agentLabel(participant)}</option>
-                    `)}
-                  </select>
-                </label>
-                <input class="input" placeholder="Message type" value=${compose.type.value} onInput=${e => { compose.type.value = e.target.value; }} />
-              </div>
-              <div class="collab-helper" style="margin-top:10px; margin-bottom:0">
-                Messages are broadcast to every other participant in the room.
-              </div>
-              ${quickInsertOptions.length > 0 ? html`
-                <label class="collab-field" style="margin-top:10px">
-                  <span>Quick insert</span>
-                  <select class="input" onInput=${e => {
-                    insertQuickItem(String(e.target.value || ''));
-                    e.target.value = '';
-                  }}>
-                    <option value="">Select a live thread or individual session</option>
-                    ${quickInsertOptions.map((option) => html`
-                      <option value=${option.key}>
-                        ${option.label}
-                      </option>
-                    `)}
-                  </select>
-                </label>
-              ` : null}
-              <div style="margin-top:10px">
-                <button type="button" class="btn" onclick=${insertBootstrapPrompt}>
-                  Insert bootstrap prompt
-                </button>
-              </div>
-              <textarea class="input collab-textarea" placeholder="Structured handoff or request..." value=${compose.body.value} onInput=${e => { compose.body.value = e.target.value; }} />
-              <div style="margin-top:12px">
-                <button type="button" class="btn btn-primary" disabled=${sending.value} onclick=${sendMessage}>
-                  Send
-                </button>
-              </div>
-            </div>
-
             ${threadState.value.metadata?.managerLoop ? html`
               <div class="card">
                 <div class="card-header">
@@ -1290,7 +1052,7 @@ export function AgentCollabPage({ id }) {
               </div>
             ` : null}
             ${(threadState.value.metadata?.bootstrapStatus || []).length > 0 ? html`
-              <div class="card" id="collab-bootstrap-status">
+              <div class="card">
                 <div class="card-header">
                   <span class="card-title">Bootstrap Status</span>
                   <span style="font-size:var(--fs-xs); color:var(--text-muted)">
@@ -1356,15 +1118,101 @@ export function AgentCollabPage({ id }) {
                 `}
               </div>
             ` : null}
-          ` : html`
-            <div class="card">
-              <div class="card-header">
-                <span class="card-title">Thread Detail</span>
-              </div>
-              <p style="color:var(--text-muted)">Select a collaboration thread to inspect participants, message flow, and delivery state.</p>
             </div>
-          `}
+          </details>
+          ${thread.status === 'open' ? html`
+            <button type="button" class="btn" onclick=${closeThread}>Close</button>
+            ${!thread.metadata?.dm ? html`
+              <button type="button" class="btn btn-danger" onclick=${endThread}>End room + sessions</button>
+            ` : null}
+          ` : null}
+        </header>
+        ${thread.metadata?.missingParticipants?.length > 0 ? html`
+          <div class="collab-room-note" style="color:var(--danger)">
+            Missing participants: ${thread.metadata.missingParticipants.map(agentLabel).join(', ')}
+          </div>
+        ` : null}
+        ${endReport.value ? html`
+          <div role="status" class="collab-room-note">${endReport.value}</div>
+        ` : null}
+
+        <div class="collab-feed" ref=${detailRef} onScroll=${(event) => {
+          const el = event.currentTarget;
+          feedStickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+        }}>
+              ${messages.value.length === 0 ? html`
+                <p style="color:var(--text-muted)">No messages in this thread yet.</p>
+              ` : messages.value.slice().sort((a, b) => a.createdAt - b.createdAt).map(message => {
+                const showRawMessage = rawMessageIds.value.has(message.id);
+                return html`
+                  <div class="collab-message-card" key=${message.id}>
+                    <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start">
+                      <div style="display:flex; align-items:center; gap:8px">
+                        <span style="font-weight:600">${agentLabel(message.from)}</span>
+                        ${message.type && message.type !== 'message' ? html`
+                          <span style="font-size:var(--fs-xs); color:var(--text-muted)">${message.type}</span>
+                        ` : null}
+                      </div>
+                      <div style="display:flex; align-items:center; gap:8px">
+                        <span style="font-size:var(--fs-xs); color:var(--text-muted)">${fmtTime(message.createdAt)}</span>
+                        <button
+                          type="button"
+                          class="btn collab-message-view-toggle"
+                          aria-pressed=${showRawMessage}
+                          onclick=${() => toggleRawMessage(message.id)}
+                        >${showRawMessage ? 'Rendered' : 'Raw'}</button>
+                      </div>
+                    </div>
+                    ${showRawMessage
+                      ? html`<div class="collab-message-body collab-message-raw" aria-label="Raw source collaboration message">${message.body}</div>`
+                      : html`<${MarkdownMath} content=${message.body} className="collab-message-body" ariaLabel="Rendered source collaboration message" />`}
+                    ${message.replyTo ? html`
+                      <div style="margin-top:8px; font-size:var(--fs-xs); color:var(--text-muted)">reply to ${message.replyTo}</div>
+                    ` : null}
+                  </div>
+                `;
+              })}
         </div>
+
+        <div class="collab-composer">
+          <div class="collab-composer-row">
+            <select class="input" aria-label="From" value=${selectedFromKey} onInput=${e => {
+              const [kind, sessionId] = String(e.target.value || '').split(':');
+              compose.fromKind.value = kind || '';
+              compose.fromId.value = sessionId || '';
+            }}>
+              ${threadParticipants.map((participant) => html`
+                <option value=${agentRefKey(participant)}>${agentLabel(participant)}</option>
+              `)}
+            </select>
+            <input class="input" aria-label="Message type" placeholder="Message type" value=${compose.type.value} onInput=${e => { compose.type.value = e.target.value; }} />
+            ${quickInsertOptions.length > 0 ? html`
+              <select class="input" aria-label="Quick insert" onInput=${e => {
+                insertQuickItem(String(e.target.value || ''));
+                e.target.value = '';
+              }}>
+                <option value="">Quick insert...</option>
+                ${quickInsertOptions.map((option) => html`
+                  <option value=${option.key}>${option.label}</option>
+                `)}
+              </select>
+            ` : null}
+            <button type="button" class="btn" onclick=${insertBootstrapPrompt}>Bootstrap prompt</button>
+          </div>
+          <div class="collab-composer-row">
+            <textarea
+              class="input collab-textarea"
+              aria-label="Message to every other participant"
+              placeholder="Message to every other participant... (Ctrl+Enter to send)"
+              value=${compose.body.value}
+              onInput=${e => { compose.body.value = e.target.value; }}
+              onKeyDown=${e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendMessage(); } }} />
+            <button type="button" class="btn btn-primary" disabled=${sending.value} onclick=${sendMessage}>
+              ${sending.value ? 'Sending...' : 'Send'}
+            </button>
+          </div>
+        </div>
+      </section>
     `;
   }
   return html`
@@ -1401,7 +1249,6 @@ export function AgentCollabPage({ id }) {
           <button type="button" class="btn" onclick=${() => loadThreads(loading, threadSearch.value)}>Refresh</button>
           ${lastBootstrapThreadId.value ? html`
             <button type="button" class="btn" onclick=${() => route(`/collab/${lastBootstrapThreadId.value}`)}>Last Bootstrap</button>
-            <button type="button" class="btn" onclick=${() => goToThreadHistory(lastBootstrapThreadId.value)}>Last History</button>
           ` : null}
         </div>
       </div>
@@ -1413,21 +1260,19 @@ export function AgentCollabPage({ id }) {
         </div>
       ` : null}
 
-      <${ThreadTabStrip} />
-
-      <${BootstrapPanel} />      <${ThreadHistoryPanel} />      <div class="collab-body">
-        <div class="collab-sidebar-stack">
-          <${ManualThreadForm} />
-
-          <div class="card" style="padding:0; overflow:hidden">
-            <div class="card-header" style="padding:16px 16px 0 16px">
-              <span class="card-title">Active Threads</span>
-              <span style="font-size:var(--fs-xs); color:var(--text-muted)">${activeThreads.length} live</span>
-            </div>
+      <${BootstrapPanel} />
+      <${ThreadHistoryPanel} />
+      <div class="collab-shell ${threadState.value ? 'collab-shell-has-thread' : ''}">
+        <aside class="agents-desktop-rail collab-rail" aria-label="Rooms">
+          <div class="agents-desktop-rail-head">
+            <span class="card-title">Active rooms</span>
+            <span class="agents-desktop-rail-count">${activeThreads.length} live</span>
+          </div>
+          <div class="agents-desktop-rail-list">
             ${loading.value ? html`
-              <p style="padding:16px; color:var(--text-muted)">Loading threads...</p>
+              <p style="padding:12px; color:var(--text-muted)">Loading threads...</p>
             ` : activeThreads.length === 0 ? html`
-              <p style="padding:16px; color:var(--text-muted)">No active collaboration threads.</p>
+              <p style="padding:12px; color:var(--text-muted)">No active collaboration threads.</p>
             ` : activeThreads.map(thread => html`
               <a
                 href="/collab/${thread.id}"
@@ -1447,32 +1292,30 @@ export function AgentCollabPage({ id }) {
                 ` : null}
               </a>
             `)}
-          </div>
-
-          ${agentBusAlerts.value.length > 0 ? html`
-            <div class="card">
-              <div class="card-header">
-                <span class="card-title">Recent Bus Alerts</span>
-              </div>
-              ${agentBusAlerts.value.slice(0, 6).map(alert => html`
-                <div style="padding:8px 0; border-top:1px solid var(--border)">
-                  <div style="display:flex; align-items:center; gap:8px">
-                    <span class="badge badge-critical">${alert.type}</span>
-                    <span style="font-size:var(--fs-xs)">${alert.error || alert.messageId || 'Alert'}</span>
-                  </div>
-                  ${alert.threadId ? html`
-                    <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">
-                      <a href="/collab/${alert.threadId}" onclick=${(event) => navigateToThread(event, alert.threadId)} style="color:var(--accent)">Open thread</a>
-                    </div>
-                  ` : null}
+            ${agentBusAlerts.value.length > 0 ? html`
+              <div class="card">
+                <div class="card-header">
+                  <span class="card-title">Recent Bus Alerts</span>
                 </div>
-              `)}
-            </div>
-          ` : null}
-
-        </div>
-
-        <${ThreadMessages} />
+                ${agentBusAlerts.value.slice(0, 6).map(alert => html`
+                  <div style="padding:8px 0; border-top:1px solid var(--border)">
+                    <div style="display:flex; align-items:center; gap:8px">
+                      <span class="badge badge-critical">${alert.type}</span>
+                      <span style="font-size:var(--fs-xs)">${alert.error || alert.messageId || 'Alert'}</span>
+                    </div>
+                    ${alert.threadId ? html`
+                      <div style="font-size:var(--fs-xs); color:var(--text-muted); margin-top:4px">
+                        <a href="/collab/${alert.threadId}" onclick=${(event) => navigateToThread(event, alert.threadId)} style="color:var(--accent)">Open thread</a>
+                      </div>
+                    ` : null}
+                  </div>
+                `)}
+              </div>
+            ` : null}
+            <${ManualThreadForm} />
+          </div>
+        </aside>
+        ${threadFeed()}
       </div>
     </div>
   `;

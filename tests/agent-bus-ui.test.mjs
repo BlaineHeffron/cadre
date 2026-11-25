@@ -11,7 +11,7 @@ import { roomLabel } from '../public/pages/agent-collab/format.mjs';
 describe('agent bus UI quick insert helpers', () => {
   it('renders broadcast messages without target or ack controls', async () => {
     const source = await readFile(new URL('../public/pages/agent-collab.mjs', import.meta.url), 'utf8');
-    assert.match(source, /Messages are broadcast to every other participant/);
+    assert.match(source, /Message to every other participant/);
     assert.doesNotMatch(source, /requiresAck|Require ack|selectedToKey/);
     assert.match(source, /message\.type !== 'message'/);
   });
@@ -27,7 +27,7 @@ describe('agent bus UI quick insert helpers', () => {
     const source = await readFile(new URL('../public/pages/agent-collab.mjs', import.meta.url), 'utf8');
     assert.match(source, /Skipped \(active in another room\)/);
     assert.match(source, /data\.skipped/);
-    assert.match(source, /!threadState\.value\.metadata\?\.dm/);
+    assert.match(source, /!thread\.metadata\?\.dm/);
     assert.match(source, /End room \+ sessions/);
   });
 
