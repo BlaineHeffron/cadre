@@ -68,7 +68,7 @@ For an operator-supplied JavaScript tree or ASAR without the MCP server, the
 pinned CLI returns the same Evidence record directly:
 
 ```bash
-npx -y rea-agents@6.9.0 analyze-javascript-application /absolute/path/to/app --json
+npx -y rea-agents@6.10.1 analyze-javascript-application /absolute/path/to/app --json
 ```
 
 ## Route the target first
@@ -78,7 +78,12 @@ active-target native or archive workflows; target-free tools take their own
 explicit path or endpoint and do not need it.
 
 - ASAR or extracted JavaScript/Electron tree:
-  `analyze_javascript_application`.
+  `analyze_javascript_application`. To find a few files in a packaged
+  `app.asar`, open it with `open_binary`, start with `inspect_artifact`
+  using `detail: "summary"`, then analyze the selected files with
+  `source_paths`. To retain digest contradictions from re-signed unpacked
+  companions, pass `integrity_policy: "record-and-continue"` starting with
+  `inspect_artifact`. See the JavaScript applications guide below.
 - Archive/package member inventory (ZIP/APK/IPA/MSIX/AppX, DMG, or a
   PyInstaller executable): `open_binary` with the supplied local path; use
   `inspect_artifact` when its graph and findings help answer the question.
@@ -90,18 +95,26 @@ explicit path or endpoint and do not need it.
   application layer. Extract stored modules and analyze the JavaScript; the
   executable is not run.
 - Managed PE/CLI assembly: `inspect_managed_artifact`.
-- Firmware image: `inspect_firmware_regions` when advertised. Use
-  `extract_firmware` when extraction is requested, with a caller-selected new
-  absolute output directory. These tools use caller-supplied Binwalk/Unblob on
-  Linux; see the [firmware guide](https://github.com/morluto/rea/blob/main/docs/guides/firmware/firmware-analysis.md).
+- UEFI firmware volumes and NVAR stores: `inspect_artifact`. For external
+  firmware scanning or extraction on Linux, use `inspect_firmware_regions` or
+  `extract_firmware` with caller-supplied Binwalk or Unblob; extraction needs a
+  caller-selected new absolute output directory. See the [firmware guide](https://github.com/morluto/rea/blob/main/docs/guides/firmware/firmware-analysis.md).
 - ESP32-family app or bootloader image (`0xE9` magic): `inspect_artifact`
   without a provider.
 - .NET NativeAOT PE/ELF: native Ghidra analysis; see the NativeAOT section in
   the native guide below.
-- A single-format file (Go, Rust, PE tables, ELF notes, IL2CPP, `.pyc`, BEAM,
-  WASM, SQLite, model files, APK signatures, Apple resources, Windows `.lnk`
-  shortcuts, Linux kernel build config): the engine-free inspector listed in the
-  native guide. Go string literals need `include_string_literals: true`.
+- A single-format file (Go, Rust including WebAssembly cargo-auditable data,
+  PE tables, ELF notes, ELF dynamic dependencies and symbol versions, ELF
+  separate debug-file links, DWARF compile units, IL2CPP, `.pyc` through
+  CPython 3.15, BEAM, WASM, SQLite, model files, APK signatures, Apple
+  resources, Windows `.lnk` shortcuts, Linux kernel build config, Maven POM or
+  Gradle module metadata, NuGet `.nupkg`): the engine-free inspector listed in
+  the native guide, when advertised (`inspect_elf_dependencies`,
+  `inspect_elf_debug_link`, `inspect_dwarf_units`,
+  `inspect_maven_gradle_metadata`, `inspect_nuget_nupkg` for the newer ones).
+  None resolves, restores, or executes what it reads, and the debug-link
+  inspector opens no lookup path except an explicit `candidate_path`. Go string
+  literals need `include_string_literals: true`.
 - ELF/PE/Mach-O hardening, pre-`main`/exit initializers, or ELF unwind function
   ranges: `inspect_binary_hardening`, `inspect_native_initializers`, or
   `inspect_elf_unwind_ranges`. A missing import, table, or `.eh_frame` is
@@ -122,7 +135,11 @@ explicit path or endpoint and do not need it.
 - User-owned Electron runtime already open: `list_electron_targets`.
 - Native executable, library, or analysis database: `open_binary`, then
   use focused analysis tools directly; call `binary_overview` when metadata or
-  inventory context is useful and available from the selected provider.
+  inventory context is useful and available from the selected provider. If
+  automatic selection returns `capability_unavailable` with
+  `selection_reason: "ambiguous"`, choose one of the reported candidates and
+  retry with its `provider_id`. Without an active target, `binary_session({})`
+  shows host availability and leaves target support unknown.
 
 If the app is missing, ask which app to inspect. Resolve a human-readable app
 name to one clear installed artifact when possible; ask only when matches are
@@ -206,4 +223,4 @@ The guides below are inlined; read only the one for your target.
 
 {{skill:rea-connection-and-recovery}}
 
-<!-- upstream: morluto/rea@d74549e .agents/skills/reverse-engineer-anything/SKILL.md -->
+<!-- upstream: morluto/rea@8bb01b5 .agents/skills/reverse-engineer-anything/SKILL.md -->
