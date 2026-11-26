@@ -35,25 +35,35 @@ connected tool list:
 
 - Go build/module metadata `inspect_go_binary` (`include_string_literals: true`
   recovers bounded static `(ptr, len)` strings, not inlined ones); Rust cargo-auditable crates
-  `inspect_rust_binary`; Unity `global-metadata.dat` `inspect_il2cpp_metadata`.
+  `inspect_rust_binary` (also WebAssembly core modules, whose `bits` may be
+  null; never coerce it); project either retained parent with
+  `inspect_analysis_view` kind `cyclonedx` for a CycloneDX 1.6 SBOM whose
+  `compositions` stay incomplete or unknown; Unity `global-metadata.dat` `inspect_il2cpp_metadata`.
 - PE: `inspect_pe_imports`, `inspect_pe_certificates` (signatures not verified),
   `inspect_pe_load_config` (TLS callbacks, CFG), `inspect_pe_resources`;
   Windows `.lnk` shortcuts `inspect_windows_shortcut`.
-- ELF: `inspect_elf_notes`, `inspect_kernel_module`, `inspect_binary_layout`
+- ELF: `inspect_elf_notes` (FDO package and dlopen fields are producer
+  declarations), `inspect_elf_dependencies` (`DT_NEEDED`, SONAME, runpath,
+  symbol versions; `$ORIGIN` not expanded), `inspect_elf_debug_link`
+  (debuglink/build-id; optional `candidate_path` verifies one chosen file),
+  `inspect_kernel_module`, `inspect_binary_layout`
   (caller-supplied pwntools), `inspect_recorded_crash` (x86-64 core),
   `inspect_elf_unwind_ranges` (function ranges that survive `strip`),
   `inspect_kernel_build_config` (kernel banner and embedded `CONFIG_*`; xz/lz4/
   zstd payloads need external decompression first).
 - ELF/PE/Mach-O: `inspect_binary_hardening` (PIE, NX, RELRO, canaries;
   signature rows report presence, not validity), `inspect_native_initializers`
-  (functions run before `main` or at exit; keep each entry's `resolution`).
+  (functions run before `main` or at exit; keep each entry's `resolution`),
+  `inspect_dwarf_units` (compile-unit source, producer, `dwo_name`; pass the
+  DWARF file inside a `.dSYM`; absent `.debug_info` describes this file only).
 - Shipped `.app`, install dir, ASAR, or executable: `audit_release_exposure`
   reports what static analysis recovers; it does not establish security.
 - PE/ELF exports `inspect_native_exports`; Mach-O `inspect_macho` (use summary,
   then `view: {kind: "macho", facet: "exports", ...}` on large frameworks).
 - Other formats: `inspect_python_pyc`, `inspect_erlang_beam`,
   `inspect_wasm_artifact`, `inspect_sqlite_database`, `inspect_model_artifact`
-  (GGUF/safetensors), `inspect_apk_signature`, `inspect_evm_interface`,
+  (GGUF/safetensors), `inspect_nuget_nupkg`, `inspect_maven_gradle_metadata`
+  (versions as spelled; no interpolation or inheritance), `inspect_apk_signature`, `inspect_evm_interface`,
   `inspect_apple_ips` (`join_path` matches images to one Mach-O/dSYM by UUID),
   `inspect_desktop_application` (unknown install dirs).
 - Apple app resources: `open_bundle_resources`, then `inspect_plist`,
@@ -124,7 +134,10 @@ unknown.
 For an admitted DOS MZ target, use `inspect_native_load_image` to check loaded
 bytes, file mappings, relocations and the entry; keep `mismatch` and
 `unsupported` explicit. Large reports take `detail: "summary"` and page
-`native-load-image` collections. Headerless DOS COM opens with `format: "dos-com"`.
+`native-load-image` collections. Headerless DOS COM opens with `format: "dos-com"`
+and no loader or base: Ghidra ComLoader records `load_address: "0000:0100"` plus
+a zero-filled PSP placeholder; a rejected image falls back to `BinaryLoader` at
+`1000:0100` with `loader_fallback.reason`. PSP contents and stack stay unmodeled.
 Other headerless firmware opens with `format: "raw-binary"`, `architecture`, and
 `entry_point` (Ghidra only). Ghidra pseudocode also accepts
 `procedure: "file-offset:0x..."`; never assume an offset plus image base is an
@@ -141,7 +154,8 @@ loaded, reflected, executed, or resolved the assembly. For large assemblies use
 `inspect_managed_members` with `detail: "summary"` and `type_names`, then page
 `kind: "managed-members"` collections, narrowing with exact `names` and
 `declaring_types` filters (check `unresolved_filter_rows` before reading an
-empty match as absence). Returned-row exhaustion does not prove
+empty match as absence). The `unresolved_definitions` collection pages TypeDef
+and MethodDef coordinates whose names failed to decode. Returned-row exhaustion does not prove
 complete metadata.
 
 ### .NET NativeAOT
@@ -158,7 +172,8 @@ not original C# source.
 
 Use `inspect_artifact` for bundles, archives, ZIP/APK/IPA/MSIX/AppX, ASAR, DMG,
 PyInstaller executables, Godot PCK, UnityFS AssetBundles, WeChat `.wxapkg`,
-U-Boot uImage, classic iNES, ESP32 app/flash images, Bun `--compile` and
+U-Boot uImage, Android boot/vendor_boot images, Android OTA `payload.bin`,
+iNES and NES 2.0, ESP32 app/flash images, Bun `--compile` and
 `deno compile` executables when the graph and findings help; request
 `detail: "summary"` for large inventories and cite graph manifest IDs. For an
 IPA or macOS `.app`, `project_apple_application_graph` reports nested bundles by
@@ -166,7 +181,9 @@ path convention (read the listed plists to confirm), and `trace_dylib_resolution
 follows `@rpath` loads after `open_binary`. Route JavaScript extracted from
 Bun or Deno executables to `analyze_javascript_application`; bytecode and
 encrypted payloads (wxapkg `V1MMWX`, encrypted UnityFS) are not decoded, and
-iNES PRG/CHR units are not mapper bank maps.
+iNES PRG/CHR units are not mapper bank maps. Android boot and OTA signatures are
+not verified; compressed boot payloads stay stored (extract `dtb` for
+`inspect_devicetree`), and OTA delta operations are inventoried, not rebuilt.
 
 `extract_artifact` materializes the active target's regular files into a fresh
 REA-chosen temporary directory; symlinks and encrypted entries stay inventory
@@ -183,4 +200,4 @@ discard them. Batch renames that collide are rejected per address in
 `analyze_function` Evidence around the edit; renamed entries match as
 `same-entry`.
 
-<!-- upstream: morluto/rea@d74549e .agents/skills/reverse-engineer-anything/references/native-and-artifacts.md -->
+<!-- upstream: morluto/rea@8bb01b5 .agents/skills/reverse-engineer-anything/references/native-and-artifacts.md -->
