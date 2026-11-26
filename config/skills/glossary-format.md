@@ -40,11 +40,11 @@ SOFTWARE.
 _Avoid_: Purchase, transaction
 
 **Invoice**:
-A request for payment sent to a customer after delivery.
+A request for payment for an **Order**, sent to its **Customer** after delivery.
 _Avoid_: Bill, payment request
 
 **Customer**:
-A person or organization that places orders.
+A person or organization that places an **Order**.
 _Avoid_: Client, buyer, account
 ```
 
@@ -52,6 +52,7 @@ _Avoid_: Client, buyer, account
 
 - **Be opinionated.** When multiple words exist for the same concept, pick the best one and list the others under `_Avoid_`.
 - **Keep definitions tight.** One or two sentences max. Define what it IS, not what it does.
+- **Bold other glossary terms inside a definition.** When a definition mentions another term, write it as `**Order**`, and let the sentence around it say how the two relate.
 - **Only include terms specific to this project's context.** General programming concepts (timeouts, error types, utility patterns) don't belong even if the project uses them extensively. Before adding a term, ask: is this a concept unique to this context, or a general programming concept? Only the former belongs.
 - **Group terms under subheadings** when natural clusters emerge. If all terms belong to a single cohesive area, a flat list is fine.
 
@@ -79,4 +80,4 @@ _Avoid_: Client, buyer, account
 
 When multiple contexts exist, infer which one the current topic relates to. If unclear, ask.
 
-<!-- upstream: mattpocock/skills@24fe0ef skills/engineering/domain-modeling/GLOSSARY-FORMAT.md -->
+<!-- upstream: mattpocock/skills@6f7f783 skills/engineering/domain-modeling/GLOSSARY-FORMAT.md -->
