@@ -35,6 +35,19 @@ analysis work. When the question concerns known files, select exact inventoried
 manifests or source maps you need); unselected files stay unknown. Omit the
 selection for complete analysis; `source_paths: []` is invalid.
 
+To find member paths in a packaged `app.asar`, call `open_binary`, then
+`inspect_artifact` with `detail: "summary"`, and page its
+`normalized_result.parent_evidence_id` with `inspect_analysis_view`; pass the
+chosen paths as `source_paths`. Narrowing reduces analysis work, but the
+inventory still examines the whole archive.
+
+When unpacked companions no longer match their declared digests (for example
+after re-signing) and you mean to keep those contradictions, pass
+`integrity_policy: "record-and-continue"` to `inspect_artifact`,
+`analyze_javascript_application`, and `extract_artifact`. The default `fail`
+returns `artifact_integrity_mismatch` wherever the contradiction is met,
+including the initial inventory.
+
 For captured or bundled JavaScript that needs readable source recovery,
 `recover_javascript_sources` (caller-supplied Wakaru, Linux x64) writes an
 `analysis_input` directory to analyze; inputs are never executed.
@@ -128,4 +141,4 @@ history on the same connection; `reset_investigation` clears them (optional
 connection to restore its references. Retention is bounded and never silently
 evicted; `binary_session.investigation` reports the budget.
 
-<!-- upstream: morluto/rea@d74549e .agents/skills/reverse-engineer-anything/references/javascript-applications.md -->
+<!-- upstream: morluto/rea@8bb01b5 .agents/skills/reverse-engineer-anything/references/javascript-applications.md -->
