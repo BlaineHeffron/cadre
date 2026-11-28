@@ -90,7 +90,7 @@ Do NOT close or modify any parent issue.
 
 ## Parent
 
-A reference to the parent issue on the tracker (if the source was an existing issue, otherwise omit this section).
+The parent issue's title followed by its reference on the tracker (if the source was an existing issue, otherwise omit this section).
 
 ## What to build
 
@@ -124,4 +124,4 @@ The end-to-end behaviour this ticket makes work, from the user's perspective, no
 
 In either form, avoid specific file paths or code snippets: they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.
 
-<!-- upstream: mattpocock/skills@4ae2317 skills/engineering/to-tickets/SKILL.md -->
+<!-- upstream: mattpocock/skills@bbadaa6 skills/engineering/to-tickets/SKILL.md -->
